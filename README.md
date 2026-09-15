@@ -13,6 +13,11 @@ Deux étapes livrées à ce jour :
 Pas encore implémenté : équipes, plannings, indisponibilités, moteur
 d'équité, vérification d'email, mot de passe oublié.
 
+**[`docs/decisions.md`](docs/decisions.md)** trace, dans l'ordre, chaque
+choix technique structurant (pourquoi tel outil, tel compromis, tel
+contournement) — c'est le premier document à consulter avant de remettre en
+cause une décision existante.
+
 ## Arborescence
 
 ```
@@ -22,6 +27,7 @@ medvue/
 ├── .github/workflows/ci.yml   # CI GitHub Actions (backend + frontend)
 │
 ├── docs/
+│   ├── decisions.md            # journal chronologique des choix techniques
 │   └── authentication.md      # modèle de données, stratégie JWT, décisions ouvertes
 │
 ├── backend/                   # API Symfony 7.4 (PHP 8.3 en conteneur, Composer inclus)
