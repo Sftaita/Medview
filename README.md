@@ -11,7 +11,10 @@ Deux étapes livrées à ce jour :
    [`docs/authentication.md`](docs/authentication.md).
 
 Pas encore implémenté : équipes, plannings, indisponibilités, moteur
-d'équité, vérification d'email, mot de passe oublié.
+d'équité, vérification d'email, mot de passe oublié. Le design du moteur de
+répartition des gardes est en revanche déjà écrit (document vivant, à
+affiner au fil de l'implémentation) :
+[`docs/allocation-algorithm.md`](docs/allocation-algorithm.md).
 
 **[`docs/decisions.md`](docs/decisions.md)** trace, dans l'ordre, chaque
 choix technique structurant (pourquoi tel outil, tel compromis, tel
@@ -28,7 +31,8 @@ medvue/
 │
 ├── docs/
 │   ├── decisions.md            # journal chronologique des choix techniques
-│   └── authentication.md      # modèle de données, stratégie JWT, décisions ouvertes
+│   ├── authentication.md      # modèle de données, stratégie JWT, décisions ouvertes
+│   └── allocation-algorithm.md # design du moteur de répartition des gardes (vivant, non implémenté)
 │
 ├── backend/                   # API Symfony 7.4 (PHP 8.3 en conteneur, Composer inclus)
 │   ├── Dockerfile

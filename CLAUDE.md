@@ -35,7 +35,9 @@ vendredis/samedis/dimanches, jours fériés, espacement, préférences) doit
 être suivie et équilibrée séparément, avec des contraintes dures/souples
 clairement distinguées et un résultat explicable (pas de boîte noire).
 Ce principe structure tout le modèle de données à venir — à garder en tête
-dès qu'une entité liée aux gardes ou aux plannings est conçue.
+dès qu'une entité liée aux gardes ou aux plannings est conçue. Design
+détaillé (encore conceptuel, rien d'implémenté) :
+[`docs/allocation-algorithm.md`](docs/allocation-algorithm.md).
 
 ## État d'avancement
 
@@ -45,7 +47,7 @@ dès qu'une entité liée aux gardes ou aux plannings est conçue.
 | Authentification (User, JWT, register/login/me) | ✅ Livré | `docs/authentication.md` |
 | Équipes, invitations, rôles | ⏳ Pas commencé | — |
 | Indisponibilités, campagnes de collecte | ⏳ Pas commencé | — |
-| Moteur de génération, équité, historique | ⏳ Pas commencé | — |
+| Moteur de génération, équité, historique | ⏳ Design conceptuel écrit, pas implémenté | `docs/allocation-algorithm.md` |
 | Échanges de garde, notifications, export calendrier | ⏳ Pas commencé | — |
 
 ## Où trouver quoi
@@ -57,7 +59,13 @@ dès qu'une entité liée aux gardes ou aux plannings est conçue.
 - **`docs/authentication.md`** — modèle de données, stratégie JWT, sécurité,
   décisions ouvertes de la fonctionnalité d'authentification. Un document
   du même type sera créé pour chaque fonctionnalité majeure suivante
-  (`docs/teams.md`, `docs/planning-engine.md`, …).
+  (`docs/teams.md`, …).
+- **`docs/allocation-algorithm.md`** — design du moteur de répartition des
+  gardes (équité multidimensionnelle, contraintes, pipeline de
+  génération). **Document vivant** : encore conceptuel, à corriger et
+  compléter à chaque étape d'implémentation réelle du moteur — jamais
+  laisser le document diverger silencieusement du code une fois que
+  celui-ci existe.
 - **`README.md`** — arborescence, choix techniques, commandes pour lancer
   le projet, URLs, tests exécutés.
 
