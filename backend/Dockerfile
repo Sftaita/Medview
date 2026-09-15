@@ -6,6 +6,8 @@ RUN install-php-extensions \
     opcache \
     zip
 
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
 WORKDIR /app
 
 # vendor/ is baked into the image (composer install already ran on the host)

@@ -2,9 +2,7 @@ import { useEffect, useState } from 'react'
 import { fetchHealth, type HealthStatus as HealthStatusType } from '../../lib/apiClient'
 
 type State =
-  | { kind: 'loading' }
-  | { kind: 'success'; health: HealthStatusType }
-  | { kind: 'error'; message: string }
+  { kind: 'loading' } | { kind: 'success'; health: HealthStatusType } | { kind: 'error'; message: string }
 
 export function HealthStatus() {
   const [state, setState] = useState<State>({ kind: 'loading' })
