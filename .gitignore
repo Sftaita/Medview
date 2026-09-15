@@ -1,0 +1,9 @@
+# Root-level environment overrides
+/.env
+!/.env.example
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
