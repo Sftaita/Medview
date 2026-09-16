@@ -44,10 +44,12 @@ détaillé (encore conceptuel, rien d'implémenté) :
 | Étape | Statut | Référence |
 |---|---|---|
 | Socle technique (Symfony + React + Docker) | ✅ Livré | `README.md` |
-| Authentification (User, JWT, register/login/me) | ✅ Livré | `docs/authentication.md` |
-| Équipes, invitations, rôles | ⏳ Pas commencé | — |
-| Indisponibilités, campagnes de collecte | ⏳ Pas commencé | — |
-| Moteur de génération, équité, historique | ⏳ Design conceptuel écrit, pas implémenté | `docs/allocation-algorithm.md` |
+| Authentification (User, register/login/me, rate limiting, access+refresh token rotatif) | ✅ Livré + UAT navigateur complète (2026-09-15, `AUTHENTIFICATION MEDVUE : PASS`) | `docs/authentication.md` §14 |
+| Équipes, invitations, rôles | ⏳ Modèle de données + services livrés, pas d'endpoints/UI de gestion complète | `docs/planning-domain.md` |
+| Disponibilités (calendrier personnel, non-participation administrative) | ✅ Livré (2026-09-16) | `docs/availability.md` |
+| Campagnes de collecte de disponibilités | ⏳ Pas commencé | — |
+| Génération : `PlanningGeneration`/`PlanningSnapshot`/`DutyAssignment` (persistance, pas d'algorithme) | ✅ Livré (2026-09-16) | `docs/planning-generation.md` |
+| Moteur de génération (équité, optimisation, explicabilité) | ⏳ Design conceptuel écrit, pas implémenté | `docs/allocation-algorithm.md` |
 | Échanges de garde, notifications, export calendrier | ⏳ Pas commencé | — |
 
 ## Où trouver quoi
@@ -60,6 +62,14 @@ détaillé (encore conceptuel, rien d'implémenté) :
   décisions ouvertes de la fonctionnalité d'authentification. Un document
   du même type sera créé pour chaque fonctionnalité majeure suivante
   (`docs/teams.md`, …).
+- **`docs/availability.md`** — modèle de données, sémantique
+  `UNAVAILABLE`/`PREFER_DUTY`, non-participation administrative,
+  chevauchement, autorisations et endpoints du Lot 2 (disponibilités).
+- **`docs/planning-generation.md`** — modèle de données, cycle de statut,
+  composition et immuabilité du snapshot, relation `DutyAssignment` ↔
+  `PlanningSnapshotMember`, concurrence, autorisations et endpoints du
+  Lot 3 (`PlanningGeneration`/`PlanningSnapshot`/`DutyAssignment` —
+  persistance uniquement, pas d'algorithme de génération).
 - **`docs/allocation-algorithm.md`** — design du moteur de répartition des
   gardes (équité multidimensionnelle, contraintes, pipeline de
   génération). **Document vivant** : encore conceptuel, à corriger et

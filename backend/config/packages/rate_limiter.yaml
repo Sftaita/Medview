@@ -1,0 +1,17 @@
+# Login is throttled natively by security.yaml's `login_throttling` option
+# (keyed by username+IP automatically) — nothing to declare here for it.
+#
+# Registration has no authenticator/firewall to hook into (it's a plain
+# controller), so it uses this named limiter directly, keyed by IP.
+#
+# Storage: the default `cache.rate_limiter` pool, backed by `cache.app`
+# (filesystem by default — see config/packages/cache.yaml). That means the
+# counters are per-instance: running several backend replicas in production
+# needs a shared backend (e.g. Redis) or one instance's limiter won't see
+# another's attempts. Documented in docs/authentication.md.
+framework:
+    rate_limiter:
+        register:
+            policy: 'sliding_window'
+            limit: 5
+            interval: '1 hour'

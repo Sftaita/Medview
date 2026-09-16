@@ -58,3 +58,197 @@
   background: #d1453922;
   color: #d14539;
 }
+
+/* Personal calendar (MyAvailabilityPage) */
+
+.availability-page {
+  max-width: 640px;
+}
+
+.availability-legend {
+  display: flex;
+  gap: 1rem;
+  margin: 0.5rem 0 1rem;
+  font-size: 0.85rem;
+}
+
+.availability-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.availability-dot {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+}
+
+.availability-dot--unavailable {
+  background: #d14539;
+}
+
+.availability-dot--prefer {
+  background: #1f9d55;
+}
+
+.availability-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.availability-month-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.availability-month-nav strong {
+  min-width: 9rem;
+  text-align: center;
+  text-transform: capitalize;
+}
+
+.availability-mode-toggle {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.availability-mode-toggle button.is-active {
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.availability-error {
+  color: #d14539;
+}
+
+.availability-calendar {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+
+.availability-weekday {
+  text-align: center;
+  font-size: 0.75rem;
+  opacity: 0.6;
+  padding-bottom: 0.25rem;
+}
+
+.availability-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  min-height: 2.75rem;
+  border: 1px solid #2a2a2a22;
+  border-radius: 0.4rem;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.availability-day--outside {
+  opacity: 0.35;
+}
+
+.availability-day--today {
+  border-color: currentColor;
+}
+
+.availability-day--selected {
+  background: #3a7bd522;
+  border-color: #3a7bd5;
+}
+
+.availability-day-dots {
+  display: flex;
+  gap: 0.2rem;
+  min-height: 0.55rem;
+}
+
+.availability-form {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #2a2a2a22;
+  border-radius: 0.5rem;
+}
+
+.availability-type-choice {
+  display: flex;
+  gap: 1rem;
+  margin: 0.5rem 0;
+}
+
+.availability-custom-time-toggle {
+  display: block;
+  margin: 0.5rem 0;
+}
+
+.availability-time-range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 0.5rem 0;
+}
+
+.availability-time-range label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.availability-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+/* Team member administration (TeamDetailPage) */
+
+.team-members-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.75rem;
+}
+
+.team-members-table th,
+.team-members-table td {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid #2a2a2a22;
+}
+
+.non-participation-panel {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid #2a2a2a22;
+  border-radius: 0.5rem;
+}
+
+.non-participation-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.non-participation-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+}

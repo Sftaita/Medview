@@ -20,3 +20,12 @@ export function register(input: RegisterInput): Promise<CurrentUser> {
 export function fetchMe(): Promise<CurrentUser> {
   return apiFetch<CurrentUser>('/api/me')
 }
+
+/**
+ * Identified by the HttpOnly refresh cookie, not the access token — always
+ * succeeds from the caller's point of view (the backend's logout endpoint
+ * is idempotent, see docs/authentication.md).
+ */
+export function logout(): Promise<void> {
+  return apiFetch<void>('/api/token/logout', { method: 'POST', skipAuth: true })
+}

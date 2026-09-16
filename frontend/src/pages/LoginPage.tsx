@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../features/auth/useAuth'
 import { ApiError } from '../lib/apiClient'
+import { formatWaitTime } from '../lib/formatWaitTime'
 
 export function LoginPage() {
   const { login } = useAuth()
@@ -12,11 +13,21 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  // UAT found that disabled={isSubmitting} alone doesn't stop two
+  // near-simultaneous submits (e.g. double-click, held Enter): the state
+  // update that disables the button isn't applied to the DOM synchronously
+  // relative to the second event. This ref is checked and set
+  // synchronously, before anything else in the handler runs.
+  const isSubmittingRef = useRef(false)
 
   const redirectTo = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ?? '/'
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
+    if (isSubmittingRef.current) {
+      return
+    }
+    isSubmittingRef.current = true
     setError(null)
     setIsSubmitting(true)
 
@@ -26,10 +37,17 @@ export function LoginPage() {
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setError('Email ou mot de passe incorrect.')
+      } else if (err instanceof ApiError && err.status === 429) {
+        setError(
+          err.retryAfterSeconds !== null
+            ? `Trop de tentatives. Merci de réessayer dans ${formatWaitTime(err.retryAfterSeconds)}.`
+            : 'Trop de tentatives. Merci de réessayer plus tard.',
+        )
       } else {
         setError('Une erreur est survenue. Merci de réessayer.')
       }
     } finally {
+      isSubmittingRef.current = false
       setIsSubmitting(false)
     }
   }

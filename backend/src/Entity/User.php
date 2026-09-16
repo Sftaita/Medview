@@ -9,10 +9,12 @@ use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface;
 use Symfony\Component\Security\Core\User\UserInterface;
 use Symfony\Component\Serializer\Attribute\Groups;
+use Symfony\Component\Uid\Uuid;
 use Symfony\Component\Validator\Constraints as Assert;
 
 #[ORM\Entity(repositoryClass: UserRepository::class)]
 #[ORM\Table(name: 'users')]
+#[ORM\UniqueConstraint(name: 'uniq_users_stable_id', columns: ['stable_id'])]
 class User implements UserInterface, PasswordAuthenticatedUserInterface
 {
     #[ORM\Id]
@@ -20,6 +22,17 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     #[ORM\Column]
     #[Groups(['user:read'])]
     private ?int $id = null;
+
+    /**
+     * The reproducible identifier the planning engine must use as
+     * candidateStableKey (docs/allocation-algorithm.md §13, tie-break) —
+     * the auto-increment $id above must never be used for that. Added
+     * here deliberately minimally: no Team reference is stored on User
+     * (a user belongs to zero, one or several teams — see TeamMember),
+     * only this stable identifier.
+     */
+    #[ORM\Column(type: 'uuid')]
+    private Uuid $stableId;
 
     #[ORM\Column(length: 180, unique: true)]
     #[Assert\NotBlank]
@@ -64,6 +77,7 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
 
     public function __construct(string $email, string $firstName, string $lastName, string $passwordHash)
     {
+        $this->stableId = Uuid::v7();
         $this->email = $email;
         $this->firstName = $firstName;
         $this->lastName = $lastName;
@@ -75,6 +89,11 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     public function getId(): ?int
     {
         return $this->id;
+    }
+
+    public function getStableId(): Uuid
+    {
+        return $this->stableId;
     }
 
     public function getEmail(): string

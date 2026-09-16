@@ -17,19 +17,29 @@ security:
             security: false
 
         # Handles POST /api/login: Symfony's json_login authenticator reads
-        # the credentials, and on success delegates to Lexik to issue a JWT.
+        # the credentials; on success App\Security\LoginSuccessHandler issues
+        # a JWT + a refresh-token cookie (see docs/authentication.md).
+        # login_throttling protects against brute-force: 5 attempts / 15min,
+        # keyed by username+IP *and* a higher-ceiling IP-only limit (both
+        # native to Symfony — see DefaultLoginRateLimiter).
         login:
             pattern: ^/api/login
             stateless: true
             user_checker: App\Security\UserChecker
+            login_throttling:
+                max_attempts: 5
+                interval: '15 minutes'
             json_login:
                 check_path: api_login
                 username_path: email
                 password_path: password
-                success_handler: lexik_jwt_authentication.handler.authentication_success
-                failure_handler: lexik_jwt_authentication.handler.authentication_failure
+                success_handler: App\Security\LoginSuccessHandler
+                failure_handler: App\Security\LoginFailureHandler
 
-        # Every other /api route must present a valid JWT.
+        # Every other /api route must present a valid JWT. /api/token/refresh
+        # and /api/token/logout are carved out below (access_control) since
+        # they authenticate via the HttpOnly cookie instead, checked
+        # manually in their controllers.
         api:
             pattern: ^/api
             stateless: true
@@ -41,6 +51,8 @@ security:
         - { path: ^/api/health, roles: PUBLIC_ACCESS }
         - { path: ^/api/register, roles: PUBLIC_ACCESS }
         - { path: ^/api/login, roles: PUBLIC_ACCESS }
+        - { path: ^/api/token/refresh, roles: PUBLIC_ACCESS }
+        - { path: ^/api/token/logout, roles: PUBLIC_ACCESS }
         - { path: ^/api, roles: IS_AUTHENTICATED_FULLY }
 
 when@test:

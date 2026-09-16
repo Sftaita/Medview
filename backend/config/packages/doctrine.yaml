@@ -8,6 +8,12 @@ doctrine:
 
         profiling_collect_backtrace: '%kernel.debug%'
         use_savepoints: true
+        types:
+            # Stable business identifiers (Team, PlanningPeriod, DutyType,
+            # DutyPattern, Duty, DutyGroupInstance, PlanningRuleSet, User)
+            # are UUIDv7, mapped to PostgreSQL's native `uuid` column type —
+            # see docs/planning-domain.md "Identifiants stables".
+            uuid: Symfony\Bridge\Doctrine\Types\UuidType
     orm:
         auto_generate_proxy_classes: true
         enable_lazy_ghost_objects: true

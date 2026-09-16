@@ -3,12 +3,13 @@
 Ce document explique **comment** l'authentification est construite et
 **pourquoi**, pour que les décisions restent traçables au fil des évolutions
 du projet. Il complète le `README.md` racine (socle technique) et sera suivi
-d'autres documents du même type (`docs/teams.md`, `docs/planning-engine.md`,
-…) au fur et à mesure des fonctionnalités.
+d'autres documents du même type (`docs/teams.md`, …) au fur et à mesure des
+fonctionnalités.
 
-Portée de cette étape : inscription, connexion, `GET /api/me`, désactivation
-d'un compte. **Pas encore** : vérification d'email, mot de passe oublié,
-rôles d'équipe, refresh token.
+Portée : inscription, connexion, `GET /api/me`, désactivation d'un compte,
+**rate limiting**, **access token court + refresh token rotatif en cookie
+HttpOnly**, logout. **Pas encore** : vérification d'email, mot de passe
+oublié, rôles d'équipe.
 
 ---
 
@@ -18,12 +19,12 @@ rôles d'équipe, refresh token.
 
 | Champ | Type | Notes |
 |---|---|---|
-| `id` | int, auto-increment | Pas d'UUID : pas de besoin identifié à ce stade (voir §7). |
+| `id` | int, auto-increment | Pas d'UUID : pas de besoin identifié à ce stade (voir §9). |
 | `email` | string(180), unique | Identifiant de connexion (`getUserIdentifier()`). |
 | `firstName` / `lastName` | string(100) | `NotBlank`. |
-| `passwordHash` | string(255) | Jamais sérialisé (pas de `#[Groups]` dessus) — voir §5. |
+| `passwordHash` | string(255) | Jamais sérialisé (pas de `#[Groups]` dessus) — voir §7. |
 | `active` | bool, défaut `true` | Désactivation = `active = false`, jamais de suppression. |
-| `emailVerifiedAt` | `?DateTimeImmutable` | **Réservé** pour la vérification d'email future (voir §7) ; aucun endpoint ne le renseigne encore. |
+| `emailVerifiedAt` | `?DateTimeImmutable` | **Réservé** pour la vérification d'email future (voir §9) ; aucun endpoint ne le renseigne encore. |
 | `createdAt` / `updatedAt` | `DateTimeImmutable` | `updatedAt` est mis à jour par chaque setter métier (`touch()`). |
 
 Table nommée `users` (et non `user`, mot réservé en PostgreSQL).
@@ -33,17 +34,32 @@ pas de colonne `roles` en base. Les rôles par équipe (OWNER/ADMIN/MEMBER)
 viendront de `TeamMember` quand les équipes existeront ; ils ne remplacent
 pas mais s'ajoutent à ce rôle de base.
 
-### Pourquoi pas d'entité `User` exposée en CRUD API Platform ?
+### Entité `RefreshToken` (`backend/src/Entity/RefreshToken.php`)
 
-Volontairement **aucune** ressource API Platform sur `User`. Inscription,
-connexion et lecture du profil passent par trois contrôleurs Symfony
-classiques (`RegistrationController`, la route `login` interceptée par le
-firewall, `AccountController`). C'est le moyen le plus direct de garantir
-qu'aucun endpoint de type `PATCH /users/{id}` ne peut apparaître par accident
-et modifier `passwordHash` ou `active` sans passer par une règle métier
-explicite. Quand un vrai besoin de gestion (liste des membres d'une équipe,
-etc.) apparaîtra, on exposera des vues dédiées et contrôlées — jamais
-l'entité brute.
+Une ligne par refresh token **émis** (une ligne existe même une fois le
+token consommé/révoqué — rien n'est supprimé, c'est l'historique de la
+session). Migration : `Version20260915084715`.
+
+| Champ | Type | Notes |
+|---|---|---|
+| `id` | int, auto-increment | |
+| `user` | `ManyToOne User`, `ON DELETE CASCADE` | Si un `User` était un jour supprimé, ses tokens le seraient aussi — mais `User` n'est de toute façon jamais supprimé (désactivation seulement, voir §1 de `User`). |
+| `tokenHash` | string(64), **unique**, indexé | SHA-256 hex du token brut. **Jamais le token en clair.** |
+| `familyId` | string(64), indexé | Identifie une lignée de rotations = une session de connexion. Voir §4. |
+| `createdAt` | `DateTimeImmutable` | |
+| `expiresAt` | `DateTimeImmutable` | `createdAt + REFRESH_TOKEN_TTL`. |
+| `revokedAt` | `?DateTimeImmutable`, nullable | Non-null = ce token ne peut plus servir, quelle qu'en soit la raison (logout, rotation, réutilisation détectée, compte désactivé). |
+| `replacedByTokenId` | `?int`, nullable, auto-référence | Renseigné quand ce token a été consommé par une rotation ; sa présence (indépendamment de `revokedAt`) signale une **réutilisation** si le token brut est présenté à nouveau. |
+| `createdByIp` / `userAgent` | nullable | Métadonnées de contexte, pas exploitées activement pour l'instant (pas de détection d'anomalie au-delà de la réutilisation) — utile pour un futur audit ou une UI "sessions actives". |
+
+### Pourquoi pas d'entité `User` (ni `RefreshToken`) exposée en CRUD API Platform ?
+
+Volontairement **aucune** ressource API Platform sur `User` ou
+`RefreshToken`. Inscription, connexion, refresh, logout et lecture du
+profil passent par des contrôleurs Symfony classiques. C'est le moyen le
+plus direct de garantir qu'aucun endpoint générique ne peut apparaître par
+accident et modifier `passwordHash`/`active`, ou lister/falsifier des
+refresh tokens, sans passer par une règle métier explicite.
 
 ---
 
@@ -54,153 +70,454 @@ POST /api/register
 { "email", "plainPassword", "firstName", "lastName" }
 ```
 
-1. `RegistrationController` désérialise le JSON en `RegisterUserRequest`
+1. Rate limiting (§6) : `429` si l'IP a dépassé le quota.
+2. `RegistrationController` désérialise le JSON en `RegisterUserRequest`
    (DTO dans `src/Dto/`, jamais l'entité directement).
-2. Validation Symfony Validator sur le DTO : email non vide + format,
+3. Validation Symfony Validator sur le DTO : email non vide + format,
    mot de passe ≥ 8 caractères, prénom/nom non vides.
    → `422` avec le détail des violations si invalide.
-3. `UserRegistrationService::register()` (logique métier, hors contrôleur) :
+4. `UserRegistrationService::register()` (logique métier, hors contrôleur) :
    - vérifie l'unicité de l'email via `UserRepository` → `409` sinon
      (l'index unique en base est un filet de sécurité, pas le mécanisme
      principal de détection du conflit) ;
    - hash le mot de passe avec `UserPasswordHasherInterface` (algorithme
-     `auto`, laissé au choix de Symfony — actuellement bcrypt/argon selon
-     l'environnement) ;
+     `auto`, laissé au choix de Symfony) ;
    - persiste l'utilisateur.
-4. Réponse `201` avec l'utilisateur sérialisé (groupe `user:read`, donc
-   sans `passwordHash`).
+5. Réponse `201` avec l'utilisateur sérialisé (groupe `user:read`, donc
+   sans `passwordHash`). **L'inscription ne connecte pas automatiquement**
+   côté backend — le frontend enchaîne explicitement sur `/api/login`
+   (voir §8).
 
-## 3. Flux de connexion et stratégie JWT
+## 3. Flux de connexion
 
 ```
 POST /api/login
 { "email", "password" }
-→ 200 { "token": "<jwt>" }
+→ 200 { "token": "<jwt d'accès>" }
+   Set-Cookie: medvue_refresh_token=<opaque>; HttpOnly; ...
 ```
 
 - Le firewall `login` (`config/packages/security.yaml`) utilise
   l'authenticator natif `json_login` de Symfony Security : il n'y a **pas**
-  de contrôleur métier pour `/api/login`. `SecurityController::__invoke()`
-  existe uniquement comme filet de sécurité (il lève une exception s'il est
-  jamais atteint) — c'est le pattern documenté officiellement par
-  LexikJWTAuthenticationBundle.
-- En cas de succès, `json_login` délègue à
-  `lexik_jwt_authentication.handler.authentication_success`, qui génère le
-  JWT et le renvoie sous la forme `{"token": "..."}`.
-- Le token est un JWT **RS256** (clé privée/publique, pas de secret
-  partagé) signé avec la paire générée par
-  `bin/console lexik:jwt:generate-keypair` dans `config/jwt/` (fichiers
-  gitignorés, à régénérer sur chaque environnement).
-- Claims du token : `iat`, `exp`, `roles`, `username` (= l'email). Pas de
-  claim custom (`sub`, `teamIds`, etc.) pour l'instant.
-- **Durée de vie : 1h** (`token_ttl: 3600` dans
-  `config/packages/lexik_jwt_authentication.yaml`). **Aucun refresh token**
-  n'est implémenté : passé une heure, l'utilisateur doit se reconnecter.
-  C'est une limitation assumée pour ce vertical slice — voir §7.
-- Chaque requête vers `/api/*` (hors `/api/login`, `/api/register`,
-  `/api/health`) passe par le firewall `api` (`jwt: ~`, `stateless: true`) :
-  le token est lu depuis l'en-tête `Authorization: Bearer <token>`, vérifié
-  (signature + expiration), et l'utilisateur est rechargé depuis la base à
-  **chaque requête** (pas de session) via `app_user_provider` (email comme
-  identifiant).
+  de contrôleur métier pour la logique d'authentification elle-même.
+  `SecurityController::__invoke()` existe uniquement comme filet de
+  sécurité (il lève une exception s'il est jamais atteint) — pattern
+  documenté officiellement par LexikJWTAuthenticationBundle.
+- En cas de succès, `json_login` délègue à `App\Security\LoginSuccessHandler`
+  (remplace le handler par défaut de Lexik) qui :
+  1. crée le JWT d'accès (`JWTTokenManagerInterface::create()`) ;
+  2. démarre une **nouvelle famille** de refresh token
+     (`RefreshTokenService::issueNewFamily()`) ;
+  3. pose le cookie refresh sur la réponse (`RefreshTokenCookieFactory`) ;
+  4. renvoie `{"token": "<jwt>"}` — **le refresh token brut n'apparaît
+     jamais dans le corps JSON**, uniquement dans le cookie `HttpOnly`.
+- Rate limiting : `login_throttling` natif de Symfony (§6).
+- Le firewall `api` protège `/api/*` (hors `/api/login`, `/api/register`,
+  `/api/health`, `/api/token/refresh`, `/api/token/logout` — ces deux
+  derniers ont leur propre mécanisme d'authentification, voir §5).
 
 ### Désactivation d'un compte (`App\Security\UserChecker`)
 
-Enregistré comme `user_checker` sur les deux firewalls (`login` et `api`) :
+Enregistré comme `user_checker` sur les firewalls `login` et `api` :
 - Sur `/api/login` : bloque l'authentification si `active = false`.
-- Sur `/api/*` : re-vérifié à **chaque requête authentifiée**, pas
-  seulement à la connexion — un compte désactivé pendant qu'un token est
-  encore valide perd l'accès à la requête suivante.
+- Sur `/api/*` (JWT) : re-vérifié à **chaque requête authentifiée** — un
+  compte désactivé pendant qu'un access token est encore valide perd
+  l'accès à la requête suivante (l'access token étant court, ce délai est
+  de toute façon borné à 15 minutes maximum).
+- Sur `/api/token/refresh` : voir §5, le refresh revalide aussi l'état du
+  compte, indépendamment du firewall JWT.
 
 **Comportement volontaire côté message d'erreur** : que le mot de passe
 soit faux ou que le compte soit désactivé, la réponse est identique —
 `401 {"code":401,"message":"Invalid credentials."}` — comportement par
-défaut du handler d'échec de Lexik/Symfony Security, conservé tel quel.
-Ça évite de révéler si un email correspond à un compte désactivé
-(énumération de comptes). Contrepartie assumée : un utilisateur désactivé
-ne sait pas *pourquoi* sa connexion échoue depuis ce seul message ; à
-traiter via un canal séparé (email, contact admin) si besoin.
+défaut du handler d'échec de Lexik/Symfony Security, conservé pour tout ce
+qui n'est pas du rate limiting (voir `App\Security\LoginFailureHandler`,
+§6). Ça évite de révéler si un email correspond à un compte désactivé
+(énumération de comptes).
 
-## 4. `GET /api/me`
+## 4. Access token + refresh token : architecture et durées de vie
 
-Protégé par le firewall `api`. Utilise l'attribut Symfony
-`#[CurrentUser] User $user` pour récupérer l'utilisateur authentifié sans
-appeler manuellement le token storage. Réponse : l'utilisateur sérialisé
-avec le groupe `user:read` (jamais `passwordHash`).
+| Token | Nature | Durée de vie | Où | Renouvelable |
+|---|---|---|---|---|
+| **Access token** | JWT RS256 (clé privée/publique, pas de secret partagé) | **15 min** (`JWT_TOKEN_TTL=900`) | Mémoire/`localStorage` frontend, envoyé en `Authorization: Bearer` | Via le refresh token |
+| **Refresh token** | Chaîne opaque aléatoire (`bin2hex(random_bytes(32))`, 256 bits d'entropie) — **pas un JWT** | **30 jours glissants** (`REFRESH_TOKEN_TTL=2592000`), renouvelés à chaque rotation | Cookie `HttpOnly` `medvue_refresh_token`, jamais lu par JavaScript | Rotation à chaque usage (§4.1) |
 
-- Sans token / token invalide / expiré → `401`.
-- Token valide → `200` avec `id, email, firstName, lastName, active,
-  createdAt, updatedAt`.
+Claims du JWT d'accès : `iat`, `exp`, `roles`, `username` (= l'email). Pas
+de claim custom (`sub`, `teamIds`, etc.) pour l'instant.
 
-## 5. Ce qui n'est jamais exposé
+**Pourquoi un refresh token opaque plutôt qu'un second JWT longue durée ?**
+Un JWT est auto-porteur et stateless par construction — il ne peut donc
+**jamais être révoqué avant son expiration** sans registre externe (ce qui
+annule l'intérêt d'être stateless). Un refresh token JWT longue durée volé
+resterait valide jusqu'à expiration, sans aucun moyen de le couper. Le
+refresh token ici est au contraire **une clé opaque qui ne veut rien dire
+par elle-même** : toute sa validité est vérifiée côté serveur contre la
+table `refresh_tokens` à chaque utilisation, ce qui permet la révocation
+immédiate (logout, réutilisation détectée, compte désactivé) — c'est le
+point central de la demande de renforcement de sécurité de cette étape.
 
-`passwordHash` n'a **aucun** attribut `#[Groups]` sur l'entité `User` : même
-en cas d'erreur de configuration ailleurs (mauvais groupe passé à un futur
-endpoint), le Serializer ne peut pas l'inclure tant que le groupe
-`user:read` (ou tout autre) n'est pas explicitement ajouté sur cette
-propriété — ce qui n'arrivera pas par accident.
+**Pourquoi SHA-256 pour le hash du refresh token, et pas le password
+hasher (bcrypt/argon2) utilisé pour les mots de passe ?** Un mot de passe
+est un secret à faible entropie choisi par un humain : un hash lent et
+adaptatif (bcrypt/argon2) est nécessaire pour ralentir le brute-force
+hors-ligne en cas de fuite de la base. Un refresh token est à l'opposé
+**256 bits générés par un CSPRNG** — le brute-force est déjà
+computationnellement impossible indépendamment de la vitesse du hash. Un
+hash rapide et déterministe (SHA-256) est donc le bon outil ici : il
+permet une recherche indexée en `O(log n)` sur `tokenHash`, ce qu'un hash
+adaptatif interdirait (bcrypt génère un salt aléatoire par appel — deux
+hashs du même mot de passe diffèrent, donc impossible à chercher par
+égalité en base).
 
-## 6. Endpoints exacts
+### 4.1 Rotation
+
+```
+POST /api/token/refresh   (cookie medvue_refresh_token requis)
+→ 200 { "token": "<nouveau jwt>" }
+   Set-Cookie: medvue_refresh_token=<nouveau opaque>; HttpOnly; ...
+```
+
+`RefreshTokenController` (public, voir §5) :
+
+1. lit le cookie `medvue_refresh_token` ;
+2. `RefreshTokenService::rotate()` :
+   - hash le token présenté, cherche la ligne correspondante ;
+   - **absent** → rejet générique ;
+   - **déjà révoqué** (`revokedAt` non-null, qu'il ait été remplacé par
+     rotation ou révoqué explicitement) → rejet **+ révocation défensive
+     de toute la famille** (§4.2) ;
+   - **expiré** → rejet ;
+   - **compte du titulaire désactivé** → rejet + révocation de la famille
+     (§5) ;
+   - sinon : émet un nouveau token **dans la même famille**, marque
+     l'ancien `revokedAt` + `replacedByTokenId` pointant vers le nouveau ;
+3. émet un nouveau JWT d'accès et un nouveau cookie refresh.
+
+**Chaque refresh valide invalide l'ancien token et en émet un nouveau** —
+un raw token de refresh ne peut donc servir qu'une seule fois.
+
+### 4.2 Détection de réutilisation et révocation de famille
+
+Si un refresh token déjà consommé (par une rotation *ou* un logout) est
+présenté à nouveau, c'est un signal de compromission : quelqu'un d'autre
+que le porteur légitime du cookie courant a ce token en main (copie volée,
+rejeu, cookie non supprimé côté client après logout, etc.). Dans ce cas,
+`revokeFamily()` révoque **tous** les tokens de la `familyId` concernée —
+y compris celui qui, une seconde plus tôt, était encore parfaitement
+valide. Toute la lignée de session est coupée ; le prochain refresh, même
+avec le token "actuel" légitime, échoue et force une reconnexion complète.
+
+C'est un compromis assumé : en cas de faux positif (perte de connexion
+réseau faisant qu'un client réessaie avec un token déjà consommé côté
+serveur, par exemple), l'utilisateur légitime est aussi déconnecté. C'est
+préférable à laisser un token potentiellement volé continuer à fonctionner.
+
+**Implémentation notable** : `RefreshTokenRepository::revokeFamily()`
+charge et mute les entités une par une plutôt qu'un `UPDATE` DQL en masse.
+Un `UPDATE` en masse modifierait la base directement sans jamais rafraîchir
+l'état d'un éventuel objet déjà chargé en mémoire (ex. le token qui vient
+de déclencher cette révocation) — piège classique de Doctrine, découvert en
+écrivant les tests (`docs/decisions.md` D020).
+
+## 5. `POST /api/token/refresh` et `POST /api/token/logout` : routes publiques, authentification par cookie
+
+Ces deux endpoints sont marqués `PUBLIC_ACCESS` dans `access_control` —
+**volontairement en dehors** du firewall `api` (`jwt: ~`). Ils
+n'authentifient jamais via `Authorization: Bearer` : leur identité vient
+uniquement du cookie `HttpOnly`, vérifié manuellement dans le contrôleur
+contre la table `refresh_tokens`. C'est un mécanisme d'authentification
+différent et complémentaire à celui du reste de l'API, pas un trou dans la
+protection JWT.
+
+`POST /api/token/logout` :
+- lit le cookie, révoque la famille entière si un token valide est trouvé ;
+- **idempotent** : appelé sans cookie, ou avec un cookie déjà invalide,
+  répond quand même `200 {"success": true}` — l'état désiré ("pas de
+  session active") est de toute façon atteint ;
+- efface le cookie côté navigateur (`Set-Cookie` avec expiration passée,
+  même nom/path/attributs — sinon le navigateur garderait l'ancien).
+
+## 6. Rate limiting
+
+| Endpoint | Mécanisme | Limite | Clé |
+|---|---|---|---|
+| `POST /api/login` | `login_throttling` natif de Symfony Security (`security.yaml`) | 5 tentatives / 15 min (local), 25 / 15 min (global) | Local : hash(username + IP). Global : hash(IP) seule — empêche qu'une attaque distribuée sur beaucoup de comptes depuis une IP échappe à toute limite. |
+| `POST /api/register` | `symfony/rate-limiter` direct (`RateLimiterFactory`, `config/packages/rate_limiter.yaml`) | 5 tentatives / heure | IP (`$request->getClientIp()`) |
+
+Dépassement → `429 Too Many Requests` avec un en-tête `Retry-After`
+(secondes) et un corps `{"error":"too_many_attempts","message":"..."}`.
+
+- **Pourquoi le mécanisme natif pour login et pas pour register ?**
+  `/api/login` n'a pas de contrôleur métier exécuté (§3) — le rate
+  limiting doit donc s'accrocher au firewall lui-même, ce que
+  `login_throttling` fait nativement, avec la double limite locale/globale
+  déjà pensée pour ce cas précis (voir `DefaultLoginRateLimiter` dans
+  Symfony). `/api/register` est un contrôleur normal : y injecter un
+  `RateLimiterFactory` directement est plus simple qu'un mécanisme
+  équivalent pour un seul endpoint sans authenticator.
+- **`App\Security\LoginFailureHandler`** enveloppe le handler par défaut de
+  Lexik : si l'exception est
+  `Symfony\Component\Security\Core\Exception\TooManyLoginAttemptsAuthenticationException`,
+  renvoie `429` + `Retry-After` ; sinon délègue au handler de Lexik
+  (comportement générique `401` inchangé, §3).
+- **Stockage** : pool de cache `cache.rate_limiter`, adossé à `cache.app`
+  (filesystem par défaut, voir `config/packages/cache.yaml`). **Ce
+  stockage est local à chaque instance.** En cas de déploiement de
+  plusieurs instances du backend derrière un load balancer, chaque
+  instance aurait son propre compteur — un attaquant distribué sur
+  plusieurs requêtes pourrait multiplier son quota effectif par le nombre
+  d'instances. À corriger avant un déploiement multi-instances en pointant
+  `cache.rate_limiter` vers un backend partagé (Redis typiquement).
+- **`Retry-After` exposé au frontend** : `config/packages/nelmio_cors.yaml`
+  liste explicitement `Retry-After` dans `expose_headers`. Sans ça, le
+  navigateur bloque la lecture JS du header même s'il est bien envoyé sur
+  le fil — trouvé lors de l'UAT du 2026-09-15 (`docs/decisions.md` D027) :
+  le frontend affichait un message générique au lieu du délai réel.
+
+## 7. Ce qui n'est jamais exposé
+
+`passwordHash` n'a **aucun** attribut `#[Groups]` sur l'entité `User`, et
+`RefreshToken` n'est sérialisé nulle part : même en cas d'erreur de
+configuration ailleurs, le Serializer ne peut pas les inclure par accident.
+Le refresh token brut ne transite **jamais** en JSON, dans aucun sens
+(requête ou réponse) — uniquement via le cookie `HttpOnly`, invisible à
+JavaScript.
+
+## 8. Frontend
+
+- `src/features/auth/context.ts` : le `React.Context` seul (fichier séparé
+  pour que le Fast Refresh de Vite fonctionne correctement).
+- `src/features/auth/AuthContext.tsx` : `AuthProvider`. Au montage, tente
+  **toujours** un refresh silencieux (`refreshAccessToken()`) plutôt que de
+  se fier à un token en `localStorage` — c'est le cookie `HttpOnly`, pas le
+  `localStorage`, qui est la vraie source de vérité d'une session existante
+  (un nouvel onglet n'a pas d'access token en mémoire mais peut avoir un
+  cookie valide). Expose `login/register/logout` (logout est maintenant
+  asynchrone : il appelle `POST /api/token/logout` avant de vider l'état
+  local, en best-effort — un échec réseau ne bloque jamais la déconnexion
+  côté client).
+- `src/features/auth/useAuth.ts` : hook de consommation.
+- `src/features/auth/ProtectedRoute.tsx` : redirige vers `/login` (avec
+  l'URL d'origine en `state`) si non authentifié ; affiche un état de
+  chargement le temps de vérifier une session existante.
+- `src/features/auth/PublicOnlyRoute.tsx` : l'inverse — enveloppe `/login`
+  et `/register`, redirige vers `/` si un utilisateur déjà authentifié y
+  accède. Ajouté suite à l'UAT du 2026-09-15 (§14) : ces deux pages
+  restaient accessibles et soumettables même connecté.
+- `src/lib/apiClient.ts` : `apiFetch()` central.
+  - Attache `Authorization: Bearer <token>` sauf `skipAuth: true`.
+  - `credentials: 'include'` sur **toutes** les requêtes (nécessaire pour
+    login/refresh/logout ; sans effet pour les autres endpoints qui
+    n'utilisent pas de cookie).
+  - Sur un `401` (hors `skipAuth`) : tente **un seul** refresh
+    (`refreshAccessToken()`), puis **rejoue une seule fois** la requête
+    d'origine avec le nouveau token (`_isRetry` interne empêche toute
+    boucle : un deuxième `401` après le rejeu n'est plus retenté).
+  - Plusieurs `401` simultanés (plusieurs appels API en parallèle dont
+    l'access token vient d'expirer) **partagent un seul refresh en vol** :
+    `refreshAccessToken()` mémorise sa promesse en cours
+    (`refreshPromise`) et la réutilise pour tout appelant concurrent,
+    au lieu de déclencher un refresh par requête.
+  - Si le refresh échoue (cookie absent/expiré/révoqué) : vide le token
+    stocké et émet l'event `medvue:unauthorized`, écouté par
+    `AuthProvider` pour déconnecter proprement l'utilisateur côté UI.
+- **Synchronisation multi-onglets** (`AuthProvider`, §14) : écoute
+  l'événement `storage` du navigateur (déclenché dans les *autres* onglets
+  du même origin quand `localStorage` change, jamais dans l'onglet qui a
+  fait le changement). Si la clé du token d'accès disparaît (logout dans
+  un autre onglet), l'état `user` de cet onglet est vidé immédiatement,
+  sans attendre un rechargement ou un prochain appel API.
+- **Garde anti-double-soumission** (`LoginPage`/`RegisterPage`, §14) : un
+  `useRef` vérifié et positionné de façon strictement synchrone en tête de
+  `handleSubmit`, en plus de (et non à la place de) `disabled={isSubmitting}`
+  — l'état React seul ne bloque pas deux soumissions déclenchées assez
+  vite l'une après l'autre pour arriver avant le prochain rendu.
+- Toutes les pages métier (`/`, `/account`, `/my-availability`, `/teams`,
+  …) sont enveloppées dans `<ProtectedRoute>` ; `/login` et `/register`
+  sont publiques mais enveloppées dans `<PublicOnlyRoute>`.
+
+## 9. Cookies : attributs retenus et pourquoi
+
+| Attribut | Valeur | Pourquoi |
+|---|---|---|
+| Nom | `medvue_refresh_token` | Namespacé, ne collisionne pas avec un cookie générique. |
+| `HttpOnly` | toujours | Le seul moyen de garantir que JavaScript (donc une XSS) ne peut jamais lire le refresh token — c'est la raison d'être du cookie plutôt que du `localStorage` pour ce token précis. |
+| `Secure` | piloté par `COOKIE_SECURE` (`false` en dev, **doit être `true`** dès que servi en HTTPS) | En dev, le frontend et le backend tournent en `http://localhost` : un cookie `Secure` serait silencieusement refusé par le navigateur. Pas d'auto-détection depuis `APP_ENV` : explicite et vérifiable en un coup d'œil par environnement plutôt qu'implicite. |
+| `SameSite` | `Lax` | Voir §10 (analyse CSRF). |
+| `Path` | `/api/token` | Regroupe volontairement `POST /api/token/refresh` et `POST /api/token/logout` sous ce préfixe **pour que le cookie ne parte jamais** vers `/api/me`, `/api/register`, etc. — surface d'exposition minimale. |
+| `Domain` | non défini (cookie host-only) | Pas de topologie de sous-domaines de prod encore décidée. Un `Domain=.medvue.example` explicite deviendrait pertinent si frontend et backend prod partagent un domaine parent avec des sous-domaines distincts — à trancher à ce moment-là, pas avant (voir §12). |
+| Durée de vie | = `REFRESH_TOKEN_TTL` (30 jours), alignée sur la ligne DB via `config/services.yaml` (`bind: $ttlSeconds`) | Le cookie et la ligne serveur doivent expirer ensemble ; les deux sont dérivés de la même variable d'environnement pour ne jamais diverger. |
+
+## 10. CSRF : analyse et décision retenue
+
+Le refresh token vit dans un cookie envoyé automatiquement par le
+navigateur — toute requête `POST /api/token/refresh` ou
+`POST /api/token/logout`, y compris déclenchée par un site tiers
+malveillant, verrait ce cookie attaché **si** le navigateur la considère
+comme same-site.
+
+**Analyse de l'architecture actuelle** : frontend (`:5183`) et backend
+(`:8010`) sont deux *origines* différentes mais le même **site** au sens
+`SameSite` (le "site" se définit par domaine enregistrable + schéma, en
+ignorant le port — `localhost` des deux côtés). Un cookie `SameSite=Lax`
+ou `SameSite=Strict` est donc envoyé sur les requêtes entre frontend et
+backend malgré le port différent — mais **ni l'un ni l'autre n'est envoyé
+sur une requête initiée par un site tiers réellement cross-site**
+(`evil.example` par exemple), qui est précisément le scénario CSRF à
+bloquer.
+
+**Décision : `SameSite=Lax`, pas de token CSRF séparé.**
+
+- `Lax` et `Strict` se comportent **de façon identique** pour notre cas
+  d'usage : les deux endpoints concernés sont exclusivement `POST`, jamais
+  atteignables par une navigation top-level (ce que `Lax` autorise en plus
+  de `Strict` : les requêtes `GET` de navigation top-level cross-site).
+  `Lax` est choisi comme réglage par défaut le plus courant et le moins
+  susceptible de surprendre un jour un flux légitime (ex. un lien de
+  navigation), sans rien perdre en protection ici.
+- Un site tiers ne peut donc **jamais** faire attacher ce cookie à une
+  requête `POST` vers `/api/token/refresh` ou `/api/token/logout` — le
+  vecteur CSRF classique (formulaire ou `fetch` cross-site) est neutralisé
+  par `SameSite` seul, sans en-tête ni token CSRF supplémentaire à gérer.
+- **Défense en profondeur additionnelle, non comptée dans la décision
+  ci-dessus** : `RefreshTokenController`/`LogoutController` n'acceptent que
+  `POST`, et CORS (`allow_credentials: true`, origine restreinte par regex,
+  jamais `*`) empêcherait de toute façon un site non autorisé de *lire* la
+  réponse même s'il parvenait à déclencher la requête.
+
+**Point de bascule explicite à surveiller** : cette décision tient tant
+que frontend et backend restent le même *site* au sens navigateur (même
+domaine enregistrable, ports différents ou sous-domaines du même domaine).
+**Si le déploiement évolue vers des domaines réellement distincts**
+(ex. `app.exemple.com` et `api.exemple-different.com`, deux domaines
+enregistrables séparés), le cookie devrait passer en `SameSite=None` +
+`Secure`, ce qui **supprime la protection CSRF apportée par `SameSite`** —
+il faudrait alors ajouter une vraie protection (jeton CSRF synchronisé ou
+motif double-submit-cookie). Ne pas repousser cette réévaluation au moment
+où la topologie change effectivement.
+
+## 11. Variables d'environnement
+
+| Variable | Où | Valeur dev (`.env`) | Rôle |
+|---|---|---|---|
+| `JWT_TOKEN_TTL` | `backend/.env` | `900` (15 min) | Durée de vie de l'access token JWT. |
+| `REFRESH_TOKEN_TTL` | `backend/.env` | `2592000` (30 jours) | Durée de vie glissante du refresh token, côté ligne DB **et** cookie (même valeur, liée dans `config/services.yaml`). |
+| `COOKIE_SECURE` | `backend/.env` | `false` | Attribut `Secure` du cookie refresh. **`true` obligatoire dès que le site est servi en HTTPS** — voir §9. |
+| `CORS_ALLOW_ORIGIN` | `backend/.env` (déjà existante, socle) | regex `localhost`/`127.0.0.1` | Doit rester une regex explicite (jamais `*`) tant que `allow_credentials: true` est actif (`config/packages/nelmio_cors.yaml`) — les deux sont incompatibles côté spec CORS. |
+
+Clés JWT (`JWT_SECRET_KEY`, `JWT_PUBLIC_KEY`, `JWT_PASSPHRASE`) et
+`APP_SECRET` inchangés depuis le socle/l'étape précédente.
+
+## 12. Endpoints exacts
 
 | Méthode | Route | Auth requise | Codes de retour |
 |---|---|---|---|
-| `POST` | `/api/register` | Non | `201`, `400` (JSON invalide), `422` (validation), `409` (email déjà utilisé) |
-| `POST` | `/api/login` | Non | `200` (`{"token"}`), `401` (identifiants invalides ou compte désactivé) |
+| `POST` | `/api/register` | Non | `201`, `400` (JSON invalide), `422` (validation), `409` (email déjà utilisé), `429` (rate limit) |
+| `POST` | `/api/login` | Non | `200` (`{"token"}` + cookie refresh), `401` (identifiants invalides ou compte désactivé), `429` (rate limit) |
 | `GET` | `/api/me` | Oui (Bearer JWT) | `200`, `401` (absent/invalide/expiré) |
+| `POST` | `/api/token/refresh` | Non (cookie refresh) | `200` (`{"token"}` + nouveau cookie refresh), `401` (absent/expiré/révoqué/réutilisé/compte désactivé — message générique) |
+| `POST` | `/api/token/logout` | Non (cookie refresh, optionnel) | `200` (`{"success":true}`, toujours — idempotent), cookie effacé |
 | `GET` | `/api/health` | Non | `200`/`503` (inchangé depuis le socle) |
 
-## 7. Décisions ouvertes / dette assumée
+## 13. Décisions ouvertes / dette assumée
 
-- **Stockage du token côté frontend : `localStorage`.** Choix pragmatique
-  pour ce vertical slice (fonctionne immédiatement en cross-port sur
-  `localhost`, pas de configuration CORS/cookies supplémentaire). **Plus
-  vulnérable au XSS** qu'un cookie `httpOnly` + `SameSite`. Migrer vers un
-  cookie `httpOnly` est l'amélioration de sécurité la plus importante à
-  considérer avant une mise en production réelle — ça demanderait : le
-  backend pose le cookie à la connexion, CORS avec `allow_credentials`,
-  `fetch` avec `credentials: 'include'`, et probablement une protection
-  CSRF puisque le navigateur enverrait le cookie automatiquement.
-- **Pas de refresh token.** Session expire après 1h sans possibilité de
-  renouvellement silencieux. À ajouter (`gesdinet/jwt-refresh-token-bundle`
-  est l'option standard avec Lexik) si l'expérience utilisateur l'exige.
-- **Pas de rate limiting** sur `/api/login` ni `/api/register` (pas de
-  protection anti-bruteforce/anti-spam pour l'instant).
+- **`localStorage` pour l'access token.** Toujours vrai pour ce token
+  court (15 min) — contrairement au refresh token, il n'est *pas* dans un
+  cookie `HttpOnly`. Une fuite XSS reste possible pendant sa courte durée
+  de vie ; le refresh token, lui, est protégé (§9). Un access token
+  entièrement en mémoire (jamais persisté, perdu au rechargement de page)
+  serait plus strict mais moins pratique — non retenu pour l'instant.
+- **Pas de rate limiting distribué.** Voir §6 — nécessite un cache partagé
+  (Redis) avant un déploiement multi-instances.
+- **Pas de limite sur `/api/token/refresh` lui-même.** Un attaquant en
+  possession d'un cookie refresh valide pourrait le "consommer" en boucle
+  (chaque appel réussit et fait tourner la rotation) sans qu'aucun rate
+  limiting ne s'y oppose. Peu exploitable en pratique (il faudrait déjà
+  posséder le cookie, ce que `HttpOnly` + `SameSite` rend difficile), mais
+  à noter comme point de durcissement possible.
 - **Vérification d'email** : le champ `emailVerifiedAt` existe mais rien ne
   le renseigne. Extension prévue : `EmailVerificationToken` (entité à part,
   à usage unique, avec expiration) + endpoint `POST
   /api/verify-email/{token}` + email envoyé via Symfony Mailer à
   l'inscription.
-- **Mot de passe oublié** : aucune colonne dédiée sur `User` (délibéré,
-  voir le README du socle) — l'extension naturelle est une entité
-  `PasswordResetToken` séparée (token à usage unique, expirant), pas des
-  colonnes supplémentaires sur `User`.
+- **Mot de passe oublié** : aucune colonne dédiée sur `User` (délibéré) —
+  l'extension naturelle est une entité `PasswordResetToken` séparée (token
+  à usage unique, expirant), pas des colonnes supplémentaires sur `User`.
 - **UUID vs id auto-increment** : gardé simple (int) faute de besoin
   identifié ; à revisiter si les identifiants utilisateurs doivent devenir
   non-devinables côté API publique.
 - **`ROLE_USER` en dur** : suffisant tant qu'il n'y a pas de notion
   d'équipe. Le jour où `TeamMember` existe, `getRoles()` restera
   `['ROLE_USER']` (rôle global) et les rôles par équipe seront vérifiés via
-  des Voters dédiés plutôt qu'ajoutés à `getRoles()`, pour ne pas mélanger
-  "qui est l'utilisateur" et "que peut-il faire dans TELLE équipe".
+  des Voters dédiés plutôt qu'ajoutés à `getRoles()`.
+- **Pas d'UI "sessions actives" / révocation manuelle par l'utilisateur.**
+  Le modèle de données (`familyId`, `createdByIp`, `userAgent`) le
+  permettrait (lister les familles actives d'un utilisateur, bouton
+  "déconnecter cet appareil"), mais rien n'est exposé côté API/frontend
+  pour l'instant.
+- **Domaine de cookie non défini** — voir §9, à trancher avec la topologie
+  de déploiement réelle.
 
-## 8. Frontend
+## 14. UAT du 2026-09-15 : fiabilisation
 
-- `src/features/auth/context.ts` : le `React.Context` seul (fichier séparé
-  pour que le Fast Refresh de Vite fonctionne correctement — un fichier qui
-  exporte à la fois un composant et un contexte casse le HMR).
-- `src/features/auth/AuthContext.tsx` : `AuthProvider`, charge
-  `/api/me` au montage si un token est déjà stocké, expose
-  `login/register/logout`.
-- `src/features/auth/useAuth.ts` : hook de consommation.
-- `src/features/auth/ProtectedRoute.tsx` : redirige vers `/login` (avec
-  l'URL d'origine en `state`) si non authentifié ; affiche un état de
-  chargement le temps de vérifier une session existante.
-- `src/lib/apiClient.ts` : `apiFetch()` central — attache
-  `Authorization: Bearer <token>`, sérialise/désérialise le JSON, et sur un
-  `401` : vide le token stocké et émet un `window` event
-  (`medvue:unauthorized`) écouté par `AuthProvider` pour vider l'état
-  utilisateur (pas d'import circulaire entre le client HTTP et le contexte
-  React).
-- Toutes les pages métier (`/`, `/account`, `/my-availability`, `/teams`,
-  …) sont enveloppées dans `<ProtectedRoute>` ; seules `/login` et
-  `/register` sont publiques.
+Une UAT complète en conditions navigateur réelles (`docs/decisions.md`
+D026-D030) a trouvé deux failles **BLOCKER** de divulgation
+d'information — toutes deux corrigées et couvertes par des tests de
+non-régression automatisés.
+
+### 14.1 `App\EventListener\ApiExceptionListener` — filet de sécurité systémique
+
+Avant cette UAT, aucun mécanisme ne garantissait qu'une exception non
+prévue reste en JSON propre sur `/api/*` : par défaut, Symfony rend une
+page HTML de debug complète (trace incluse) dès que `APP_ENV=dev`.
+Découvert via deux chemins distincts :
+
+- **Course entre deux inscriptions concurrentes avec le même email**
+  (double-clic sur "Créer mon compte", ou deux requêtes simultanées) : les
+  deux passaient la vérification préalable `findOneByEmail()` avant que
+  l'une ou l'autre ne committe, et le second `flush()` levait une
+  `Doctrine\DBAL\Exception\UniqueConstraintViolationException` non
+  interceptée → `500` avec trace complète sur un endpoint public non
+  authentifié.
+- **`Content-Type` non-JSON sur `POST /api/login`** (header absent,
+  `text/plain`, formulaire encodé…) : l'authenticator `json_login` décline
+  alors la requête (il n'intercepte que `application/json`), qui retombe
+  sur `SecurityController` — dont le corps supposait être "jamais atteint"
+  et levait une `LogicException` non interceptée → même fuite, en une
+  seule requête, sans concurrence nécessaire.
+
+**Corrections** :
+
+1. `UserRegistrationService::register()` capture désormais
+   `UniqueConstraintViolationException` autour du `flush()` et la convertit
+   en `EmailAlreadyUsedException` (même `409` propre qu'un doublon
+   séquentiel).
+2. `SecurityController::__invoke()` répond `400
+   {"error":"invalid_content_type"}` au lieu de lever une exception.
+3. `ApiExceptionListener` (nouveau, `kernel.exception`, priorité -10) :
+   filet de sécurité pour **tout** le reste — toute exception non prévue
+   sur `/api/*` est reformatée en JSON propre (`HttpExceptionInterface` →
+   son vrai code + message déjà sûr ; sinon `500` générique, message fixe,
+   **jamais** le message/la trace réels). L'exception complète reste
+   loguée côté serveur (`docker logs`), seule la réponse HTTP est
+   assainie. Corrige la classe de bug entière, pas seulement les deux cas
+   trouvés — voir `docs/decisions.md` D026.
+
+### 14.2 Autres correctifs issus de cette UAT
+
+| Trouvaille | Sévérité | Correction |
+|---|---|---|
+| `/login` et `/register` accessibles et soumettables déjà connecté | MEDIUM | `PublicOnlyRoute` (§8) |
+| Logout dans un onglet laissait les autres onglets visuellement connectés jusqu'au prochain appel | MEDIUM | Écoute de l'événement `storage` dans `AuthProvider` (§8) |
+| `Retry-After` envoyé par le serveur mais illisible en JS (absent de `Access-Control-Expose-Headers`) | MEDIUM | Ajouté à `expose_headers` (§6) |
+| Message générique affiché sur `429`, indistinguable d'une vraie erreur serveur | MEDIUM | `LoginPage`/`RegisterPage` affichent désormais un message dédié avec le délai (`ApiError.retryAfterSeconds`) |
+| Double-clic/double-Enter déclenchait deux requêtes réseau réelles | HIGH | Garde `useRef` synchrone dans `handleSubmit` (§8) |
+
+Tous ces correctifs sont couverts par des tests de non-régression
+(`tests/Service/UserRegistrationServiceTest.php`,
+`tests/EventListener/ApiExceptionListenerTest.php`,
+`tests/Controller/AuthenticationTest.php` côté backend ;
+`App.test.tsx`, `LoginPage.test.tsx` côté frontend). Détail complet du
+diagnostic, des sévérités et des preuves : rapport d'UAT du 2026-09-15
+(conservé dans l'historique de conversation du projet) et
+`docs/decisions.md` D026-D030.

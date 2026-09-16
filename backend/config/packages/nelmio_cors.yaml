@@ -4,7 +4,17 @@ nelmio_cors:
         allow_origin: ['%env(CORS_ALLOW_ORIGIN)%']
         allow_methods: ['GET', 'OPTIONS', 'POST', 'PUT', 'PATCH', 'DELETE']
         allow_headers: ['Content-Type', 'Authorization']
-        expose_headers: ['Link']
+        # Retry-After must be listed explicitly: browsers only let JS read
+        # response headers that are exposed here, regardless of whether the
+        # server actually sent them (found via UAT — the frontend could
+        # never read the header the 429 responses already carried).
+        expose_headers: ['Link', 'Retry-After']
         max_age: 3600
+        # Required so the browser attaches/accepts the HttpOnly refresh
+        # cookie on cross-origin fetches to /api/token/*. Safe to allow
+        # broadly on /api/: allow_origin is a regex (never "*"), which is
+        # what makes allow_credentials + a real Origin echo valid together,
+        # and the cookie itself stays scoped to /api/token by its own Path.
+        allow_credentials: true
     paths:
         '^/api/': ~

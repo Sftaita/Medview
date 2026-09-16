@@ -1,6 +1,7 @@
 import { NavLink, Route, Routes } from 'react-router-dom'
 import './App.css'
 import { ProtectedRoute } from './features/auth/ProtectedRoute'
+import { PublicOnlyRoute } from './features/auth/PublicOnlyRoute'
 import { useAuth } from './features/auth/useAuth'
 import { HealthStatus } from './features/system/HealthStatus'
 import { AccountPage } from './pages/AccountPage'
@@ -57,8 +58,22 @@ function App() {
 
       <main className="app-content">
         <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
+          <Route
+            path="/login"
+            element={
+              <PublicOnlyRoute>
+                <LoginPage />
+              </PublicOnlyRoute>
+            }
+          />
+          <Route
+            path="/register"
+            element={
+              <PublicOnlyRoute>
+                <RegisterPage />
+              </PublicOnlyRoute>
+            }
+          />
 
           <Route
             path="/"
