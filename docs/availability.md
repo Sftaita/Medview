@@ -179,7 +179,7 @@ non-participation indépendantes dans chacune de ses équipes.
 Pas de rôle global `ROLE_ADMIN` (CLAUDE.md D012) : tout passe par
 `TeamMember::role` (`OWNER`/`ADMIN`/`MEMBER`) et un Voter dédié.
 
-### `TeamRoleVoter` (`backend/src/Security/Voter/TeamRoleVoter.php`, D057)
+### `PlanningTeamRoleVoter` (`backend/src/Security/Voter/PlanningTeamRoleVoter.php`, D057; renommé depuis `TeamRoleVoter` — docs/decisions.md D079)
 
 Premier Voter du projet — jusqu'ici seulement évoqué dans les docblocks de
 `TeamMember`/`TeamMemberRole`. Scopé strictement aux besoins de ce lot (pas

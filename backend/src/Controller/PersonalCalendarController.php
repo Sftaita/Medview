@@ -23,7 +23,7 @@ use Symfony\Component\Validator\Validator\ValidatorInterface;
  * docs/availability.md). Deliberately never accepts another User as a
  * parameter: every action here is implicitly scoped to #[CurrentUser], so
  * this endpoint needs no Voter — a user can only ever reach their own rows
- * (D057, see also TeamRoleVoter's docblock).
+ * (D057, see also PlanningTeamRoleVoter's docblock).
  */
 final class PersonalCalendarController
 {

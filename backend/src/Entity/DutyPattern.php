@@ -35,9 +35,9 @@ class DutyPattern
     #[ORM\Column(type: 'uuid')]
     private Uuid $stableId;
 
-    #[ORM\ManyToOne(targetEntity: Team::class)]
+    #[ORM\ManyToOne(targetEntity: PlanningTeam::class)]
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
-    private Team $team;
+    private PlanningTeam $team;
 
     #[ORM\Column(length: 50)]
     private string $code;
@@ -61,7 +61,7 @@ class DutyPattern
     #[ORM\Column]
     private \DateTimeImmutable $updatedAt;
 
-    public function __construct(Team $team, string $code, string $name)
+    public function __construct(PlanningTeam $team, string $code, string $name)
     {
         $this->stableId = Uuid::v7();
         $this->team = $team;
@@ -82,7 +82,7 @@ class DutyPattern
         return $this->stableId;
     }
 
-    public function getTeam(): Team
+    public function getTeam(): PlanningTeam
     {
         return $this->team;
     }
@@ -110,12 +110,12 @@ class DutyPattern
 
     /**
      * @throws \InvalidArgumentException if $dayOffset is already used, or
-     *                                   $dutyType belongs to another Team
+     *                                   $dutyType belongs to another PlanningTeam
      */
     public function addComponent(int $dayOffset, DutyType $dutyType): DutyPatternComponent
     {
         if ($dutyType->getTeam() !== $this->team) {
-            throw new \InvalidArgumentException('A DutyPatternComponent must reference a DutyType from the same Team as its DutyPattern.');
+            throw new \InvalidArgumentException('A DutyPatternComponent must reference a DutyType from the same PlanningTeam as its DutyPattern.');
         }
 
         foreach ($this->components as $existing) {

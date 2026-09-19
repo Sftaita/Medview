@@ -15,7 +15,7 @@ use Symfony\Component\Uid\Uuid;
  * PlanningPeriod — only one per generation, enforced by the unique
  * constraint on ($generation, $duty).
  *
- * Carries both $teamMember (the live row, for normal operation) and
+ * Carries both $teamMember (a PlanningTeamMember, the live row, for normal operation) and
  * $snapshotMember (the frozen row from this generation's snapshot, for
  * historical interpretability even if $teamMember later leaves the team —
  * docs/planning-generation.md §15). The two cross-entity checks below
@@ -47,9 +47,9 @@ class DutyAssignment
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
     private Duty $duty;
 
-    #[ORM\ManyToOne(targetEntity: TeamMember::class)]
+    #[ORM\ManyToOne(targetEntity: PlanningTeamMember::class)]
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
-    private TeamMember $teamMember;
+    private PlanningTeamMember $teamMember;
 
     #[ORM\ManyToOne(targetEntity: PlanningSnapshotMember::class)]
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
@@ -70,7 +70,7 @@ class DutyAssignment
     public function __construct(
         PlanningGeneration $generation,
         Duty $duty,
-        TeamMember $teamMember,
+        PlanningTeamMember $teamMember,
         PlanningSnapshotMember $snapshotMember,
         DutyAssignmentSource $source,
         bool $locked = false,
@@ -79,8 +79,8 @@ class DutyAssignment
             throw new \InvalidArgumentException('A DutyAssignment must use a Duty from the same PlanningPeriod as its PlanningGeneration.');
         }
 
-        if ($teamMember->getTeam() !== $generation->getPlanningPeriod()->getTeam()) {
-            throw new \InvalidArgumentException('A DutyAssignment must use a TeamMember from the same Team as its PlanningGeneration.');
+        if ($teamMember->getPlanningTeam() !== $generation->getPlanningPeriod()->getTeam()) {
+            throw new \InvalidArgumentException('A DutyAssignment must use a TeamMember from the same PlanningTeam as its PlanningGeneration.');
         }
 
         if (!$snapshotMember->getSourceTeamMemberStableId()->equals($teamMember->getStableId())) {
@@ -118,7 +118,7 @@ class DutyAssignment
         return $this->duty;
     }
 
-    public function getTeamMember(): TeamMember
+    public function getTeamMember(): PlanningTeamMember
     {
         return $this->teamMember;
     }

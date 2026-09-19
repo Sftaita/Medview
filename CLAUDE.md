@@ -45,11 +45,20 @@ détaillé (encore conceptuel, rien d'implémenté) :
 |---|---|---|
 | Socle technique (Symfony + React + Docker) | ✅ Livré | `README.md` |
 | Authentification (User, register/login/me, rate limiting, access+refresh token rotatif) | ✅ Livré + UAT navigateur complète (2026-09-15, `AUTHENTIFICATION MEDVUE : PASS`) | `docs/authentication.md` §14 |
-| Équipes, invitations, rôles | ⏳ Modèle de données + services livrés, pas d'endpoints/UI de gestion complète | `docs/planning-domain.md` |
+| Équipes (`PlanningTeam`, propriété exclusive d'un `Planning`), rôles | ✅ Restructuration livrée (2026-09-18) : plus d'entité globale, création inline par ligne, endpoints + UI de gestion des membres ; pas d'invitations | `docs/planning.md` |
 | Disponibilités (calendrier personnel, non-participation administrative) | ✅ Livré (2026-09-16) | `docs/availability.md` |
 | Campagnes de collecte de disponibilités | ⏳ Pas commencé | — |
 | Génération : `PlanningGeneration`/`PlanningSnapshot`/`DutyAssignment` (persistance, pas d'algorithme) | ✅ Livré (2026-09-16) | `docs/planning-generation.md` |
-| Moteur de génération (équité, optimisation, explicabilité) | ⏳ Design conceptuel écrit, pas implémenté | `docs/allocation-algorithm.md` |
+| Éligibilité : `EligibilityService`/`EligibilityMatrixBuilder` (sous-ensemble de raisons, pas de solveur) | ✅ Livré (2026-09-16) | `docs/eligibility.md` |
+| Planning multi-lignes : `Planning`/`PlanningLine` (agrégat visible, moteurs de ligne mono-équipe) | ✅ Livré (2026-09-16) | `docs/planning.md` |
+| Fairness : `FairnessContext`/`OptimizationProblem` abstrait (targets, structurally forced, pas de solveur) | ✅ Livré (2026-09-18) | `docs/fairness.md` |
+| Frontière `PlanningSolver` + 8 phases d'objectif GENERATE (contrat abstrait, pas de solveur concret) | ✅ Livré (2026-09-18) | `docs/planning-solver.md` |
+| `OrToolsPlanningSolver` : OR-Tools CP-SAT réel, STRICT GENERATE, lexicographique | ✅ Livré (2026-09-18) | `docs/planning-solver.md` |
+| STRICT → PARTIAL, priorité CRITICAL, diagnostic UNSAT structuré (`UnsatReport`) | ✅ Livré (2026-09-18) | `docs/planning-solver.md` |
+| Contraintes globales `CONFLICT`/`TEAM_MIN_REST` (`AssignmentConflict`) — priorité CRITICAL réellement observable | ✅ Livré (2026-09-19) | `docs/planning-solver.md` |
+| Politiques de repos par génération : `LEGAL_MIN_REST`/`TEAM_MIN_REST` deviennent des options `RestPolicyOptions` figées par `PlanningGeneration`, jamais un défaut d'équipe | ✅ Livré (2026-09-19) | `docs/planning-solver.md` §36, `docs/decisions.md` D105 |
+| Orchestration réelle `PlanningGeneration → solve → DutyAssignment AUTO` : `SolverParameterSet`, seed/snapshotHash, timeout CP-SAT réel, concurrence par verrou optimiste, atomicité, `PUBLISHED` ⇒ coverage COMPLETE | ✅ Livré (2026-09-19) | `docs/planning-generation.md` §13-16, `docs/planning-solver.md` §37, `docs/decisions.md` D106 |
+| Moteur de génération avancé (`fixedAssignments` réels, REPAIR, SIMULATE, MAX_DUTIES/MAX_WEEKENDS, UI, validation/publication avancée) | ⏳ Design conceptuel écrit, pas implémenté | `docs/allocation-algorithm.md` |
 | Échanges de garde, notifications, export calendrier | ⏳ Pas commencé | — |
 
 ## Où trouver quoi
@@ -69,7 +78,61 @@ détaillé (encore conceptuel, rien d'implémenté) :
   composition et immuabilité du snapshot, relation `DutyAssignment` ↔
   `PlanningSnapshotMember`, concurrence, autorisations et endpoints du
   Lot 3 (`PlanningGeneration`/`PlanningSnapshot`/`DutyAssignment` —
-  persistance uniquement, pas d'algorithme de génération).
+  persistance uniquement, pas d'algorithme de génération). Depuis le Lot
+  6D.1, `PlanningGeneration` porte aussi sa politique de repos figée
+  (`RestPolicyOptions`, D105) — voir §2. Depuis le Lot 6E,
+  `PlanningGenerationService::generate()` orchestre un vrai solve
+  (`SolverParameterSet`, seed/snapshotHash, `DutyAssignment` AUTO,
+  atomicité, concurrence par verrou optimiste, `PUBLISHED` ⇒ coverage
+  COMPLETE) — voir §13-16, `docs/decisions.md` D106.
+- **`docs/eligibility.md`** — modèle métier d'éligibilité
+  (`ExclusionReason`/`ConstraintTier`/`DutyUnit`), raisons réellement
+  calculables vs seulement déclarées, sémantique de
+  `structuralOpportunity`, atomicité des groupes de gardes, endpoint
+  d'audit du Lot 4 (`EligibilityService`/`EligibilityMatrixBuilder` —
+  toujours pas de solveur ni d'affectation automatique).
+- **`docs/planning.md`** — l'agrégat `Planning`/`PlanningLine` visible
+  côté utilisateur, ligne PRIMARY/SECONDARY, isolation stricte des
+  populations par ligne (mono-équipe, moteur inchangé), autorisations
+  creator-only, `PlanningTeam` propriété exclusive d'un Planning et créée
+  inline par sa ligne, règle "une adhésion ouverte par Planning, jamais
+  par Team seule" (D079/D080), endpoints et UI du lot Planning +
+  restructuration Team.
+- **`docs/fairness.md`** — `FairnessContext` (dimensions supportées/non
+  supportées, `RequiredDemand`, `EffectiveExposure`, targets bruts et
+  discrétionnaires, `STRUCTURALLY_FORCED`) et l'`OptimizationProblem`
+  abstrait (mode `GENERATE` uniquement dans ce lot) construits au-dessus
+  de l'`EligibilityMatrix` — toujours pas de solveur ni de
+  `DutyAssignment` automatique.
+- **`docs/planning-solver.md`** — interface `PlanningSolver`
+  (`solve`/`checkFeasibility`), `OptimizationResult` (`SolverStatus`,
+  `CoverageStatus`, jamais confondus), les 8 phases lexicographiques
+  explicites de `GENERATE` (`ObjectivePhase`/`ObjectivePhaseFactory`), et
+  `OrToolsPlanningSolver` (`src/Solver/`) — premier solveur réel (OR-Tools
+  CP-SAT en subprocess Python, aucun binding PHP officiel n'existe),
+  aucune dépendance OR-Tools dans le domaine. Bascule STRICT → PARTIAL
+  automatique sur UNSAT prouvé (jamais sur UNKNOWN/ERROR), priorité
+  CRITICAL, et `UnsatReport` — diagnostic UNSAT structuré (exclusions
+  locales réelles, jamais de fausse causalité). `AssignmentConflict`
+  (`CONFLICT` HARD, `TEAM_MIN_REST` POLICY_HARD) — première contrainte
+  globale reliant deux `DutyUnit`, calculée dans le domaine
+  (`AssignmentConflictAnalyzer`), jamais recalculée par Python ; la
+  priorité CRITICAL est désormais réellement observable.
+  `diagnosticRelaxations` peut désormais proposer réellement de relâcher
+  `TEAM_MIN_REST`, uniquement après un vrai re-solve confirmant
+  l'amélioration — `LEGAL_MIN_REST` reste HARD et ne peut structurellement
+  jamais y apparaître. `MAX_DUTIES`/`MAX_WEEKENDS`/`MAX_CONSECUTIVE_NIGHTS`
+  restent non implémentées malgré une configuration réelle existante.
+  `FakePlanningSolver` réservé aux tests. `LEGAL_MIN_REST`/`TEAM_MIN_REST`
+  sont des options par génération (`App\Entity\RestPolicyOptions`),
+  jamais un défaut global d'équipe ni une durée devinée automatiquement
+  (§36, D105). Depuis le Lot 6E : timeout CP-SAT réel et `numWorkers`
+  réellement transmis via `SolverParameterSet` (versionné, système,
+  jamais une constante cachée), `snapshotHash`/`seed` réels (calculés par
+  `SnapshotHasher`/`SeedMaterialBuilder`, le seed reste non consommé par
+  le solve — phase de tie-break toujours neutre), `algorithmVersion`
+  versionné manuellement (`OptimizationProblemBuilder::ALGORITHM_VERSION`)
+  — voir §37, `docs/decisions.md` D106.
 - **`docs/allocation-algorithm.md`** — design du moteur de répartition des
   gardes (équité multidimensionnelle, contraintes, pipeline de
   génération). **Document vivant** : encore conceptuel, à corriger et

@@ -1,0 +1,51 @@
+/* ============================================================
+   SurgeryHub — Base element defaults
+   ------------------------------------------------------------
+   Minimal, opinionated resets so specimens and UI kits render
+   consistently. Tokens must be loaded before this file.
+   ============================================================ */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--leading-normal);
+  color: var(--text-body);
+  background: var(--surface-page);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: 'cv05' 1; /* Inter: lowercase l with tail */
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  color: var(--text-strong);
+  letter-spacing: var(--tracking-snug);
+  line-height: var(--leading-tight);
+  margin: 0;
+  text-wrap: balance;
+}
+
+p { text-wrap: pretty; }
+
+a { color: var(--text-link); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* Tabular numerals everywhere data is shown */
+.tnum, time, .mono { font-variant-numeric: tabular-nums; }
+.mono { font-family: var(--font-mono); }
+
+/* Uppercase eyebrow / label utility */
+.eyebrow {
+  font-size: var(--type-eyebrow-size);
+  letter-spacing: var(--type-eyebrow-track);
+  text-transform: uppercase;
+  font-weight: var(--weight-semibold);
+  color: var(--text-muted);
+}
+
+::selection { background: var(--green-100); color: var(--green-900); }

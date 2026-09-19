@@ -65,7 +65,14 @@ final class DutyMaterializationServiceTest extends KernelTestCase
     public function testDutyTypeRejectsNonPositiveWorkload(): void
     {
         self::bootKernel();
-        $team = new \App\Entity\Team('Cardiology', 'cardiology');
+        $planning = new \App\Entity\Planning(
+            'Test Planning',
+            new \App\Entity\User('creator@example.com', 'Creator', 'User', 'hash'),
+            new \DateTimeImmutable('2027-01-01'),
+            new \DateTimeImmutable('2028-01-01'),
+            'Europe/Brussels',
+        );
+        $team = new \App\Entity\PlanningTeam($planning, 'Cardiology');
 
         $this->expectException(\InvalidArgumentException::class);
         new DutyType($team, 'NIGHT', 'Garde de nuit', 0.0);

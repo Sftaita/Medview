@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Repository;
 
-use App\Entity\TeamMember;
+use App\Entity\PlanningTeamMember;
 use App\Entity\TeamMemberParticipationPeriod;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
@@ -19,7 +19,7 @@ class TeamMemberParticipationPeriodRepository extends ServiceEntityRepository
         parent::__construct($registry, TeamMemberParticipationPeriod::class);
     }
 
-    public function findOpenPeriod(TeamMember $teamMember): ?TeamMemberParticipationPeriod
+    public function findOpenPeriod(PlanningTeamMember $teamMember): ?TeamMemberParticipationPeriod
     {
         return $this->findOneBy([
             'teamMember' => $teamMember,
@@ -31,7 +31,7 @@ class TeamMemberParticipationPeriodRepository extends ServiceEntityRepository
      * The segment in force at $date, if any — the sole data source behind
      * participationFactorAt() (docs/allocation-algorithm.md §20).
      */
-    public function findEffectiveAt(TeamMember $teamMember, \DateTimeImmutable $date): ?TeamMemberParticipationPeriod
+    public function findEffectiveAt(PlanningTeamMember $teamMember, \DateTimeImmutable $date): ?TeamMemberParticipationPeriod
     {
         $qb = $this->createQueryBuilder('p')
             ->andWhere('p.teamMember = :teamMember')
@@ -54,7 +54,7 @@ class TeamMemberParticipationPeriodRepository extends ServiceEntityRepository
      *
      * @return list<TeamMemberParticipationPeriod>
      */
-    public function findIntersecting(TeamMember $teamMember, \DateTimeImmutable $from, \DateTimeImmutable $to): array
+    public function findIntersecting(PlanningTeamMember $teamMember, \DateTimeImmutable $from, \DateTimeImmutable $to): array
     {
         return $this->createQueryBuilder('p')
             ->andWhere('p.teamMember = :teamMember')

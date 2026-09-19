@@ -9,14 +9,17 @@ use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Uid\Uuid;
 
 /**
- * A temporary window where a TeamMember's administrative participation is
- * considered null for planning purposes — distinct from a personal
- * UserAvailabilityPeriod (docs/availability.md "Indisponibilité vs
- * non-participation"): this is scoped to one Team only (attached to
- * TeamMember, not User), and future structuralOpportunity() — not just
- * eligibility — must be zero while it applies. Also distinct from
- * TeamMemberParticipationPeriod, which is the structural
- * participationFactor timeline, not a temporary administrative window.
+ * A temporary window where a PlanningTeamMember's administrative
+ * participation is considered null for planning purposes — distinct from a
+ * personal UserAvailabilityPeriod (docs/availability.md "Indisponibilité
+ * vs non-participation"): this is scoped to one PlanningTeam only
+ * (attached to PlanningTeamMember, not User), which since a membership is
+ * itself Planning-scoped (docs/decisions.md D079) automatically means "this
+ * User + this team + this Planning" with no separate concept needed. Future
+ * structuralOpportunity() — not just eligibility — must be zero while it
+ * applies. Also distinct from TeamMemberParticipationPeriod, which is the
+ * structural participationFactor timeline, not a temporary administrative
+ * window.
  *
  * Semi-open interval [$startsAt, $endsAt[ as absolute instants
  * (TIMESTAMPTZ, mirroring Duty/UserAvailabilityPeriod). Mutable in place
@@ -36,9 +39,9 @@ class TeamMemberNonParticipationPeriod
     #[ORM\Column(type: 'uuid')]
     private Uuid $stableId;
 
-    #[ORM\ManyToOne(targetEntity: TeamMember::class)]
+    #[ORM\ManyToOne(targetEntity: PlanningTeamMember::class)]
     #[ORM\JoinColumn(nullable: false, onDelete: 'CASCADE')]
-    private TeamMember $teamMember;
+    private PlanningTeamMember $teamMember;
 
     #[ORM\Column(type: 'datetimetz_immutable')]
     private \DateTimeImmutable $startsAt;
@@ -52,7 +55,7 @@ class TeamMemberNonParticipationPeriod
     #[ORM\Column]
     private \DateTimeImmutable $updatedAt;
 
-    public function __construct(TeamMember $teamMember, \DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt)
+    public function __construct(PlanningTeamMember $teamMember, \DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt)
     {
         if ($endsAt <= $startsAt) {
             throw new \InvalidArgumentException('endsAt must be strictly after startsAt.');
@@ -76,7 +79,7 @@ class TeamMemberNonParticipationPeriod
         return $this->stableId;
     }
 
-    public function getTeamMember(): TeamMember
+    public function getTeamMember(): PlanningTeamMember
     {
         return $this->teamMember;
     }

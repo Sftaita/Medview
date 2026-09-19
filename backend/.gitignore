@@ -22,3 +22,7 @@
 /phpunit.xml
 /.phpunit.cache/
 ###< phpunit/phpunit ###
+
+###> ortools cp-sat subprocess (bin/cp_sat_solver.py) ###
+/bin/__pycache__/
+###< ortools cp-sat subprocess (bin/cp_sat_solver.py) ###

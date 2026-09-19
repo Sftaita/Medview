@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Repository;
 
 use App\Entity\FairnessPeriod;
-use App\Entity\Team;
+use App\Entity\PlanningTeam;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 
@@ -27,7 +27,7 @@ class FairnessPeriodRepository extends ServiceEntityRepository
      *
      * @return list<FairnessPeriod>
      */
-    public function findOverlapping(Team $team, \DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt): array
+    public function findOverlapping(PlanningTeam $team, \DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt): array
     {
         return $this->createQueryBuilder('f')
             ->andWhere('f.team = :team')

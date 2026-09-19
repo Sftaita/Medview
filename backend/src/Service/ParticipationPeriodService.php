@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Entity\ParticipationFactorChangeReason;
-use App\Entity\TeamMember;
+use App\Entity\PlanningTeamMember;
 use App\Entity\TeamMemberParticipationPeriod;
 use App\Repository\TeamMemberParticipationPeriodRepository;
 use Doctrine\ORM\EntityManagerInterface;
@@ -28,11 +28,11 @@ final class ParticipationPeriodService
     /**
      * @throws \LogicException if $teamMember has no open period to close
      *                         (its membership is likely already closed —
-     *                         use TeamMembershipService::endMembership()
+     *                         use PlanningTeamMembershipService::endMembership()
      *                         for that case instead)
      */
     public function changeFactor(
-        TeamMember $teamMember,
+        PlanningTeamMember $teamMember,
         \DateTimeImmutable $effectiveFrom,
         float $factor,
         ParticipationFactorChangeReason $reason,
@@ -69,7 +69,7 @@ final class ParticipationPeriodService
      * §4/§20. Null means no period covers that date (before membership
      * start, or after an unclosed gap that should never legally exist).
      */
-    public function factorAt(TeamMember $teamMember, \DateTimeImmutable $date): ?float
+    public function factorAt(PlanningTeamMember $teamMember, \DateTimeImmutable $date): ?float
     {
         return $this->repository->findEffectiveAt($teamMember, $date)?->toFloat();
     }

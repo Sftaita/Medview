@@ -1,0 +1,48 @@
+/* ============================================================
+   Surgery Hub — Effects: radius, borders, shadow, motion, z
+   ------------------------------------------------------------
+   Production charter uses 12px rounded corners. Mobile-first:
+   soft MUI-style elevation, large tap surfaces, quick motion.
+   ============================================================ */
+
+:root {
+  /* ---- Corner radius (12px is the brand default) ---- */
+  --radius-xs:   4px;
+  --radius-sm:   8px;
+  --radius-md:   12px;   /* brand default — cards, inputs, buttons */
+  --radius-lg:   16px;
+  --radius-xl:   20px;
+  --radius-2xl:  28px;
+  --radius-pill: 999px;
+  --radius-card: var(--radius-md);
+
+  /* ---- Border widths ---- */
+  --border-hairline: 1px;
+  --border-thick:    1.5px;
+
+  /* ---- Elevation (soft, green-neutral tinted) ---- */
+  --shadow-xs:  0 1px 2px rgba(22, 32, 43, 0.05);
+  --shadow-sm:  0 1px 2px rgba(22, 32, 43, 0.05), 0 2px 6px rgba(22, 32, 43, 0.06);
+  --shadow-md:  0 2px 6px rgba(22, 32, 43, 0.06), 0 8px 20px rgba(22, 32, 43, 0.08);
+  --shadow-lg:  0 6px 16px rgba(22, 32, 43, 0.08), 0 16px 40px rgba(22, 32, 43, 0.12);
+  --shadow-xl:  0 10px 24px rgba(22, 32, 43, 0.10), 0 28px 60px rgba(22, 32, 43, 0.16);
+  --shadow-nav: 0 -2px 12px rgba(22, 32, 43, 0.08);   /* bottom navigation */
+  --shadow-focus: var(--focus-ring);
+
+  /* ---- Motion ---- */
+  --ease-out:   cubic-bezier(0.22, 1, 0.36, 1);   /* @kind other */
+  --ease-inout: cubic-bezier(0.65, 0, 0.35, 1);   /* @kind other */
+  --dur-fast:   120ms;  /* @kind other */
+  --dur-base:   200ms;  /* @kind other */
+  --dur-slow:   300ms;  /* @kind other */
+  --transition-base: all var(--dur-base) var(--ease-out);  /* @kind other */
+
+  /* ---- Z-index scale ---- */
+  --z-base:     0;     /* @kind other */
+  --z-sticky:   100;   /* @kind other */
+  --z-nav:      200;   /* @kind other */
+  --z-dropdown: 400;   /* @kind other */
+  --z-overlay:  800;   /* @kind other */
+  --z-sheet:    900;   /* @kind other */
+  --z-toast:    1000;  /* @kind other */
+}

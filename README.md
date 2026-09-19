@@ -124,6 +124,7 @@ medvue/
 | Lint backend | PHP CS Fixer (jeu de règles `@Symfony`) |
 | Lint frontend | oxlint (fourni par le template Vite) |
 | Conteneurisation | Docker Compose : `database` (postgres), `backend` (FrankenPHP), `frontend` (node dev server) |
+| Solveur | OR-Tools CP-SAT (`ortools` PyPI, pas de binding PHP officiel) — Python 3 + venv dédié (`/opt/ortools-venv`) dans l'image `backend`, invoqué en subprocess par `OrToolsPlanningSolver` (`docs/planning-solver.md`) |
 | CI | GitHub Actions : job `backend` (composer, cs-check, phpunit avec postgres en service) et job `frontend` (npm ci, lint, tsc, vitest) |
 
 **Pourquoi FrankenPHP plutôt que PHP-FPM + Nginx ?** Un seul conteneur sert le

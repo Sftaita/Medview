@@ -6,7 +6,7 @@ namespace App\Tests\Controller;
 
 use App\Entity\TeamMemberRole;
 use App\Repository\UserRepository;
-use App\Service\TeamMembershipService;
+use App\Service\PlanningTeamMembershipService;
 use App\Tests\AuthenticationTestHelpers;
 use App\Tests\PlanningDomainTestHelpers;
 use Doctrine\ORM\EntityManagerInterface;
@@ -22,13 +22,23 @@ final class TeamMemberNonParticipationControllerTest extends WebTestCase
         return ['HTTP_AUTHORIZATION' => 'Bearer '.$token, 'CONTENT_TYPE' => 'application/json'];
     }
 
+    private function nonParticipationUrl(\App\Entity\PlanningTeam $team, \App\Entity\PlanningTeamMember $member): string
+    {
+        return \sprintf(
+            '/api/plannings/%s/teams/%s/members/%s/non-participation',
+            $team->getPlanning()->getStableId(),
+            $team->getStableId(),
+            $member->getStableId(),
+        );
+    }
+
     public function testAdminCanCreateAndPlainMemberCannot(): void
     {
         $client = static::createClient();
         $container = static::getContainer();
         $em = $container->get(EntityManagerInterface::class);
         $userRepository = $container->get(UserRepository::class);
-        $membershipService = $container->get(TeamMembershipService::class);
+        $membershipService = $container->get(PlanningTeamMembershipService::class);
 
         $this->registerUser($client, 'np.admin@example.com', 'correct-horse-battery');
         $adminToken = $this->loginUser($client, 'np.admin@example.com', 'correct-horse-battery');
@@ -44,7 +54,7 @@ final class TeamMemberNonParticipationControllerTest extends WebTestCase
         $membershipService->addMember($team, $plainMember, TeamMemberRole::MEMBER, $this->date('2026-01-01'));
         $target = $membershipService->addMember($team, $targetUser, TeamMemberRole::MEMBER, $this->date('2026-01-01'));
 
-        $url = \sprintf('/api/teams/%s/members/%s/non-participation', $team->getStableId(), $target->getStableId());
+        $url = $this->nonParticipationUrl($team, $target);
 
         $client->request('POST', $url, server: $this->authHeader($memberToken), content: json_encode([
             'startsAt' => '2026-11-01T00:00:00+01:00',
@@ -65,7 +75,7 @@ final class TeamMemberNonParticipationControllerTest extends WebTestCase
         $container = static::getContainer();
         $em = $container->get(EntityManagerInterface::class);
         $userRepository = $container->get(UserRepository::class);
-        $membershipService = $container->get(TeamMembershipService::class);
+        $membershipService = $container->get(PlanningTeamMembershipService::class);
 
         $this->registerUser($client, 'np.badrange@example.com', 'correct-horse-battery');
         $token = $this->loginUser($client, 'np.badrange@example.com', 'correct-horse-battery');
@@ -74,7 +84,7 @@ final class TeamMemberNonParticipationControllerTest extends WebTestCase
         $user = $userRepository->findOneByEmail('np.badrange@example.com');
         $member = $membershipService->addMember($team, $user, TeamMemberRole::OWNER, $this->date('2026-01-01'));
 
-        $url = \sprintf('/api/teams/%s/members/%s/non-participation', $team->getStableId(), $member->getStableId());
+        $url = $this->nonParticipationUrl($team, $member);
         $client->request('POST', $url, server: $this->authHeader($token), content: json_encode([
             'startsAt' => '2026-11-30T00:00:00+01:00',
             'endsAt' => '2026-11-01T00:00:00+01:00',
@@ -89,7 +99,7 @@ final class TeamMemberNonParticipationControllerTest extends WebTestCase
         $container = static::getContainer();
         $em = $container->get(EntityManagerInterface::class);
         $userRepository = $container->get(UserRepository::class);
-        $membershipService = $container->get(TeamMembershipService::class);
+        $membershipService = $container->get(PlanningTeamMembershipService::class);
 
         $this->registerUser($client, 'np.overlap@example.com', 'correct-horse-battery');
         $token = $this->loginUser($client, 'np.overlap@example.com', 'correct-horse-battery');
@@ -98,7 +108,7 @@ final class TeamMemberNonParticipationControllerTest extends WebTestCase
         $user = $userRepository->findOneByEmail('np.overlap@example.com');
         $member = $membershipService->addMember($team, $user, TeamMemberRole::OWNER, $this->date('2026-01-01'));
 
-        $url = \sprintf('/api/teams/%s/members/%s/non-participation', $team->getStableId(), $member->getStableId());
+        $url = $this->nonParticipationUrl($team, $member);
         $client->request('POST', $url, server: $this->authHeader($token), content: json_encode([
             'startsAt' => '2026-11-01T00:00:00+01:00',
             'endsAt' => '2026-11-15T00:00:00+01:00',
@@ -118,7 +128,7 @@ final class TeamMemberNonParticipationControllerTest extends WebTestCase
         $container = static::getContainer();
         $em = $container->get(EntityManagerInterface::class);
         $userRepository = $container->get(UserRepository::class);
-        $membershipService = $container->get(TeamMembershipService::class);
+        $membershipService = $container->get(PlanningTeamMembershipService::class);
 
         $this->registerUser($client, 'np.viewer1@example.com', 'correct-horse-battery');
         $viewer1Token = $this->loginUser($client, 'np.viewer1@example.com', 'correct-horse-battery');
@@ -131,7 +141,7 @@ final class TeamMemberNonParticipationControllerTest extends WebTestCase
         $member1 = $membershipService->addMember($team, $user1, TeamMemberRole::MEMBER, $this->date('2026-01-01'));
         $membershipService->addMember($team, $user2, TeamMemberRole::MEMBER, $this->date('2026-01-01'));
 
-        $url = \sprintf('/api/teams/%s/members/%s/non-participation', $team->getStableId(), $member1->getStableId());
+        $url = $this->nonParticipationUrl($team, $member1);
 
         $client->request('GET', $url, server: $this->authHeader($viewer1Token));
         self::assertResponseStatusCodeSame(200, 'A member must be able to view their own non-participation periods.');
@@ -146,19 +156,25 @@ final class TeamMemberNonParticipationControllerTest extends WebTestCase
         $container = static::getContainer();
         $em = $container->get(EntityManagerInterface::class);
         $userRepository = $container->get(UserRepository::class);
-        $membershipService = $container->get(TeamMembershipService::class);
+        $membershipService = $container->get(PlanningTeamMembershipService::class);
 
         $this->registerUser($client, 'np.crossteam@example.com', 'correct-horse-battery');
         $token = $this->loginUser($client, 'np.crossteam@example.com', 'correct-horse-battery');
 
-        $teamA = $this->createTeam($em, 'Team A', 'team-a');
-        $teamB = $this->createTeam($em, 'Team B', 'team-b');
+        $teamA = $this->createTeam($em, 'Team A');
+        $teamB = $this->createTeam($em, 'Team B');
         $user = $userRepository->findOneByEmail('np.crossteam@example.com');
         $membershipService->addMember($teamA, $user, TeamMemberRole::OWNER, $this->date('2026-01-01'));
         $otherUser = $this->createUser($em);
         $memberOfB = $membershipService->addMember($teamB, $otherUser, TeamMemberRole::MEMBER, $this->date('2026-01-01'));
 
-        $url = \sprintf('/api/teams/%s/members/%s/non-participation', $teamA->getStableId(), $memberOfB->getStableId());
+        // teamA's own Planning, but memberOfB's own PlanningTeamMember stableId — must 404, never confirm cross-team data.
+        $url = \sprintf(
+            '/api/plannings/%s/teams/%s/members/%s/non-participation',
+            $teamA->getPlanning()->getStableId(),
+            $teamA->getStableId(),
+            $memberOfB->getStableId(),
+        );
         $client->request('GET', $url, server: $this->authHeader($token));
 
         self::assertResponseStatusCodeSame(404);
@@ -170,7 +186,7 @@ final class TeamMemberNonParticipationControllerTest extends WebTestCase
         $container = static::getContainer();
         $em = $container->get(EntityManagerInterface::class);
         $userRepository = $container->get(UserRepository::class);
-        $membershipService = $container->get(TeamMembershipService::class);
+        $membershipService = $container->get(PlanningTeamMembershipService::class);
 
         $this->registerUser($client, 'np.delete@example.com', 'correct-horse-battery');
         $token = $this->loginUser($client, 'np.delete@example.com', 'correct-horse-battery');
@@ -179,7 +195,7 @@ final class TeamMemberNonParticipationControllerTest extends WebTestCase
         $user = $userRepository->findOneByEmail('np.delete@example.com');
         $member = $membershipService->addMember($team, $user, TeamMemberRole::OWNER, $this->date('2026-01-01'));
 
-        $baseUrl = \sprintf('/api/teams/%s/members/%s/non-participation', $team->getStableId(), $member->getStableId());
+        $baseUrl = $this->nonParticipationUrl($team, $member);
         $client->request('POST', $baseUrl, server: $this->authHeader($token), content: json_encode([
             'startsAt' => '2026-11-01T00:00:00+01:00',
             'endsAt' => '2026-11-15T00:00:00+01:00',
@@ -197,13 +213,13 @@ final class TeamMemberNonParticipationControllerTest extends WebTestCase
     {
         $client = static::createClient();
         $em = static::getContainer()->get(EntityManagerInterface::class);
-        $membershipService = static::getContainer()->get(TeamMembershipService::class);
+        $membershipService = static::getContainer()->get(PlanningTeamMembershipService::class);
 
         $team = $this->createTeam($em);
         $user = $this->createUser($em);
         $member = $membershipService->addMember($team, $user, TeamMemberRole::OWNER, $this->date('2026-01-01'));
 
-        $url = \sprintf('/api/teams/%s/members/%s/non-participation', $team->getStableId(), $member->getStableId());
+        $url = $this->nonParticipationUrl($team, $member);
         $client->request('GET', $url);
 
         self::assertResponseStatusCodeSame(401);

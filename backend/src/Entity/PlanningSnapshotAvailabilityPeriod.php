@@ -111,6 +111,17 @@ class PlanningSnapshotAvailabilityPeriod
         return $this->sourceUpdatedAt;
     }
 
+    /**
+     * Exact-instant overlap check against a Duty's real start/end — never
+     * $duty->getLocalDate() (docs/eligibility.md §4.3: a personal
+     * unavailability must be compared against the real instants, exactly
+     * like Duty::overlapsWith() compares two duties).
+     */
+    public function overlapsWith(Duty $duty): bool
+    {
+        return $this->startsAt < $duty->getEndsAt() && $duty->getStartsAt() < $this->endsAt;
+    }
+
     public function getCreatedAt(): \DateTimeImmutable
     {
         return $this->createdAt;

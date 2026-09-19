@@ -9,7 +9,7 @@ use App\Entity\UserAvailabilityPeriod;
 use App\Entity\UserAvailabilityType;
 use App\Exception\OverlappingUserAvailabilityPeriodException;
 use App\Repository\UserAvailabilityPeriodRepository;
-use App\Service\TeamMembershipService;
+use App\Service\PlanningTeamMembershipService;
 use App\Service\UserAvailabilityService;
 use App\Tests\PlanningDomainTestHelpers;
 use Doctrine\DBAL\Exception\DriverException;
@@ -119,27 +119,33 @@ final class UserAvailabilityServiceTest extends KernelTestCase
 
     /**
      * A User's UNAVAILABLE period is stored once on User and must be
-     * queryable regardless of which of their Teams is asking — see
-     * docs/availability.md "Multi-team".
+     * queryable regardless of which of their PlanningTeams is asking — see
+     * docs/availability.md "Multi-team". New scenario 5: since membership
+     * is now Planning-scoped (docs/decisions.md D079/D080), the User can
+     * hold this membership in Planning A's team and Planning B's team
+     * *simultaneously* — the calendar entry stays a single row shared by
+     * both, never duplicated per team/Planning.
      */
-    public function testUnavailabilityIsStoredOnceAndVisibleAcrossBothTeams(): void
+    public function testUnavailabilityIsStoredOnceAndVisibleAcrossBothPlannings(): void
     {
         self::bootKernel();
         $em = self::getContainer()->get(EntityManagerInterface::class);
-        $membershipService = self::getContainer()->get(TeamMembershipService::class);
+        $membershipService = self::getContainer()->get(PlanningTeamMembershipService::class);
         $service = self::getContainer()->get(UserAvailabilityService::class);
         $repository = self::getContainer()->get(UserAvailabilityPeriodRepository::class);
 
         $user = $this->createUser($em);
-        $teamA = $this->createTeam($em, 'Team A', 'team-a');
-        $teamB = $this->createTeam($em, 'Team B', 'team-b');
+        $teamA = $this->createTeam($em, 'Team A'); // its own fresh Planning A
+        $teamB = $this->createTeam($em, 'Team B'); // its own fresh Planning B
+        self::assertNotSame($teamA->getPlanning(), $teamB->getPlanning());
+
         $membershipService->addMember($teamA, $user, TeamMemberRole::MEMBER, $this->dt('2026-01-01'));
         $membershipService->addMember($teamB, $user, TeamMemberRole::MEMBER, $this->dt('2026-01-01'));
 
         $service->create($user, UserAvailabilityType::UNAVAILABLE, $this->dt('2026-11-10'), $this->dt('2026-11-11'));
 
         $periods = $repository->findByUser($user);
-        self::assertCount(1, $periods, 'The unavailability must be stored exactly once, not per team.');
+        self::assertCount(1, $periods, 'The unavailability must be stored exactly once, not per team/Planning.');
     }
 
     public function testDatabaseRejectsOverlappingPeriodsEvenBypassingTheService(): void

@@ -18,8 +18,8 @@ use Symfony\Component\Uid\Uuid;
  * the future solver treats this instance as one atomic unit (§9/§14).
  *
  * $team is a deliberate denormalization enforcing, via a composite
- * foreign key (see migrations), that $pattern belongs to the same Team as
- * $planningPeriod — a cross-table invariant a plain CHECK constraint
+ * foreign key (see migrations), that $pattern belongs to the same
+ * PlanningTeam as $planningPeriod — a cross-table invariant a plain CHECK constraint
  * cannot express. The same composite-key technique is reused on Duty to
  * guarantee every constituent Duty belongs to this exact
  * $planningPeriod, never another one (see Duty and migrations).
@@ -39,9 +39,9 @@ class DutyGroupInstance
     #[ORM\Column(type: 'uuid')]
     private Uuid $stableId;
 
-    #[ORM\ManyToOne(targetEntity: Team::class)]
+    #[ORM\ManyToOne(targetEntity: PlanningTeam::class)]
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
-    private Team $team;
+    private PlanningTeam $team;
 
     #[ORM\ManyToOne(targetEntity: PlanningPeriod::class)]
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
@@ -72,7 +72,7 @@ class DutyGroupInstance
     public function __construct(PlanningPeriod $planningPeriod, DutyPattern $pattern, \DateTimeImmutable $anchorDate)
     {
         if ($pattern->getTeam() !== $planningPeriod->getTeam()) {
-            throw new \InvalidArgumentException('A DutyGroupInstance must use a DutyPattern from the same Team as its PlanningPeriod.');
+            throw new \InvalidArgumentException('A DutyGroupInstance must use a DutyPattern from the same PlanningTeam as its PlanningPeriod.');
         }
 
         $this->stableId = Uuid::v7();
@@ -95,7 +95,7 @@ class DutyGroupInstance
         return $this->stableId;
     }
 
-    public function getTeam(): Team
+    public function getTeam(): PlanningTeam
     {
         return $this->team;
     }
@@ -125,7 +125,7 @@ class DutyGroupInstance
 
     /**
      * Keeps the inverse side of the association in sync in-memory — see
-     * TeamMember::addParticipationPeriod() for why this is necessary
+     * PlanningTeamMember::addParticipationPeriod() for why this is necessary
      * (Doctrine does not populate an already-loaded inverse collection
      * just because the owning side's foreign key was set).
      *

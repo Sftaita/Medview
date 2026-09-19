@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Service;
 
-use App\Entity\TeamMember;
+use App\Entity\PlanningTeamMember;
 use App\Entity\TeamMemberNonParticipationPeriod;
 use App\Exception\OverlappingNonParticipationPeriodException;
 use App\Repository\TeamMemberNonParticipationPeriodRepository;
@@ -26,7 +26,7 @@ final class TeamMemberNonParticipationService
     /**
      * @throws OverlappingNonParticipationPeriodException
      */
-    public function create(TeamMember $teamMember, \DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt): TeamMemberNonParticipationPeriod
+    public function create(PlanningTeamMember $teamMember, \DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt): TeamMemberNonParticipationPeriod
     {
         if ([] !== $this->repository->findOverlappingOrTouchingForTeamMember($teamMember, $startsAt, $endsAt)) {
             throw new OverlappingNonParticipationPeriodException();

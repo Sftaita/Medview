@@ -8,7 +8,7 @@ use App\Entity\ParticipationFactorChangeReason;
 use App\Entity\TeamMemberParticipationPeriod;
 use App\Entity\TeamMemberRole;
 use App\Service\ParticipationPeriodService;
-use App\Service\TeamMembershipService;
+use App\Service\PlanningTeamMembershipService;
 use App\Tests\PlanningDomainTestHelpers;
 use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\ORM\EntityManagerInterface;
@@ -22,7 +22,7 @@ final class ParticipationPeriodServiceTest extends KernelTestCase
     {
         self::bootKernel();
         $em = self::getContainer()->get(EntityManagerInterface::class);
-        $membershipService = self::getContainer()->get(TeamMembershipService::class);
+        $membershipService = self::getContainer()->get(PlanningTeamMembershipService::class);
         $participationService = self::getContainer()->get(ParticipationPeriodService::class);
 
         $team = $this->createTeam($em);
@@ -41,7 +41,7 @@ final class ParticipationPeriodServiceTest extends KernelTestCase
     {
         self::bootKernel();
         $em = self::getContainer()->get(EntityManagerInterface::class);
-        $membershipService = self::getContainer()->get(TeamMembershipService::class);
+        $membershipService = self::getContainer()->get(PlanningTeamMembershipService::class);
         $participationService = self::getContainer()->get(ParticipationPeriodService::class);
 
         $team = $this->createTeam($em);
@@ -60,7 +60,7 @@ final class ParticipationPeriodServiceTest extends KernelTestCase
     {
         self::bootKernel();
         $em = self::getContainer()->get(EntityManagerInterface::class);
-        $membershipService = self::getContainer()->get(TeamMembershipService::class);
+        $membershipService = self::getContainer()->get(PlanningTeamMembershipService::class);
 
         $team = $this->createTeam($em);
         $user = $this->createUser($em);

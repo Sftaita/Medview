@@ -1,0 +1,119 @@
+/* ============================================================
+   Surgery Hub — Color Tokens
+   ------------------------------------------------------------
+   Re-anchored to the production brand:
+     • Brand green  #42A882 (primary) → #63C9A3 (light)
+     • Page background #F5F7FA
+     • Cool gray neutrals
+   The app is mobile-first for surgical instrument technicians
+   (instrumentistes), so contrast and touch clarity matter:
+   the brand green is reserved for primary actions and identity;
+   status colors carry mission state.
+   ============================================================ */
+
+:root {
+  /* ---- Base: cool gray neutrals ---- */
+  --gray-950: #0B1320;
+  --gray-900: #16202B;
+  --gray-800: #243240;
+  --gray-700: #3A4754;
+  --gray-600: #566270;
+  --gray-500: #727E8C;
+  --gray-400: #98A2AE;
+  --gray-300: #C2C9D1;
+  --gray-200: #DDE2E8;
+  --gray-150: #E7EBEF;
+  --gray-100: #EFF2F5;
+  --gray-75:  #F1F4F7;
+  --gray-50:  #F5F7FA;   /* the production page background */
+  --white:    #FFFFFF;
+
+  /* ---- Brand: Surgery Hub green ---- */
+  --green-900: #144D38;
+  --green-800: #1F6B4F;
+  --green-700: #2C7D5F;
+  --green-600: #338F6E;
+  --green-500: #42A882;   /* primary brand */
+  --green-400: #63C9A3;   /* light brand / gradients */
+  --green-300: #8FDABF;
+  --green-200: #BCE9D6;
+  --green-100: #DDF4EA;
+  --green-50:  #EFFAF5;
+
+  /* ---- Semantic: Warning (amber) ---- */
+  --amber-700: #B7791F;
+  --amber-600: #D9920B;
+  --amber-500: #F0A91B;
+  --amber-100: #FBEACB;
+  --amber-50:  #FEF6E7;
+
+  /* ---- Semantic: Error / decline (red) ---- */
+  --red-700: #C62F36;
+  --red-600: #E5484D;
+  --red-500: #F0676B;
+  --red-100: #FAD7D8;
+  --red-50:  #FDEEEE;
+
+  /* ---- Semantic: Info (blue) ---- */
+  --blue-700: #1B5FD0;
+  --blue-600: #2D7FF9;
+  --blue-500: #5598FB;
+  --blue-100: #D6E6FE;
+  --blue-50:  #EDF4FF;
+
+  /* ============================================================
+     SEMANTIC ALIASES — reach for these in product code
+     ============================================================ */
+
+  /* Surfaces */
+  --surface-page:     var(--gray-50);
+  --surface-card:     var(--white);
+  --surface-raised:   var(--white);
+  --surface-sunken:   var(--gray-75);
+  --surface-inverse:  var(--gray-900);
+  --surface-hover:    var(--gray-75);
+  --surface-active:   var(--gray-100);
+  --surface-selected: var(--green-50);
+  --surface-brand-soft: var(--green-50);
+
+  /* Text */
+  --text-strong:   var(--gray-900);
+  --text-body:     var(--gray-700);
+  --text-muted:    var(--gray-500);
+  --text-subtle:   var(--gray-400);
+  --text-inverse:  var(--white);
+  --text-link:     var(--green-700);
+  --text-on-brand: var(--white);
+
+  /* Borders */
+  --border-subtle:  var(--gray-150);
+  --border-default: var(--gray-200);
+  --border-strong:  var(--gray-300);
+  --border-focus:   var(--green-500);
+
+  /* Brand / interactive */
+  --brand:         var(--green-500);
+  --brand-hover:   var(--green-600);
+  --brand-active:  var(--green-700);
+  --brand-light:   var(--green-400);
+  --brand-subtle:  var(--green-50);
+  --brand-on:      var(--white);
+
+  /* Secondary accent (info blue) — for non-brand emphasis */
+  --accent:        var(--blue-600);
+  --accent-hover:  var(--blue-700);
+  --accent-subtle: var(--blue-50);
+
+  /* Status — foreground / surface pairs (mission state) */
+  --status-ok-fg:        var(--green-700);   /* confirmed / done */
+  --status-ok-surface:   var(--green-50);
+  --status-warn-fg:      var(--amber-700);   /* à encoder / pending */
+  --status-warn-surface: var(--amber-50);
+  --status-crit-fg:      var(--red-700);     /* declined / cancelled */
+  --status-crit-surface: var(--red-50);
+  --status-info-fg:      var(--blue-700);    /* upcoming / offered */
+  --status-info-surface: var(--blue-50);
+
+  /* Focus ring */
+  --focus-ring: 0 0 0 3px color-mix(in srgb, var(--green-500) 32%, transparent);
+}

@@ -31,9 +31,14 @@ final class PlanningRuleSetConfiguration
     public ?int $maxWeekendsPerFairnessPeriod = null;
 
     /**
-     * TEAM_MIN_REST, in hours — the team's own protective policy, always
-     * bound to be at least LEGAL_MIN_REST once that floor is wired in
-     * (not yet, see docs/planning-domain.md).
+     * Historical field, no longer read by the solver (docs/decisions.md
+     * D105, Lot 6D.1): `TEAM_MIN_REST`/`LEGAL_MIN_REST` are now
+     * *per-generation* options (`App\Entity\RestPolicyOptions`, set when a
+     * `PlanningGeneration` is created), never a team-wide default silently
+     * applied to every planning — `AssignmentConflictAnalyzer` reads
+     * `PlanningGeneration::getRestPolicy()` exclusively. Kept here,
+     * unused, only because dropping the column outright was not
+     * demonstrated as necessary for this lot.
      */
     #[Assert\Positive]
     public ?int $teamMinRestHours = null;

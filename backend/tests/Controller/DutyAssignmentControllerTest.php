@@ -10,7 +10,7 @@ use App\Entity\TeamMemberRole;
 use App\Repository\UserRepository;
 use App\Service\DutyMaterializationService;
 use App\Service\PlanningRuleSetService;
-use App\Service\TeamMembershipService;
+use App\Service\PlanningTeamMembershipService;
 use App\Tests\AuthenticationTestHelpers;
 use App\Tests\PlanningDomainTestHelpers;
 use App\Tests\PlanningGenerationTestHelpers;
@@ -34,7 +34,7 @@ final class DutyAssignmentControllerTest extends WebTestCase
         $container = static::getContainer();
         $em = $container->get(EntityManagerInterface::class);
         $userRepository = $container->get(UserRepository::class);
-        $membershipService = $container->get(TeamMembershipService::class);
+        $membershipService = $container->get(PlanningTeamMembershipService::class);
         $ruleSetService = $container->get(PlanningRuleSetService::class);
         $dutyMaterializationService = $container->get(DutyMaterializationService::class);
 
@@ -78,7 +78,7 @@ final class DutyAssignmentControllerTest extends WebTestCase
         $container = static::getContainer();
         $em = $container->get(EntityManagerInterface::class);
         $userRepository = $container->get(UserRepository::class);
-        $membershipService = $container->get(TeamMembershipService::class);
+        $membershipService = $container->get(PlanningTeamMembershipService::class);
         $ruleSetService = $container->get(PlanningRuleSetService::class);
         $dutyMaterializationService = $container->get(DutyMaterializationService::class);
 
@@ -112,7 +112,7 @@ final class DutyAssignmentControllerTest extends WebTestCase
         $container = static::getContainer();
         $em = $container->get(EntityManagerInterface::class);
         $userRepository = $container->get(UserRepository::class);
-        $membershipService = $container->get(TeamMembershipService::class);
+        $membershipService = $container->get(PlanningTeamMembershipService::class);
         $ruleSetService = $container->get(PlanningRuleSetService::class);
         $dutyMaterializationService = $container->get(DutyMaterializationService::class);
 
@@ -158,7 +158,7 @@ final class DutyAssignmentControllerTest extends WebTestCase
         $container = static::getContainer();
         $em = $container->get(EntityManagerInterface::class);
         $userRepository = $container->get(UserRepository::class);
-        $membershipService = $container->get(TeamMembershipService::class);
+        $membershipService = $container->get(PlanningTeamMembershipService::class);
         $ruleSetService = $container->get(PlanningRuleSetService::class);
         $dutyMaterializationService = $container->get(DutyMaterializationService::class);
 
@@ -196,7 +196,7 @@ final class DutyAssignmentControllerTest extends WebTestCase
         $container = static::getContainer();
         $em = $container->get(EntityManagerInterface::class);
         $userRepository = $container->get(UserRepository::class);
-        $membershipService = $container->get(TeamMembershipService::class);
+        $membershipService = $container->get(PlanningTeamMembershipService::class);
         $ruleSetService = $container->get(PlanningRuleSetService::class);
         $dutyMaterializationService = $container->get(DutyMaterializationService::class);
 
@@ -232,7 +232,7 @@ final class DutyAssignmentControllerTest extends WebTestCase
         $container = static::getContainer();
         $em = $container->get(EntityManagerInterface::class);
         $userRepository = $container->get(UserRepository::class);
-        $membershipService = $container->get(TeamMembershipService::class);
+        $membershipService = $container->get(PlanningTeamMembershipService::class);
         $ruleSetService = $container->get(PlanningRuleSetService::class);
         $dutyMaterializationService = $container->get(DutyMaterializationService::class);
 
@@ -268,7 +268,7 @@ final class DutyAssignmentControllerTest extends WebTestCase
         $container = static::getContainer();
         $em = $container->get(EntityManagerInterface::class);
         $userRepository = $container->get(UserRepository::class);
-        $membershipService = $container->get(TeamMembershipService::class);
+        $membershipService = $container->get(PlanningTeamMembershipService::class);
         $ruleSetService = $container->get(PlanningRuleSetService::class);
 
         $this->registerUser($client, 'da.unknownduty@example.com', 'correct-horse-battery');

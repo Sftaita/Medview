@@ -4,8 +4,17 @@
 > entièrement non implémenté. Le Lot 3 (`docs/planning-generation.md`) a
 > construit la couche de persistance qui l'entourera —
 > `PlanningGeneration`, `PlanningSnapshot` (et ses enfants), `DutyAssignment`
-> — sans aucune logique de génération/optimisation : voir §14 et §19
-> ci-dessous pour le détail de ce qui est réellement en place. Cette
+> — sans aucune logique de génération/optimisation. Le Lot 4
+> (`docs/eligibility.md`) a ensuite construit la première vraie couche
+> métier du moteur, `EligibilityService`/`EligibilityMatrixBuilder` (§4.1),
+> toujours sans optimisation ni solveur. Le lot Planning
+> (`docs/planning.md`) a ajouté un agrégat `Planning`/`PlanningLine`
+> **au-dessus** de `PlanningPeriod` sans toucher au moteur lui-même : un
+> Planning peut regrouper plusieurs lignes multi-équipe, mais chaque ligne
+> reste un contexte mono-équipe strictement isolé — `EligibilityService`
+> et le futur solveur continuent de raisonner par `PlanningPeriod`, jamais
+> par Planning. Voir §4, §14 et §19 ci-dessous pour le détail de ce qui
+> est réellement en place. Cette
 > version **remplace entièrement** la v0.1 initiale : elle fige
 > les fondamentaux algorithmiques et les contrats métier à l'issue d'un
 > audit critique en plusieurs passes (voir changelog en fin de fichier).
@@ -21,13 +30,17 @@
 
 ## 0. Où ça s'implémentera
 
-Le solveur/l'algorithme d'optimisation décrit dans ce document (§4-§22)
+Le solveur/l'algorithme d'optimisation décrit dans ce document (§5-§22)
 n'existe encore dans aucun code — aucune intégration OR-Tools, aucun
-`OptimizationProblem`, aucune des passes éligibilité/équité/explication.
-Le Lot 3 a implémenté la couche de persistance qui l'entourera : voir
-`docs/planning-generation.md` pour `PlanningGeneration`, `PlanningSnapshot`
-et `DutyAssignment` réellement en base aujourd'hui — un socle
-délibérément étroit (D060-D065), pas une anticipation du moteur lui-même.
+`OptimizationProblem`, aucune des passes équité/explication. La passe
+Éligibilité (§4.1) est la seule exception : voir `docs/eligibility.md`
+(Lot 4) pour `EligibilityService`/`EligibilityMatrixBuilder`, réellement
+en place, quoique sur un sous-ensemble volontairement restreint de
+`ExclusionReason`. Le Lot 3 a implémenté la couche de persistance qui
+l'entourera : voir `docs/planning-generation.md` pour `PlanningGeneration`,
+`PlanningSnapshot` et `DutyAssignment` réellement en base aujourd'hui — un
+socle délibérément étroit (D060-D065), pas une anticipation du moteur
+lui-même.
 Ce document reste la spécification de référence à valider/affiner avant
 que le moteur proprement dit ne soit codé (voir `docs/decisions.md` D031
 et suivantes pour le statut de validation).
@@ -78,6 +91,36 @@ indisponibilités (toujours) et des préférences (best effort borné),
 
 ## 3. Taxonomie des contraintes : HARD / POLICY_HARD / SOFT
 
+> **Statut d'implémentation (Lot 6D, `docs/planning-solver.md`)** :
+> `CONFLICT` (HARD) et `TEAM_MIN_REST` (POLICY_HARD) sont désormais
+> réellement calculées (`AssignmentConflictAnalyzer`) et appliquées comme
+> contraintes globales CP-SAT (`x[left,c] + x[right,c] <= 1`) —
+> `docs/decisions.md` D100/D101. `LEGAL_MIN_REST` reste non implémentée
+> (point ouvert ci-dessous toujours d'actualité). `MAX_DUTIES`/
+> `MAX_WEEKENDS`/`MAX_CONSECUTIVE_NIGHTS` restent également non
+> implémentées malgré l'existence d'une configuration réelle
+> (`PlanningRuleSetConfiguration`) — blocages distincts et documentés
+> (`docs/decisions.md` D104) : portée `FairnessPeriod` incompatible avec
+> ce qu'`OptimizationProblem` peut voir aujourd'hui pour les deux
+> premières, aucune notion de garde "de nuit" identifiable pour la
+> troisième.
+>
+> **Statut d'implémentation (Lot 6D.1, `docs/planning-solver.md` §36,
+> `docs/decisions.md` D105)** : `LEGAL_MIN_REST` est désormais également
+> implémentée, avec le tier HARD ci-dessous inchangé. Le changement
+> essentiel porte sur l'**activation**, pas sur le tier une fois activée :
+> `LEGAL_MIN_REST` et `TEAM_MIN_REST` ne sont plus des règles globales
+> (équipe ou système) mais des options choisies explicitement par
+> `PlanningGeneration`, figées à sa création (`App\Entity\RestPolicyOptions`)
+> — une génération peut les avoir désactivées, une autre de la même équipe
+> les avoir activées à des seuils différents, sans jamais toucher au
+> `PlanningRuleSet` de l'équipe ni à l'historique d'une génération
+> précédente. Une fois activée pour une génération donnée, chaque règle
+> conserve exactement le tier indiqué ci-dessous (HARD/POLICY_HARD,
+> jamais reconfigurable) — seule la question "est-elle active pour *cette*
+> génération, et à quel seuil" devient une donnée par génération plutôt
+> qu'une constante système ou d'équipe.
+
 | Tier | Définition | Comportement solveur | En cas d'UNSAT |
 |---|---|---|---|
 | **HARD** | Contrainte physique/légale/structurelle, jamais négociable | Bloquante, infeasible-by-construction (pas de variable créée pour les paires exclues) | Jamais proposée en relaxation |
@@ -113,7 +156,39 @@ implémentation, pas déduite ici. `MAX_CONSECUTIVE_NIGHTS` pourrait
 nécessiter le même traitement si un plafond légal existe dans certaines
 juridictions — à vérifier au moment de l'implémentation, pas tranché ici.
 
+> **Statut d'implémentation (Lot 6D.1, `docs/decisions.md` D105)** : ce
+> point ouvert reste réel — aucune valeur n'est **déduite**
+> automatiquement, toujours pas de détection de juridiction/référentiel
+> légal. Ce qui a changé : `LEGAL_MIN_REST` est devenue implémentable
+> parce qu'elle est maintenant une saisie **manuelle et explicite** du
+> planificateur pour une génération donnée (`RestPolicyOptions`), jamais
+> une constante système devinée. Le point ouvert "quelle est la bonne
+> valeur" reste entier ; ce qui est résolu est "comment l'appliquer une
+> fois qu'un humain l'a fournie".
+
 ## 4. Éligibilité et forced assignments
+
+> **Statut d'implémentation (Lot 4, `docs/eligibility.md`)** : §4.1 est
+> implémenté — `EligibilityService`/`EligibilityMatrixBuilder` produisent
+> réellement cette matrice, à partir du snapshot uniquement. Seul un
+> sous-ensemble de `ExclusionReason` est réellement calculé (voir
+> `docs/eligibility.md` §3 pour la liste exacte et pourquoi chaque raison
+> manquante est différée, pas devinée). §4.2 (`STRUCTURALLY_FORCED`) et
+> §4.3 (`GLOBALLY_FORCED`) restaient tous deux non implémentés à l'issue
+> de ce lot.
+>
+> **Statut d'implémentation (Lot 5, `docs/fairness.md`)** : §4.2
+> (`STRUCTURALLY_FORCED`) est désormais implémenté
+> (`StructurallyForcedAnalyzer`), avec la précision explicite que
+> "HARD-éligible" n'est **pas** synonyme de `EligibilityResult::eligible`
+> — une future exclusion `POLICY_HARD` ne doit jamais réduire l'ensemble
+> HARD-éligible utilisé par ce calcul. §4.3 (`GLOBALLY_FORCED`) reste non
+> implémenté — nécessite toujours un `PlanningSolver.checkFeasibility()`
+> qui n'existe pas. §4.4 (forced load) est implémenté côté **target**
+> (`discretionaryTargetAtSolve`, docs/decisions.md D085) mais pas encore
+> côté **charge réelle** (`discretionaryLoadAtSolve`/
+> `discretionaryLoadHistorical`) — ceux-ci nécessitent un `raw(user,d)`
+> post-solve qui n'existe pas encore.
 
 ### 4.1 Matrice d'éligibilité
 
@@ -184,6 +259,14 @@ neutraliser artificiellement trop de gardes et détruire la précision du
 signal d'équité du solve en cours.
 
 ## 5. Exposition structurelle et `requiredDemand`
+
+> **Statut d'implémentation (Lot 5, `docs/fairness.md`)** : implémenté
+> pour les dimensions `TOTAL_DUTIES`, `WEIGHTED_WORKLOAD`, `FRIDAY`,
+> `SATURDAY`, `SUNDAY`, `DUTY_TYPE:<stableId>` (`RequiredDemandBuilder`,
+> `EffectiveExposureService`, `FairnessTargetService`). `WEEKEND_GROUPS`,
+> `HOLIDAY`, `NAMED_HOLIDAY[code]`, `NIGHT` restent **délibérément** non
+> implémentés — aucune source de donnée réelle n'existe encore pour eux
+> (`docs/fairness.md` §3) ; ni devinés, ni approximés.
 
 ```
 structuralOpportunity(user, duty) ∈ {0,1}
@@ -332,6 +415,34 @@ atteint uniquement si le groupe entier est ajouté : garanti nativement
 
 ## 10. Modèle strict / partial diagnostic solve
 
+> **Statut d'implémentation (Lot 6C, `docs/planning-solver.md`)** :
+> l'orchestration STRICT → PARTIAL ci-dessous est réellement implémentée
+> dans `OrToolsPlanningSolver::solve()` — étapes 1 à 5 fidèlement
+> respectées, y compris le refus explicite de basculer en PARTIAL sur
+> `UNKNOWN`/`ERROR` (étape 5). Un constat d'audit important limite
+> aujourd'hui la portée pratique de la priorité CRITICAL de phase 1 :
+> aucune contrainte du modèle actuel ne couple deux `DutyUnit` entre eux
+> (pas de MAX_DUTIES, pas de CONFLICT), donc aucun vrai arbitrage
+> "sacrifier une STANDARD pour sauver une CRITICAL" n'est aujourd'hui
+> possible — voir `docs/decisions.md` D099.
+>
+> **Statut d'implémentation (Lot 6D, `docs/planning-solver.md`)** : D099
+> ne s'applique plus à `CONFLICT` — la priorité CRITICAL de phase 1 est
+> désormais réellement observable dans un vrai solve CP-SAT dès qu'un
+> conflit temporel ou `TEAM_MIN_REST` force un arbitrage
+> (`docs/decisions.md` D100/D101). Elle reste inerte pour toute autre
+> forme de contention (MAX_DUTIES/MAX_WEEKENDS, toujours non
+> implémentées, D104).
+>
+> **Statut d'implémentation (Lot 6D.1, `docs/planning-solver.md` §36)** :
+> `LEGAL_MIN_REST` peut désormais elle aussi forcer un arbitrage, au même
+> titre que `TEAM_MIN_REST` — uniquement quand elle est explicitement
+> activée pour la génération en cours de solve. L'orchestration STRICT →
+> PARTIAL ci-dessous est inchangée : seule la présence ou non d'un
+> `AssignmentConflict` (dont la source, HARD ou POLICY_HARD, dépend
+> désormais des options de la génération plutôt que d'une constante)
+> détermine si un arbitrage a effectivement lieu.
+
 Aucune garde `UNASSIGNED` n'existe dans le `OptimizationProblem` de base
 (§21) — le problème STRICT reste pur.
 
@@ -382,6 +493,24 @@ apparaît.
 
 ## 11. Optimisation lexicographique par mode
 
+> **Statut d'implémentation (Lot 6A, `docs/planning-solver.md`)** : l'ordre
+> GENERATE ci-dessous est désormais entièrement représenté par
+> `ObjectivePhase`/`ObjectivePhaseFactory` — **8 phases d'optimisation
+> distinctes**, jamais fusionnées (docs/decisions.md D087, qui clarifie
+> l'écriture compacte "Phase 4 ... puis ..." ci-dessous : SECONDARY suit
+> exactement le même passage min-max-puis-somme que PRIMARY, en deux
+> phases séparées, pas une seule).
+>
+> **Statut d'implémentation (Lot 6B, `docs/planning-solver.md`)** :
+> `OrToolsPlanningSolver` exécute réellement ces 8 phases en STRICT
+> (couverture complète obligatoire, précondition HARD/POLICY_HARD déjà
+> entièrement capturée par l'éligibilité). PRIMARY reste toujours vide
+> (D086) donc trivialement neutre ; les phases 5-8 (fériés
+> nommés/espacement/préférences/tie-break) sont neutres faute de donnée
+> réelle (D088). Seules `maxDeviation(SECONDARY)`/`sumDeviation(SECONDARY)`
+> optimisent réellement aujourd'hui. PARTIAL/REPAIR/SIMULATE restent non
+> implémentés.
+
 ### GENERATE
 
 ```
@@ -389,16 +518,21 @@ Phase 0  HARD + POLICY_HARD (précondition)
 Phase 1  couverture complète (mécanisme strict/partial, §10 — pas une phase d'optimisation classique)
 Phase 2  minimize maxDeviation(PRIMARY)     sur discretionaryLoadAtSolve
 Phase 3  minimize sumDeviation(PRIMARY)
-Phase 4  minimize maxDeviation(SECONDARY) puis sumDeviation(SECONDARY)
-Phase 5  minimize pénalité de répétition de fériés nommés
-Phase 6  maximize score d'espacement
-Phase 7  maximize préférences satisfaites (dans l'espace figé par 2-6)
-Phase 8  tie-break déterministe
+Phase 4  minimize maxDeviation(SECONDARY)
+Phase 5  minimize sumDeviation(SECONDARY)
+Phase 6  minimize pénalité de répétition de fériés nommés
+Phase 7  maximize score d'espacement
+Phase 8  maximize préférences satisfaites (dans l'espace figé par 2-7)
+Phase 9  tie-break déterministe
 ```
 
 Le passage min-max-puis-somme s'applique à PRIMARY **et** SECONDARY (pas
 seulement PRIMARY) — sinon une personne très pénalisée sur une dimension
-secondaire pourrait passer inaperçue derrière une bonne moyenne.
+secondaire pourrait passer inaperçue derrière une bonne moyenne. **Note** :
+cette renumérotation (Phase 4/5 pour SECONDARY, décalant fériés/espacement/
+préférences/tie-break d'un cran) rend explicite le compte réel de 8 phases
+d'optimisation (hors phase 0/1, qui ne sont pas des phases d'objectif) —
+`ObjectivePhaseId` ne porte que ces 8-là.
 
 ### REPAIR
 
@@ -491,6 +625,30 @@ un audit d'exécution réelle en démontre un.
 > `solverType/Version`, `seed`, `mode`, `coverageStatus`,
 > `solverMetadata` n'existent pas encore sur `PlanningGeneration` — ils
 > supposent un solveur qui n'existe pas.
+>
+> **Statut d'implémentation (Lot 6E, `docs/decisions.md` D106,
+> `docs/planning-solver.md` §37)** : `algorithmVersion`, `solverType`,
+> `solverVersion`, `solverParameterSetVersion` (référence réelle à
+> `SolverParameterSet`), `seed`, `snapshotHash`, `mode`, `coverageStatus`,
+> `generatedAt`, `strictSolverStatus`/`partialSolverStatus` (jamais fondus
+> en un seul champ), `objectiveValues`/`optimality`, `solveDurationMs`,
+> `timeoutHit` sont désormais tous persistés directement sur
+> `PlanningGeneration`. **Format canonique du hash resserré par rapport à
+> la liste ci-dessous** — `SnapshotHasher` inclut uniquement les données
+> réellement consommées par `EligibilityMatrixBuilder`/
+> `FairnessContextBuilder`/`AssignmentConflictAnalyzer` : membres +
+> `participationFactor` historisé + fenêtres de membership, disponibilités
+> (dont préférences), non-participations, `RestPolicyOptions`, et la
+> liste **vivante** des `Duty` (jamais dupliquée dans le snapshot,
+> `docs/planning-generation.md` §4). **Exclu explicitement** :
+> `PlanningRuleSet.configuration` — audité et confirmé sans effet sur le
+> calcul aujourd'hui (D104/D105) ; les verrouillages (aucun
+> `fixedAssignments` n'existe, D090) ; les métriques/fériés historiques
+> (aucune donnée history-feed n'existe encore). `rulesVersion` reste un
+> champ séparé de l'identité reproductible (ci-dessous), jamais un
+> ingrédient du hash lui-même. `seed` est calculé et persisté pour l'audit
+> uniquement — non consommé par le solve (la phase de tie-break reste
+> neutre, D088, `docs/planning-solver.md` §37).
 
 **Snapshot hybride** : références vers les objets structurants + copie
 immuable des données qui influencent réellement le calcul.
@@ -553,7 +711,57 @@ T4  tentative de persist :
 
 Jamais de publication silencieuse sur données obsolètes.
 
+> **Statut d'implémentation (Lot 6E, `docs/decisions.md` D106)** : le
+> mécanisme ci-dessus est désormais réel, mais resserré à ce qui peut
+> honnêtement changer — audit du lot : le snapshot lui-même (membres,
+> `RestPolicyOptions`) est déjà immuable par construction, donc une
+> "vérification de concurrence" dessus serait factice. Seule la liste
+> **vivante** des `Duty` de la `PlanningPeriod` (jamais dupliquée dans le
+> snapshot) peut réellement dériver pendant un solve désormais synchrone
+> mais réellement long. `snapshotHash` recalculé juste avant persist,
+> comparé à celui calculé juste avant le solve : une différence lève
+> `StalePlanningGenerationDataException` (409), la génération passe
+> `FAILED`, rien n'est jamais persisté partiellement — même garantie que
+> ci-dessus, mécanisme volontairement plus étroit que "toute mutation
+> externe" parce que tout le reste est structurellement figé. Pas de
+> "version optimiste" séparée sur `PlanningPeriod` — le solve reste
+> toujours synchrone dans ce lot (T1→T3 dans la même requête HTTP), donc
+> le hash avant/après suffit sans compteur de version supplémentaire.
+> Détail : `docs/planning-generation.md` §16.
+
 ## 16. Modèle UNSAT
+
+> **Statut d'implémentation (Lot 6C, `docs/planning-solver.md`)** :
+> implémenté comme `UnsatReport` (`src/Fairness/`), construit par
+> `UnsatDiagnosticsBuilder`. Couches A (précalcul déterministe) et B
+> (matrice locale d'exclusions) réellement peuplées, mais A se limite à
+> `NO_ELIGIBLE_CANDIDATE` (`INSUFFICIENT_ELIGIBLE_CAPACITY` nécessiterait
+> un vrai argument de capacité bipartite, non implémenté). Couche C
+> (`solverAnalysis`) toujours `available: false` — `cp_sat_solver.py` ne
+> construit aucun littéral d'assumption CP-SAT aujourd'hui (D096). Couche
+> D (`diagnosticRelaxations`) toujours vide — aucune raison `POLICY_HARD`
+> n'est produite par `EligibilityService` (D097). `existingDataConflict`
+> a son contrat entièrement implémenté mais reste inatteignable via un
+> vrai solve CP-SAT tant que `fixedAssignments` n'existe pas (D090/D098).
+>
+> **Statut d'implémentation (Lot 6D, `docs/planning-solver.md`)** :
+> couche A étendue à `INSUFFICIENT_ELIGIBLE_CAPACITY`, mais uniquement le
+> cas mathématiquement exact (deux unités en conflit, un seul candidat
+> éligible partagé — D102) ; le cas général reste hors périmètre. Couche
+> D (`diagnosticRelaxations`) n'est plus systématiquement vide :
+> `TEAM_MIN_REST` étant désormais une vraie `POLICY_HARD` capable de
+> causer un UNSAT, `OrToolsPlanningSolver` produit une vraie relaxation
+> confirmée par un second solve réel, jamais déduite (D103).
+>
+> **Statut d'implémentation (Lot 6D.1, `docs/decisions.md` D105)** :
+> `LEGAL_MIN_REST`, même désormais implémentée et capable à elle seule de
+> causer un UNSAT, ne peut structurellement jamais apparaître en couche D
+> — elle reste HARD, et `OrToolsPlanningSolver::buildRelaxations()` ne
+> collecte que les conflits `POLICY_HARD`. Quand `LEGAL_MIN_REST` est la
+> seule cause réelle d'un déficit de couverture, `diagnosticRelaxations`
+> reste `[]` plutôt que de proposer, à tort, de retirer `TEAM_MIN_REST` —
+> testé explicitement
+> (`GlobalConstraintsSolveTest::testLegalMinRestAloneNeverProducesAMisleadingRelaxation`).
 
 ```json
 {
@@ -734,6 +942,71 @@ le déséquilibre reste visible, correctement attribué, absorbé par le
 reste de l'équipe, sans jamais améliorer le ratio apparent du déclarant.
 
 ## 21. Contrats abstraits
+
+> **Statut d'implémentation (Lot 5, `docs/fairness.md`)** : `OptimizationProblem`
+> est implémenté (`src/Fairness/OptimizationProblem.php`), construit par
+> `OptimizationProblemBuilder` — mais seul un sous-ensemble des champs
+> ci-dessous est réellement peuplé : `requiredDuties`/`optionalDuties`
+> (`requiredDutyUnits`/`optionalDutyUnits`), `requiredDemand`,
+> `eligibilityMatrix`, `structurallyForcedLoad`, `fairnessTargets`
+> (= `discretionaryTargetAtSolve`), `dimensionMembership`,
+> `coveragePolicy`, `mode` (toujours `GENERATE` dans ce lot). `fixedAssignments`,
+> `changeCostByUnit`, `seedMaterial`, `timeoutBudget` restent
+> délibérément absents — aucune donnée réelle ne les justifie encore
+> (`docs/fairness.md` §10).
+>
+> **Statut d'implémentation (Lot 6A, `docs/planning-solver.md`)** :
+> `objectivePhases` est désormais peuplé (8 phases GENERATE, D087).
+> `PlanningSolver` (interface) et `OptimizationResult` sont désormais
+> implémentés comme contrat abstrait — mais aucune implémentation de
+> production n'existe (seul `FakePlanningSolver`, test uniquement).
+> `OptimizationResult.snapshotHash`/`solverMetadata` restent
+> structurellement présents mais toujours `null` en dehors des tests —
+> aucune des données réelles qui les justifieraient n'existe encore
+> (§14).
+>
+> **Statut d'implémentation (Lot 6B, `docs/planning-solver.md`)** :
+> `OrToolsPlanningSolver` (`src/Solver/`) est la première implémentation
+> réelle de `PlanningSolver` — un subprocess Python (OR-Tools CP-SAT,
+> aucun binding PHP officiel n'existe, D031/D090-093), STRICT uniquement.
+> `OptimizationResult.solverMetadata` est désormais réellement peuplé
+> (`solverType`, `solverVersion`, `solveDurationMs`) ; `snapshotHash`
+> reste `null` (toujours aucune donnée réelle). `fixedAssignments` reste
+> confirmé absent (D090) — `checkFeasibility()` retourne désormais
+> `SolverStatus`, pas `bool` (D091, contrat élargi avant toute
+> consommation réelle).
+>
+> **Statut d'implémentation (Lot 6C, `docs/planning-solver.md`)** :
+> `OptimizationResult.diagnostics` est désormais réellement peuplé —
+> `UnsatDiagnostics` n'est plus une interface marqueur vide, implémentée
+> par `UnsatReport` (§16). `partialSolverStatus` et `unassignedDuties`
+> sont désormais réellement produits par `OrToolsPlanningSolver::solve()`
+> quand STRICT est `UNSATISFIABLE` (§10). `fixedAssignments` reste
+> toujours confirmé absent (D090).
+>
+> **Statut d'implémentation (Lot 6D, `docs/planning-solver.md`)** :
+> `OptimizationProblem` porte désormais `assignmentConflicts` — la
+> première contrainte globale réelle (`AssignmentConflict`, D100),
+> absente du contrat abstrait de ce §21 mais nécessaire pour que le
+> solveur arbitre réellement entre affectations concurrentes.
+>
+> **Statut d'implémentation (Lot 6E, `docs/decisions.md` D106,
+> `docs/planning-solver.md` §37)** : `OptimizationProblem` porte
+> désormais `timeoutSeconds`/`numWorkers` (jamais `timeoutBudget` tel
+> quel — deux champs scalaires réellement consommés par
+> `CpSatPayloadBuilder`/`cp_sat_solver.py`, résolus depuis un
+> `SolverParameterSet` versionné). `seedMaterial` reste absent du
+> contrat solveur : calculé et persisté pour l'audit
+> (`SeedMaterialBuilder`), mais non consommé par aucun solve (phase 8
+> neutre, D088) — vivre sur le contrat solveur impliquerait un
+> consommateur qui n'existe pas. `fixedAssignments`/`changeCostByUnit`
+> restent absents (D090, REPAIR non implémenté). Côté
+> `OptimizationResult` : `snapshotHash` reste `null` en pratique — le
+> hash vit désormais sur `PlanningGeneration` (calculé par
+> l'orchestrateur `PlanningGenerationService`, pas par le solveur
+> lui-même) ; `solverMetadata` porte toujours `solverType`/
+> `solverVersion`/`solveDurationMs` réels (Lot 6B) plus désormais
+> `timeoutHit` réellement dérivé (jamais deviné — voir §37).
 
 ```
 OptimizationProblem {

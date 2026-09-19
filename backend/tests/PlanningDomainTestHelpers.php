@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace App\Tests;
 
 use App\Entity\FairnessPeriod;
+use App\Entity\Planning;
 use App\Entity\PlanningPeriod;
-use App\Entity\Team;
+use App\Entity\PlanningTeam;
 use App\Entity\User;
 use Doctrine\ORM\EntityManagerInterface;
 
@@ -17,13 +18,40 @@ use Doctrine\ORM\EntityManagerInterface;
  */
 trait PlanningDomainTestHelpers
 {
-    private function createTeam(EntityManagerInterface $em, string $name = 'Cardiology', string $slug = 'cardiology'): Team
+    /**
+     * A PlanningTeam always belongs to exactly one Planning
+     * (docs/decisions.md D079). When $planning is omitted, a fresh
+     * throwaway Planning is created for it — two createTeam() calls with no
+     * explicit $planning therefore belong to two *different* Plannings by
+     * default, which is what most cross-team tests in this suite actually
+     * want (they are testing mono-team consistency, not Planning sharing).
+     * Pass the same $planning explicitly when a test specifically needs two
+     * teams of the *same* Planning (e.g. membership-conflict scenarios).
+     */
+    private function createTeam(EntityManagerInterface $em, string $name = 'Cardiology', ?Planning $planning = null): PlanningTeam
     {
-        $team = new Team($name, $slug.'-'.bin2hex(random_bytes(4)));
+        $planning ??= $this->createStandalonePlanning($em);
+
+        $team = new PlanningTeam($planning, $name);
         $em->persist($team);
         $em->flush();
 
         return $team;
+    }
+
+    private function createStandalonePlanning(EntityManagerInterface $em, ?User $creator = null): Planning
+    {
+        $planning = new Planning(
+            'Test Planning '.bin2hex(random_bytes(4)),
+            $creator ?? $this->createUser($em),
+            $this->date('2027-01-01'),
+            $this->date('2028-01-01'),
+            'Europe/Brussels',
+        );
+        $em->persist($planning);
+        $em->flush();
+
+        return $planning;
     }
 
     private function createUser(EntityManagerInterface $em, ?string $email = null): User
@@ -47,7 +75,7 @@ trait PlanningDomainTestHelpers
 
     private function createPlanningPeriod(
         EntityManagerInterface $em,
-        Team $team,
+        PlanningTeam $team,
         string $startsAt = '2027-01-01',
         string $endsAt = '2027-05-01',
     ): PlanningPeriod {

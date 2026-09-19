@@ -8,7 +8,8 @@ use App\Entity\Duty;
 use App\Entity\DutyAssignment;
 use App\Entity\DutyAssignmentSource;
 use App\Entity\PlanningGeneration;
-use App\Entity\TeamMember;
+use App\Entity\PlanningSnapshot;
+use App\Entity\PlanningTeamMember;
 use App\Exception\DuplicateDutyAssignmentException;
 use App\Exception\InvalidDutyAssignmentException;
 use App\Exception\PlanningGenerationNotSnapshottedException;
@@ -20,10 +21,23 @@ use Doctrine\ORM\EntityManagerInterface;
 /**
  * Creates DutyAssignment rows. Deliberately narrow (docs/planning-generation.md
  * §18): checks the structural invariants a client could otherwise violate
- * trivially (wrong PlanningPeriod, wrong Team, duplicate), but performs no
+ * trivially (wrong PlanningPeriod, wrong PlanningTeam, duplicate), but performs no
  * eligibility check at all (availability, spacing, fairness, rules) — that
- * is EligibilityService's job, a later lot. Every assignment created here
- * is forced to DutyAssignmentSource::MANUAL; the client never chooses.
+ * is EligibilityService's job, a later lot.
+ *
+ * Two real, distinct write paths, never conflated (docs/decisions.md
+ * D106):
+ *
+ * - `createManual()` (Lot 3) — one HTTP request, one assignment,
+ *   `DutyAssignmentSource::MANUAL` always forced, flushes immediately (its
+ *   own transaction).
+ * - `createAuto()` (Lot 6E) — called many times in a loop by
+ *   `PlanningGenerationService::generate()` while persisting a whole solve
+ *   result; never flushes itself (the caller flushes exactly once for the
+ *   entire batch + the generation's own metadata + status transitions, the
+ *   atomicity §18 of the lot requires) and accepts an already-resolved
+ *   `PlanningSnapshot` instead of looking it up again for every single
+ *   assignment.
  */
 final class DutyAssignmentService
 {
@@ -39,27 +53,14 @@ final class DutyAssignmentService
      * @throws InvalidDutyAssignmentException
      * @throws DuplicateDutyAssignmentException
      */
-    public function createManual(PlanningGeneration $generation, Duty $duty, TeamMember $teamMember, bool $locked): DutyAssignment
+    public function createManual(PlanningGeneration $generation, Duty $duty, PlanningTeamMember $teamMember, bool $locked): DutyAssignment
     {
         $snapshot = $this->snapshotRepository->findOneByGeneration($generation);
         if (null === $snapshot) {
             throw new PlanningGenerationNotSnapshottedException();
         }
 
-        if ($duty->getPlanningPeriod() !== $generation->getPlanningPeriod()) {
-            throw new InvalidDutyAssignmentException('This Duty does not belong to the PlanningPeriod of this PlanningGeneration.');
-        }
-
-        if ($teamMember->getTeam() !== $generation->getPlanningPeriod()->getTeam()) {
-            throw new InvalidDutyAssignmentException('This TeamMember does not belong to the Team of this PlanningGeneration.');
-        }
-
-        $snapshotMember = $this->snapshotMemberRepository->findOneBySnapshotAndTeamMemberStableId($snapshot, $teamMember->getStableId());
-        if (null === $snapshotMember) {
-            throw new InvalidDutyAssignmentException('This TeamMember is not part of the snapshot used by this PlanningGeneration.');
-        }
-
-        $assignment = new DutyAssignment($generation, $duty, $teamMember, $snapshotMember, DutyAssignmentSource::MANUAL, $locked);
+        $assignment = $this->buildAssignment($generation, $snapshot, $duty, $teamMember, DutyAssignmentSource::MANUAL, $locked);
         $this->entityManager->persist($assignment);
 
         try {
@@ -74,5 +75,42 @@ final class DutyAssignmentService
         }
 
         return $assignment;
+    }
+
+    /**
+     * Never flushes — see class docblock. `$snapshot` must already be the
+     * one belonging to `$generation` (the caller resolves it once for the
+     * whole batch); not re-verified here beyond what `DutyAssignment`'s own
+     * constructor already guards.
+     *
+     * @throws InvalidDutyAssignmentException
+     */
+    public function createAuto(PlanningGeneration $generation, PlanningSnapshot $snapshot, Duty $duty, PlanningTeamMember $teamMember): DutyAssignment
+    {
+        $assignment = $this->buildAssignment($generation, $snapshot, $duty, $teamMember, DutyAssignmentSource::AUTO, locked: false);
+        $this->entityManager->persist($assignment);
+
+        return $assignment;
+    }
+
+    /**
+     * @throws InvalidDutyAssignmentException
+     */
+    private function buildAssignment(PlanningGeneration $generation, PlanningSnapshot $snapshot, Duty $duty, PlanningTeamMember $teamMember, DutyAssignmentSource $source, bool $locked): DutyAssignment
+    {
+        if ($duty->getPlanningPeriod() !== $generation->getPlanningPeriod()) {
+            throw new InvalidDutyAssignmentException('This Duty does not belong to the PlanningPeriod of this PlanningGeneration.');
+        }
+
+        if ($teamMember->getPlanningTeam() !== $generation->getPlanningPeriod()->getTeam()) {
+            throw new InvalidDutyAssignmentException('This TeamMember does not belong to the PlanningTeam of this PlanningGeneration.');
+        }
+
+        $snapshotMember = $this->snapshotMemberRepository->findOneBySnapshotAndTeamMemberStableId($snapshot, $teamMember->getStableId());
+        if (null === $snapshotMember) {
+            throw new InvalidDutyAssignmentException('This TeamMember is not part of the snapshot used by this PlanningGeneration.');
+        }
+
+        return new DutyAssignment($generation, $duty, $teamMember, $snapshotMember, $source, $locked);
     }
 }

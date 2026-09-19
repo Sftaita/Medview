@@ -16,7 +16,7 @@ use Doctrine\ORM\Mapping as ORM;
  * would actually read it exists — adding the column now would be a
  * half-built concept with nothing behind it.
  *
- * A Team's FairnessPeriods never overlap in time — a duty must belong to
+ * A PlanningTeam's FairnessPeriods never overlap in time — a duty must belong to
  * exactly one equity ledger, or requiredDemand/target computations become
  * ambiguous. Enforced at the database level (see migrations), not just in
  * application code.
@@ -32,9 +32,9 @@ class FairnessPeriod
     #[ORM\Column]
     private ?int $id = null;
 
-    #[ORM\ManyToOne(targetEntity: Team::class)]
+    #[ORM\ManyToOne(targetEntity: PlanningTeam::class)]
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
-    private Team $team;
+    private PlanningTeam $team;
 
     #[ORM\Column(length: 150)]
     private string $name;
@@ -48,7 +48,7 @@ class FairnessPeriod
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
-    public function __construct(Team $team, string $name, \DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt)
+    public function __construct(PlanningTeam $team, string $name, \DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt)
     {
         if ($endsAt <= $startsAt) {
             throw new \InvalidArgumentException('endsAt must be strictly after startsAt.');
@@ -66,7 +66,7 @@ class FairnessPeriod
         return $this->id;
     }
 
-    public function getTeam(): Team
+    public function getTeam(): PlanningTeam
     {
         return $this->team;
     }

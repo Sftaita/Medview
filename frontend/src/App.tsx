@@ -10,17 +10,16 @@ import { DashboardPage } from './pages/DashboardPage'
 import { LoginPage } from './pages/LoginPage'
 import { MyAvailabilityPage } from './pages/MyAvailabilityPage'
 import { MyDutiesPage } from './pages/MyDutiesPage'
+import { PlanningDetailPage } from './pages/PlanningDetailPage'
 import { PlanningPeriodPage } from './pages/PlanningPeriodPage'
+import { PlanningsPage } from './pages/PlanningsPage'
 import { RegisterPage } from './pages/RegisterPage'
-import { TeamAvailabilityCalendarPage } from './pages/TeamAvailabilityCalendarPage'
-import { TeamDetailPage } from './pages/TeamDetailPage'
-import { TeamsPage } from './pages/TeamsPage'
 
 const navItems = [
   { to: '/', label: 'Tableau de bord', end: true },
   { to: '/my-availability', label: 'Mes indisponibilités' },
   { to: '/my-duties', label: 'Mes gardes' },
-  { to: '/teams', label: 'Équipes' },
+  { to: '/plannings', label: 'Plannings' },
 ]
 
 function AccountNav() {
@@ -108,26 +107,18 @@ function App() {
             }
           />
           <Route
-            path="/teams"
+            path="/plannings"
             element={
               <ProtectedRoute>
-                <TeamsPage />
+                <PlanningsPage />
               </ProtectedRoute>
             }
           />
           <Route
-            path="/teams/:teamId"
+            path="/plannings/:planningId"
             element={
               <ProtectedRoute>
-                <TeamDetailPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/teams/:teamId/availability-calendar"
-            element={
-              <ProtectedRoute>
-                <TeamAvailabilityCalendarPage />
+                <PlanningDetailPage />
               </ProtectedRoute>
             }
           />

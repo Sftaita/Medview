@@ -86,6 +86,33 @@ class PlanningSnapshotParticipationPeriod
         return (float) $this->participationFactor;
     }
 
+    /**
+     * The stored fixed-precision decimal string, verbatim — never round-tripped
+     * through a native float (docs/allocation-algorithm.md §14's canonical
+     * hash format requires "nombres décimaux ... jamais un flottant natif").
+     * Used only by `SnapshotHasher`.
+     */
+    public function getParticipationFactorRaw(): string
+    {
+        return $this->participationFactor;
+    }
+
+    /**
+     * True when $date falls in [$validFrom, $validTo) — mirrors
+     * TeamMemberParticipationPeriod::covers(), the frozen equivalent used
+     * by EffectiveExposureService (docs/fairness.md) to read the
+     * participationFactor in force at one specific Duty's date, from the
+     * snapshot alone.
+     */
+    public function covers(\DateTimeImmutable $date): bool
+    {
+        if ($date < $this->validFrom) {
+            return false;
+        }
+
+        return null === $this->validTo || $date < $this->validTo;
+    }
+
     public function getChangeReason(): ParticipationFactorChangeReason
     {
         return $this->changeReason;

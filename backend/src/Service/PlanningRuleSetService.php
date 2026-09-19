@@ -6,7 +6,7 @@ namespace App\Service;
 
 use App\Dto\PlanningRuleSetConfiguration;
 use App\Entity\PlanningRuleSet;
-use App\Entity\Team;
+use App\Entity\PlanningTeam;
 use App\Entity\User;
 use App\Repository\PlanningRuleSetRepository;
 use Doctrine\ORM\EntityManagerInterface;
@@ -33,7 +33,7 @@ final class PlanningRuleSetService
      * @throws ValidationFailedException
      */
     public function createDraft(
-        Team $team,
+        PlanningTeam $team,
         \DateTimeImmutable $effectiveFrom,
         PlanningRuleSetConfiguration $configuration,
         ?User $createdBy = null,

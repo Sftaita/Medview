@@ -1,0 +1,51 @@
+/* ============================================================
+   Surgery Hub — Typography Tokens
+   ------------------------------------------------------------
+   Inter throughout (matches the MUI production app). Mobile-first:
+   generous sizes, high legibility for quick glances in the OR
+   (gloves, fast scanning). Numbers use Inter's tabular figures.
+   ============================================================ */
+
+:root {
+  /* ---- Families ---- */
+  --font-display: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-sans:    'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-data:    'Inter', system-ui, sans-serif;          /* use with tabular-nums */
+  --font-mono:    ui-monospace, 'SF Mono', Menlo, monospace; /* code only */
+
+  /* ---- Font sizes (rem-based, 16px root) — mobile scale ---- */
+  --text-2xs:  0.6875rem; /* 11px — micro meta, badges */
+  --text-xs:   0.75rem;   /* 12px — captions */
+  --text-sm:   0.8125rem; /* 13px — secondary text */
+  --text-base: 0.9375rem; /* 15px — default mobile body */
+  --text-md:   1rem;      /* 16px — comfortable body / inputs */
+  --text-lg:   1.125rem;  /* 18px — list titles, card titles */
+  --text-xl:   1.3125rem; /* 21px — section / screen subtitles */
+  --text-2xl:  1.625rem;  /* 26px — screen titles ("Bonjour, Thomas !") */
+  --text-3xl:  2rem;      /* 32px — big numbers / emphasis */
+  --text-4xl:  2.5rem;    /* 40px — splash / large display */
+
+  /* ---- Weights ---- */
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+  --weight-extra:    800;
+
+  /* ---- Line heights ---- */
+  --leading-tight:   1.15;
+  --leading-snug:    1.3;
+  --leading-normal:  1.5;
+  --leading-relaxed: 1.65;
+
+  /* ---- Letter spacing ---- */
+  --tracking-tight:   -0.02em;
+  --tracking-snug:    -0.01em;
+  --tracking-normal:  0em;
+  --tracking-wide:    0.02em;
+  --tracking-caps:    0.06em;  /* uppercase eyebrows / labels */
+
+  /* ---- Semantic roles ---- */
+  --type-eyebrow-size:  var(--text-xs);
+  --type-eyebrow-track: var(--tracking-caps);
+}

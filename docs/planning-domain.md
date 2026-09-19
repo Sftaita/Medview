@@ -1,6 +1,6 @@
 # Domaine de planification — socle de données
 
-> Documente le modèle **effectivement implémenté** dans ce lot (Team,
+> Documente le modèle **effectivement implémenté** dans ce lot (PlanningTeam,
 > membership, historique de participation, périodes d'équité/de planning,
 > types/patterns/instances de garde, RuleSet versionné). Ne couvre pas
 > encore : disponibilités, absences, préférences, `PlanningGeneration`,
@@ -20,12 +20,12 @@ identifiant reproductible et jamais recyclé :
 | Entité | `stableId` | Pourquoi |
 |---|---|---|
 | `User` | Oui (ajouté ce lot) | `candidateStableKey` du tie-break (`docs/allocation-algorithm.md` §13) — l'ID auto-incrémenté ne doit jamais servir de matière première à un calcul reproductible |
-| `Team` | Oui | `teamStableKey` du seed material |
+| `PlanningTeam` | Oui | `teamStableKey` du seed material |
 | `PlanningPeriod` | Oui | `planningPeriodStableKey` ; doit rester identique à travers les régénérations |
 | `DutyType`, `DutyPattern` | Oui | catalogue référencé par audit/export |
 | `DutyGroupInstance`, `Duty` | Oui | `dutyStableKey` — condition dure de stabilité du tie-break futur |
 | `PlanningRuleSet` | Oui | c'est cette valeur, pas `version` (entier séquentiel **par équipe**, donc non unique globalement), que `docs/allocation-algorithm.md` désigne par `rulesVersion` |
-| `FairnessPeriod`, `TeamMember`, `TeamMemberParticipationPeriod` | Non | aucun besoin identifié dans le seed material du tie-break ni dans le snapshot — ajouté seulement si un besoin réel apparaît (YAGNI) |
+| `FairnessPeriod`, `PlanningTeamMember`, `TeamMemberParticipationPeriod` | Non | aucun besoin identifié dans le seed material du tie-break ni dans le snapshot — ajouté seulement si un besoin réel apparaît (YAGNI) |
 
 **UUIDv7 plutôt qu'ULID** : type natif PostgreSQL `uuid` (16 octets,
 indexation compacte), même propriété d'ordonnancement temporel qu'un ULID
@@ -62,9 +62,10 @@ de session au moment de la lecture).
 
 **`Duty.timezone`** (chaîne IANA, ex. `Europe/Brussels`) est conservée
 séparément car `TIMESTAMPTZ` ne fait jamais transiter le nom du fuseau
-d'origine — seul l'instant absolu survit au round-trip. `Team.timezone`
-porte le fuseau par défaut de l'équipe (une équipe = un fuseau
-opérationnel en v1 ; pas encore de fuseau par site/membre).
+d'origine — seul l'instant absolu survit au round-trip.
+`PlanningTeam::getTimezone()` délègue à `planning.timezone` (depuis D079 —
+plus de colonne `timezone` propre à l'équipe) : une équipe = le fuseau
+opérationnel de son Planning en v1 ; pas encore de fuseau par site/membre.
 
 **DST** : `DutyMaterializationService::resolveInstant()` construit
 l'instant absolu à partir de l'heure murale + fuseau IANA explicite — PHP
@@ -88,26 +89,48 @@ incorrecte alors même que les deux représentent le même jour calendaire.
 absolues, jamais bornées par `FairnessPeriod`/`PlanningPeriod` — rien dans
 ce lot n'introduit de logique de reset, cohérent avec la spécification.
 
-## 3. Team
+## 3. PlanningTeam
 
-`stableId`, `name`, `slug` (unique, identifiant humain/URL — pas la clé de
-calcul reproductible), `timezone`, `active`. Ne référence jamais ses
-membres directement (voir `TeamMember`) — un `User` appartient à zéro, une
-ou plusieurs équipes.
+**Renommée depuis `Team` le 2026-09-18** (docs/decisions.md D079) : n'est
+plus une entité globale/partagée. `stableId`, `planning` (ManyToOne
+obligatoire — une PlanningTeam appartient à exactement un `Planning`),
+`name`, `active`. Ni `slug` (plus de raison d'être une fois qu'une équipe
+n'est plus navigable en dehors de son Planning) ni colonne `timezone`
+propre (`getTimezone()` délègue à `planning.getTimezone()`). Ne référence
+jamais ses membres directement (voir `PlanningTeamMember`) — un `User`
+appartient à zéro, une ou plusieurs équipes. Une `PlanningTeam` n'est
+jamais créée de façon autonome par un client : toujours inline, par
+`PlanningLineService::addLine()` — détail complet dans `docs/planning.md`.
 
-## 4. TeamMember — un stint de membership, pas un pointeur nullable
+## 4. PlanningTeamMember — un stint de membership, pas un pointeur nullable
+
+**Renommée depuis `TeamMember`** (D079), avec un champ `planning`
+supplémentaire, dénormalisé depuis `planningTeam.planning` (D081) — voir
+plus bas.
 
 Une ligne = **un stint continu** d'appartenance (`membershipStart`,
 `membershipEnd` nullable). Quitter une équipe ferme le stint
 (`membershipEnd`), ne le supprime jamais. Revenir crée un **nouveau**
-`TeamMember` — l'historique reste une vraie séquence append-only, jamais
-réécrite.
+`PlanningTeamMember` — l'historique reste une vraie séquence append-only,
+jamais réécrite.
 
 - `role` (`OWNER`/`ADMIN`/`MEMBER`) — **jamais** intégré à
   `User::getRoles()` (D012, rappelé explicitement dans le code).
-- Au plus un stint **ouvert** (`membershipEnd IS NULL`) par `(team, user)`
-  — enforced par un **index unique partiel** PostgreSQL (`uniq_team_members_open_membership`),
-  pas seulement une vérification applicative.
+- Au plus un stint **ouvert** (`membershipEnd IS NULL`) par
+  `(planning, user)` — enforced par un **index unique partiel** PostgreSQL
+  (`uniq_planning_team_members_open_membership`), pas seulement une
+  vérification applicative. **Historique de la règle** : l'index portait
+  d'abord sur `(team_id, user_id)` (un User pouvait être membre ouvert de
+  plusieurs Teams à la fois), puis sur `user_id` seul au Lot Planning
+  (D072 : un User n'avait plus jamais qu'une seule Team active dans toute
+  l'application) ; depuis D079/D080 (2026-09-18), il porte sur
+  `(planning_id, user_id)` — un User peut de nouveau tenir des adhésions
+  ouvertes simultanées, mais seulement dans des PlanningTeams de
+  **Plannings différents**, jamais deux dans le même Planning
+  (`docs/planning.md` §6). `planning_id` est une dénormalisation de
+  `planningTeam.planning`, garantie cohérente par une clé étrangère
+  composite `(planning_team_id, planning_id)` — même technique que le
+  §"Portée exacte du contrôle d'intégrité" ci-dessous.
 - `isCurrentlyOpen()` (le prédicat DB-enforced) est distinct de
   `isActiveAt(date)` (date-aware, tient compte de `membershipStart` futur)
   — deux questions différentes, jamais confondues dans le code.
@@ -183,6 +206,15 @@ exige `PUBLISHED` ⇒ `coverageStatus = COMPLETE`, mais `coverageStatus`
 vit sur `PlanningGeneration`, hors périmètre de ce lot — seule la forme de
 la machine à états est enforced aujourd'hui.
 
+> **Statut d'implémentation (Lot 6E, `docs/decisions.md` D106)** : cette
+> lacune est fermée — `PlanningGeneration` porte désormais un vrai
+> `coverageStatus`, et `PlanningPeriodLifecycleService::transition()`
+> vérifie, uniquement pour la cible `PUBLISHED`, qu'une génération
+> `COMPLETED` avec `coverageStatus = COMPLETE` existe pour la période
+> (sinon `PlanningPeriodNotReadyToPublishException`, 409). Aucun endpoint
+> de publication n'est créé dans ce lot — voir
+> `docs/planning-generation.md` §16.
+
 ## 8. DutyType
 
 Catalogue **par équipe** (pas un enum global — chaque équipe définit ses
@@ -254,14 +286,15 @@ Contraintes ajoutées (deux migrations : schéma de base, puis
 
 | Invariant | Mécanisme |
 |---|---|
-| `Team.slug`, `*.stableId` uniques | Index unique classique |
+| `*.stableId` uniques | Index unique classique |
 | `DutyType.code` / `DutyPattern.code` unique par équipe | Index unique composite `(team_id, code)` |
-| Au plus un membership ouvert par `(team, user)` | Index unique **partiel** (`WHERE membership_end IS NULL`) |
+| Au plus un membership ouvert par `(planning, user)` | Index unique **partiel** sur `planning_team_members(planning_id, user_id)` (`WHERE membership_end IS NULL`) — historique de cette règle : `docs/planning.md` §6 |
 | Au plus un `PlanningRuleSet` `ACTIVE` par équipe | Index unique **partiel** (`WHERE status = 'ACTIVE'`) |
 | `FairnessPeriod` : pas de chevauchement par équipe | `EXCLUDE USING gist` (extension `btree_gist`) |
 | `TeamMemberParticipationPeriod` : pas de chevauchement par membre | `EXCLUDE USING gist`, **`DEFERRABLE INITIALLY DEFERRED`** (voir piège ci-dessous) |
 | Cohérence d'équipe cross-table (`PlanningPeriod`↔`FairnessPeriod`, `DutyGroupInstance`↔`PlanningPeriod`/`DutyPattern`, `DutyPatternComponent`↔`DutyPattern`/`DutyType`, `Duty`↔`PlanningPeriod`/`DutyType`) | **Clés étrangères composites** `(id, team_id)` — technique décrite ci-dessous |
 | `Duty` d'un groupe appartenant à une autre `PlanningPeriod` | Clé étrangère composite `(group_instance_id, planning_period_id) → duty_group_instances(id, planning_period_id)` |
+| `PlanningTeamMember.planning` cohérent avec `planningTeam.planning` (D081) | Clé étrangère composite `(planning_team_id, planning_id) → planning_teams(id, planning_id)` |
 | Dates non inversées, facteur/workload positifs | `CHECK` (défense en profondeur, déjà validé aussi dans les constructeurs) |
 
 **Technique des clés étrangères composites** : pour garantir qu'un enfant
@@ -343,6 +376,16 @@ uniquement la politique **de l'équipe** (`TEAM_MIN_REST`, POLICY_HARD).
 Aucune valeur réglementaire n'est inventée ici — voir §13 "Dette" pour la
 provenance restant à définir.
 
+> **Statut d'implémentation (Lot 6D.1, docs/decisions.md D105)** :
+> `PlanningRuleSetConfiguration.teamMinRestHours` ne s'applique **plus**
+> à toutes les générations d'une équipe — c'est un champ historique, non
+> lu par `AssignmentConflictAnalyzer`. `TEAM_MIN_REST` (comme
+> `LEGAL_MIN_REST`, désormais implémentée elle aussi) est une option
+> choisie explicitement par génération (`App\Entity\RestPolicyOptions`,
+> figée à la création de la `PlanningGeneration`), jamais un défaut
+> global de l'équipe silencieusement appliqué à tous ses plannings.
+> Détail : `docs/planning-solver.md` §36.
+
 ## 13. Convention pour l'exposition API (aucun endpoint créé dans ce lot)
 
 Aucune ressource API Platform, aucun contrôleur créé pour ce lot (demande
@@ -351,8 +394,8 @@ de CRUD générique sur `User`) :
 
 | Entité | Exposition future |
 |---|---|
-| `Team`, `DutyType`, `DutyPattern` | CRUD dédié envisageable (contrôleurs/DTOs explicites), jamais une `ApiResource` générique sans réflexion |
-| `TeamMember` | Actions métier explicites (`addMember`/`endMembership`), jamais un `PATCH` générique qui permettrait de modifier `membershipEnd` en dehors de `TeamMembershipService` |
+| `PlanningTeam`, `DutyType`, `DutyPattern` | CRUD dédié envisageable (contrôleurs/DTOs explicites), jamais une `ApiResource` générique sans réflexion — et jamais de création autonome pour `PlanningTeam` : toujours inline via `PlanningLineService::addLine()` (D079) |
+| `PlanningTeamMember` | Actions métier explicites (`addMember`/`endMembership`), jamais un `PATCH` générique qui permettrait de modifier `membershipEnd` en dehors de `PlanningTeamMembershipService` |
 | **`TeamMemberParticipationPeriod`, `PlanningRuleSet` (historique), `Duty`** | **Jamais** de CRUD générique, même plus tard — uniquement des actions métier explicites (`changeFactor`, `createDraft`/`activate`, matérialisation) qui préservent les invariants d'immuabilité/versioning ; un `PATCH` direct sur l'une de ces entités contournerait exactement les garanties que ce lot construit |
 | `PlanningPeriod` | Lecture libre envisageable, écriture uniquement via `PlanningPeriodLifecycleService` |
 
@@ -360,8 +403,8 @@ de CRUD générique sur `User`) :
 
 | Entité | Politique |
 |---|---|
-| `User`, `Team` | Jamais de suppression physique une fois utilisée — `active`/désactivation |
-| `TeamMember` | Jamais supprimée — `membershipEnd` (fermeture) |
+| `User`, `PlanningTeam` | Jamais de suppression physique une fois utilisée — `active`/désactivation |
+| `PlanningTeamMember` | Jamais supprimée — `membershipEnd` (fermeture) |
 | `TeamMemberParticipationPeriod` | Jamais supprimée, jamais mutée après création sauf `close()` une fois |
 | `FairnessPeriod`, `PlanningPeriod` | `ON DELETE RESTRICT` sur toute référence descendante — suppression possible seulement si rien ne la référence encore (aucun service de suppression fourni dans ce lot, la contrainte protège un futur endpoint) |
 | `DutyType`, `DutyPattern` | `active` pour retirer du catalogue ; `RESTRICT` empêche la suppression une fois référencée |
@@ -396,14 +439,16 @@ vrai consommateur existe) une fois le lot suivant branché dessus — voir
 
 | Besoin futur | Données disponibles | Statut |
 |---|---|---|
-| `structuralOpportunity(user, duty)` | `TeamMember.isActiveAt()`, `Duty.team`/`dutyType` | OK |
-| `effectiveExposure(user, dimension)` | `ParticipationPeriodService::factorAt()` par date exacte de garde | OK |
-| `requiredDemand(dimension)` | `Duty.demandType`, `localDate`, `dutyType` — suffisant pour calculer chaque dimension a posteriori, aucune entité `RequiredDemand` dupliquée | OK |
-| `participationFactorAt(date)` | `TeamMemberParticipationPeriodRepository::findEffectiveAt()` | OK |
-| Atomicité `DutyGroup` | `DutyGroupInstance` + FK composite garantissant la cohérence de période | OK |
-| Tie-break stable | `Team.stableId`, `PlanningPeriod.stableId`, `Duty.stableId`, `User.stableId`, `PlanningRuleSet.stableId` — tous présents, tous immuables | OK |
+| `structuralOpportunity(user, duty)` | Implémenté depuis le Lot 4 pour les dimensions membership/non-participation/`active` — `EligibilityService`, voir `docs/eligibility.md` §4 | OK (Lot 4, partiel) |
+| `effectiveExposure(user, dimension)` | Implémenté depuis le Lot 5 — `EffectiveExposureService`, voir `docs/fairness.md` §6 | OK (Lot 5) |
+| `requiredDemand(dimension)` | Implémenté depuis le Lot 5 pour `TOTAL_DUTIES`/`WEIGHTED_WORKLOAD`/`FRIDAY`/`SATURDAY`/`SUNDAY`/`DUTY_TYPE` — `RequiredDemandBuilder`, voir `docs/fairness.md` §5 | OK (Lot 5, partiel — `WEEKEND_GROUPS`/`HOLIDAY`/`NAMED_HOLIDAY`/`NIGHT` toujours sans source de donnée) |
+| `participationFactorAt(date)` | `TeamMemberParticipationPeriodRepository::findEffectiveAt()` (état vivant) / `PlanningSnapshotParticipationPeriod::covers()` (état snapshotté, lu par `EffectiveExposureService`) | OK |
+| `STRUCTURALLY_FORCED` | Implémenté depuis le Lot 5 — `StructurallyForcedAnalyzer`, voir `docs/fairness.md` §8 | OK (Lot 5) |
+| Atomicité `DutyGroup` | `DutyGroupInstance` + FK composite garantissant la cohérence de période ; homogénéité REQUIRED/OPTIONAL désormais garantie au constructeur (D083) | OK |
+| Tie-break stable | `PlanningTeam.stableId`, `PlanningPeriod.stableId`, `Duty.stableId`, `User.stableId`, `PlanningRuleSet.stableId` — tous présents, tous immuables | OK |
 | Snapshot | Implémenté depuis le Lot 3 — `PlanningSnapshot` et ses enfants, voir `docs/planning-generation.md` | OK (Lot 3) |
-| GENERATE / REPAIR / SIMULATE | Aucune logique de solveur ; `PlanningPeriodStatus` fournit déjà le lifecycle sur lequel ces modes s'articuleront | Attendu — hors périmètre |
+| `OptimizationProblem` (mode GENERATE) | Implémenté depuis le Lot 5 — `OptimizationProblemBuilder`, voir `docs/fairness.md` §10 | OK (Lot 5, partiel — pas de `fixedAssignments`/`objectivePhases`) |
+| GENERATE / REPAIR / SIMULATE (solveur réel) | Aucune logique de solveur ; `PlanningPeriodStatus` fournit déjà le lifecycle sur lequel ces modes s'articuleront ; `OptimizationMode` existe mais seul `GENERATE` est construit | Attendu — hors périmètre |
 
 Aucun manque structurel bloquant identifié pour ce lot précis. Le seul
 gap réel concerne `coverageStatus` (§7 ci-dessus), qui dépend
@@ -411,14 +456,18 @@ explicitement d'une entité hors périmètre (`PlanningGeneration`).
 
 ## 17. Dette / points ouverts (les vrais, pas une liste de précaution)
 
-1. **`LEGAL_MIN_REST`** : aucune valeur ni source de vérité définie
-   (système ? juridiction ? configuration externe ?) — nécessite un
-   référent métier/légal avant implémentation, volontairement non deviné
-   ici (D036).
-2. **`PUBLISHED` ⇒ `coverageStatus = COMPLETE`** : seule la forme de la
-   machine à états `PlanningPeriodStatus` est enforced ; la précondition
-   de couverture ne peut être branchée qu'une fois `PlanningGeneration`
-   implémentée (lot suivant).
+1. **`LEGAL_MIN_REST`** : aucune valeur ni source de vérité *automatique*
+   définie (système ? juridiction ? configuration externe ?) — reste
+   entièrement non devinée (D036). Implémentée au Lot 6D.1 (D105) comme
+   option **manuelle** par génération (`RestPolicyOptions`) : le
+   planificateur saisit lui-même la durée à chaque activation ; aucune
+   détection de juridiction ni récupération automatique d'une règle
+   légale n'existe — ce gap-là reste entier, seul le mécanisme d'activation
+   est désormais réel.
+2. **`PUBLISHED` ⇒ `coverageStatus = COMPLETE`** — fermée au Lot 6E
+   (`docs/decisions.md` D106) : `PlanningPeriodLifecycleService::transition()`
+   vérifie désormais réellement cette précondition contre la
+   `PlanningGeneration` `COMPLETED` la plus récente.
 3. **Services de domaine marqués `public: true`** par nécessité technique
    temporaire (aucun consommateur réel encore) — à revisiter une fois de
    vrais contrôleurs existent.

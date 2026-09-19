@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/surgery-hub-design-system-d9910452-cae4-4658-bd1e-a9360bed9e01/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/surgery-hub-design-system-d9910452-cae4-4658-bd1e-a9360bed9e01/tokens/colors.css">
+<link rel="stylesheet" href="_ds/surgery-hub-design-system-d9910452-cae4-4658-bd1e-a9360bed9e01/tokens/typography.css">
+<link rel="stylesheet" href="_ds/surgery-hub-design-system-d9910452-cae4-4658-bd1e-a9360bed9e01/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/surgery-hub-design-system-d9910452-cae4-4658-bd1e-a9360bed9e01/tokens/effects.css">
+<link rel="stylesheet" href="_ds/surgery-hub-design-system-d9910452-cae4-4658-bd1e-a9360bed9e01/tokens/base.css">
+<link rel="stylesheet" href="_ds/surgery-hub-design-system-d9910452-cae4-4658-bd1e-a9360bed9e01/styles.css">
+<script src="_ds/surgery-hub-design-system-d9910452-cae4-4658-bd1e-a9360bed9e01/_ds_bundle.js"></script>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--surface-page);font-family:var(--font-sans);color:var(--text-body);-webkit-font-smoothing:antialiased}
+a{color:var(--text-link);text-decoration:none}
+a:hover{color:var(--green-800);text-decoration:underline}
+</style>
+</helmet>
+
+<div style="background:var(--surface-page); min-height:100vh; padding:28px 24px 64px; font-family:var(--font-sans); color:var(--text-body)">
+<div style="max-width:1300px; margin:0 auto; display:flex; flex-direction:column; gap:24px">
+
+<header style="display:flex; flex-wrap:wrap; align-items:flex-end; justify-content:space-between; gap:16px">
+<div style="min-width:0">
+<div style="font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--brand); margin-bottom:6px">Planning · disponibilités</div>
+<h1 style="margin:0; font-size:26px; font-weight:800; letter-spacing:-0.02em; color:var(--text-strong)">Sélection multiple de dates et de périodes</h1>
+<p style="margin:8px 0 0; font-size:15px; line-height:1.5; color:var(--text-muted); max-width:64ch; text-wrap:pretty">Un seul geste pour déclarer une journée, une période continue, plusieurs dates isolées, plusieurs périodes — même à cheval sur deux mois — ou des créneaux horaires précis. Identique à la souris et au doigt.</p>
+</div>
+<div style="display:flex; flex-direction:column; gap:7px">
+<span style="font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-subtle)">Nature de la sélection</span>
+<div style="display:flex; gap:6px; padding:4px; background:var(--surface-card); border:1px solid var(--border-subtle); border-radius:12px">
+<sc-for list="{{ typeChips }}" as="t" hint-placeholder-count="2">
+<button style="{{ t.style }}" onClick="{{ t.onClick }}"><span style="{{ t.dotStyle }}"></span>{{ t.label }}</button>
+</sc-for>
+</div>
+</div>
+</header>
+
+<section style="display:flex; flex-direction:column; gap:10px">
+<div style="font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-subtle)">Cas d'usage démontrés</div>
+<div style="display:flex; flex-wrap:wrap; gap:8px">
+<sc-for list="{{ presets }}" as="p" hint-placeholder-count="6">
+<button style="{{ p.style }}" onClick="{{ p.onClick }}">
+<span style="{{ p.numStyle }}">{{ p.n }}</span>{{ p.label }}
+</button>
+</sc-for>
+</div>
+</section>
+
+<section style="display:flex; flex-wrap:wrap; gap:20px; align-items:flex-start">
+
+<div style="flex:1 1 640px; min-width:0; background:var(--surface-card); border:1px solid var(--border-subtle); border-radius:12px; box-shadow:var(--shadow-sm); overflow:hidden">
+<div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; padding:14px 18px 0">
+<x-import component-from-global-scope="DesignSystem_d99104.Tabs" tabs="{{ viewTabs }}" value="{{ view }}" on-change="{{ setView }}" style="border-bottom:none" hint-size="240px,44px"></x-import>
+<div style="display:flex; align-items:center; gap:8px; padding-bottom:8px">
+<button style="{{ prevStyle }}" onClick="{{ prevPage }}" title="Mois précédent">‹</button>
+<span style="min-width:200px; text-align:center; font-size:13px; font-weight:700; color:var(--text-strong); font-variant-numeric:tabular-nums">{{ periodLabel }}</span>
+<button style="{{ nextStyle }}" onClick="{{ nextPage }}" title="Mois suivant">›</button>
+</div>
+</div>
+<div style="height:1px; background:var(--border-subtle)"></div>
+
+<sc-if value="{{ isMonth }}" hint-placeholder-val="{{ true }}">
+<div style="padding:18px">
+<div style="position:relative; overflow:hidden" onPointerMove="{{ onEdge }}">
+<div style="{{ trackStyle }}">
+<sc-for list="{{ months }}" as="m" hint-placeholder-count="4">
+<div style="{{ m.panelStyle }}">
+<div style="display:flex; align-items:baseline; gap:8px; margin-bottom:9px">
+<span style="{{ m.titleStyle }}">{{ m.name }}</span>
+<span style="font-size:11.5px; font-weight:600; color:var(--text-subtle)">{{ m.note }}</span>
+</div>
+<div style="display:grid; grid-template-columns:repeat(7,1fr); margin-bottom:6px">
+<div style="font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-subtle); text-align:center">Lun</div>
+<div style="font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-subtle); text-align:center">Mar</div>
+<div style="font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-subtle); text-align:center">Mer</div>
+<div style="font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-subtle); text-align:center">Jeu</div>
+<div style="font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-subtle); text-align:center">Ven</div>
+<div style="font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-subtle); text-align:center">Sam</div>
+<div style="font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-subtle); text-align:center">Dim</div>
+</div>
+<div style="display:grid; grid-template-columns:repeat(7,1fr); border-top:1px solid var(--border-subtle); border-left:1px solid var(--border-subtle); border-radius:12px; overflow:hidden; touch-action:none" onPointerMove="{{ onGridMove }}" onMouseLeave="{{ clearHover }}">
+<sc-for list="{{ m.cells }}" as="c" hint-placeholder-count="35">
+<div style="{{ c.rootStyle }}" data-day="{{ c.abs }}" onPointerDown="{{ c.onDown }}" onMouseEnter="{{ c.onEnter }}" title="{{ c.title }}">
+<div style="{{ c.bandStyle }}"></div>
+<div style="{{ c.markStyle }}"></div>
+<span style="{{ c.numStyle }}">{{ c.num }}</span>
+<sc-if value="{{ c.badge }}" hint-placeholder-val="{{ false }}"><span style="{{ c.badgeStyle }}">{{ c.badge }}</span></sc-if>
+<sc-if value="{{ c.foot }}" hint-placeholder-val="{{ false }}"><span style="{{ c.footStyle }}">{{ c.foot }}</span></sc-if>
+</div>
+</sc-for>
+</div>
+</div>
+</sc-for>
+</div>
+</div>
+<div style="margin-top:14px; display:flex; flex-wrap:wrap; gap:8px 18px; align-items:center">
+<sc-for list="{{ legend }}" as="l" hint-placeholder-count="9">
+<span style="display:inline-flex; align-items:center; gap:7px; font-size:11.5px; font-weight:600; color:var(--text-muted); white-space:nowrap">
+<span style="{{ l.swatch }}"></span>{{ l.label }}
+</span>
+</sc-for>
+</div>
+<p style="margin:13px 0 0; font-size:12.5px; line-height:1.6; color:var(--text-subtle)">Clic : ajouter ou retirer une journée · Clic-glisser : période continue — chaque glisser crée une période <em>supplémentaire</em> · En glissant vers le bord gauche ou droit, le calendrier défile vers le mois précédent ou suivant · Ctrl/Cmd + clic : retirer · Maj + clic : étendre la dernière plage</p>
+</div>
+</sc-if>
+
+<sc-if value="{{ isWeek }}" hint-placeholder-val="{{ false }}">
+<div style="padding:18px">
+<div style="display:grid; grid-template-columns:54px repeat(7,1fr); gap:0; margin-bottom:6px">
+<div></div>
+<sc-for list="{{ weekHeads }}" as="h" hint-placeholder-count="7">
+<div style="text-align:center; padding:2px 0 8px">
+<div style="font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-subtle)">{{ h.wd }}</div>
+<div style="{{ h.numStyle }}">{{ h.num }}</div>
+</div>
+</sc-for>
+</div>
+<div style="display:grid; grid-template-columns:54px repeat(7,1fr); border-top:1px solid var(--border-subtle); border-left:1px solid var(--border-subtle); border-radius:12px; overflow:hidden">
+<div style="border-right:1px solid var(--border-subtle); background:var(--surface-sunken)">
+<sc-for list="{{ hours }}" as="h" hint-placeholder-count="14">
+<div style="height:44px; border-bottom:1px solid var(--border-subtle); padding:4px 8px 0 0; text-align:right; font-size:11px; font-weight:600; color:var(--text-subtle); font-variant-numeric:tabular-nums">{{ h }}</div>
+</sc-for>
+</div>
+<sc-for list="{{ dayCols }}" as="col" hint-placeholder-count="7">
+<div style="{{ col.style }}" onMouseDown="{{ col.onDown }}" onMouseMove="{{ col.onMove }}">
+<sc-for list="{{ col.blocks }}" as="b" hint-placeholder-count="0">
+<div style="{{ b.style }}">
+<div style="{{ b.timeStyle }}">{{ b.time }}</div>
+<div style="{{ b.subStyle }}">{{ b.sub }}</div>
+<sc-if value="{{ b.onRemove }}" hint-placeholder-val="{{ false }}">
+<button style="position:absolute; top:4px; right:4px; width:22px; height:22px; display:flex; align-items:center; justify-content:center; border:none; border-radius:6px; background:rgba(255,255,255,.8); color:var(--text-body); font-size:13px; font-weight:700; cursor:pointer; line-height:1" onMouseDown="{{ b.stop }}" onClick="{{ b.onRemove }}">×</button>
+</sc-if>
+</div>
+</sc-for>
+</div>
+</sc-for>
+</div>
+<p style="margin:13px 0 0; font-size:12.5px; line-height:1.6; color:var(--text-subtle)">{{ weekHelp }}</p>
+</div>
+</sc-if>
+</div>
+
+<aside style="flex:0 0 312px; max-width:100%; display:flex; flex-direction:column; gap:14px; background:var(--surface-card); border:1px solid var(--border-subtle); border-radius:12px; box-shadow:var(--shadow-sm); padding:18px">
+<div>
+<div style="font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-subtle); margin-bottom:6px">Récapitulatif</div>
+<div style="display:flex; align-items:baseline; gap:8px">
+<span style="{{ summaryCountStyle }}">{{ summaryCount }}</span>
+<h2 style="margin:0; font-size:17px; font-weight:700; letter-spacing:-0.01em; color:var(--text-strong)">{{ summaryTitle }}</h2>
+</div>
+<div style="margin-top:4px; font-size:12.5px; color:var(--text-muted); font-variant-numeric:tabular-nums">{{ summarySub }}</div>
+</div>
+
+<div style="display:flex; flex-direction:column; gap:12px; max-height:340px; overflow:auto">
+<sc-for list="{{ groups }}" as="g" hint-placeholder-count="2">
+<div style="display:flex; flex-direction:column; gap:7px">
+<div style="display:flex; align-items:center; gap:7px">
+<span style="{{ g.dotStyle }}"></span>
+<span style="font-size:11.5px; font-weight:800; letter-spacing:.03em; text-transform:uppercase; color:{{ g.ink }}">{{ g.title }}</span>
+</div>
+<sc-for list="{{ g.items }}" as="it" hint-placeholder-count="2">
+<div style="{{ it.style }}">
+<span style="{{ it.dotStyle }}">{{ it.dot }}</span>
+<span style="flex:1; min-width:0">
+<span style="display:block; font-size:13.5px; font-weight:700; color:var(--text-strong); font-variant-numeric:tabular-nums">{{ it.label }}</span>
+<span style="display:block; font-size:11.5px; color:var(--text-muted); margin-top:2px">{{ it.sub }}</span>
+</span>
+<button style="flex:none; width:26px; height:26px; display:flex; align-items:center; justify-content:center; border:1px solid var(--border-subtle); border-radius:8px; background:var(--surface-card); color:var(--text-muted); font-size:14px; line-height:1; cursor:pointer" style-hover="background:var(--status-crit-surface); border-color:var(--red-100); color:var(--red-700)" onClick="{{ it.onRemove }}" title="Retirer">×</button>
+</div>
+</sc-for>
+</div>
+</sc-for>
+<sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+<div style="padding:18px 14px; border:1px dashed var(--border-default); border-radius:12px; text-align:center; font-size:13px; color:var(--text-muted); line-height:1.5">Aucune date sélectionnée.<br>Cliquez ou glissez dans le calendrier.</div>
+</sc-if>
+</div>
+
+<sc-if value="{{ conflictNote }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex; gap:9px; padding:11px 12px; background:var(--status-info-surface); border:1px solid var(--blue-100); border-radius:12px; font-size:12.5px; line-height:1.45; color:var(--blue-700)">
+<span style="flex:none; width:6px; height:6px; margin-top:6px; border-radius:50%; background:var(--accent)"></span>
+<span>{{ conflictNote }}</span>
+</div>
+</sc-if>
+
+<sc-if value="{{ hint }}" hint-placeholder-val="{{ false }}">
+<div style="padding:11px 12px; background:var(--surface-sunken); border:1px solid var(--border-subtle); border-radius:12px; font-size:12.5px; line-height:1.45; color:var(--text-body)">{{ hint }}</div>
+</sc-if>
+
+<div style="height:1px; background:var(--border-subtle)"></div>
+
+<div style="display:flex; flex-direction:column; gap:8px">
+<x-import component-from-global-scope="DesignSystem_d99104.Button" variant="secondary" size="md" full-width="{{ true }}" on-click="{{ addPeriod }}" hint-size="100%,48px">{{ addLabel }}</x-import>
+<x-import component-from-global-scope="DesignSystem_d99104.Button" variant="ghost" size="sm" full-width="{{ true }}" on-click="{{ clearAll }}" hint-size="100%,40px">Tout effacer</x-import>
+<x-import component-from-global-scope="DesignSystem_d99104.Button" variant="primary" size="lg" full-width="{{ true }}" on-click="{{ validate }}" hint-size="100%,56px">{{ validateLabel }}</x-import>
+</div>
+
+<sc-if value="{{ validated }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex; gap:9px; align-items:flex-start; padding:11px 12px; background:var(--status-ok-surface); border:1px solid var(--green-200); border-radius:12px; font-size:12.5px; line-height:1.45; color:var(--green-800); font-weight:600">
+<span style="flex:none; width:6px; height:6px; margin-top:6px; border-radius:50%; background:var(--brand)"></span>
+<span>{{ validated }}</span>
+</div>
+</sc-if>
+</aside>
+</section>
+
+<section style="display:flex; flex-wrap:wrap; gap:28px; align-items:flex-start; padding-top:8px">
+<div style="flex:0 0 auto; width:390px; max-width:100%; background:var(--surface-card); border:1px solid var(--border-default); border-radius:28px; box-shadow:var(--shadow-lg); overflow:hidden">
+<div style="height:34px; display:flex; align-items:flex-end; justify-content:space-between; padding:0 22px 4px; font-size:11px; font-weight:700; color:var(--text-strong); font-variant-numeric:tabular-nums">
+<span>9:41</span>
+<span style="width:16px; height:8px; border:1px solid var(--text-strong); border-radius:2px; display:inline-block"></span>
+</div>
+<x-import component-from-global-scope="DesignSystem_d99104.AppBar" title="Disponibilités" notification-count="{{ 0 }}" hint-size="100%,56px"></x-import>
+
+<div style="padding:14px 20px 0; display:flex; flex-direction:column; gap:13px">
+<div style="{{ mSwitchStyle }}">
+<x-import component-from-global-scope="DesignSystem_d99104.Switch" label="{{ mSwitchLabel }}" checked="{{ isGarde }}" on-change="{{ toggleType }}" hint-size="100%,24px"></x-import>
+<div style="margin-top:5px; font-size:11.5px; line-height:1.4; color:var(--text-muted)">{{ mSwitchHelp }}</div>
+</div>
+
+<div>
+<div style="display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:9px">
+<button style="{{ prevStyle }}" onClick="{{ prevPage }}">‹</button>
+<span style="font-size:15px; font-weight:700; color:var(--text-strong)">{{ mMonthName }}</span>
+<button style="{{ nextStyle }}" onClick="{{ nextPage }}">›</button>
+</div>
+<div style="display:grid; grid-template-columns:repeat(7,1fr); margin-bottom:4px">
+<div style="font-size:10.5px; font-weight:700; color:var(--text-subtle); text-align:center">L</div>
+<div style="font-size:10.5px; font-weight:700; color:var(--text-subtle); text-align:center">M</div>
+<div style="font-size:10.5px; font-weight:700; color:var(--text-subtle); text-align:center">M</div>
+<div style="font-size:10.5px; font-weight:700; color:var(--text-subtle); text-align:center">J</div>
+<div style="font-size:10.5px; font-weight:700; color:var(--text-subtle); text-align:center">V</div>
+<div style="font-size:10.5px; font-weight:700; color:var(--text-subtle); text-align:center">S</div>
+<div style="font-size:10.5px; font-weight:700; color:var(--text-subtle); text-align:center">D</div>
+</div>
+<div style="position:relative; overflow:hidden" onPointerMove="{{ onEdge }}">
+<div style="{{ mTrackStyle }}">
+<sc-for list="{{ mMonths }}" as="m" hint-placeholder-count="4">
+<div style="{{ m.panelStyle }}">
+<div style="display:grid; grid-template-columns:repeat(7,1fr); touch-action:none" onPointerMove="{{ onGridMove }}">
+<sc-for list="{{ m.cells }}" as="c" hint-placeholder-count="35">
+<div style="{{ c.rootStyle }}" data-day="{{ c.abs }}" onPointerDown="{{ c.onDown }}">
+<div style="{{ c.bandStyle }}"></div>
+<div style="{{ c.markStyle }}"></div>
+<span style="{{ c.numStyle }}">{{ c.num }}</span>
+<sc-if value="{{ c.foot }}" hint-placeholder-val="{{ false }}"><span style="{{ c.footStyle }}">{{ c.foot }}</span></sc-if>
+</div>
+</sc-for>
+</div>
+</div>
+</sc-for>
+</div>
+</div>
+</div>
+
+<div style="font-size:11.5px; line-height:1.45; color:var(--text-subtle)">Touchez une date pour l'ajouter ou la retirer · Restez appuyé et glissez pour tracer une période · Glissez jusqu'au bord pour passer au mois suivant</div>
+
+<div style="display:flex; flex-wrap:wrap; gap:6px; min-height:30px">
+<sc-for list="{{ mChips }}" as="it" hint-placeholder-count="3">
+<button style="{{ it.style }}" onClick="{{ it.onRemove }}">{{ it.label }}<span style="font-size:13px; opacity:.7">×</span></button>
+</sc-for>
+</div>
+</div>
+
+<div style="position:sticky; bottom:0; margin-top:14px">
+<div style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 20px; border-top:1px solid var(--border-subtle); background:var(--surface-card); box-shadow:var(--shadow-nav)">
+<div style="min-width:0">
+<div style="font-size:14px; font-weight:800; color:var(--text-strong); font-variant-numeric:tabular-nums">{{ mBarTitle }}</div>
+<div style="font-size:11.5px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis">{{ mBarSub }}</div>
+</div>
+<div style="flex:none; display:flex; align-items:center; gap:8px">
+<x-import component-from-global-scope="DesignSystem_d99104.Button" variant="ghost" size="sm" on-click="{{ clearAll }}" hint-size="auto,40px">Effacer</x-import>
+<x-import component-from-global-scope="DesignSystem_d99104.Button" variant="primary" size="md" on-click="{{ validate }}" hint-size="auto,48px">Continuer</x-import>
+</div>
+</div>
+<x-import component-from-global-scope="DesignSystem_d99104.BottomNav" items="{{ navItems }}" value="planning" hint-size="100%,64px"></x-import>
+</div>
+</div>
+
+<div style="flex:1 1 280px; min-width:0; display:flex; flex-direction:column; gap:14px">
+<div>
+<div style="font-size:12px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--brand); margin-bottom:6px">Cas 6</div>
+<h2 style="margin:0 0 8px; font-size:20px; font-weight:800; letter-spacing:-0.01em; color:var(--text-strong)">Le même système au doigt</h2>
+<p style="margin:0; font-size:14px; line-height:1.55; color:var(--text-muted); max-width:52ch; text-wrap:pretty">Aucun mode à activer, aucune touche à maintenir : les mêmes gestes qu'au bureau, et une sélection partagée entre les deux écrans.</p>
+</div>
+<ol style="margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:10px">
+<sc-for list="{{ steps }}" as="s" hint-placeholder-count="4">
+<li style="display:flex; gap:11px; align-items:flex-start; padding:12px 14px; background:var(--surface-card); border:1px solid var(--border-subtle); border-radius:12px">
+<span style="flex:none; width:22px; height:22px; display:flex; align-items:center; justify-content:center; border-radius:50%; background:var(--surface-sunken); color:var(--text-strong); font-size:11.5px; font-weight:800">{{ s.n }}</span>
+<span style="font-size:13.5px; line-height:1.5; color:var(--text-body)"><strong style="color:var(--text-strong)">{{ s.title }}</strong> — {{ s.body }}</span>
+</li>
+</sc-for>
+</ol>
+</div>
+</section>
+
+</div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;intensiteSelection&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;douce&quot;,&quot;contrastée&quot;],&quot;default&quot;:&quot;douce&quot;,&quot;tsType&quot;:&quot;'douce' | 'contrastée'&quot;,&quot;section&quot;:&quot;Sélection&quot;},&quot;afficherBadgesPeriodes&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Sélection&quot;},&quot;afficherMissionsExistantes&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Calendrier&quot;},&quot;densite&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;confortable&quot;,&quot;compact&quot;],&quot;default&quot;:&quot;confortable&quot;,&quot;tsType&quot;:&quot;'confortable' | 'compact'&quot;,&quot;section&quot;:&quot;Calendrier&quot;}}">
+const WD = ['Lun.','Mar.','Mer.','Jeu.','Ven.','Sam.','Dim.'];
+const MNAMES = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+const MSHORT = ['janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
+const START_Y = 2026, START_M = 8, NMONTHS = 14;
+const MONTHS = (function () {
+  const out = [];
+  let start = 0;
+  for (let k = 0; k < NMONTHS; k++) {
+    const y = START_Y + Math.floor((START_M + k)/12), m = (START_M + k) % 12;
+    const days = new Date(y, m + 1, 0).getDate();
+    out.push({name:MNAMES[m] + ' ' + y, short:MSHORT[m], days:days, offset:(new Date(y, m, 1).getDay() + 6) % 7, start:start, y:y, m:m});
+    start += days;
+  }
+  return out;
+})();
+const TOTAL = MONTHS[NMONTHS - 1].start + MONTHS[NMONTHS - 1].days;
+const OCT = MONTHS[1].start, NOV = MONTHS[2].start;
+const OCC = {}; [[2,'CHIREC'],[8,'St-Jean'],[14,'CHIREC'],[27,'Brugmann']].forEach(x => OCC[OCT + x[0] - 1] = x[1]);
+OCC[NOV + 4] = 'St-Jean';
+const LOCKED = [];
+const HOLIDAYS = {};
+[[2026,10,1,'Toussaint'],[2026,10,11,'Armistice'],[2026,11,25,'Noël'],[2027,0,1,'Nouvel an'],[2027,3,5,'Lundi de Pâques'],[2027,4,1,'Fête du travail'],[2027,4,6,'Ascension'],[2027,4,17,'Lundi de Pentecôte'],[2027,6,21,'Fête nationale'],[2027,7,15,'Assomption']].forEach(function (x) {
+  const M = MONTHS.filter(function (m) { return m.y === x[0] && m.m === x[1]; })[0];
+  if (M) HOLIDAYS[M.start + x[2] - 1] = x[3];
+});
+const WEEK = [12,13,14,15,16,17,18].map(d => OCT + d - 1);
+const ROWH = 22, STEP = 30, T0 = 7*60, NROWS = 28;
+
+const TYPES = {
+  indispo: {
+    label:'Indisponibilité', short:'Indispo.', plural:'indisponibilités',
+    soft:'var(--red-50)', hard:'var(--red-100)', edgeSoft:'var(--red-100)', edgeHard:'var(--red-500)',
+    mark:'var(--red-600)', ink:'var(--red-700)', on:'var(--white)', dot:'var(--red-600)'
+  },
+  garde: {
+    label:'Préférence de garde', short:'Garde', plural:'préférences de garde',
+    soft:'var(--green-50)', hard:'var(--green-100)', edgeSoft:'var(--green-200)', edgeHard:'var(--green-400)',
+    mark:'var(--green-700)', ink:'var(--green-800)', on:'var(--white)', dot:'var(--brand)'
+  }
+};
+
+class Component extends DCLogic {
+  state = {
+    view:'mois', page:1, type:'indispo',
+    ranges:[{s:OCT+11, e:OCT+13, type:'indispo'}, {s:OCT+19, e:OCT+21, type:'indispo'}, {s:OCT+6, e:OCT+7, type:'garde'}],
+    anchor:OCT+11, hover:null, drag:null, preset:'p4',
+    slots:[{d:OCT+12, s:'09:00', e:'12:30', type:'garde'}, {d:OCT+14, s:'14:00', e:'17:00', type:'garde'}, {d:OCT+15, allDay:true, type:'indispo'}],
+    tdrag:null, hint:null, validated:null
+  };
+
+  componentDidMount() {
+    this._up = () => this.commit();
+    window.addEventListener('pointerup', this._up);
+  }
+  componentWillUnmount() { window.removeEventListener('pointerup', this._up); }
+
+  /* ---------- date helpers ---------- */
+  mOf(i) {
+    for (let k = MONTHS.length - 1; k >= 0; k--) if (i >= MONTHS[k].start) return k;
+    return 0;
+  }
+  dOf(i) { return i - MONTHS[this.mOf(i)].start + 1; }
+  wdOf(i) { const m = MONTHS[this.mOf(i)]; return WD[(m.offset + (i - m.start)) % 7]; }
+  lab(i) { return this.dOf(i) + ' ' + MONTHS[this.mOf(i)].short; }
+  labLong(i) { return this.dOf(i) + ' ' + MONTHS[this.mOf(i)].name.split(' ')[0].toLowerCase(); }
+  locked(i) { return LOCKED.indexOf(i) !== -1; }
+  wdIdx(i) { const m = MONTHS[this.mOf(i)]; return (m.offset + (i - m.start)) % 7; }
+  weekend(i) { return this.wdIdx(i) >= 5; }
+  holiday(i) { return HOLIDAYS[i] || null; }
+  offday(i) { return this.weekend(i) || !!this.holiday(i); }
+  occ(i) { return (this.props.afficherMissionsExistantes ?? true) ? (OCC[i] || null) : null; }
+  pal(t) {
+    const T = TYPES[t] || TYPES.indispo;
+    const strong = this.props.intensiteSelection === 'contrastée';
+    return {band: strong ? T.hard : T.soft, edge: strong ? T.edgeHard : T.edgeSoft, mark:T.mark, ink:T.ink, on:T.on, dot:T.dot};
+  }
+  cellH() { return this.props.densite === 'compact' ? 58 : 72; }
+
+  /* ---------- range algebra ---------- */
+  merge(rs) {
+    const a = rs.slice().sort((x, y) => x.s - y.s || (x.type < y.type ? -1 : 1));
+    const out = [];
+    a.forEach(r => {
+      const last = out[out.length - 1];
+      if (last && last.type === r.type && r.s <= last.e + 1) last.e = Math.max(last.e, r.e);
+      else out.push({s:r.s, e:r.e, type:r.type});
+    });
+    return out.sort((x, y) => x.s - y.s);
+  }
+  cut(rs, s, e) {
+    const out = [];
+    rs.forEach(r => {
+      if (r.e < s || r.s > e) { out.push(r); return; }
+      if (r.s < s) out.push({s:r.s, e:s - 1, type:r.type});
+      if (r.e > e) out.push({s:e + 1, e:r.e, type:r.type});
+    });
+    return out;
+  }
+  splitLocked(s, e, type) {
+    const out = []; let cur = null;
+    for (let d = Math.min(s, e); d <= Math.max(s, e); d++) {
+      if (this.locked(d)) { if (cur) { out.push(cur); cur = null; } }
+      else if (!cur) cur = {s:d, e:d, type:type};
+      else cur.e = d;
+    }
+    if (cur) out.push(cur);
+    return out;
+  }
+  add(rs, s, e, type) {
+    const a = Math.min(s, e), b = Math.max(s, e);
+    return this.merge(this.cut(rs, a, b).concat(this.splitLocked(a, b, type)));
+  }
+  at(rs, d) { let f = null; rs.forEach(r => { if (d >= r.s && d <= r.e) f = r; }); return f; }
+  toggle(d) {
+    const rs = this.state.ranges, cur = this.at(rs, d), t = this.state.type;
+    const next = (cur && cur.type === t) ? this.cut(rs, d, d) : this.add(rs, d, d, t);
+    this.setState({ranges:this.merge(next), validated:null, anchor:d});
+  }
+  days(rs) { return rs.reduce((n, r) => n + (r.e - r.s + 1), 0); }
+  eff() {
+    const dg = this.state.drag;
+    if (!dg) return this.state.ranges;
+    return this.add(this.state.ranges, dg.from, dg.to, dg.type);
+  }
+
+  /* ---------- month interaction ---------- */
+  visible() { return this.state.view === 'mois' ? 2 : 1; }
+  setPage(p) {
+    const max = MONTHS.length - this.visible();
+    this.setState({page:Math.max(0, Math.min(max, p))});
+  }
+  follow(i) {
+    const mi = this.mOf(i), p = this.state.page, v = this.visible();
+    const want = mi > p + v - 1 ? p + 1 : (mi < p ? p - 1 : p);
+    if (want === p) { this._pendPage = null; return; }
+    const now = Date.now();
+    if (this._pageAt && now - this._pageAt < 900) return;
+    if (this._pendPage !== want) { this._pendPage = want; this._pendAt = now; return; }
+    if (now - this._pendAt < 450) return;
+    this._pageAt = now; this._pendPage = null;
+    this.setPage(want);
+  }
+  onDown(d, e) {
+    if (this.locked(d) || d < 0 || d >= TOTAL) return;
+    e.preventDefault();
+    if (e.currentTarget.setPointerCapture && e.pointerId != null) {
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+    }
+    if (e.shiftKey && this.state.anchor != null) {
+      this.setState({ranges:this.add(this.state.ranges, this.state.anchor, d, this.state.type), drag:null, validated:null});
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey)) {
+      this.setState({ranges:this.merge(this.cut(this.state.ranges, Math.min(d, d), d)), validated:null, drag:null});
+      return;
+    }
+    this._pageAt = null; this._pendPage = null; this._pendAt = null;
+    this.setState({drag:{from:d, to:d, type:this.state.type, moved:false}, validated:null, hint:null});
+  }
+  onMove(d) {
+    const dg = this.state.drag;
+    if (!dg || this.locked(d) || d === dg.to) return;
+    this.setState({drag:Object.assign({}, dg, {to:d, moved:true})});
+    this.follow(d);
+  }
+  onEdge(e) {
+    if (!this.state.drag) return;
+    const r = e.currentTarget.getBoundingClientRect(), band = 56, now = Date.now();
+    const dir = e.clientX < r.left + band ? -1 : (e.clientX > r.right - band ? 1 : 0);
+    if (!dir) { this._edgeAt = 0; return; }
+    if (this._edgeAt && now - this._edgeAt < 340) return;
+    const max = MONTHS.length - this.visible(), p = this.state.page;
+    if ((dir < 0 && p === 0) || (dir > 0 && p >= max)) return;
+    this._edgeAt = now;
+    this.setPage(p + dir);
+  }
+  onGridMove(e) {
+    if (!this.state.drag) return;
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    const host = el && el.closest ? el.closest('[data-day]') : null;
+    if (!host) return;
+    const d = parseInt(host.getAttribute('data-day'), 10);
+    if (!isNaN(d)) this.onMove(d);
+  }
+  commit() {
+    const td = this.state.tdrag;
+    if (td) {
+      const a = Math.min(td.a, td.b), b = Math.max(td.a, td.b);
+      this.setState({slots:this.state.slots.concat([{d:td.d, s:this.fmtT(T0 + a*STEP), e:this.fmtT(T0 + (b + 1)*STEP), type:this.state.type}]), tdrag:null, hint:null, validated:null});
+      return;
+    }
+    const dg = this.state.drag;
+    this._edgeAt = 0;
+    if (!dg) return;
+    if (!dg.moved) { this.setState({drag:null}); this.toggle(dg.from); return; }
+    this.setState({ranges:this.add(this.state.ranges, dg.from, dg.to, dg.type), drag:null, anchor:dg.from, validated:null});
+  }
+
+  /* ---------- time ---------- */
+  pad(n) { return n < 10 ? '0' + n : '' + n; }
+  fmtT(m) { return this.pad(Math.floor(m/60)) + ':' + this.pad(m % 60); }
+  toMin(t) { const p = t.split(':'); return (+p[0])*60 + (+p[1]); }
+  dur(a, b) { const m = this.toMin(b) - this.toMin(a); return 'Durée : ' + Math.floor(m/60) + 'h' + this.pad(m % 60); }
+  rowOf(e) {
+    const r = e.currentTarget.getBoundingClientRect();
+    return Math.max(0, Math.min(NROWS - 1, Math.floor((e.clientY - r.top)/ROWH)));
+  }
+
+  /* ---------- cells ---------- */
+  buildCells(mi, ranges, mobile) {
+    const M = MONTHS[mi], H = mobile ? 48 : this.cellH();
+    const rows = Math.ceil((M.offset + M.days)/7);
+    const dg = this.state.drag;
+    const showBadge = (this.props.afficherBadgesPeriodes ?? true);
+    const periodsOf = {};
+    Object.keys(TYPES).forEach(t => { periodsOf[t] = ranges.filter(r => r.type === t && r.e > r.s); });
+    const out = [];
+    for (let i = 0; i < rows*7; i++) {
+      const rel = i - M.offset, abs = M.start + rel;
+      const outside = rel < 0 || rel >= M.days;
+      if (rel < 0 || abs < 0 || abs >= TOTAL) {
+        out.push({key:'x'+i, abs:'', num:'', rootStyle:{height:H+'px', background: mobile ? 'transparent' : 'var(--surface-sunken)', borderRight: mobile ? 'none' : '1px solid var(--border-subtle)', borderBottom: mobile ? 'none' : '1px solid var(--border-subtle)'}, bandStyle:{display:'none'}, markStyle:{display:'none'}, numStyle:{display:'none'}, badge:null, foot:null, title:''});
+        continue;
+      }
+      const r = this.at(ranges, abs);
+      const sel = !!r, single = sel && r.s === r.e, isS = sel && abs === r.s, isE = sel && abs === r.e;
+      const P = this.pal(sel ? r.type : this.state.type);
+      const lck = this.locked(abs), occ = this.occ(abs);
+      const hov = !mobile && this.state.hover === abs;
+      const prev = !!dg && dg.moved && abs >= Math.min(dg.from, dg.to) && abs <= Math.max(dg.from, dg.to);
+
+      const root = {position:'relative', height:H+'px', background: mobile ? 'transparent' : 'var(--surface-card)', cursor: lck ? 'not-allowed' : 'pointer', userSelect:'none', WebkitUserSelect:'none', touchAction:'none', overflow:'hidden'};
+      if (!mobile) { root.borderRight = '1px solid var(--border-subtle)'; root.borderBottom = '1px solid var(--border-subtle)'; }
+      const off = this.offday(abs), hol = this.holiday(abs);
+      if (off) root.background = mobile ? 'transparent' : 'var(--blue-50)';
+      if (occ && !mobile) root.boxShadow = 'inset 3px 0 0 var(--blue-500)';
+      if (outside && !sel) root.opacity = mobile ? .4 : .62;
+
+      let band = {display:'none'}, mark = {display:'none'};
+      if (sel && !lck) {
+        band = {position:'absolute', top:'6px', bottom:'6px',
+          left: isS ? '6px' : (mobile ? '0' : '-2px'),
+          right: isE ? '6px' : (mobile ? '0' : '-2px'),
+          background:P.band, borderTop:'1px solid '+P.edge, borderBottom:'1px solid '+P.edge, pointerEvents:'none'};
+        const cont = !isS && abs === M.start;
+        if (isS) { band.borderTopLeftRadius = '10px'; band.borderBottomLeftRadius = '10px'; }
+        if (cont) { band.left = '6px'; band.borderTopLeftRadius = '10px'; band.borderBottomLeftRadius = '10px'; band.borderLeft = '1px dashed ' + P.edge; }
+        if (isE) { band.borderTopRightRadius = '10px'; band.borderBottomRightRadius = '10px'; }
+        if (single) { band.border = '1px solid '+P.edge; band.borderRadius = '10px'; }
+        if (prev) { band.borderTopStyle = 'dashed'; band.borderBottomStyle = 'dashed'; }
+        if (isS || isE) {
+          mark = {position:'absolute', top:'6px', bottom:'6px', width:'4px', background:P.mark, pointerEvents:'none'};
+          if (isS) { mark.left = '6px'; mark.borderTopLeftRadius = '10px'; mark.borderBottomLeftRadius = '10px'; }
+          else { mark.right = '6px'; mark.borderTopRightRadius = '10px'; mark.borderBottomRightRadius = '10px'; }
+        }
+      } else if (hov && !lck) {
+        band = {position:'absolute', inset:'6px', borderRadius:'10px', background: off ? 'var(--blue-100)' : 'var(--surface-hover)', border:'1px dashed ' + (off ? 'var(--blue-500)' : 'var(--border-strong)'), pointerEvents:'none'};
+      }
+
+      const chip = sel && !lck && (isS || isE);
+      const num = {position:'relative', display: mobile ? 'flex' : 'inline-flex', alignItems:'center', justifyContent:'center',
+        margin: mobile ? '6px auto 0' : '7px 0 0 ' + (isS ? '13px' : '9px'),
+        width: chip ? (mobile ? '26px' : '25px') : (mobile ? '26px' : 'auto'),
+        height: chip ? (mobile ? '24px' : '25px') : (mobile ? '24px' : 'auto'),
+        borderRadius: chip ? '8px' : (mobile ? '8px' : '0'),
+        background: chip ? P.mark : (mobile && off && !sel ? 'var(--blue-50)' : 'transparent'),
+        fontSize: mobile ? '14px' : '14px',
+        fontWeight: sel ? 700 : (off ? 600 : 500),
+        color: chip ? P.on : (sel ? P.ink : (off ? 'var(--blue-700)' : 'var(--text-body)')),
+        fontVariantNumeric:'tabular-nums'};
+      if (!mobile && !chip) { num.marginLeft = '11px'; num.width = 'auto'; }
+
+      let badge = null;
+      if (sel && showBadge && isS && r.e > r.s && !mobile) {
+        const list = periodsOf[r.type] || [];
+        if (list.length > 1) badge = (r.type === 'garde' ? 'G' : 'P') + (list.indexOf(r) + 1);
+      }
+      let foot = null, footColor = 'var(--text-subtle)';
+      if (occ) { foot = (mobile || sel) ? '•' : occ; footColor = 'var(--blue-700)'; }
+      else if (hol && !mobile) { foot = hol; footColor = 'var(--blue-600)'; }
+
+      out.push({
+        key:'d'+abs, abs:abs, num:this.dOf(abs), rootStyle:root, bandStyle:band, markStyle:mark, numStyle:num,
+        badge:badge,
+        badgeStyle:{position:'absolute', bottom:'7px', right:'9px', padding:'0 4px', borderRadius:'5px', background:'var(--surface-card)', border:'1px solid '+P.mark, color:P.mark, fontSize:'9px', fontWeight:800, letterSpacing:'.03em', lineHeight:'14px', pointerEvents:'none'},
+        foot:foot,
+        footStyle:{position:'absolute', left:0, right:0, bottom: mobile ? '3px' : '6px', padding: mobile ? 0 : '0 9px', fontSize: mobile ? '14px' : '9.5px', lineHeight: mobile ? .5 : 1.2, fontWeight:700, color:footColor, textAlign: mobile ? 'center' : 'left', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', pointerEvents:'none'},
+        title: this.labLong(abs) + (hol ? ' · jour férié (' + hol + ')' : (this.weekend(abs) ? ' · week-end' : '')) + (occ ? ' · mission déjà attribuée (' + occ + ')' : ''),
+        onDown:(e => this.onDown(abs, e)),
+        onEnter: mobile ? null : (() => this.setState({hover:abs}))
+      });
+    }
+    return out;
+  }
+
+  renderVals() {
+    const st = this.state, isWeek = st.view === 'semaine';
+    const ranges = this.eff();
+    const nDays = this.days(ranges);
+    const periods = ranges.filter(r => r.e > r.s);
+    const CP = this.pal(st.type);
+
+    const typeChips = Object.keys(TYPES).map(t => {
+      const on = st.type === t, T = TYPES[t], P = this.pal(t);
+      return {key:t, label:T.label,
+        style:{display:'inline-flex', alignItems:'center', gap:'8px', height:'38px', padding:'0 14px', border:'1px solid ' + (on ? P.mark : 'transparent'), borderRadius:'9px', cursor:'pointer', fontFamily:'var(--font-sans)', fontSize:'13px', fontWeight: on ? 700 : 600, whiteSpace:'nowrap', color: on ? P.ink : 'var(--text-muted)', background: on ? P.band : 'transparent'},
+        dotStyle:{width:'9px', height:'9px', borderRadius:'50%', background:P.dot, opacity: on ? 1 : .45},
+        onClick:(() => this.setState({type:t, validated:null}))};
+    });
+
+    const defs = [
+      {id:'p1', n:'1', label:'Journée unique', ranges:[{s:OCT+14, e:OCT+14, type:'indispo'}], page:1, view:'mois'},
+      {id:'p2', n:'2', label:'Période continue 12 → 16 oct.', ranges:[{s:OCT+11, e:OCT+15, type:'indispo'}], page:1, view:'mois'},
+      {id:'p3', n:'3', label:'Dates non consécutives', ranges:[{s:OCT+11, e:OCT+11, type:'indispo'}, {s:OCT+14, e:OCT+14, type:'indispo'}, {s:OCT+21, e:OCT+21, type:'indispo'}], page:1, view:'mois'},
+      {id:'p4', n:'4', label:'Périodes distinctes + garde', ranges:[{s:OCT+11, e:OCT+13, type:'indispo'}, {s:OCT+19, e:OCT+21, type:'indispo'}, {s:OCT+6, e:OCT+7, type:'garde'}], page:1, view:'mois'},
+      {id:'p5', n:'5', label:'À cheval sur deux mois', ranges:[{s:OCT+27, e:NOV+2, type:'indispo'}], page:1, view:'mois'},
+      {id:'p6', n:'6', label:'Créneaux horaires', page:1, view:'semaine'}
+    ];
+    const presets = defs.map(d => {
+      const on = st.preset === d.id;
+      return {key:d.id, n:d.n, label:d.label,
+        style:{display:'inline-flex', alignItems:'center', gap:'8px', height:'40px', padding:'0 14px 0 10px', borderRadius:'12px', cursor:'pointer', whiteSpace:'nowrap', fontFamily:'var(--font-sans)', fontSize:'13px', fontWeight: on ? 700 : 500, color: on ? 'var(--text-strong)' : 'var(--text-body)', background: on ? 'var(--surface-sunken)' : 'var(--surface-card)', border:'1px solid ' + (on ? 'var(--border-strong)' : 'var(--border-default)')},
+        numStyle:{display:'flex', alignItems:'center', justifyContent:'center', width:'20px', height:'20px', borderRadius:'50%', background: on ? 'var(--text-strong)' : 'var(--gray-100)', color: on ? 'var(--white)' : 'var(--text-muted)', fontSize:'11px', fontWeight:800},
+        onClick:(() => {
+          const o = {preset:d.id, view:d.view, page:d.page, validated:null, hint:null, drag:null};
+          if (d.ranges) { o.ranges = this.merge(d.ranges); o.anchor = d.ranges[0].s; }
+          this.setState(o);
+        })};
+    });
+
+    /* summary */
+    let count = '0', title = 'Aucune date sélectionnée', sub = 'Sélectionnez dans le calendrier';
+    if (isWeek) {
+      const n = st.slots.length;
+      count = '' + n;
+      title = n === 1 ? 'créneau sélectionné' : 'créneaux sélectionnés';
+      sub = n ? 'Sur ' + new Set(st.slots.map(s => s.d)).size + ' journée(s) · semaine du 12 au 18 octobre' : 'Glissez verticalement dans une colonne';
+    } else if (ranges.length) {
+      if (periods.length === 0) {
+        count = '' + nDays;
+        title = nDays === 1 ? 'date sélectionnée' : 'dates sélectionnées';
+        sub = 'Dates isolées';
+      } else if (periods.length === ranges.length) {
+        count = '' + ranges.length;
+        title = ranges.length === 1 ? 'période sélectionnée' : 'périodes sélectionnées';
+        sub = nDays + ' jours au total';
+      } else {
+        count = '' + ranges.length;
+        title = 'sélections';
+        sub = periods.length + ' période(s) · ' + (ranges.length - periods.length) + ' date(s) isolée(s) · ' + nDays + ' jours';
+      }
+    }
+
+    const groups = [];
+    if (isWeek) {
+      Object.keys(TYPES).forEach(t => {
+        const sl = st.slots.filter(s => s.type === t);
+        if (!sl.length) return;
+        const P = this.pal(t);
+        groups.push({key:t, title:TYPES[t].label, ink:P.ink, dotStyle:{width:'9px', height:'9px', borderRadius:'50%', background:P.dot},
+          items:sl.map((s, i) => ({key:t+i,
+            style:{display:'flex', alignItems:'center', gap:'10px', padding:'9px 10px', background:'var(--surface-card)', border:'1px solid var(--border-subtle)', borderRadius:'12px'},
+            dot:'' + (i + 1),
+            dotStyle:{flex:'none', display:'flex', alignItems:'center', justifyContent:'center', width:'24px', height:'22px', borderRadius:'7px', background:P.band, color:P.ink, fontSize:'11px', fontWeight:800},
+            label:this.wdOf(s.d) + ' ' + this.lab(s.d) + ' — ' + (s.allDay ? 'journée entière' : s.s + ' → ' + s.e),
+            sub:s.allDay ? 'Jour complet' : this.dur(s.s, s.e),
+            onRemove:(() => this.setState({slots:st.slots.filter(x => x !== s), validated:null}))}))});
+      });
+    } else {
+      Object.keys(TYPES).forEach(t => {
+        const rs = ranges.filter(r => r.type === t);
+        if (!rs.length) return;
+        const P = this.pal(t), ps = rs.filter(r => r.e > r.s);
+        const nd = this.days(rs);
+        const head = ps.length === rs.length
+          ? rs.length + (rs.length > 1 ? ' périodes' : ' période') + ' · ' + nd + ' jours'
+          : nd + (nd > 1 ? ' dates' : ' date');
+        groups.push({key:t, title:TYPES[t].label + ' — ' + head, ink:P.ink,
+          dotStyle:{width:'9px', height:'9px', borderRadius:'50%', background:P.dot},
+          items:rs.map(r => ({key:t+r.s,
+            style:{display:'flex', alignItems:'center', gap:'10px', padding:'9px 10px', background: r.e > r.s ? P.band : 'var(--surface-card)', border:'1px solid ' + (r.e > r.s ? P.edge : 'var(--border-subtle)'), borderRadius:'12px'},
+            dot: r.e > r.s ? ((t === 'garde' ? 'G' : 'P') + (ps.indexOf(r) + 1)) : '·',
+            dotStyle:{flex:'none', display:'flex', alignItems:'center', justifyContent:'center', width:'26px', height:'22px', borderRadius:'7px', background: r.e > r.s ? P.mark : 'var(--gray-100)', color: r.e > r.s ? P.on : 'var(--text-muted)', fontSize:'10.5px', fontWeight:800},
+            label: r.s === r.e ? this.labLong(r.s) : this.lab(r.s) + ' → ' + this.labLong(r.e),
+            sub: r.s === r.e ? this.wdOf(r.s) : this.wdOf(r.s) + ' → ' + this.wdOf(r.e) + ' · ' + (r.e - r.s + 1) + ' jours',
+            onRemove:(() => this.setState({ranges:this.cut(st.ranges, r.s, r.e), validated:null}))}))});
+      });
+    }
+
+    const conflicts = isWeek ? [] : ranges.reduce((acc, r) => {
+      for (let d = r.s; d <= r.e; d++) if (this.occ(d)) acc.push(d);
+      return acc;
+    }, []).sort((x, y) => x - y).map(d => this.lab(d));
+
+    /* month panels */
+    const v = 2;
+    const mk = (mobile) => MONTHS.map((M, i) => ({
+      key:'m'+i, name:M.name, note: i === 1 ? '31 jours' : '',
+      panelStyle:{flex:'0 0 ' + (100/MONTHS.length) + '%', minWidth:0, paddingRight: mobile ? 0 : '10px', paddingLeft: mobile ? 0 : '10px'},
+      titleStyle:{fontSize:'14.5px', fontWeight:800, letterSpacing:'-0.01em', color:'var(--text-strong)'},
+      cells:this.buildCells(i, ranges, mobile)
+    }));
+
+    /* week view */
+    const hours = [];
+    for (let h = 7; h <= 20; h++) hours.push(this.pad(h) + ':00');
+    const weekHeads = WEEK.map(d => ({key:'h'+d, wd:this.wdOf(d), num:'' + this.dOf(d),
+      numStyle:{marginTop:'2px', fontSize:'15px', fontWeight: st.slots.some(s => s.d === d) ? 800 : 600, color: st.slots.some(s => s.d === d) ? 'var(--text-strong)' : (this.offday(d) ? 'var(--blue-700)' : 'var(--text-body)'), fontVariantNumeric:'tabular-nums'}}));
+
+    const dayCols = WEEK.map(d => {
+      const lck = this.locked(d), off = this.offday(d), blocks = [];
+      const mk2 = (top, h, kind, time, sub, onRemove, P) => ({
+        key:kind + d + top,
+        style:{position:'absolute', left:'3px', right:'3px', top:top+'px', height:h+'px', padding:'6px 8px', borderRadius:'9px',
+          background: kind === 'occ' ? 'var(--status-info-surface)' : P.band,
+          border:'1px ' + (kind === 'preview' ? 'dashed' : 'solid') + ' ' + (kind === 'occ' ? 'var(--blue-100)' : P.edge),
+          borderLeft:'4px solid ' + (kind === 'occ' ? 'var(--accent)' : P.mark),
+          overflow:'hidden', pointerEvents: kind === 'slot' ? 'auto' : 'none'},
+        timeStyle:{paddingRight: kind === 'slot' ? '22px' : 0, fontSize:'11.5px', fontWeight:800, color: kind === 'occ' ? 'var(--blue-700)' : P.ink, fontVariantNumeric:'tabular-nums'},
+        subStyle:{marginTop:'2px', fontSize:'10.5px', fontWeight:600, color: kind === 'occ' ? 'var(--blue-600)' : P.ink, opacity: kind === 'occ' ? 1 : .8, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis'},
+        time:time, sub:sub, onRemove:onRemove || null, stop:(e => e.stopPropagation())
+      });
+      st.slots.forEach(s => {
+        if (s.d !== d) return;
+        const P = this.pal(s.type);
+        const rm = () => this.setState({slots:st.slots.filter(x => x !== s), validated:null});
+        if (s.allDay) blocks.push(mk2(0, NROWS*ROWH - 2, 'slot', 'Journée entière', TYPES[s.type].label + ' · jour complet', rm, P));
+        else {
+          const top = (this.toMin(s.s) - T0)/STEP*ROWH, h = (this.toMin(s.e) - this.toMin(s.s))/STEP*ROWH;
+          blocks.push(mk2(top, h - 2, 'slot', s.s + ' → ' + s.e, this.dur(s.s, s.e), rm, P));
+        }
+      });
+      if (d === OCT + 13 && (this.props.afficherMissionsExistantes ?? true)) {
+        const top = (this.toMin('07:30') - T0)/STEP*ROWH, h = (this.toMin('15:00') - this.toMin('07:30'))/STEP*ROWH;
+        blocks.push(mk2(top, h - 2, 'occ', '07:30 → 15:00', 'CHIREC · Delta', null, CP));
+      }
+      const td = st.tdrag;
+      if (td && td.d === d) {
+        const a = Math.min(td.a, td.b), b = Math.max(td.a, td.b);
+        blocks.push(mk2(a*ROWH, (b - a + 1)*ROWH - 2, 'preview', this.fmtT(T0 + a*STEP) + ' → ' + this.fmtT(T0 + (b + 1)*STEP), 'Glissez pour ajuster', null, CP));
+      }
+      return {key:'c'+d, blocks:blocks,
+        style:{position:'relative', height:(NROWS*ROWH)+'px', borderRight:'1px solid var(--border-subtle)', cursor: lck ? 'not-allowed' : 'ns-resize', userSelect:'none',
+          background: 'repeating-linear-gradient(to bottom, ' + (off ? 'var(--blue-50)' : 'var(--surface-card)') + ' 0 ' + (ROWH-1) + 'px, ' + (off ? 'var(--blue-100)' : 'var(--gray-100)') + ' ' + (ROWH-1) + 'px ' + ROWH + 'px, ' + (off ? 'var(--blue-50)' : 'var(--surface-card)') + ' ' + ROWH + 'px ' + (2*ROWH-1) + 'px, ' + (off ? 'var(--blue-100)' : 'var(--border-subtle)') + ' ' + (2*ROWH-1) + 'px ' + (2*ROWH) + 'px)'},
+        onDown: lck ? null : (e => { e.preventDefault();
+          if (st.type === 'indispo') {
+            const has = st.slots.some(s => s.d === d && s.allDay);
+            this.setState({slots: has ? st.slots.filter(s => !(s.d === d && s.allDay)) : st.slots.filter(s => s.d !== d).concat([{d:d, allDay:true, type:'indispo'}]), validated:null, hint:null});
+            return;
+          }
+          const i = this.rowOf(e); this.setState({tdrag:{d:d, a:i, b:i}, validated:null}); }),
+        onMove: lck ? null : (e => { if (st.type === 'indispo' || !st.tdrag || st.tdrag.d !== d) return; this.setState({tdrag:{d:d, a:st.tdrag.a, b:this.rowOf(e)}}); })};
+    });
+
+    const arrow = (dis) => ({width:'32px', height:'32px', display:'flex', alignItems:'center', justifyContent:'center', border:'1px solid var(--border-default)', borderRadius:'9px', background:'var(--surface-card)', color: dis ? 'var(--text-subtle)' : 'var(--text-body)', fontSize:'16px', fontWeight:700, cursor: dis ? 'default' : 'pointer', opacity: dis ? .5 : 1});
+
+    const mPeriods = ranges.filter(r => r.e > r.s);
+    const mBarTitle = ranges.length
+      ? (mPeriods.length === ranges.length
+        ? ranges.length + (ranges.length > 1 ? ' périodes sélectionnées' : ' période sélectionnée')
+        : nDays + (nDays > 1 ? ' dates sélectionnées' : ' date sélectionnée'))
+      : 'Aucune date sélectionnée';
+
+    return {
+      view:st.view, isMonth:!isWeek, isWeek:isWeek,
+      viewTabs:[{id:'mois', label:'Mois'}, {id:'semaine', label:'Semaine · horaires'}],
+      setView:(x => this.setState({view:x, validated:null, hint:null, preset: x === 'semaine' ? 'p6' : 'p4'})),
+      periodLabel: isWeek ? 'Semaine du 12 au 18 octobre 2026' : (function () {
+        const a = MONTHS[st.page], b = MONTHS[Math.min(MONTHS.length - 1, st.page + 1)];
+        return (a.y === b.y ? a.name.split(' ')[0] : a.name) + ' — ' + b.name;
+      })(),
+      prevStyle:arrow(st.page === 0), nextStyle:arrow(st.page >= MONTHS.length - this.visible()),
+      prevPage:(() => this.setPage(st.page - 1)), nextPage:(() => this.setPage(st.page + 1)),
+      trackStyle:{display:'flex', width:(MONTHS.length*50)+'%', transform:'translateX(-' + (st.page*(100/MONTHS.length)) + '%)', transition:'transform var(--dur-base) var(--ease-out)', alignItems:'flex-start'},
+      mTrackStyle:{display:'flex', width:(MONTHS.length*100)+'%', transform:'translateX(-' + (st.page*(100/MONTHS.length)) + '%)', transition:'transform var(--dur-base) var(--ease-out)'},
+      months:mk(false), mMonths:mk(true), mMonthName:MONTHS[st.page].name,
+      onGridMove:(e => this.onGridMove(e)), onEdge:(e => this.onEdge(e)),
+      clearHover:(() => this.setState({hover:null})),
+      typeChips:typeChips, presets:presets,
+      legend:[
+        {key:'l1', label:'Survolée', swatch:{width:'17px', height:'17px', borderRadius:'5px', background:'var(--surface-hover)', border:'1px dashed var(--border-strong)'}},
+        {key:'l2', label:'Date isolée', swatch:{width:'17px', height:'17px', borderRadius:'5px', background:CP.band, border:'1px solid '+CP.edge, boxShadow:'inset 3px 0 0 '+CP.mark}},
+        {key:'l4', label:'Période', swatch:{width:'17px', height:'17px', background:CP.band, borderTop:'1px solid '+CP.edge, borderBottom:'1px solid '+CP.edge}},
+        {key:'l6', label:'Indisponibilité', swatch:{width:'17px', height:'17px', borderRadius:'5px', background:TYPES.indispo.soft, border:'1px solid '+TYPES.indispo.mark}},
+        {key:'l7', label:'Préférence de garde', swatch:{width:'17px', height:'17px', borderRadius:'5px', background:TYPES.garde.soft, border:'1px solid '+TYPES.garde.mark}},
+        {key:'l8', label:'Jour déjà occupé', swatch:{width:'17px', height:'17px', borderRadius:'5px', background:'var(--surface-card)', border:'1px solid var(--border-subtle)', boxShadow:'inset 3px 0 0 var(--blue-500)'}},
+        {key:'l9', label:'Week-end · jour férié', swatch:{width:'17px', height:'17px', borderRadius:'5px', background:'var(--blue-50)', border:'1px solid var(--blue-100)'}}
+      ],
+      hours:hours, weekHeads:weekHeads, dayCols:dayCols,
+      weekHelp: st.type === 'indispo'
+        ? 'Une indisponibilité couvre toujours la journée entière : un clic dans la colonne bloque le jour complet, un second le libère. Passez en « Préférence de garde » pour tracer des créneaux horaires.'
+        : 'Glissez verticalement dans une colonne pour tracer un créneau (pas de 30 min) · Un clic simple pose 30 min · Chaque nouveau glisser ajoute un créneau · Les blocs bleus sont des missions déjà attribuées',
+      summaryCount:count,
+      summaryCountStyle:{fontSize:'30px', fontWeight:800, letterSpacing:'-0.03em', color: (isWeek ? st.slots.length : ranges.length) ? CP.mark : 'var(--text-subtle)', fontVariantNumeric:'tabular-nums', lineHeight:1},
+      summaryTitle:title, summarySub:sub,
+      groups:groups, isEmpty: isWeek ? st.slots.length === 0 : ranges.length === 0,
+      conflictNote: conflicts.length ? 'Chevauchement : le ' + conflicts.join(', le ') + (conflicts.length > 1 ? ' comportent' : ' comporte') + ' déjà une mission attribuée. La déclaration partira comme demande à confirmer.' : null,
+      hint:st.hint, validated:st.validated,
+      addLabel: isWeek ? (st.type === 'indispo' ? '+ Ajouter un jour complet' : '+ Ajouter un autre créneau') : '+ Ajouter une période',
+      addPeriod:(() => this.setState({hint: isWeek
+        ? (st.type === 'indispo' ? 'Les indisponibilités se déclarent par jour entier : cliquez sur la colonne du jour à bloquer.' : 'Glissez verticalement dans une colonne : le créneau s’ajoute aux précédents.')
+        : 'Glissez sur les jours voulus : chaque glisser crée une période supplémentaire, la sélection actuelle est conservée.', validated:null})),
+      clearAll:(() => this.setState({ranges:[], slots:[], hint:null, validated:null, anchor:null, drag:null})),
+      validateLabel: isWeek
+        ? (st.slots.length ? 'Valider ' + st.slots.length + ' créneau(x)' : 'Valider la sélection')
+        : (nDays ? 'Valider ' + nDays + ' jour' + (nDays > 1 ? 's' : '') : 'Valider la sélection'),
+      validate:(() => this.setState({validated: isWeek
+        ? (st.slots.length ? st.slots.length + ' créneau(x) transmis. Vous recevrez une confirmation par notification.' : 'Sélectionnez au moins un créneau avant de valider.')
+        : (nDays ? 'Déclaration transmise : ' + nDays + ' jour(s) sur ' + ranges.length + ' sélection(s).' : 'Sélectionnez au moins une date avant de valider.')})),
+      isGarde: st.type === 'garde',
+      toggleType:(() => this.setState({type: st.type === 'garde' ? 'indispo' : 'garde', validated:null})),
+      mSwitchLabel: TYPES[st.type].label,
+      mSwitchHelp: st.type === 'garde'
+        ? 'Les dates touchées seront proposées en priorité pour une garde.'
+        : 'Les dates touchées seront déclarées comme non travaillables.',
+      mSwitchStyle:{padding:'12px 14px', background:CP.band, border:'1px solid '+CP.edge, borderRadius:'12px'},
+      mChips:ranges.map(r => ({key:'c'+r.s,
+        style:{display:'inline-flex', alignItems:'center', gap:'6px', height:'30px', padding:'0 9px 0 10px', whiteSpace:'nowrap', background:this.pal(r.type).band, border:'1px solid '+this.pal(r.type).mark, borderRadius:'999px', fontFamily:'var(--font-sans)', fontSize:'12px', fontWeight:700, color:this.pal(r.type).ink, fontVariantNumeric:'tabular-nums', cursor:'pointer'},
+        label: r.s === r.e ? this.lab(r.s) : this.lab(r.s) + ' → ' + this.lab(r.e),
+        onRemove:(() => this.setState({ranges:this.cut(st.ranges, r.s, r.e), validated:null}))})),
+      mBarTitle:mBarTitle,
+      mBarSub: ranges.length ? ranges.map(r => r.s === r.e ? this.lab(r.s) : this.dOf(r.s) + '→' + this.lab(r.e)).join(' · ') : 'Touchez le calendrier pour commencer',
+      navItems:[{id:'aujourdhui', label:"Aujourd'hui"}, {id:'offres', label:'Offres'}, {id:'planning', label:'Planning'}, {id:'profil', label:'Profil'}],
+      steps:[
+        {key:'s1', n:'1', title:'Un tap', body:'ajoute la journée ; un second tap la retire. Aucun mode à activer.'},
+        {key:'s2', n:'2', title:'Appui et glisser', body:'trace une période continue, exactement comme le clic-glisser au bureau.'},
+        {key:'s3', n:'3', title:'Glisser vers le bord', body:'fait défiler le calendrier vers le mois suivant, sans lâcher : une période peut franchir le changement de mois.'},
+        {key:'s4', n:'4', title:'Le switch', body:'bascule entre indisponibilité (rouge) et préférence de garde (vert) ; la barre basse garde le compteur, Effacer et Continuer au pouce.'}
+      ]
+    };
+  }
+}
+
+</script>
+</body>
+</html>

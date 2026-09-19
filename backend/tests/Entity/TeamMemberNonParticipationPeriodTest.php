@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace App\Tests\Entity;
 
-use App\Entity\Team;
-use App\Entity\TeamMember;
+use App\Entity\Planning;
+use App\Entity\PlanningTeam;
+use App\Entity\PlanningTeamMember;
 use App\Entity\TeamMemberNonParticipationPeriod;
 use App\Entity\TeamMemberRole;
 use App\Entity\User;
@@ -13,10 +14,18 @@ use PHPUnit\Framework\TestCase;
 
 final class TeamMemberNonParticipationPeriodTest extends TestCase
 {
-    private function newTeamMember(): TeamMember
+    private function newTeamMember(): PlanningTeamMember
     {
-        return new TeamMember(
-            new Team('Cardiology', 'cardiology'),
+        $planning = new Planning(
+            'Test Planning',
+            new User('creator@example.com', 'Creator', 'User', 'hash'),
+            new \DateTimeImmutable('2026-01-01'),
+            new \DateTimeImmutable('2028-01-01'),
+            'Europe/Brussels',
+        );
+
+        return new PlanningTeamMember(
+            new PlanningTeam($planning, 'Cardiology'),
             new User('a@example.com', 'A', 'User', 'hash'),
             TeamMemberRole::MEMBER,
             new \DateTimeImmutable('2026-01-01'),

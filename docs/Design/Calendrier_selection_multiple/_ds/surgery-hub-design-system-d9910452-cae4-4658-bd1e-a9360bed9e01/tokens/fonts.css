@@ -1,0 +1,9 @@
+/* ============================================================
+   Surgery Hub — Webfonts
+   ------------------------------------------------------------
+   Brand typeface is Inter (matches the production app, which is
+   React + TypeScript + MUI). Loaded from Google Fonts.
+   Replace with a self-hosted Inter if you need offline support.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');

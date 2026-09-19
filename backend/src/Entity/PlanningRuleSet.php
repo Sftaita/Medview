@@ -10,7 +10,7 @@ use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Uid\Uuid;
 
 /**
- * One versioned snapshot of a Team's planning rules (docs/decisions.md
+ * One versioned snapshot of a PlanningTeam's planning rules (docs/decisions.md
  * D039, docs/allocation-algorithm.md §14). $version is a per-team,
  * human-friendly sequence number ("this team's 3rd ruleset") — not
  * globally unique, so it is never what a PlanningGeneration should record
@@ -20,9 +20,9 @@ use Symfony\Component\Uid\Uuid;
  * Immutability is enforced by the entity itself, not just documented:
  * $configuration can only change while $status is DRAFT.
  * activate()/retire() are one-way; there is no path back to DRAFT. At
- * most one ACTIVE PlanningRuleSet may exist per Team at a time — enforced
+ * most one ACTIVE PlanningRuleSet may exist per PlanningTeam at a time — enforced
  * by a partial unique index (see migrations), the same technique used for
- * TeamMember's single-open-membership invariant.
+ * PlanningTeamMember's single-open-membership-per-Planning invariant.
  */
 #[ORM\Entity(repositoryClass: PlanningRuleSetRepository::class)]
 #[ORM\Table(name: 'planning_rule_sets')]
@@ -38,9 +38,9 @@ class PlanningRuleSet
     #[ORM\Column(type: 'uuid')]
     private Uuid $stableId;
 
-    #[ORM\ManyToOne(targetEntity: Team::class)]
+    #[ORM\ManyToOne(targetEntity: PlanningTeam::class)]
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
-    private Team $team;
+    private PlanningTeam $team;
 
     #[ORM\Column]
     private int $version;
@@ -71,7 +71,7 @@ class PlanningRuleSet
      * @param array<string, mixed> $configuration
      */
     public function __construct(
-        Team $team,
+        PlanningTeam $team,
         int $version,
         \DateTimeImmutable $effectiveFrom,
         array $configuration,
@@ -98,7 +98,7 @@ class PlanningRuleSet
         return $this->stableId;
     }
 
-    public function getTeam(): Team
+    public function getTeam(): PlanningTeam
     {
         return $this->team;
     }

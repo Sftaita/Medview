@@ -17,8 +17,8 @@ use App\Repository\PlanningSnapshotRuleSetRepository;
 use App\Service\ParticipationPeriodService;
 use App\Service\PlanningRuleSetService;
 use App\Service\PlanningSnapshotService;
+use App\Service\PlanningTeamMembershipService;
 use App\Service\TeamMemberNonParticipationService;
-use App\Service\TeamMembershipService;
 use App\Service\UserAvailabilityService;
 use App\Tests\PlanningDomainTestHelpers;
 use App\Tests\PlanningGenerationTestHelpers;
@@ -35,7 +35,7 @@ final class PlanningSnapshotServiceTest extends KernelTestCase
         self::bootKernel();
         $em = self::getContainer()->get(EntityManagerInterface::class);
         $snapshotService = self::getContainer()->get(PlanningSnapshotService::class);
-        $membershipService = self::getContainer()->get(TeamMembershipService::class);
+        $membershipService = self::getContainer()->get(PlanningTeamMembershipService::class);
         $ruleSetService = self::getContainer()->get(PlanningRuleSetService::class);
         $memberRepository = self::getContainer()->get(PlanningSnapshotMemberRepository::class);
 
@@ -67,7 +67,7 @@ final class PlanningSnapshotServiceTest extends KernelTestCase
         self::bootKernel();
         $em = self::getContainer()->get(EntityManagerInterface::class);
         $snapshotService = self::getContainer()->get(PlanningSnapshotService::class);
-        $membershipService = self::getContainer()->get(TeamMembershipService::class);
+        $membershipService = self::getContainer()->get(PlanningTeamMembershipService::class);
         $ruleSetService = self::getContainer()->get(PlanningRuleSetService::class);
         $availabilityService = self::getContainer()->get(UserAvailabilityService::class);
 
@@ -103,7 +103,7 @@ final class PlanningSnapshotServiceTest extends KernelTestCase
         self::bootKernel();
         $em = self::getContainer()->get(EntityManagerInterface::class);
         $snapshotService = self::getContainer()->get(PlanningSnapshotService::class);
-        $membershipService = self::getContainer()->get(TeamMembershipService::class);
+        $membershipService = self::getContainer()->get(PlanningTeamMembershipService::class);
         $ruleSetService = self::getContainer()->get(PlanningRuleSetService::class);
         $nonParticipationService = self::getContainer()->get(TeamMemberNonParticipationService::class);
 
@@ -175,7 +175,7 @@ final class PlanningSnapshotServiceTest extends KernelTestCase
         self::bootKernel();
         $em = self::getContainer()->get(EntityManagerInterface::class);
         $snapshotService = self::getContainer()->get(PlanningSnapshotService::class);
-        $membershipService = self::getContainer()->get(TeamMembershipService::class);
+        $membershipService = self::getContainer()->get(PlanningTeamMembershipService::class);
         $ruleSetService = self::getContainer()->get(PlanningRuleSetService::class);
 
         $team = $this->createTeam($em);
@@ -204,7 +204,7 @@ final class PlanningSnapshotServiceTest extends KernelTestCase
         self::bootKernel();
         $em = self::getContainer()->get(EntityManagerInterface::class);
         $snapshotService = self::getContainer()->get(PlanningSnapshotService::class);
-        $membershipService = self::getContainer()->get(TeamMembershipService::class);
+        $membershipService = self::getContainer()->get(PlanningTeamMembershipService::class);
         $ruleSetService = self::getContainer()->get(PlanningRuleSetService::class);
 
         $teamA = $this->createTeam($em, 'Cardiology');
@@ -234,7 +234,7 @@ final class PlanningSnapshotServiceTest extends KernelTestCase
         self::bootKernel();
         $em = self::getContainer()->get(EntityManagerInterface::class);
         $snapshotService = self::getContainer()->get(PlanningSnapshotService::class);
-        $membershipService = self::getContainer()->get(TeamMembershipService::class);
+        $membershipService = self::getContainer()->get(PlanningTeamMembershipService::class);
         $ruleSetService = self::getContainer()->get(PlanningRuleSetService::class);
         $availabilityService = self::getContainer()->get(UserAvailabilityService::class);
         $participationPeriodService = self::getContainer()->get(ParticipationPeriodService::class);
@@ -299,7 +299,7 @@ final class PlanningSnapshotServiceTest extends KernelTestCase
         self::bootKernel();
         $em = self::getContainer()->get(EntityManagerInterface::class);
         $snapshotService = self::getContainer()->get(PlanningSnapshotService::class);
-        $membershipService = self::getContainer()->get(TeamMembershipService::class);
+        $membershipService = self::getContainer()->get(PlanningTeamMembershipService::class);
         $ruleSetService = self::getContainer()->get(PlanningRuleSetService::class);
         $participationPeriodService = self::getContainer()->get(ParticipationPeriodService::class);
 

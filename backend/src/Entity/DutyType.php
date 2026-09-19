@@ -9,9 +9,9 @@ use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Uid\Uuid;
 
 /**
- * A team's own catalogue entry for a kind of duty (e.g. DAY, NIGHT,
- * ON_CALL) — deliberately not a global application-wide enum, since each
- * team defines its own set (docs/allocation-algorithm.md §5/§X).
+ * A PlanningTeam's own catalogue entry for a kind of duty (e.g. DAY,
+ * NIGHT, ON_CALL) — deliberately not a global application-wide enum, since
+ * each team defines its own set (docs/allocation-algorithm.md §5/§X).
  *
  * $workloadValue drives the WEIGHTED_WORKLOAD fairness dimension
  * (requiredDemand(WEIGHTED_WORKLOAD) = Σ dutyType.workloadValue over
@@ -40,13 +40,13 @@ class DutyType
     #[ORM\Column(type: 'uuid')]
     private Uuid $stableId;
 
-    #[ORM\ManyToOne(targetEntity: Team::class)]
+    #[ORM\ManyToOne(targetEntity: PlanningTeam::class)]
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
-    private Team $team;
+    private PlanningTeam $team;
 
     /**
-     * Stable within a Team, unique within a Team — the same code may be
-     * reused freely by a different Team.
+     * Stable within a PlanningTeam, unique within a PlanningTeam — the same
+     * code may be reused freely by a different PlanningTeam.
      */
     #[ORM\Column(length: 50)]
     private string $code;
@@ -66,7 +66,7 @@ class DutyType
     #[ORM\Column]
     private \DateTimeImmutable $updatedAt;
 
-    public function __construct(Team $team, string $code, string $name, float $workloadValue = 1.0)
+    public function __construct(PlanningTeam $team, string $code, string $name, float $workloadValue = 1.0)
     {
         if ($workloadValue <= 0) {
             throw new \InvalidArgumentException('workloadValue must be strictly positive.');
@@ -91,7 +91,7 @@ class DutyType
         return $this->stableId;
     }
 
-    public function getTeam(): Team
+    public function getTeam(): PlanningTeam
     {
         return $this->team;
     }

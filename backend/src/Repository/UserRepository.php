@@ -10,6 +10,7 @@ use Doctrine\Persistence\ManagerRegistry;
 use Symfony\Component\Security\Core\Exception\UnsupportedUserException;
 use Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface;
 use Symfony\Component\Security\Core\User\PasswordUpgraderInterface;
+use Symfony\Component\Uid\Uuid;
 
 /**
  * @extends ServiceEntityRepository<User>
@@ -24,6 +25,17 @@ class UserRepository extends ServiceEntityRepository implements PasswordUpgrader
     public function findOneByEmail(string $email): ?User
     {
         return $this->findOneBy(['email' => $email]);
+    }
+
+    public function findOneByStableId(string $stableId): ?User
+    {
+        try {
+            $uuid = Uuid::fromString($stableId);
+        } catch (\InvalidArgumentException) {
+            return null;
+        }
+
+        return $this->findOneBy(['stableId' => $uuid]);
     }
 
     /**

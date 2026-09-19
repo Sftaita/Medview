@@ -12,8 +12,8 @@ use App\Exception\InvalidDutyAssignmentException;
 use App\Exception\PlanningGenerationNotSnapshottedException;
 use App\Repository\DutyRepository;
 use App\Repository\PlanningGenerationRepository;
-use App\Repository\TeamMemberRepository;
-use App\Security\Voter\TeamRoleVoter;
+use App\Repository\PlanningTeamMemberRepository;
+use App\Security\Voter\PlanningTeamRoleVoter;
 use App\Service\DutyAssignmentService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -25,7 +25,7 @@ use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 /**
  * Manual duty assignments within a PlanningGeneration (docs/planning-generation.md
- * §17-18). Only OWNER/ADMIN may create one (TeamRoleVoter::MANAGE_PLANNING)
+ * §17-18). Only OWNER/ADMIN may create one (PlanningTeamRoleVoter::MANAGE_PLANNING)
  * — the underlying invariants (Duty/TeamMember consistency, no duplicate)
  * are enforced by DutyAssignmentService, not here. No eligibility check
  * (availability, spacing, fairness) exists yet — a later lot's
@@ -36,7 +36,7 @@ final class DutyAssignmentController
     public function __construct(
         private readonly PlanningGenerationRepository $generationRepository,
         private readonly DutyRepository $dutyRepository,
-        private readonly TeamMemberRepository $teamMemberRepository,
+        private readonly PlanningTeamMemberRepository $teamMemberRepository,
         private readonly DutyAssignmentService $service,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
         private readonly ValidatorInterface $validator,
@@ -48,7 +48,7 @@ final class DutyAssignmentController
     {
         $generation = $this->resolveGeneration($generationStableId);
 
-        if (!$this->authorizationChecker->isGranted(TeamRoleVoter::MANAGE_PLANNING, $generation->getPlanningPeriod()->getTeam())) {
+        if (!$this->authorizationChecker->isGranted(PlanningTeamRoleVoter::MANAGE_PLANNING, $generation->getPlanningPeriod()->getTeam())) {
             throw new AccessDeniedHttpException('Only an OWNER or ADMIN of this team can create duty assignments.');
         }
 

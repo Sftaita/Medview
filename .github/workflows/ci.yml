@@ -39,6 +39,15 @@ jobs:
           extensions: pdo_pgsql, intl, zip
           coverage: none
 
+      # OrToolsPlanningSolver (docs/planning-solver.md) shells out to this
+      # exact venv path — mirrors backend/Dockerfile so CI and the dev
+      # container behave identically. OR-Tools has no official PHP
+      # bindings (docs/decisions.md D031), hence the subprocess.
+      - name: Install OR-Tools CP-SAT (Python)
+        run: |
+          sudo python3 -m venv /opt/ortools-venv
+          sudo /opt/ortools-venv/bin/pip install --no-cache-dir ortools==9.15.6755
+
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist
 

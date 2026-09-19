@@ -92,6 +92,47 @@ l'ancienne (voir légende).
 | [D063](#d063--concurrence-du-snapshotassignment-par-statut--contrainte-unique-pas-par-hash) | 2026-09-16 | Concurrence du snapshot/assignment par statut + contrainte unique, pas par hash | 🟢 |
 | [D064](#d064--duty-non-dupliquée-dans-le-snapshot-confirmé-par-lecture-du-code) | 2026-09-16 | `Duty` non dupliquée dans le snapshot, confirmé par lecture du code | 🟢 |
 | [D065](#d065--pas-de-fk-composite-pour-les-invariants-teamplanningperiod-de-dutyassignment) | 2026-09-16 | Pas de FK composite pour les invariants Team/PlanningPeriod de `DutyAssignment` | 🟡 |
+| [D066](#d066--nouveau-namespace-srceligibility-pour-le-modèle-métier-déligibilité) | 2026-09-16 | Nouveau namespace `src/Eligibility/` pour le modèle métier d'éligibilité | 🟢 |
+| [D067](#d067--planningsnapshotmemberactive--extension-du-snapshot-pour-user_inactive) | 2026-09-16 | `PlanningSnapshotMember.active` : extension du snapshot pour `USER_INACTIVE` | 🟢 |
+| [D068](#d068--eligibilityresulteligibilityexclusion--champs-dérivés-jamais-indépendants) | 2026-09-16 | `EligibilityResult`/`EligibilityExclusion` : champs dérivés, jamais indépendants | 🟢 |
+| [D069](#d069--group_unavailable-nemballe-que-unavailablenon_participation-jamais-membership_out_of_range) | 2026-09-16 | `GROUP_UNAVAILABLE` n'emballe que `UNAVAILABLE`/`NON_PARTICIPATION`, jamais `MEMBERSHIP_OUT_OF_RANGE` | 🟢 |
+| [D070](#d070--conflict-reporté-malgré-lexistence-de-dutyassignment) | 2026-09-16 | `CONFLICT` reporté malgré l'existence de `DutyAssignment` | 🟡 |
+| [D071](#d071--planningcreator-seul-manager-en-v1-via-planningvoter-séparé) | 2026-09-16 | `Planning.creator` seul manager en v1, via `PlanningVoter` séparé | 🟢 |
+| [D072](#d072--teammember--au-plus-une-team-active-par-user-plus-par-team-user) | 2026-09-16 | `TeamMember` : au plus une Team active par User (plus par `(Team, User)`) | 🔴 (D080) |
+| [D073](#d073--planningline-reste-une-entité-séparée-de-team-malgré-la-relation-11-imposée-en-v1) | 2026-09-16 | `PlanningLine` reste une entité séparée de `Team`, malgré la relation 1:1 imposée en v1 | 🟡 |
+| [D074](#d074--ligne-primary-jamais-supprimable--création-planningligne-primary-atomique) | 2026-09-16 | Ligne PRIMARY jamais supprimable ; création `Planning`+ligne PRIMARY atomique | 🟢 |
+| [D075](#d075--le-planningperiod-dune-planningline-doit-correspondre-exactement-aux-dates-du-planning) | 2026-09-16 | Le `PlanningPeriod` d'une `PlanningLine` doit correspondre exactement aux dates du `Planning` | 🟢 |
+| [D076](#d076--visibilité-de-get-apiplannings--creator--membres-des-teams-associées-rien-de-plus) | 2026-09-16 | Visibilité de `GET /api/plannings` : creator + membres des Teams associées, rien de plus | 🟡 |
+| [D077](#d077--patch-apiplanningsstableid-ne-modifie-que-name-en-v1) | 2026-09-16 | `PATCH /api/plannings/{stableId}` ne modifie que `name` en v1 | 🟡 |
+| [D078](#d078--canmanage-calculé-côté-serveur-plutôt-que-dexposer-userstableid-sur-apime) | 2026-09-17 | `canManage` calculé côté serveur plutôt que d'exposer `User.stableId` sur `/api/me` | 🟡 |
+| [D079](#d079--team-devient-planningteam--propriété-exclusive-dun-planning-créée-inline-par-planningline) | 2026-09-18 | `Team` devient `PlanningTeam` : propriété exclusive d'un Planning, créée inline par `PlanningLine` | 🟢 |
+| [D080](#d080--adhésion-unique-par-planning-et-non-par-application-remplace-d072) | 2026-09-18 | Adhésion unique par Planning (et non par application), remplace D072 | 🟢 |
+| [D081](#d081--planningteammemberplanning-dénormalisé--fk-composite-plutôt-quune-jointure-via-planningteam) | 2026-09-18 | `PlanningTeamMember.planning` dénormalisé + FK composite, plutôt qu'une jointure via `PlanningTeam` | 🟢 |
+| [D082](#d082--candidat-de-fairness--sourceuserstableid-jamais-le-stint-sourceteammemberstableid) | 2026-09-18 | Candidat de fairness = `sourceUserStableId`, jamais le stint `sourceTeamMemberStableId` | 🟢 |
+| [D083](#d083--dutygroupinstance-ne-peut-jamais-mélanger-required-et-optional) | 2026-09-18 | `DutyGroupInstance` ne peut jamais mélanger `REQUIRED` et `OPTIONAL` | 🟢 |
+| [D084](#d084--effectiveexposure-porte-sur-toutes-les-duties-jamais-restreinte-aux-required) | 2026-09-18 | `effectiveExposure` porte sur toutes les Duties, jamais restreinte aux REQUIRED | 🟢 |
+| [D085](#d085--discretionarytargetatsolve--max0-grosstarget--structurallyforcedload) | 2026-09-18 | `discretionaryTargetAtSolve = max(0, grossTarget − structurallyForcedLoad)` | 🟢 |
+| [D086](#d086--classification-primarysecondary-des-dimensions-composant-dédié-swappable-primary-vide-aujourdhui) | 2026-09-18 | Classification PRIMARY/SECONDARY des dimensions : composant dédié swappable, PRIMARY vide aujourd'hui | 🟢 |
+| [D087](#d087--8-phases-generate-explicites-secondary-jamais-fusionnée-maxsum-en-une-seule-phase) | 2026-09-18 | 8 phases GENERATE explicites, SECONDARY jamais fusionnée max/sum en une seule phase | 🟢 |
+| [D088](#d088--tie-break-direction-minimize-conventionnelle-et-absence-de-matière-de-seed-réelle) | 2026-09-18 | Tie-break : direction MINIMIZE conventionnelle, pas de matière de seed réelle encore | 🟢 |
+| [D089](#d089--feasible-sur-une-phase-non-finale--arrêt-de-la-chaîne-lexicographique) | 2026-09-18 | `FEASIBLE` (non prouvé optimal) sur une phase non finale → arrêt de la chaîne lexicographique | 🟢 |
+| [D090](#d090--fixedassignments-confirmé-absent-doptimizationproblem-jamais-fabriqué-par-ladapter) | 2026-09-18 | `fixedAssignments` confirmé absent d'`OptimizationProblem` — jamais fabriqué par l'adapter | 🟢 |
+| [D091](#d091--planningsolvercheckfeasibility-retourne-solverstatus-jamais-bool) | 2026-09-18 | `PlanningSolver::checkFeasibility()` retourne `SolverStatus`, jamais `bool` | 🟢 |
+| [D092](#d092--échelle-entière-cp-sat--scale--10-000-auditée-sur-la-précision-réelle-de-workloadvalue) | 2026-09-18 | Échelle entière CP-SAT `SCALE = 10 000`, auditée sur la précision réelle de `workloadValue` | 🟢 |
+| [D093](#d093--aucun-timeout-cp-sat-par-défaut--gap-documenté-plutôt-quune-constante-cachée) | 2026-09-18 | Aucun timeout CP-SAT par défaut — gap documenté plutôt qu'une constante cachée | 🟢 |
+| [D094](#d094--orchestration-strict--partial-dans-ortoolsplanningsolversolve-jamais-un-orchestrateur-séparé) | 2026-09-18 | Orchestration STRICT → PARTIAL dans `OrToolsPlanningSolver::solve()`, jamais un orchestrateur séparé | 🟢 |
+| [D095](#d095--un-candidat-éligible-mais-non-sélectionné-ne-reçoit-jamais-de-fausse-raison-dexclusion) | 2026-09-18 | Un candidat éligible mais non sélectionné ne reçoit jamais de fausse raison d'exclusion | 🟢 |
+| [D096](#d096--solveranalysisavailable--false-dans-ce-lot--aucune-littérale-dassumption-câblée) | 2026-09-18 | `solverAnalysis.available = false` dans ce lot — aucune assumption literal câblée | 🟢 |
+| [D097](#d097--diagnosticrelaxations-toujours-vide--aucune-policy_hard-produite-aujourdhui) | 2026-09-18 | `diagnosticRelaxations` toujours vide — aucune POLICY_HARD produite aujourd'hui | 🟢 |
+| [D098](#d098--existingdataconflict-contrat-prêt-scénario-inatteignable-avec-le-modèle-actuel) | 2026-09-18 | `existingDataConflict` : contrat prêt, scénario inatteignable avec le modèle actuel | 🟢 |
+| [D099](#d099--priorité-critical-structurellement-inerte-avec-le-jeu-de-contraintes-actuel) | 2026-09-18 | Priorité CRITICAL structurellement inerte avec le jeu de contraintes actuel (aucune vraie contention possible) | 🟢 |
+| [D100](#d100--assignmentconflict--première-contrainte-globale-reliant-deux-dutyunit-calculée-dans-le-domaine) | 2026-09-19 | `AssignmentConflict` : première contrainte globale reliant deux `DutyUnit`, calculée dans le domaine | 🟢 |
+| [D101](#d101--conflict-hard-et-team_min_rest-policy_hard-implémentés-legal_min_rest-toujours-non-implémentée) | 2026-09-19 | `CONFLICT` (HARD) et `TEAM_MIN_REST` (POLICY_HARD) implémentées ; `LEGAL_MIN_REST` toujours non implémentée | 🟡 (portée révisée par D105) |
+| [D102](#d102--insufficient_eligible_capacity--cas-exact-unique-un-seul-candidat-partagé-entre-deux-unités-en-conflit) | 2026-09-19 | `INSUFFICIENT_ELIGIBLE_CAPACITY` : cas exact unique (un seul candidat partagé entre deux unités en conflit) | 🟢 |
+| [D103](#d103--diagnosticrelaxations-réellement-calculé-par-un-vrai-re-solve-jamais-inféré) | 2026-09-19 | `diagnosticRelaxations` réellement calculé par un vrai re-solve, jamais inféré | 🟢 |
+| [D104](#d104--max_duties-max_weekends-max_consecutive_nights-non-implémentées-malgré-une-configuration-réelle) | 2026-09-19 | `MAX_DUTIES`/`MAX_WEEKENDS`/`MAX_CONSECUTIVE_NIGHTS` non implémentées malgré une configuration réelle existante | 🟢 |
+| [D105](#d105--legal_min_rest-et-team_min_rest-sont-des-politiques-activables-par-génération--aucune-durée-réglementaire-nest-déduite-automatiquement) | 2026-09-19 | `LEGAL_MIN_REST`/`TEAM_MIN_REST` deviennent des politiques activables par génération ; remplace la portée équipe-globale de D101 | 🟢 |
+| [D106](#d106--orchestration-réelle-planninggeneration--solve--dutyassignment-auto-solverparameterset-seed-snapshothash-concurrence) | 2026-09-19 | Orchestration réelle `PlanningGeneration → solve → DutyAssignment AUTO` : `SolverParameterSet`, seed/snapshotHash réels, timeout CP-SAT réel, concurrence par verrou optimiste, atomicité, PUBLISHED ⇒ coverage COMPLETE | 🟢 |
 
 ---
 
@@ -1336,3 +1377,1497 @@ l'ancienne (voir légende).
   application, pas au niveau base — à reconsidérer si un second
   consommateur a besoin de la même garantie au niveau base. Détail :
   `docs/planning-generation.md` §8.
+
+## D066 — Nouveau namespace `src/Eligibility/` pour le modèle métier d'éligibilité
+
+- **Contexte** : `ExclusionReason`, `ConstraintTier`, `EligibilityResult`,
+  `EligibilityExclusion`, `DutyUnit`/`SingleDutyUnit`/`DutyGroupUnit`,
+  `EligibilityMatrix` ne sont ni des entités Doctrine (`src/Entity/`,
+  persistées) ni des DTO de frontière HTTP (`src/Dto/`, désérialisés
+  depuis une requête) — un objet de domaine pur, construit à la volée
+  depuis le snapshot, jamais persisté.
+- **Décision** : nouveau namespace `src/Eligibility/`, distinct des deux
+  précédents. `EligibilityService`/`EligibilityMatrixBuilder` (les
+  services qui orchestrent ce modèle) restent dans `src/Service/`, comme
+  tout le reste de la logique métier du projet — seul le modèle de
+  données lui-même change d'emplacement.
+- **Justification** : forcer ces objets dans `src/Dto/` aurait mélangé
+  deux notions différentes ("forme acceptée/renvoyée par une requête HTTP"
+  vs "modèle de domaine interne") ; les forcer en entités Doctrine aurait
+  fait porter une notion de persistance à des objets qui n'en ont
+  explicitement pas besoin (§eligibility.md "Pas de persistance de la
+  matrice"). `docs/allocation-algorithm.md` D031 avait déjà anticipé une
+  architecture en couches (domaine → `OptimizationProblem` → solveur) —
+  ce namespace en est la première couche concrète.
+- **Conséquences** : tout futur objet de domaine du moteur sans besoin de
+  persistance (ex. un futur `OptimizationProblem`) a désormais un
+  emplacement cohérent où vivre. Détail : `docs/eligibility.md` §1.
+
+## D067 — `PlanningSnapshotMember.active` : extension du snapshot pour `USER_INACTIVE`
+
+- **Contexte** : la spécification du Lot 4 demandait un choix argumenté
+  entre étendre `PlanningSnapshotMember` pour figer `User::isActive()`, ou
+  différer `USER_INACTIVE` faute de donnée snapshotée.
+- **Décision** : étendre. Colonne `active` `NOT NULL` ajoutée directement
+  (`Version20260916095723`) — zéro ligne existante dans
+  `planning_snapshot_members` au moment du lot, donc pas de backfill
+  nécessaire (contrairement à `users.stable_id`, D046).
+  `structuralOpportunity` traite `USER_INACTIVE` comme un fait structurel
+  (met l'exposition à zéro), pas comme une déclaration personnelle
+  circonstancielle comme `UNAVAILABLE` — un compte désactivé retire
+  réellement la personne de la capacité de l'équipe, ce n'est pas un choix
+  temporaire.
+- **Justification** : coût minimal (une seule colonne booléenne) ; la
+  désactivation est un cas limite déjà explicitement exigé par
+  `CLAUDE.md` ("cas limites couverts explicitement... désactivation") ;
+  laisser `EligibilityService` lire `$member->getUser()->isActive()` en
+  direct aurait violé le principe central du Lot 3 ("une génération
+  historique doit toujours être interprétée à partir de l'état figé au
+  moment du snapshot").
+- **Conséquences** : `PlanningSnapshotService::createSnapshot()` capture
+  désormais aussi ce champ à chaque génération. Détail :
+  `docs/eligibility.md` §5.
+
+## D068 — `EligibilityResult`/`EligibilityExclusion` : champs dérivés, jamais indépendants
+
+- **Contexte** : la spécification du Lot 4 proposait `EligibilityResult`
+  avec `$eligible` comme premier paramètre du constructeur, indépendant de
+  `$exclusions`, et `EligibilityExclusion` avec `$tier` accepté au même
+  titre que `$reason`.
+- **Décision** : `$eligible` est dérivé de `[] === $exclusions` dans le
+  constructeur de `EligibilityResult`, jamais accepté en paramètre
+  indépendant. `EligibilityExclusion::$tier` est de la même façon dérivé
+  de `$reason->tier()`, jamais accepté indépendamment. Écart volontaire
+  par rapport à la signature donnée en exemple par la spécification (qui
+  autorisait explicitement "une structure équivalente mieux adaptée au
+  code réel").
+- **Justification** : un résultat prétendant "éligible" avec une liste
+  d'exclusions non vide, ou une exclusion dont le tier contredirait
+  `ExclusionReason::tier()`, seraient des bugs représentables par le type
+  — exactement la classe d'erreur que la spécification elle-même interdit
+  ("un reason ne doit pas changer de tier selon le contexte"). Rendre ces
+  états impossibles à construire est une garantie plus forte qu'une
+  simple convention documentée.
+- **Conséquences** : aucun appelant ne peut jamais désynchroniser ces
+  deux paires de champs, y compris par erreur future. Détail :
+  `docs/eligibility.md` §1.
+
+## D069 — `GROUP_UNAVAILABLE` n'emballe que `UNAVAILABLE`/`NON_PARTICIPATION`, jamais `MEMBERSHIP_OUT_OF_RANGE`
+
+- **Contexte** : pour un `DutyGroupUnit`, plusieurs composants peuvent
+  produire des causes d'exclusion différentes (une garde du groupe hors
+  membership, une autre couverte par une indisponibilité) — la
+  spécification demande un emballage `GROUP_UNAVAILABLE` "si la cause
+  vient d'une indisponibilité/non-participation sur un composant du
+  groupe", sans mentionner `MEMBERSHIP_OUT_OF_RANGE`.
+- **Décision** : seules les causes composant-par-composant `UNAVAILABLE`
+  et `NON_PARTICIPATION` sont emballées dans une unique exclusion
+  `GROUP_UNAVAILABLE` (dont `context.rootCauses` liste chaque cause
+  racine réelle). `MEMBERSHIP_OUT_OF_RANGE` reste toujours reportée
+  directement, avec `context.affectedDutyStableIds` listant les gardes du
+  groupe concernées.
+- **Justification** : suit le texte de la spécification à la lettre
+  plutôt que d'étendre l'emballage par analogie — `MEMBERSHIP_OUT_OF_RANGE`
+  reste une notion structurelle de premier ordre pour laquelle masquer la
+  raison exacte derrière une raison dérivée n'apporterait rien d'utile à
+  l'audit.
+- **Conséquences** : testé explicitement
+  (`EligibilityServiceTest::testGroupMembershipCoveringOnlyOneDutyExcludesTheWholeGroup`).
+  Détail : `docs/eligibility.md` §6.
+
+## D070 — `CONFLICT` reporté malgré l'existence de `DutyAssignment`
+
+- **Contexte** : la spécification autorise `CONFLICT` "si le service
+  évalue un candidat en tenant compte d'affectations fixes/existantes
+  réellement connues de la génération" — et `DutyAssignment` (Lot 3)
+  existe bel et bien comme source potentielle.
+- **Décision** : `CONFLICT` reste dans le contrat de `ExclusionReason`
+  mais n'est calculé nulle part dans ce lot.
+- **Justification** : aucun `DutyAssignment` `AUTO` n'existe (pas de
+  solveur), seules des affectations `MANUAL` isolées pourraient exister à
+  ce stade — bâtir la logique de détection de conflit maintenant
+  reviendrait à concevoir contre un usage qui n'existe pas encore
+  réellement, avec le risque de devoir la refaire une fois le vrai
+  pipeline de génération en place. La spécification elle-même autorise
+  explicitement ce report ("documenter ce point comme reporté").
+- **Conséquences** : à réévaluer dès qu'un flux réel d'affectations
+  (manuel en volume, ou automatique) existe. Détail :
+  `docs/eligibility.md` §3.
+
+## D071 — `Planning.creator` seul manager en v1, via `PlanningVoter` séparé
+
+- **Contexte** : `Planning` est un nouvel agrégat visible utilisateur,
+  potentiellement associé à plusieurs Teams via ses `PlanningLine`. Un
+  OWNER/ADMIN d'une de ces Teams ne doit **pas** hériter automatiquement
+  d'un droit de gestion sur le Planning.
+- **Décision** : `PlanningVoter` (`PLANNING_VIEW`/`PLANNING_MANAGE`),
+  séparé de `TeamRoleVoter`. `PLANNING_MANAGE` est vrai uniquement pour
+  `user === planning.creator` — aucune combinaison de rôles d'équipe ne
+  peut jamais satisfaire cette condition. Aucun concept de
+  collaborateur/co-owner en v1.
+- **Justification** : un Planning combine plusieurs Teams ; lui donner un
+  modèle d'autorisation dérivé des rôles d'équipe aurait immédiatement
+  posé la question "quelle Team fait autorité ?", sans réponse évidente.
+  Un propriétaire unique et explicite évite ce problème sans le trancher
+  prématurément — un vrai modèle de collaboration pourra être ajouté plus
+  tard sans revenir sur ce choix (`PLANNING_MANAGE` resterait vrai pour le
+  creator, une future règle s'y ajouterait).
+- **Conséquences** : `PlanningController`/`PlanningLineController`
+  réservent systématiquement les écritures à `PLANNING_MANAGE`. Détail :
+  `docs/planning.md` §3, §10.
+
+## D072 — `TeamMember` : au plus une Team active par User (plus par `(Team, User)`) 🔴 Remplacé par [D080](#d080--adhésion-unique-par-planning-et-non-par-application-remplace-d072)
+
+> **🔴 Remplacé (2026-09-18)** : cette règle app-wide ("une seule Team
+> active dans toute l'application") est abandonnée dès que `Team` cesse
+> d'être une entité globale (D079) — elle n'a plus de sens une fois
+> qu'une Team appartient à exactement un Planning. Voir D080 pour la
+> règle qui la remplace ("une seule adhésion ouverte par Planning").
+> Entrée conservée intacte ci-dessous pour l'historique, jamais
+> supprimée (convention du fichier).
+
+- **Contexte** : le domaine autorisait jusqu'ici un User à avoir des
+  memberships ouverts simultanés dans plusieurs Teams. Le lot Planning
+  introduit une règle métier explicite : un User n'est candidat que pour
+  exactement une Team à la fois.
+- **Décision** : l'index unique partiel `uniq_team_members_open_membership`
+  passe de `(team_id, user_id) WHERE membership_end IS NULL` à `(user_id)
+  WHERE membership_end IS NULL` (migration `Version20260916123301`).
+  `TeamMembershipService::addMember()` vérifie désormais
+  `TeamMemberRepository::findOpenMembershipForUser()` (toute Team) au lieu
+  de `findOpenMembership($team, $user)` (une Team précise). Même
+  exception métier (`TeamMembershipConflictException`), message généralisé
+  plutôt qu'une nouvelle classe — c'est le même concept ("un membership
+  ouvert entre en conflit"), seule sa portée change. L'historique par
+  stints (D047) est inchangé : un User peut avoir appartenu à différentes
+  Teams à des périodes différentes, jamais simultanément.
+- **Alternative écartée** : garder l'ancienne contrainte et n'ajouter la
+  nouvelle règle qu'au niveau applicatif (`TeamMembershipService` seul) —
+  écartée : la spécification demande explicitement "ajouter une contrainte
+  DB forte", cohérent avec la philosophie déjà établie du projet (la base
+  rend les états impossibles impossibles, jamais seulement PHP).
+- **Conséquences** : zéro ligne dans `team_members` au moment de ce lot
+  (vérifié), donc aucun conflit de données existantes — migration directe,
+  sans étape de backfill. Quatre tests pré-existants du Lot 2/3/4
+  supposaient un User dans deux Teams simultanément ; adaptés (deux Users
+  distincts, ou stints séquentiels) plutôt que supprimés — voir
+  `TeamMembershipServiceTest`, `TeamMemberNonParticipationServiceTest`,
+  `UserAvailabilityServiceTest`, `EligibilityMatrixBuilderTest`. Détail :
+  `docs/planning.md` §6.
+
+## D073 — `PlanningLine` reste une entité séparée de `Team`, malgré la relation 1:1 imposée en v1
+
+- **Contexte** : v1 impose `UNIQUE(planning_id, team_id)` — une Team ne
+  peut alimenter qu'une seule ligne d'un même Planning (§7 de la
+  spécification).
+- **Décision** : `PlanningLine` reste une entité à part entière (pas une
+  simple relation `Planning ↔ Team`) malgré cette contrainte 1:1 actuelle.
+- **Justification** : explicitement demandé — conserver deux entités
+  séparées permet de lever cette restriction plus tard (plusieurs lignes
+  sur la même Team dans un même Planning) sans refonte du domaine. Une
+  fusion `Planning.teams` (ManyToMany) aurait rendu ce changement futur
+  bien plus coûteux.
+- **Conséquences** : `PlanningLine` porte son propre `name`/`position`/
+  `type`/`active`, indépendants de ceux de la Team. Détail :
+  `docs/planning.md` §4.
+
+## D074 — Ligne PRIMARY jamais supprimable ; création `Planning`+ligne PRIMARY atomique
+
+- **Contexte** : un Planning doit toujours avoir exactement une ligne
+  PRIMARY (§3) ; v1 n'a pas de mécanisme de promotion/rétrogradation.
+  Séparément : la création de la ligne PRIMARY peut échouer (ex. Team déjà
+  programmée sur cette fenêtre ailleurs, `OverlappingFairnessPeriodException`)
+  après que le `Planning` lui-même a déjà été persisté.
+- **Décision** : la ligne PRIMARY n'est jamais supprimable
+  (`PrimaryPlanningLineNotDeletableException`, 409) — règle la plus simple
+  possible pour cette version, explicitement documentée plutôt que de
+  construire un mécanisme de promotion non demandé. `PlanningService::create()`
+  enveloppe la création du `Planning` et de sa ligne PRIMARY dans
+  `EntityManager::wrapInTransaction()` — si la ligne échoue, le `Planning`
+  est annulé avec elle, jamais laissé orphelin sans aucune ligne.
+- **Alternative écartée** (pour la suppression) : autoriser la suppression
+  de la ligne PRIMARY si c'est la dernière ligne du Planning (suppression
+  du Planning entier implicite) — écartée : aucune suppression de
+  `Planning` n'est demandée dans ce lot, et mélanger les deux aurait été
+  une fonctionnalité non demandée construite par anticipation.
+- **Conséquences** : testé explicitement
+  (`PlanningServiceTest::testCreationIsAtomicWhenThePrimaryLineCannotBeCreated`,
+  `PlanningLineServiceTest::testSecondaryLineCanBeDeletedButPrimaryCannot`).
+  Détail : `docs/planning.md` §3.
+
+## D075 — Le `PlanningPeriod` d'une `PlanningLine` doit correspondre exactement aux dates du `Planning`
+
+- **Contexte** : la spécification propose, pour cette v1, que
+  `Planning.startsAt == PlanningPeriod.startsAt` et `Planning.endsAt ==
+  PlanningPeriod.endsAt` pour toutes les lignes, plutôt que des périodes
+  différenciées par ligne.
+- **Décision** : vérifié directement dans le constructeur de
+  `PlanningLine` (`\InvalidArgumentException` sinon), même style que les
+  autres invariants cross-entité du domaine (`Duty`, `PlanningPeriod`,
+  `DutyGroupInstance`) — jamais seulement documenté.
+- **Conséquences** : `PlanningLineService::addLine()` crée toujours un
+  nouveau `FairnessPeriod` + `PlanningPeriod` bornés exactement sur la
+  fenêtre du Planning pour la Team de la ligne — jamais de réutilisation
+  d'une période existante. Si cette Team a déjà un `FairnessPeriod`
+  chevauchant cette fenêtre (ex. déjà utilisée par un **autre** Planning
+  sur la même période), l'invariant D049 déjà existant s'applique tel
+  quel : `OverlappingFairnessPeriodException`, pas une règle nouvelle.
+  Détail : `docs/planning.md` §5.
+
+## D076 — Visibilité de `GET /api/plannings` : creator + membres des Teams associées, rien de plus
+
+- **Contexte** : la règle de visibilité n'était pas entièrement définie
+  par le besoin fonctionnel ; la spécification demande de choisir la
+  variante minimale et de la documenter.
+- **Décision** : `creator` → VIEW + MANAGE ; membre courant (n'importe
+  quel rôle) d'une Team alimentant une des lignes du Planning → VIEW
+  uniquement ; tout autre utilisateur → aucun accès.
+  `PlanningRepository::findVisibleTo()` implémente cette règle par une
+  jointure DQL vers `PlanningLine`/`TeamMember` plutôt qu'un filtrage en
+  PHP après coup.
+- **Conséquences** : à réévaluer explicitement dès que le besoin
+  fonctionnel précise une politique de partage plus riche (ex.
+  collaborateurs, D071) — cette règle n'est pas présentée comme
+  définitive. Détail : `docs/planning.md` §10.
+
+## D077 — `PATCH /api/plannings/{stableId}` ne modifie que `name` en v1
+
+- **Contexte** : `Planning.startsAt`/`endsAt` sont utilisés comme source
+  de vérité par chaque `PlanningLine` de ce Planning (D075) — les changer
+  demanderait de faire cascader la modification sur le `PlanningPeriod` de
+  chaque ligne et de revalider chaque `FairnessPeriod` de Team concernée.
+- **Décision** : `Planning::rename()` est la seule méthode de mutation
+  exposée au PATCH ; `UpdatePlanningRequest` ne porte qu'un champ `name`.
+- **Justification** : implémenter la cascade de dates n'est demandé nulle
+  part dans ce lot, et le faire "à moitié" (changer le Planning sans
+  toucher aux lignes) laisserait immédiatement l'invariant D075 violé pour
+  toutes les lignes existantes — pire que ne pas l'implémenter du tout.
+- **Conséquences** : dette explicite, pas un oubli — à construire quand le
+  besoin réel de replanifier un Planning existant (dates comprises)
+  apparaîtra. Détail : `docs/planning.md` §9.
+
+## D078 — `canManage` calculé côté serveur plutôt que d'exposer `User.stableId` sur `/api/me`
+
+- **Contexte** : le frontend minimal (§13) doit savoir si l'utilisateur
+  courant peut gérer un Planning (afficher ou non les actions
+  creator-only). La comparaison naturelle serait
+  `planning.creatorStableId === currentUser.stableId` — sauf que `/api/me`
+  (lot authentification) n'expose actuellement que `id` (auto-incrémenté)
+  dans le groupe de sérialisation `user:read`, jamais `stableId`.
+- **Décision** : plutôt que de modifier `User`/`AccountController` (lot
+  authentification, hors périmètre de celui-ci), chaque réponse
+  `Planning` porte un booléen `canManage`, calculé côté serveur via le
+  même `PlanningVoter::MANAGE` qui protège déjà chaque endpoint
+  d'écriture. Le frontend n'a donc jamais besoin de connaître son propre
+  `stableId`.
+- **Justification** : corriger l'absence de `stableId` sur `/api/me`
+  toucherait un lot déjà livré et audité (authentification) pour un
+  besoin strictement local à ce lot — une extension ciblée de la réponse
+  `Planning` est un changement plus petit, plus sûr, et réutilisable pour
+  toute future UI qui a besoin de savoir "que puis-je faire ici", pas
+  seulement "qui suis-je".
+- **Conséquences** : l'absence de `stableId` sur `/api/me` reste une dette
+  connue, indépendante de ce lot — à corriger le jour où un vrai besoin
+  frontend de comparaison d'identité apparaît ailleurs qu'ici. Détail :
+  `docs/planning.md` §12.
+
+## D079 — `Team` devient `PlanningTeam` : propriété exclusive d'un Planning, créée inline par `PlanningLine`
+
+- **Contexte** : le lot Planning (D071-D078) avait gardé `Team` comme
+  entité globale/partagée — une Team préexistante était référencée par
+  `stableId` à la création d'un Planning ou d'une PlanningLine. À
+  l'usage, cela s'est révélé être la conséquence d'un mauvais modèle :
+  l'UI devait faire coller à l'utilisateur un identifiant technique
+  (`stableId` de la Team), et rien n'empêchait qu'une même Team soit
+  candidate pour plusieurs Plannings simultanément — ce qui n'a aucun
+  sens métier (un Planning est un exercice de planification
+  autonome ; ses équipes n'ont pas vocation à exister en dehors de lui).
+- **Décision** : `Team` est renommée `PlanningTeam` et gagne une relation
+  obligatoire `ManyToOne` vers `Planning`. Une `PlanningTeam` n'est plus
+  jamais créée de façon autonome par un client : elle est systématiquement
+  créée *inline*, dans la même transaction, par
+  `PlanningLineService::addLine()` — que ce soit pour la ligne PRIMARY
+  (via `PlanningService::create()`) ou une ligne SECONDARY. `POST
+  /api/plannings` prend désormais `primaryTeam.name` (un nom, pas un
+  identifiant) et `POST /api/plannings/{id}/lines` prend juste `name` —
+  aucun des deux n'accepte plus de `teamStableId`/`primaryTeamStableId`.
+  Conséquence directe : le conflit "cette Team alimente déjà une ligne de
+  ce Planning" (`PlanningTeamAlreadyInUseException`, introduit dans le lot
+  précédent) devient structurellement impossible — un client ne peut plus
+  jamais référencer une Team existante — et la classe est supprimée.
+  `Team.slug` est également supprimé (plus de raison d'être une fois
+  qu'une Team n'est plus navigable/adressable en dehors de son Planning),
+  et `Team.timezone` est retiré au profit d'une délégation
+  `PlanningTeam::getTimezone()` → `$this->planning->getTimezone()` (une
+  seule source de vérité, jamais deux colonnes qui peuvent diverger).
+- **Alternative écartée** : garder `Team` globale et se contenter
+  d'ajouter la contrainte "au plus un Planning à la fois" en base —
+  écartée : cela n'aurait pas résolu le vrai problème (l'UI qui demande un
+  identifiant technique à l'utilisateur, et la possibilité qu'une Team
+  survive sans aucun Planning l'utilisant). La demande explicite était de
+  rendre la portée Planning *structurellement vraie en base*, pas
+  seulement vérifiée en PHP.
+- **Conséquences** : `PlanningLine`, `DutyType`, `DutyPattern`,
+  `DutyPatternComponent`, `DutyGroupInstance`, `Duty`, `FairnessPeriod`,
+  `PlanningPeriod`, `PlanningRuleSet` gardent tous une propriété `$team`
+  (nom inchangé) mais retypée `PlanningTeam` — seul `PlanningLine` change
+  aussi le nom de sa propriété (`$team` → `$planningTeam`,
+  `getTeam()` → `getPlanningTeam()`), par cohérence avec le fait que son
+  invariant de construction compare désormais explicitement
+  `$planningTeam->getPlanning() === $planning`. `PlanningSnapshotMember`
+  et les entités de snapshot sœurs n'ont nécessité **aucun** changement
+  structurel : elles ne référencent déjà l'ancien `TeamMember` que par
+  UUID copié (`sourceTeamMemberStableId`), jamais par FK vivante (D061) —
+  confirmé par relecture de code avant de commencer ce lot. Nouveaux
+  contrôleurs `PlanningTeamController` (liste des PlanningTeams d'un
+  Planning) et `PlanningTeamMemberController` (liste/ajout/fin
+  d'adhésion) ; `TeamMembersController` (ancien
+  `GET /api/teams/{stableId}/members`) est supprimé, remplacé.
+  `TeamMemberNonParticipationController` garde son nom mais ses routes
+  sont renestées sous `/api/plannings/{planningId}/teams/{teamId}/...`.
+  Migration `Version20260917091305` : les 2 Teams et 1
+  Planning/PlanningLine de fixtures QA manuelles (aucune donnée réelle)
+  n'ont pas pu être portées (une Team de fixture n'avait pas de Planning
+  propriétaire à lui attribuer, désormais obligatoire) et ont été
+  supprimées par la migration elle-même — voir le rapport de ce lot pour
+  la liste exacte à recréer manuellement. Détail : `docs/planning.md`.
+
+## D080 — Adhésion unique par Planning (et non par application), remplace D072
+
+- **Contexte** : D072 imposait qu'un User n'ait au plus qu'une seule
+  adhésion (`TeamMember`) ouverte dans **toute l'application**. Une fois
+  `Team` scopée à un Planning (D079), cette règle n'a plus de sens : deux
+  Plannings sont deux exercices de planification indépendants, et rien ne
+  justifie qu'un User ne puisse pas être membre d'une équipe du Planning A
+  *et* d'une équipe du Planning B en même temps (par exemple, deux
+  services différents qui utilisent chacun leur propre Planning).
+- **Décision** : la règle devient "au plus une adhésion ouverte par
+  **Planning**" — un User peut tenir des adhésions ouvertes simultanées
+  dans des PlanningTeams de Plannings *différents*, mais jamais deux
+  adhésions ouvertes dans deux PlanningTeams du *même* Planning à la fois.
+  Implémentation : l'index unique partiel devient `(planning_id, user_id)
+  WHERE membership_end IS NULL` sur `planning_team_members` (au lieu de
+  `(user_id)` seul pour D072, lui-même au lieu de `(team_id, user_id)`
+  avant D072). `PlanningTeamMembershipService::addMember()` vérifie
+  `PlanningTeamMemberRepository::findOpenMembershipForUserInPlanning(Planning,
+  User)`. Même exception métier renommée
+  `PlanningTeamMembershipConflictException`, message adapté à la nouvelle
+  portée.
+- **Alternative écartée** : revenir purement à la règle pré-D072 ("au
+  plus une adhésion par Team") — écartée explicitement : elle permettrait
+  à un User d'avoir deux adhésions ouvertes simultanées dans deux
+  PlanningTeams du *même* Planning, ce qui n'a pas de sens (un membre ne
+  peut pas occuper deux lignes de garde différentes du même exercice de
+  planification à la fois).
+- **Conséquences** : nécessite que la contrainte DB puisse lire
+  `planning_id` directement sur `planning_team_members`, alors que la
+  seule route naturelle vers cette information passe par
+  `planning_team_id` → `planning_teams.planning_id` — voir D081 pour la
+  dénormalisation qui rend cela possible sans jointure. 11 scénarios de
+  test dédiés (dont les D072-era `TeamMembershipServiceTest`,
+  `TeamMemberNonParticipationServiceTest`, `UserAvailabilityServiceTest`,
+  `EligibilityMatrixBuilderTest` adaptés pour exercer la nouvelle
+  simultanéité inter-Planning plutôt que l'ancien contournement séquentiel
+  D072). Détail : `docs/planning.md`.
+
+## D081 — `PlanningTeamMember.planning` dénormalisé + FK composite, plutôt qu'une jointure via `PlanningTeam`
+
+- **Contexte** : l'invariant D080 ("au plus une adhésion ouverte par
+  Planning") doit être une contrainte DB forte (philosophie déjà établie
+  du projet, cf. D072), pas seulement une vérification applicative. Or un
+  simple index partiel sur `planning_team_members` ne peut porter que sur
+  ses propres colonnes — et `planning_id` n'est naturellement accessible
+  que via une jointure `planning_team_id → planning_teams.planning_id`,
+  qu'un index ne peut pas traverser.
+- **Décision** : `PlanningTeamMember` porte une colonne `planning_id`
+  dénormalisée, en plus de `planning_team_id` — redondante avec
+  `planning_team_id → planning_teams.planning_id`, mais dont la
+  cohérence est garantie par une clé étrangère composite
+  `(planning_team_id, planning_id) RÉFÉRENCE planning_teams(id,
+  planning_id)`, laquelle nécessite elle-même une contrainte
+  `UNIQUE(id, planning_id)` sur `planning_teams`. Exactement la même
+  technique que D051 (déjà établie dans ce domaine pour des invariants
+  cross-table équivalents), donc pas une nouveauté architecturale — une
+  application de plus du même principe.
+- **Alternative écartée** : n'enforcer l'unicité qu'au niveau applicatif
+  (`PlanningTeamMembershipService::addMember()` seul) — écartée pour la
+  même raison que D072 : la spécification de ce lot demande explicitement
+  une contrainte DB forte, et une race condition entre deux requêtes
+  concurrentes resterait possible sans elle.
+- **Conséquences** : comme pour toutes les FK composites de ce domaine
+  (D051), `doctrine:migrations:diff` propose systématiquement de la
+  supprimer/recréer à chaque exécution future (elle n'est pas
+  représentable dans le mapping ORM) — bruit connu et documenté, à élaguer
+  manuellement à chaque nouvelle migration touchant une table adjacente,
+  jamais à appliquer tel quel. `PlanningRepository::findVisibleTo()`
+  bénéficie de cette dénormalisation : la vérification "User membre d'une
+  PlanningTeam de ce Planning" devient une jointure directe sur
+  `tm.planning = p`, sans plus jamais devoir passer par `PlanningLine`.
+  Détail : `docs/planning.md`.
+
+## D082 — Candidat de fairness = `sourceUserStableId`, jamais le stint `sourceTeamMemberStableId`
+
+- **Contexte** : Lot 5 (fairness), Audit A obligatoire avant implémentation.
+  `EligibilityMatrix`/`EligibilityResult` sont clés par
+  `sourceTeamMemberStableId` — un **stint** de membership
+  (`PlanningTeamMember`), pas une personne. Or
+  `PlanningTeamMemberRepository::findIntersecting()` capture tout stint
+  chevauchant la fenêtre du `PlanningPeriod` : un même `User` parti puis
+  revenu dans la même équipe pendant cette fenêtre produit **deux**
+  `PlanningSnapshotMember` distincts dans un même snapshot (deux
+  `sourceTeamMemberStableId` différents, un seul `sourceUserStableId`
+  commun).
+- **Décision** : `FairnessContext`/`FairnessContextBuilder` regroupent les
+  membres du snapshot par `sourceUserStableId` — `FairnessCandidate` porte
+  un `sourceUserStableId` et la **liste** de tous les stints
+  (`PlanningSnapshotMember`) de cette personne dans ce snapshot. Toutes les
+  quantités par candidat (`effectiveExposure`, `grossTargets`,
+  `discretionaryTargets`, `structurallyForcedLoad`) sont indexées par
+  `sourceUserStableId`, jamais par stint. `EffectiveExposureService` lit,
+  pour chaque Duty, le stint (au plus un, les stints d'un même
+  `PlanningTeamMember` ne se chevauchant jamais dans le temps) qui couvre
+  sa `localDate` via `FairnessCandidate::stintCovering()`.
+- **Cas particulier — `StructurallyForcedAnalyzer`** : opère lui à la
+  granularité native de la matrice (le stint), parce que c'est la
+  granularité réelle d'une future affectation (`DutyAssignment.teamMember`
+  référence un `PlanningTeamMember`, jamais un `User` directement) — mais
+  `StructurallyForcedUnit` ne retient que le `sourceUserStableId` du stint
+  gagnant, pour que `structurallyForcedLoad` puisse ensuite s'agréger à la
+  même granularité User que le reste du `FairnessContext`.
+- **Alternative écartée** : garder le candidat au niveau stint (comme
+  `EligibilityMatrix`) — écartée : un même User apparaîtrait comme deux
+  "personnes" distinctes dans la distribution des targets, recevant chacun
+  une part disproportionnée au lieu d'une part cohérente par personne
+  réelle — exactement le double-comptage que l'audit devait empêcher.
+- **Conséquences** : `FairnessContextBuilderTest::testMultipleHistoricalStintsOfTheSameUserAreCountedAsOneCandidate`
+  vérifie explicitement l'absence de double-comptage. Détail :
+  `docs/fairness.md`.
+
+## D083 — `DutyGroupInstance` ne peut jamais mélanger `REQUIRED` et `OPTIONAL`
+
+- **Contexte** : Lot 5, Audit B obligatoire avant implémentation. Un
+  `DutyGroupUnit` doit être classifiable de façon cohérente comme
+  `requiredDutyUnit` ou `optionalDutyUnit` (atomique pour l'affectation,
+  docs/allocation-algorithm.md §9). Lecture du code :
+  `DutyMaterializationService::materializeGroup()` applique un seul
+  `$demandType` à toutes les Duties d'un groupe — via le seul chemin
+  applicatif réel, un groupe mixte est aujourd'hui impossible. Mais rien
+  n'empêchait `Duty` d'être construite directement (hors service) avec un
+  `demandType` différent de ses frères déjà dans le même
+  `DutyGroupInstance`.
+- **Décision** : ajout d'une garde dans le constructeur de `Duty` —
+  si `$groupInstance` est fourni et contient déjà des Duties, le nouveau
+  `$demandType` doit être identique à celui du premier ; sinon
+  `\InvalidArgumentException`, même style que les deux invariants
+  cross-entité déjà présents dans ce même constructeur.
+  `DutyGroupUnit::isRequired()` vérifie la même homogénéité par défense en
+  profondeur (jamais un pick arbitraire) et lève `\LogicException` si
+  violée — jamais atteint en pratique grâce à la garde ci-dessus, mais na
+  masque pas le problème si l'invariant venait à être contourné plus tard.
+- **Alternative écartée** : ignorer le problème puisqu'il n'est pas
+  atteignable aujourd'hui par l'application réelle — écartée : la
+  spécification demande explicitement de ne pas masquer un problème
+  structurel par une convention arbitraire, même quand le chemin
+  applicatif actuel le rend improbable.
+- **Conséquences** : aucune migration — invariant PHP uniquement, aucune
+  contrainte DB ajoutée (`demandType` par Duty individuelle reste la
+  source de vérité stockée, la cohérence de groupe est une règle de
+  construction, pas une contrainte de colonne). Testé directement dans
+  `tests/Entity/DutyTest.php` (construction directe, bypassant le
+  service). Détail : `docs/fairness.md`.
+
+## D084 — `effectiveExposure` porte sur toutes les Duties, jamais restreinte aux REQUIRED
+
+- **Contexte** : Lot 5. `docs/allocation-algorithm.md` §5 qualifie
+  explicitement `requiredDemand` de "depuis les Duty REQUIRED", mais ne
+  qualifie **pas** la formule d'`effectiveExposure`
+  (`Σ_{duty ∈ d} structuralOpportunity(user, duty) × participationFactor(...)`)
+  de la même restriction — asymétrie textuelle potentiellement
+  intentionnelle ou potentiellement un oubli, jamais tranchée
+  explicitement avant ce lot.
+- **Décision** : `EffectiveExposureService` somme sur **toutes** les
+  Duties de la `PlanningPeriod` (REQUIRED et OPTIONAL), lecture littérale
+  de la formule du §5 — `structuralOpportunity(user, duty)` elle-même est
+  définie comme "candidat à `duty`", jamais "candidat à une duty requise".
+  L'exposition structurelle mesure la présence structurelle d'une personne
+  dans le planning, indépendante de la classification REQUIRED/OPTIONAL
+  d'un exercice de staffing donné.
+- **Alternative écartée** : restreindre `effectiveExposure` aux seules
+  Duties REQUIRED, par symétrie avec `requiredDemand` — séduisante car
+  elle évite qu'un fort volume de Duties OPTIONAL ne fasse gonfler
+  artificiellement la part d'exposition d'un candidat par rapport à un
+  autre ayant une exposition REQUIRED identique mais moins de Duties
+  OPTIONAL disponibles. Écartée pour ce lot car ce serait une restriction
+  que le texte de la spécification n'énonce pas explicitement — mais
+  **explicitement signalée ici comme un point à revalider** avec un
+  référent métier avant que le futur solveur ne consomme réellement
+  `discretionaryTargetAtSolve` en pratique : l'invariant
+  `Σ target = requiredDemand` reste vrai mathématiquement quel que soit ce
+  choix (c'est une pure répartition proportionnelle), mais la
+  *proportionnalité elle-même* peut se retrouver faussée par des Duties
+  OPTIONAL très inégalement réparties entre candidats.
+- **Conséquences** : dette de clarification explicite, pas un oubli — à
+  trancher avec un référent métier avant le lot solveur. Détail :
+  `docs/fairness.md`.
+
+## D085 — `discretionaryTargetAtSolve = max(0, grossTarget − structurallyForcedLoad)`
+
+- **Contexte** : Lot 5. `docs/allocation-algorithm.md` §4.4 définit
+  `discretionaryLoadAtSolve(user,d) = raw(user,d) − structurallyForcedLoad(user,d)`
+  (côté **charge**, post-solve) et §6 utilise
+  `deviation(user,d) = discretionaryLoadAtSolve(user,d) − discretionaryTarget(user,d)`
+  — mais aucune formule explicite pour `discretionaryTarget`/
+  `discretionaryTargetAtSolve` (côté **cible**, pré-solve) n'apparaît nulle
+  part dans le document, alors que §21 l'utilise déjà comme champ du
+  contrat abstrait `OptimizationProblem.fairnessTargets`.
+- **Décision** : `discretionaryTargetAtSolve(user, d) = max(0, grossTarget(user, d) − structurallyForcedLoad(user, d))`,
+  implémentée dans `FairnessTargetService::buildDiscretionaryTargets()`.
+- **Justification** : c'est la seule lecture qui garde la formule de
+  `deviation` du §6 interne cohérente. Sans cette soustraction, un
+  candidat dont toute la charge requise serait structurellement forcée
+  (`raw = structurallyForcedLoad` ⇒ `discretionaryLoadAtSolve = 0`) tout
+  en gardant un `grossTarget` intact afficherait une `deviation`
+  fortement négative purement artificielle — un signal de
+  "sous-servi" fallacieux que le solveur cherckerait à corriger en lui
+  donnant *plus* de gardes discrétionnaires, alors qu'il a déjà reçu sa
+  part équitable (juste toute forcée). Le raisonnement du §4.4
+  ("une garde forcée cette année n'est jamais comptée comme un choix qui
+  justifierait d'en donner moins") s'applique symétriquement côté cible :
+  une garde forcée ne doit pas non plus laisser intacte toute la cible
+  discrétionnaire qu'elle a déjà en partie remplie.
+- **Alternative écartée** : ne pas soustraire (`discretionaryTargetAtSolve
+  = grossTarget`) — écartée pour la raison ci-dessus (déviation faussée).
+  Une autre alternative, plafonner à `min(grossTarget, structurallyForcedLoad)`
+  plutôt que soustraire, a été écartée car elle perdrait l'information de
+  surplus/déficit au-delà du forcé — `max(0, ...)` est la formulation la
+  plus simple qui préserve exactement la sémantique "ce qui reste dû, au
+  minimum zéro".
+- **Conséquences** : `docs/allocation-algorithm.md` reste tel quel (la
+  formule manquante y sera ajoutée à l'occasion d'une prochaine révision
+  de ce document vivant, jamais silencieusement laissée diverger du code —
+  voir CLAUDE.md) ; ce journal fait foi entre-temps. Testé explicitement
+  (`FairnessTargetServiceTest::testDiscretionaryTargetSubtractsStructurallyForcedLoadAndNeverGoesNegative`).
+  Détail : `docs/fairness.md`.
+
+## D086 — Classification PRIMARY/SECONDARY des dimensions : composant dédié swappable, PRIMARY vide aujourd'hui
+
+- **Contexte** : Lot 6A (`docs/planning-solver.md`), audit avant
+  implémentation. Les phases 1-4 de GENERATE (`docs/allocation-algorithm.md`
+  §11) ont besoin de savoir, pour un ensemble de dimensions données,
+  lesquelles sont PRIMARY et lesquelles sont SECONDARY. Recherche dans le
+  code existant : ni `FairnessContext` (Lot 5) ni `PlanningRuleSet`
+  (`configuration: array<string, mixed>` JSON libre, sans schéma documenté)
+  ne portent aujourd'hui une telle classification — aucune source de
+  vérité à réutiliser, contrairement à ce que l'instruction du lot
+  espérait trouver.
+- **Audit de suivi** : une fois le lot livré, l'écart a été re-questionné
+  explicitement : "l'absence de schéma `PlanningRuleSet` ne doit pas
+  entraîner un PRIMARY vide si la spécification a déjà un défaut métier
+  explicite". Vérification faite : **la spécification définit bien, à
+  terme, `WEEKEND_GROUPS` et `NAMED_HOLIDAY` comme dimensions PRIMARY par
+  défaut** (`docs/allocation-algorithm.md` §6) — ce n'est pas une lacune de
+  configuration par équipe qui empêche de l'appliquer aujourd'hui, c'est
+  que **`WEEKEND_GROUPS` et `NAMED_HOLIDAY` ne sont pas implémentées dans
+  le modèle réel de fairness** : ni `FairnessDimensionType`, ni
+  `FairnessDimensionKey`, ni `requiredDemand`, ni `effectiveExposure`, ni
+  `dimensionMembership` ne les couvrent (`docs/fairness.md` §3 — aucun
+  `HolidayDefinition`, aucune classification de groupe week-end). Question
+  posée explicitement à l'utilisateur (deux options : garder PRIMARY vide,
+  ou ajouter les deux dimensions comme identités de classification pures
+  sans donnée réelle derrière) — réponse : **garder PRIMARY vide**, ne
+  jamais ajouter une dimension de classification sans sa chaîne de calcul
+  réelle derrière.
+- **Décision (confirmée)** : `DefaultFairnessDimensionClassifier::primaryDimensions()`
+  continue de renvoyer une liste vide, pour tout ensemble de dimensions en
+  entrée, tant que `WEEKEND_GROUPS`/`NAMED_HOLIDAY` n'existent pas comme
+  dimensions réellement calculées. `secondaryDimensions()` continue de
+  classer SECONDARY toutes les dimensions actuellement supportées
+  (`TOTAL_DUTIES`, `WEIGHTED_WORKLOAD`, `FRIDAY`, `SATURDAY`, `SUNDAY`,
+  `DUTY_TYPE`). Résultat assumé et testé
+  (`ObjectivePhaseFactoryTest`, `DefaultFairnessDimensionClassifierTest`),
+  jamais un bug : `weightedWorkload`/`totalDuties` ne peuvent
+  structurellement jamais devenir PRIMARY par accident.
+- **Ce que ça signifie concrètement** :
+  - La classification par équipe (lire un futur `PlanningRuleSet.configuration`
+    structuré) **n'est pas encore implémentée** — `FairnessDimensionClassifier`
+    reste une interface à une seule implémentation aujourd'hui.
+  - Le défaut métier réel est bien `WEEKEND_GROUPS` + `NAMED_HOLIDAY`
+    (`docs/allocation-algorithm.md` §6) — **ce n'est pas une constante
+    magique inventée pour ce lot**, c'est la spécification elle-même ;
+    seule son *application* est bloquée par l'absence des deux dimensions
+    dans le modèle réel.
+  - `DefaultFairnessDimensionClassifier::primaryDimensions()` retourne
+    donc volontairement un ensemble vide **pour l'instant**, pas par choix
+    de conception indépendant de la spécification.
+  - Toutes les dimensions réellement supportées aujourd'hui restent
+    classées SECONDARY.
+- **Alternative écartée** (les deux, revues explicitement) :
+  1. Lire une clé dédiée dans `PlanningRuleSet.configuration` — écartée,
+     cette clé n'a aucun schéma documenté ni lecteur aujourd'hui.
+  2. Ajouter `WEEKEND_GROUPS`/`NAMED_HOLIDAY` comme cas de
+     `FairnessDimensionType` **seulement** pour la classification, sans
+     `requiredDemand`/`effectiveExposure`/`dimensionMembership` réels
+     derrière — écartée explicitement par l'utilisateur : une dimension de
+     classification sans chaîne de calcul réelle romprait l'invariant
+     "jamais une dimension sans source de donnée réelle" tenu depuis le
+     Lot 4/5, et ne pourrait de toute façon jamais apparaître dans un
+     `OptimizationProblem` réel (`getSupportedDimensions()` ne la
+     produirait jamais).
+- **Chemin pour un futur lot qui implémenterait réellement `WEEKEND_GROUPS`/
+  `NAMED_HOLIDAY`** — dans cet ordre, jamais en commençant par le
+  classifier : (1) `FairnessDimensionType` (nouveaux cas) ; (2)
+  `FairnessDimensionKey` (nouvelles fabriques statiques) ; (3)
+  `RequiredDemandBuilder` ; (4) `EffectiveExposureService` si la dimension
+  a un poids par Duty distinct à sommer ; (5)
+  `DimensionMembershipCalculator` ; (6)
+  `FairnessContextBuilder::deriveSupportedDimensions()` ; (7) **seulement
+  alors** `DefaultFairnessDimensionClassifier::primaryDimensions()`. Le
+  classifier est la dernière pièce à toucher, jamais la première.
+- **Conséquences** : PRIMARY réellement vide dans toute construction
+  actuelle d'`OptimizationProblem` — les phases 1-2 (max/sum PRIMARY)
+  existent structurellement (8 phases toujours) mais portent une liste de
+  dimensions vide tant qu'aucune dimension PRIMARY réelle n'existe. Tests
+  explicites ajoutés pour verrouiller ce comportement : PRIMARY vide
+  aujourd'hui, toutes les dimensions supportées classées SECONDARY,
+  PRIMARY et SECONDARY disjoints, aucune dimension absente de l'entrée
+  n'est jamais inventée par le classifier. Détail : `docs/planning-solver.md`.
+
+## D087 — 8 phases GENERATE explicites, SECONDARY jamais fusionnée max/sum en une seule phase
+
+- **Contexte** : `docs/allocation-algorithm.md` §11 liste, dans sa forme
+  actuelle, "Phase 4 : minimize maxDeviation(SECONDARY) puis
+  sumDeviation(SECONDARY)" comme une seule ligne — une écriture compacte
+  ambiguë sur le nombre réel de phases lexicographiques distinctes,
+  d'autant que le paragraphe qui suit immédiatement précise explicitement
+  "le passage min-max-puis-somme s'applique à PRIMARY **et** SECONDARY
+  (pas seulement PRIMARY)", ce qui n'a de sens que si ce sont deux phases
+  strictement ordonnées, pas une seule.
+- **Décision** : `ObjectivePhaseFactory` matérialise sans ambiguïté 8
+  phases pour GENERATE : `maxDeviationPrimary`, `sumDeviationPrimary`,
+  `maxDeviationSecondary`, `sumDeviationSecondary`,
+  `namedHolidayRepetitionPenalty`, `spacingScore`,
+  `preferenceSatisfaction`, `deterministicTieBreak` — jamais fusionnées,
+  chacune une entrée distincte et ordonnée de la liste retournée par
+  `ObjectivePhaseFactory::forMode()`. C'est la lecture qui rend le
+  paragraphe explicatif du §11 cohérent avec sa propre liste numérotée.
+- **Alternative écartée** : une seule phase "SECONDARY" combinant max et
+  somme en interne (deux sous-étapes non observables depuis le contrat
+  abstrait) — écartée car elle rendrait impossible pour un futur solveur
+  de figer la valeur optimale de `maxDeviation(SECONDARY)` comme contrainte
+  avant d'attaquer `sumDeviation(SECONDARY)` (la préservation lexicographique
+  du §8 de l'instruction du lot l'exige explicitement), et contredirait le
+  texte même du §11 cité ci-dessus.
+- **Conséquences** : `docs/allocation-algorithm.md` §11 n'a pas été
+  réécrit (pas de refonte de la spécification existante) — une note de
+  statut d'implémentation y renvoie vers cette décision pour la
+  clarification. Détail : `docs/planning-solver.md`.
+
+## D088 — Tie-break : direction MINIMIZE conventionnelle, pas de matière de seed réelle
+
+- **Contexte** : `docs/allocation-algorithm.md` §13 définit
+  `tieBreakKey = StableHash(seedMaterial + dutyStableKey + candidateStableKey)`
+  mais ne précise aucune direction MINIMIZE/MAXIMIZE — un tie-break n'a pas
+  de sens "plus grand est meilleur" intrinsèque, seulement un ordre total
+  arbitraire mais fixe. Par ailleurs, `seedMaterial` requiert
+  `snapshotHash`/`algorithmVersion`/`solverParameterSetVersion` —
+  `docs/allocation-algorithm.md` §14 confirme qu'aucun de ces trois
+  n'existe encore nulle part dans le code (pas de `SolverParameterSet`, pas
+  de hash canonique de snapshot).
+- **Décision** : `ObjectivePhase::deterministicTieBreak()` fixe la
+  direction à `MINIMIZE` — convention documentée ("préférer le plus petit
+  `tieBreakKey`"), jamais présentée comme une exigence de la spécification
+  elle-même. Aucune matière de seed réelle n'est construite dans ce lot :
+  la phase reste une identité structurelle pure (`ObjectivePhaseId::DETERMINISTIC_TIE_BREAK`,
+  aucune dimension, aucun paramètre), en attendant que
+  `snapshotHash`/`SolverParameterSet` existent réellement.
+- **Alternative écartée** : inventer un `seedMaterial` provisoire à partir
+  des seuls identifiants aujourd'hui disponibles (ex. `PlanningPeriod.stableId`
+  seul) — écartée explicitement : la spécification du lot demande de
+  documenter le manque plutôt que de fabriquer une valeur, et un seed
+  partiel non conforme à la formule du §13 serait pire qu'une absence
+  claire (risque qu'un futur lot le prenne par erreur pour la vraie
+  formule).
+- **Conséquences** : dette explicite pour un futur lot —
+  `seedMaterial`/`tieBreakKey` restent à implémenter une fois
+  `snapshotHash` et `SolverParameterSet` réellement modélisés. Détail :
+  `docs/planning-solver.md`.
+
+## D089 — `FEASIBLE` sur une phase non finale → arrêt de la chaîne lexicographique
+
+- **Contexte** : Lot 6B, exécution lexicographique réelle
+  (`OrToolsPlanningSolver`). Aucun document existant (`docs/allocation-algorithm.md`
+  §10, §11, §16) ne tranche explicitement le comportement à adopter quand
+  CP-SAT retourne `FEASIBLE` (solution trouvée, optimalité **non**
+  prouvée) sur une phase qui n'est pas la dernière de la chaîne. Le §10 ne
+  couvre que la politique produit sur le résultat **final** d'un solve
+  strict/partial (`FEASIBLE + COMPLETE` → validation admin explicite) —
+  pas le cas intermédiaire d'une phase lexicographique.
+- **Décision** : dès qu'une phase non neutre retourne `FEASIBLE`, la
+  chaîne lexicographique s'arrête immédiatement. Le statut global du
+  solve devient `FEASIBLE`, les phases restantes ne sont jamais
+  attentées (absentes de `objectiveValues`/`optimality`, jamais une
+  valeur `0.0`/`false` fabriquée), et surtout **aucune contrainte de
+  verrouillage n'est ajoutée** pour la valeur non prouvée de cette
+  phase — verrouiller une valeur non prouvée optimale aurait pu exclure
+  de meilleures solutions qu'un temps de calcul plus long aurait trouvées.
+- **Alternative écartée** : traiter `FEASIBLE` comme `OPTIMAL` et
+  continuer la chaîne (verrouiller la valeur trouvée et enchaîner) —
+  écartée explicitement : dans une optimisation lexicographique stricte,
+  prétendre figer un optimum non prouvé contredit la sémantique même de
+  "lexicographique" (chaque phase doit céder à la suivante l'espace de
+  solutions *réellement* optimal, pas une approximation).
+- **Conséquences** : ce lot ne configure aucun budget de temps
+  (`docs/decisions.md` D093), donc `FEASIBLE` ne devrait apparaître que
+  sur des problèmes de taille significative — non exercé par les tests de
+  ce lot (tous de petite taille, toujours `OPTIMAL`/`UNSATISFIABLE`), mais
+  le chemin de code existe et est explicitement documenté ici. Détail :
+  `docs/planning-solver.md` §Lexicographique.
+
+## D090 — `fixedAssignments` confirmé absent d'`OptimizationProblem`, jamais fabriqué par l'adapter
+
+- **Contexte** : Lot 6B, audit obligatoire avant code. La spécification du
+  lot demande d'implémenter la prise en compte de `fixedAssignments` (§7)
+  en présumant que ce champ existe sur `OptimizationProblem`. Audit du
+  code réel (Lot 5, `docs/fairness.md` §10) : **il n'existe pas** —
+  `DutyAssignment.locked` existe bien en persistance depuis le Lot 3, mais
+  aucun flux applicatif ne le renseigne jamais (toujours `false`), et le
+  Lot 5 avait explicitement choisi de ne pas ajouter `fixedAssignments`
+  tant qu'aucun concept de verrouillage non ambigu n'existe pour une
+  génération.
+- **Décision** : Lot 6B **n'ajoute pas** `fixedAssignments` à
+  `OptimizationProblem`. `CpSatPayloadBuilder` envoie systématiquement
+  `excludedEdges: []` vide dans le payload de solve (jamais utilisé pour
+  des verrouillages — ce nom de clé JSON est réutilisé uniquement par
+  `checkFeasibility()` pour les edges explicitement exclues par
+  l'appelant, un concept différent). `OrToolsPlanningSolver` ne contient
+  donc aucune logique de verrouillage `x[d][c]=1` dans ce lot — la
+  section 7 de la spécification du lot reste non implémentée,
+  explicitement, faute de donnée réelle.
+- **Alternative écartée** : dériver `fixedAssignments` depuis les lignes
+  `DutyAssignment` où `locked=true` pour la génération courante — écartée
+  car aucun flux applicatif ne peut aujourd'hui produire une telle ligne
+  (toujours un ensemble vide en pratique), et l'ajouter maintenant
+  élargirait le scope du Lot 6B (nouvelle requête repository, nouvelle
+  logique d'agrégation dans `OptimizationProblemBuilder`, gestion de la
+  cohérence groupe/lock comme D083) sans besoin démontré. Le mécanisme
+  d'exclusion de la spécification du lot ("comportement explicite et
+  testé si le fixedAssignment référence une paire absente/impossible")
+  est donc sans objet — il n'existe littéralement aucune façon de
+  construire un `fixedAssignment` dans ce lot.
+- **Conséquences** : le futur adapter/lot qui ajoutera un vrai concept de
+  verrouillage devra étendre `OptimizationProblem` (nouveau champ),
+  `OptimizationProblemBuilder` (le peupler depuis une vraie source), et
+  seulement alors `CpSatPayloadBuilder`/`cp_sat_solver.py`
+  (`model.Add(x[u][c] == 1)` + interdiction des autres candidats sur cette
+  unité). Détail : `docs/planning-solver.md` §Hors périmètre.
+
+## D091 — `PlanningSolver::checkFeasibility()` retourne `SolverStatus`, jamais `bool`
+
+- **Contexte** : Lot 6B §22. Le contrat `PlanningSolver` du Lot 6A
+  (`docs/planning-solver.md`) déclarait `checkFeasibility(): bool`. Une
+  vérification de faisabilité réelle via CP-SAT peut légitimement
+  retourner `UNKNOWN` (budget épuisé avant preuve) ou échouer
+  techniquement (`ERROR`) — deux résultats qu'un simple `bool` ne peut
+  représenter sans mentir : les coder en `false` laisserait croire à une
+  infaisabilité *prouvée*, ce que le principe déjà posé par `SolverStatus`
+  (`docs/decisions.md`, Lot 6A) interdit explicitement ailleurs dans ce
+  même contrat.
+- **Décision** : élargissement du contrat — `checkFeasibility(OptimizationProblem,
+  array $excludedEdges): SolverStatus`, réutilisant l'enum déjà existant
+  plutôt que d'en créer un nouveau. `OPTIMAL`/`FEASIBLE` signifient tous
+  deux "une solution existe" (cet appel ne porte aucun objectif, donc la
+  distinction OPTIMAL/FEASIBLE de CP-SAT est sans objet ici) ;
+  `UNSATISFIABLE` signifie prouvé infaisable ; `UNKNOWN`/`ERROR` gardent
+  exactement leur sens habituel. Un appelant qui veut un booléen peut
+  toujours écrire `in_array($status, [OPTIMAL, FEASIBLE], true)`
+  lui-même — jamais cette interface.
+- **Alternative écartée** : garder `bool` et lever une exception pour
+  `UNKNOWN`/`ERROR` — écartée : forcerait tout appelant à un `try/catch`
+  pour un résultat parfaitement normal et attendu (un budget de calcul
+  épuisé n'est pas une erreur de programmation), et casserait le
+  parallélisme avec `solve()` qui traite déjà ces cas comme des valeurs de
+  retour normales, jamais des exceptions.
+- **Conséquences** : `FakePlanningSolver`/`FakePlanningSolverTest` (Lot
+  6A) mis à jour en conséquence — c'est un élargissement de contrat fait
+  avant toute release réelle du Lot 6A (aucun consommateur externe
+  n'existait), donc sans code mort ni compatibilité descendante à
+  maintenir. Détail : `docs/planning-solver.md` §`checkFeasibility()`.
+
+## D092 — Échelle entière CP-SAT `SCALE = 10 000`, auditée sur la précision réelle de `workloadValue`
+
+- **Contexte** : Lot 6B §10. CP-SAT n'accepte que des coefficients
+  entiers ; les targets/déviations de fairness sont fractionnaires
+  (`docs/allocation-algorithm.md` §5/§6). La spécification interdit
+  explicitement de choisir arbitrairement un facteur d'échelle sans
+  auditer la précision réelle des données existantes.
+- **Décision** : `CpSatScale::SCALE = 10_000`, dérivé de
+  `DutyType.workloadValue`, la seule quantité fractionnaire réelle du
+  domaine aujourd'hui — stockée `decimal(6,2)` (`src/Entity/DutyType.php`),
+  donc de précision réelle `0.01`. 10 000 est le plus petit multiple
+  rond de 100 (`0.01 × 10 000 = 100`, un entier exact, jamais un artefact
+  d'arrondi). Cette valeur a été dérivée indépendamment de la donnée
+  réelle, et coïncide avec l'exemple illustratif "×10 000" de
+  `docs/allocation-algorithm.md` §22 sans avoir été copiée dessus.
+  `smallestUnit(d)` (§5) vaut `1.0` pour les dimensions comptées en
+  gardes entières, `0.01` pour `WEIGHTED_WORKLOAD`.
+- **Alternative écartée** : reprendre tel quel l'exemple "×10 000" du §22
+  sans audit — explicitement interdit par la spécification du lot ; fait
+  ici avec un audit réel qui confirme indépendamment la même valeur.
+  Une échelle plus fine (ex. ×1 000 000) a aussi été envisagée puis
+  écartée : aucune donnée du domaine n'a de précision plus fine que 0.01,
+  une échelle plus fine n'ajouterait aucune précision réelle, seulement un
+  risque accru de dépassement sur de grands problèmes.
+- **Conséquences** : tout coefficient CP-SAT est arrondi une seule fois,
+  dans `CpSatPayloadBuilder` (PHP), jamais dans `cp_sat_solver.py` — testé
+  explicitement (`CpSatScaleTest`). Détail : `docs/planning-solver.md`
+  §Scaling.
+
+## D093 — Aucun timeout CP-SAT par défaut — gap documenté plutôt qu'une constante cachée
+
+- **Contexte** : Lot 6B §23. Un vrai budget de temps
+  (`OptimizationProblem.timeoutBudget`) n'existe pas — Lot 5 l'a
+  explicitement exclu (`docs/fairness.md` §10), faute de source réelle.
+  La spécification du lot interdit explicitement de choisir
+  silencieusement une constante (5s/30s/60s) dans `OrToolsPlanningSolver`.
+- **Décision** : `OrToolsPlanningSolver` ne configure **aucun** timeout —
+  ni sur le `Symfony\Process` (`setTimeout(null)` explicite, pour éviter
+  le timeout par défaut de 60s de Symfony, qui serait tout aussi arbitraire
+  que les valeurs interdites), ni sur les paramètres CP-SAT
+  (`max_time_in_seconds` jamais renseigné). Un solve tourne donc jusqu'à
+  une conclusion réelle (`OPTIMAL`/`UNSATISFIABLE`) ou jusqu'à ce que
+  CP-SAT lui-même conclue `UNKNOWN` pour une autre raison.
+- **Alternative écartée** : choisir une valeur par défaut "raisonnable"
+  (ex. 30s) — explicitement écartée par la spécification elle-même,
+  confirmée dans ce lot : aucune donnée réelle ne justifie un chiffre
+  plutôt qu'un autre, et un mauvais choix serait pire qu'une absence
+  assumée (soit trop court pour un vrai planning, soit inutilement long
+  pour un petit problème).
+- **Conséquences** : **risque de production réel et assumé** — un
+  problème suffisamment grand/mal contraint pourrait faire tourner le
+  solveur indéfiniment, bloquant la requête HTTP qui l'a déclenché. Ce
+  lot ne branche justement aucune requête HTTP réelle sur le solveur
+  (§27 de la spécification du lot, `docs/planning-solver.md` §Hors
+  périmètre) — ce risque devient bloquant seulement quand un futur lot
+  orchestre un vrai appel `PlanningGeneration → solve`, et devra alors
+  résoudre ce gap avant, pas après, de brancher cet appel. Détail :
+  `docs/planning-solver.md` §Timeouts.
+
+## D094 — Orchestration STRICT → PARTIAL dans `OrToolsPlanningSolver::solve()`, jamais un orchestrateur séparé
+
+- **Contexte** : Lot 6C, §17 de la spécification du lot demande
+  explicitement d'auditer où placer la politique "STRICT UNSAT → lancer
+  PARTIAL" (`docs/allocation-algorithm.md` §10), en évitant à la fois de
+  l'enfouir dans `cp_sat_solver.py` (Python doit rester un adapter
+  solveur) et de construire "un pipeline massif prématuré".
+- **Décision** : la cascade reste entièrement dans
+  `OrToolsPlanningSolver::solve()` (factorisé en méthodes privées
+  `solvePartial()`/`buildResult()`/`errorResult()`), jamais dans une
+  classe orchestratrice séparée au-dessus de `PlanningSolver`. Deux
+  arguments l'emportent : (1) `OptimizationResult` porte déjà
+  `strictSolverStatus` **et** `partialSolverStatus` depuis le Lot 5/6A,
+  avant même que ce lot existe — preuve que le contrat a toujours
+  supposé qu'un seul appel `solve()` puisse produire les deux tentatives
+  et un résultat combiné ; (2) "PARTIAL" n'est pas un objet métier mais
+  une transformation de modèle solveur (`unassigned[d]` slack) de ce même
+  `OptimizationProblem` — chaque implémentation de `PlanningSolver` sait
+  construire "sa" version PARTIAL à sa manière (CP-SAT ici), donc cette
+  construction appartient structurellement à l'adapter qui sait déjà
+  construire STRICT, pas à une couche générique au-dessus qui devrait
+  deviner comment.
+- **Alternative écartée** : une classe `PlanningSolverOrchestrator`
+  généraliste, indépendante du solveur, appelant `solve()` deux fois et
+  fusionnant les deux `OptimizationResult` — écartée : `OptimizationResult`
+  n'est pas conçu pour être fusionné après coup (ses champs représentent
+  déjà un résultat combiné) et une telle classe devrait de toute façon
+  déléguer la construction du problème PARTIAL à l'adapter, la rendant
+  vide de logique réelle — exactement le "pipeline massif prématuré" à
+  éviter.
+- **Conséquences** : `UnsatDiagnosticsBuilder`, lui, est bien une classe
+  séparée dans `src/Service/` — parce que construire le diagnostic
+  (lecture d'`EligibilityMatrix`/`CoveragePolicy`) ne dépend d'aucune
+  donnée CP-SAT, seulement d'une liste de clés unassigned déjà décidées,
+  donc réutilisable par un futur solveur alternatif sans dupliquer cette
+  logique. Détail : `docs/planning-solver.md` §Orchestration.
+
+## D095 — Un candidat éligible mais non sélectionné ne reçoit jamais de fausse raison d'exclusion
+
+- **Contexte** : Lot 6C §9, règle d'honnêteté explicite reprise de
+  `docs/allocation-algorithm.md` §17 : "la sélection parmi les candidats
+  éligibles n'est jamais formulée par comparaison locale". Un candidat
+  réellement `eligible` pour une garde non attribuée (parce que
+  structurellement une autre garde a absorbé le problème, ou simplement
+  parce que la garde reste non couverte pour une autre raison) ne doit
+  jamais apparaître comme "exclu".
+- **Décision** : `UnsatDiagnosticsBuilder::buildCandidateExclusions()` ne
+  construit un `CandidateExclusionDiagnostic` que pour un candidat dont
+  `EligibilityResult::$eligible === false`, en réutilisant directement
+  `EligibilityResult::$exclusions` — jamais une raison inventée. Un
+  candidat éligible est simplement absent de `candidateExclusions`,
+  silence correct plutôt qu'une fausse causalité.
+- **Alternative écartée** : lister tous les candidats évalués avec une
+  liste de raisons vide pour les éligibles — écartée : ajouterait du bruit
+  sans information (un "candidateExclusions: []" par candidat éligible ne
+  dit rien qu'une absence ne dise déjà, plus simplement).
+- **Conséquences** : testé explicitement
+  (`UnsatDiagnosticsBuilderTest::testEligibleButUnselectedCandidateNeverGetsAFabricatedExclusion`).
+  Détail : `docs/planning-solver.md` §Diagnostics.
+
+## D096 — `solverAnalysis.available = false` dans ce lot — aucune assumption literal câblée
+
+- **Contexte** : Lot 6C §16, audit explicitement demandé de ce que
+  CP-SAT permet réellement d'exposer (cœur d'infaisabilité natif via
+  `SufficientAssumptionsForInfeasibility()`). Cette API de CP-SAT exige
+  que les contraintes du modèle soient construites avec des littéraux
+  d'assumption (`model.AddAssumptions([...])`) — `bin/cp_sat_solver.py`
+  construit aujourd'hui ses contraintes directement
+  (`AddExactlyOne`/`AddAtMostOne`/somme + `unassigned[d]`), sans aucun
+  littéral d'assumption attaché.
+- **Décision** : `SolverAnalysis::unavailable()` (`available=false,
+  infeasibleCore=null`) dans tous les cas ce lot — jamais un cœur
+  d'infaisabilité simulé ou partiel. Le diagnostic local déterministe
+  (`structuralDiagnostics`/`candidateExclusions`) reste complet et valide
+  sans lui, exactement comme le permet
+  `docs/allocation-algorithm.md` §16.
+- **Alternative écartée** : restructurer `build_model()` pour attacher un
+  littéral d'assumption à chaque contrainte de couverture, afin
+  d'extraire un vrai cœur d'infaisabilité — reporté : changement non
+  trivial de la construction du modèle, hors du périmètre "prouver que
+  STRICT→PARTIAL fonctionne" de ce lot, à réévaluer si un futur besoin
+  d'explicabilité fine le justifie.
+- **Conséquences** : dette explicite, non bloquante — testé
+  (`UnsatDiagnosticsBuilderTest::testSolverAnalysisIsAlwaysUnavailableInThisLot`).
+  Détail : `docs/planning-solver.md` §Diagnostics.
+
+## D097 — `diagnosticRelaxations` toujours vide — aucune POLICY_HARD produite aujourd'hui
+
+- **Contexte** : Lot 6C §12/§13, confirmation d'un audit déjà fait au Lot
+  6B (`docs/eligibility.md` §3) : `EligibilityService` ne produit
+  aujourd'hui aucune raison `POLICY_HARD` (`MAX_DUTIES`/`MAX_WEEKENDS`/
+  `TEAM_MIN_REST`/`MAX_CONSECUTIVE_NIGHTS`/`RULE_EXCLUSION`).
+- **Décision** : `UnsatDiagnosticsBuilder::buildForCoverageShortfall()`
+  renvoie toujours `diagnosticRelaxations = []`. Le type
+  `DiagnosticRelaxation` existe (contrat prêt, `docs/fairness.md`-style),
+  avec un garde-fou au constructeur qui refuse structurellement tout
+  `ExclusionReason` dont le tier n'est pas `POLICY_HARD` — donc même si ce
+  type était mal utilisé plus tard, une contrainte HARD ne pourrait
+  jamais être proposée comme relaxation.
+- **Alternative écartée** : construire une relaxation à partir d'un tier
+  POLICY_HARD "hypothétique" pour remplir le modèle — explicitement
+  écartée par la spécification du lot ("Ne crée pas de fausses
+  relaxations uniquement pour remplir le modèle").
+- **Conséquences** : testé explicitement
+  (`UnsatDiagnosticsBuilderTest::testNoPolicyHardIsEverProposedAsARelaxationToday`,
+  `DiagnosticRelaxationTest::testAHardRuleCanNeverBeProposedAsARelaxation`).
+  Détail : `docs/planning-solver.md` §Diagnostics.
+
+## D098 — `existingDataConflict` : contrat prêt, scénario inatteignable avec le modèle actuel
+
+- **Contexte** : Lot 6C §14/§15/§22. `docs/allocation-algorithm.md`
+  §10.5/§16 décrit `existingDataConflict` pour le cas où le solve PARTIAL
+  est lui-même `UNSATISFIABLE` (ex. verrouillages existants en conflit
+  LEGAL_MIN_REST). Audit de ce lot : avec `unassigned[d]` ajouté à
+  **chaque** unité REQUIRED et sans aucune contrainte couplant deux
+  DutyUnits entre elles (pas de MAX_DUTIES, pas de CONFLICT — voir D099),
+  le problème PARTIAL admet toujours au moins la solution triviale "tout
+  `unassigned[d] = 1`" — il ne peut donc jamais être lui-même UNSAT avec
+  le modèle actuel. `fixedAssignments` (D090), seule source réaliste d'une
+  vraie contradiction de données déjà existantes, n'existe toujours pas.
+- **Décision** : le contrat (`ExistingDataConflict`,
+  `ExistingDataConflictType`,
+  `UnsatDiagnosticsBuilder::buildForExistingDataConflict()`, le
+  branchement dans `OrToolsPlanningSolver::solvePartial()`) est
+  entièrement implémenté et testé — mais uniquement via un test unitaire
+  direct du builder et un test d'orchestration piloté par un script
+  Python de test dédié (`tests/Solver/fixtures/echo_partial_unsat.py`),
+  jamais via un scénario CP-SAT réel de bout en bout, qui n'existe pas.
+- **Alternative écartée** : fabriquer un `fixedAssignments` artificiel
+  rien que pour produire un vrai scénario PARTIAL-UNSAT testable —
+  explicitement interdit par la spécification du lot ("Ne construis pas
+  de faux fixedAssignments pour pouvoir tester existingDataConflict").
+- **Conséquences** : dette réelle pour un futur lot — le jour où
+  `fixedAssignments` existera réellement (D090 résolue), ce chemin devient
+  atteignable et devra être re-testé avec un vrai scénario CP-SAT.
+  Détail : `docs/planning-solver.md` §PARTIAL lui-même UNSAT.
+
+## D099 — Priorité CRITICAL structurellement inerte avec le jeu de contraintes actuel
+
+- **Contexte** : Lot 6C §24, tests demandés "CRITICAL vs STANDARD en
+  concurrence pour une capacité unique → CRITICAL couverte" et "deux
+  CRITICAL impossibles à couvrir toutes → minimum non couvert". En
+  construisant ces scénarios, audit direct du modèle CP-SAT actuel :
+  chaque `DutyUnit` porte ses propres variables `x[unit][candidat]`,
+  indépendantes de toute autre unité — rien dans `build_model()` ne lie
+  la couverture d'une unité à celle d'une autre (pas de MAX_DUTIES, pas de
+  CONFLICT/exclusivité temporelle — confirmé absents de
+  `EligibilityService` par l'audit du Lot 6B, `docs/eligibility.md` §3).
+  **Conséquence mathématique** : un candidat éligible à plusieurs
+  `DutyUnit` peut toujours couvrir tous ces DutyUnit simultanément — la
+  couverture d'une unité REQUIRED ne dépend donc que d'elle-même (a-t-elle
+  au moins un candidat éligible ?), jamais d'un arbitrage avec une autre
+  unité. Il n'existe donc **aucun scénario réel** où laisser une garde
+  STANDARD non couverte serait nécessaire pour couvrir une garde CRITICAL
+  — les deux phases `PARTIAL_COVERAGE_CRITICAL`/`PARTIAL_COVERAGE_TOTAL`
+  comptent et minimisent correctement, mais ne changent jamais la
+  couverture obtenue par rapport à "couvrir tout ce qui a un candidat,
+  laisser le reste" — avec le modèle actuel, il n'existe littéralement
+  aucun véritable choix à faire.
+- **Décision** : les tests de la spécification sont honnêtement adaptés
+  plutôt que simulés artificiellement — `testTwoCriticalDutiesBothUncoverableAreBothReportedUnassignedAndCritical`
+  (deux CRITICAL réellement impossibles, sans concurrence, chacune
+  isolément sans candidat) remplace le scénario de "concurrence"
+  demandé ; `testCriticalAndStandardEachWithTheirOwnCandidateAreBothCoveredNothingSacrificed`
+  démontre explicitement l'absence de sacrifice quand chacune a son
+  candidat. Le mécanisme des phases P1/P2 (comptage, ordre, verrouillage)
+  reste implémenté intégralement et correctement testé — seule
+  l'affirmation "un vrai arbitrage a été observé" est écartée, parce
+  qu'elle serait fausse avec le code réel.
+- **Alternative écartée** : ajouter une contrainte artificielle (ex. une
+  fausse règle de capacité partagée) uniquement pour produire une
+  démonstration de contention — explicitement interdit par le principe du
+  lot ("ne jamais inventer une donnée métier manquante").
+- **Conséquences** : dette réelle et directement actionnable pour la
+  suite — la priorité CRITICAL ne deviendra **observable** que lorsque
+  `MAX_DUTIES`/`CONFLICT`/une autre contrainte couplant plusieurs
+  `DutyUnit` sera réellement implémentée dans `EligibilityService`. Tant
+  que ce n'est pas le cas, ce mécanisme reste correct mais silencieux en
+  pratique — à garder en tête pour ne pas conclure à tort qu'un futur test
+  "CRITICAL non prioritaire" révèle un bug. Détail :
+  `docs/planning-solver.md` §Priorité CRITICAL.
+
+## D100 — `AssignmentConflict` : première contrainte globale reliant deux `DutyUnit`, calculée dans le domaine
+
+- **Contexte** : Lot 6D. D099 avait identifié que rien ne couple deux
+  `DutyUnit` entre eux dans le modèle CP-SAT — ni `EligibilityMatrix`
+  (qui ne retire jamais qu'une seule arête à la fois) ni le solveur
+  lui-même. Le lot demande d'introduire une vraie contrainte globale.
+- **Décision** : nouveau value object `App\Fairness\AssignmentConflict`
+  `{candidateStableKey, leftDutyUnitStableKey, rightDutyUnitStableKey,
+  reason, tier (dérivé de reason, jamais indépendant)}`, calculé par
+  `App\Service\AssignmentConflictAnalyzer` et porté par un nouveau champ
+  `OptimizationProblem::$assignmentConflicts` (jamais un
+  `array<string,mixed>`). Architecture : le calcul reste dans le domaine
+  (`AssignmentConflictAnalyzer`, `O(units²)` — jamais
+  `O(units² × candidats)`, en séparant "ces deux unités sont
+  incompatibles" — candidat-indépendant, calculé une fois — de "quels
+  candidats sont éligibles aux deux" — calculé ensuite seulement pour les
+  paires réellement incompatibles) ; `CpSatPayloadBuilder` traduit
+  mécaniquement chaque `AssignmentConflict` en
+  `x[left,c] + x[right,c] <= 1` ; `cp_sat_solver.py` ne recalcule jamais
+  de chevauchement/écart temporel à partir de timestamps bruts — il ne
+  fait qu'ajouter la contrainte que PHP lui a déjà entièrement
+  déterminée.
+- **Alternative écartée** : laisser Python recalculer les incompatibilités
+  depuis `Duty.startsAt`/`endsAt` bruts transmis dans le payload —
+  explicitement écartée par la spécification du lot ("le Python ne doit
+  pas recalculer les intervalles métier depuis des timestamps bruts") :
+  le solveur resterait un pur exécutant de contraintes déjà déterminées,
+  jamais un second endroit où la sémantique métier pourrait diverger.
+- **Conséquences** : `EligibilityMatrix`/`EligibilityService` restent
+  inchangés — `UNAVAILABLE` continue de retirer une seule arête,
+  `AssignmentConflict` ne duplique jamais cette règle (testé
+  explicitement,
+  `GlobalConstraintsSolveTest::testUnavailabilityNeverProducesAGlobalConstraintOnlyAnAbsentEdge`).
+  Ordre canonique (`left < right` par comparaison de chaînes, tri par clé
+  stable) garanti par l'analyseur et réaffirmé au moment de la
+  sérialisation JSON — jamais dépendant de l'ordre Doctrine/hashmap.
+  Détail : `docs/planning-solver.md` §Contraintes globales.
+
+## D101 — `CONFLICT` (HARD) et `TEAM_MIN_REST` (POLICY_HARD) implémentées ; `LEGAL_MIN_REST` toujours non implémentée 🟡 Portée révisée par [D105](#d105--legal_min_rest-et-team_min_rest-sont-des-politiques-activables-par-génération--aucune-durée-réglementaire-nest-déduite-automatiquement) (TEAM_MIN_REST n'est plus lue depuis le RuleSet d'équipe mais depuis les options figées de la génération — le calcul géométrique CONFLICT/TEAM_MIN_REST lui-même reste inchangé)
+
+- **Contexte** : Lot 6D §2, audit des six règles candidates
+  (CONFLICT/TEAM_MIN_REST/MAX_DUTIES/MAX_WEEKENDS/MAX_CONSECUTIVE_NIGHTS/
+  LEGAL_MIN_REST) dans l'ordre demandé.
+  - **CONFLICT** : donnée réelle (`Duty.startsAt`/`endsAt`,
+    `Duty::overlapsWith()` — déjà présente, déjà documentée comme
+    backing CONFLICT, jusque-là jamais utilisée), sémantique sans
+    ambiguïté (impossibilité physique), toujours HARD.
+  - **TEAM_MIN_REST** : donnée réelle
+    (`PlanningRuleSetConfiguration::$teamMinRestHours`, snapshottée via
+    `PlanningSnapshotRuleSet` — confirmé lisible et stable pour tout le
+    solve), sémantique claire (écart entre `endsAt`/`startsAt` réels,
+    jamais `localDate`), toujours POLICY_HARD (D036).
+  - **LEGAL_MIN_REST** : aucune source de vérité légale n'existe
+    toujours (D036 réaffirmée) — non implémentée, jamais copiée depuis
+    `teamMinRestHours`.
+- **Décision** : `AssignmentConflictAnalyzer` produit `CONFLICT` pour
+  toute paire d'unités dont au moins une paire de Duty constituantes se
+  chevauche (instants absolus, jamais `localDate` — DST-safe par
+  construction, comme `Duty::overlapsWith()` lui-même), et
+  `TEAM_MIN_REST` pour toute paire non chevauchante dont l'écart réel est
+  strictement inférieur à `teamMinRestHours` — un écart exactement égal
+  au minimum reste autorisé (testé explicitement,
+  `AssignmentConflictAnalyzerTest::testGapExactlyEqualToTeamMinRestIsAllowed`).
+  `CONFLICT` prime toujours sur `TEAM_MIN_REST` pour une même paire
+  (jamais les deux rapportées pour la même incompatibilité). Le tier est
+  toujours dérivé de `ExclusionReason::tier()`, jamais reconfigurable.
+- **Alternative écartée** : inventer un seuil `LEGAL_MIN_REST` "courant"
+  (ex. 11h) — explicitement interdit par la spécification du lot et par
+  D036 elle-même.
+- **Conséquences** : un `DutyGroupInstance` reste une seule unité — les
+  incompatibilités sont calculées en comparant *toutes* les paires de
+  Duty constituantes des deux unités (jamais seulement les Duty
+  "frontières"), garantissant l'exactitude même si un futur groupe
+  n'était pas trié chronologiquement. Détail : `docs/planning-solver.md`
+  §Contraintes globales.
+
+## D102 — `INSUFFICIENT_ELIGIBLE_CAPACITY` : cas exact unique (un seul candidat partagé entre deux unités en conflit)
+
+- **Contexte** : Lot 6D §16. `docs/allocation-algorithm.md` §16 cite cet
+  exemple : "2 gardes incompatibles, 1 seul candidat commun, capacité
+  maximale = 1, demande = 2". La spécification interdit explicitement
+  toute généralisation non démontrable sans solveur approximatif.
+- **Décision** : `StructuralDiagnosticCode::INSUFFICIENT_ELIGIBLE_CAPACITY`
+  n'est produit que dans le cas mathématiquement exact : une unité
+  REQUIRED non assignée dont l'unique candidat éligible C est également
+  en `AssignmentConflict` (CONFLICT ou TEAM_MIN_REST) avec une autre
+  unité REQUIRED dont C est *également* l'unique candidat éligible —
+  preuve directe qu'au plus une des deux peut jamais être couverte,
+  aucune approximation. S'applique que l'autre unité ait fini assignée
+  ou elle-même non assignée. Le cas général (violation du théorème de
+  Hall sur un groupe arbitraire d'unités et un pool de candidats plus
+  large) n'est délibérément **pas** couvert — nécessiterait un vrai
+  algorithme de couplage biparti, non implémenté.
+- **Alternative écartée** : un algorithme de couplage biparti complet
+  (Hopcroft-Karp ou équivalent) pour détecter tout déficit de capacité
+  — écarté explicitement par la spécification du lot ("si une analyse
+  complète de capacité devient complexe, laisser cette couche pour plus
+  tard plutôt que produire de faux diagnostics").
+- **Conséquences** : `StructuralDiagnostic` reste `{code,
+  dutyUnitStableKey}` — pour ce nouveau code, chacune des deux unités
+  impliquées reçoit sa propre entrée (le lien vers l'autre unité n'est
+  pas représenté dans ce type, limite documentée). Testé explicitement
+  (`GlobalConstraintsSolveTest::testInsufficientEligibleCapacityDiagnosedWhenExactlyOneSharedCandidate`).
+  Détail : `docs/planning-solver.md` §Diagnostics.
+
+## D103 — `diagnosticRelaxations` réellement calculé par un vrai re-solve, jamais inféré
+
+- **Contexte** : Lot 6D §17. Avec `TEAM_MIN_REST` désormais une vraie
+  POLICY_HARD capable de causer un UNSAT réel, le mécanisme du Lot 6C
+  (jusque-là toujours vide, D097) peut enfin produire une vraie
+  relaxation. La spécification impose un algorithme précis : résoudre
+  STRICT avec la règle, confirmer UNSAT, construire un problème
+  diagnostic *sans* cette POLICY_HARD, vérifier si la couverture
+  s'améliore réellement — jamais une déduction a priori.
+- **Décision** : `OrToolsPlanningSolver::buildRelaxations()` — appelé
+  uniquement quand PARTIAL laisse au moins une garde non assignée et
+  qu'au moins un `AssignmentConflict` POLICY_HARD existe dans le
+  problème — relance un vrai solve PARTIAL via
+  `CpSatPayloadBuilder::buildPartialSolvePayload($problem,
+  excludePolicyHardConflicts: true)` et ne construit un
+  `DiagnosticRelaxation` que si ce second solve aboutit *réellement* à
+  moins de gardes non assignées. La formulation reste conditionnelle
+  ("permettrait de retrouver une couverture complète" si le nouveau
+  solve est effectivement complet, "permettrait de réduire... de N à M"
+  sinon) — jamais "X est la cause" (testé explicitement,
+  `GlobalConstraintsSolveTest::testTeamMinRestRelaxationDiagnosticProposesRemovingItAndNeverAHardRule`).
+  `DiagnosticRelaxation` garde son garde-fou de constructeur du Lot 6C
+  (D097) — une contrainte HARD ne peut structurellement jamais y
+  apparaître.
+- **Alternative écartée** : déduire qu'une POLICY_HARD "doit" être la
+  cause dès qu'elle existe dans le problème, sans re-solve de
+  confirmation — explicitement interdit ("jamais inféré").
+- **Conséquences** : un coût réel — un troisième appel subprocess
+  seulement quand les deux conditions (shortfall + POLICY_HARD présente)
+  sont réunies, jamais systématique. S'il existait un jour plusieurs
+  types de règles POLICY_HARD simultanément, ce mécanisme les teste
+  toutes retirées *ensemble*, pas indépendamment — limitation documentée,
+  sans conséquence aujourd'hui puisque `TEAM_MIN_REST` est la seule
+  POLICY_HARD réellement produite. Détail : `docs/planning-solver.md`
+  §Diagnostics.
+
+## D104 — `MAX_DUTIES`/`MAX_WEEKENDS`/`MAX_CONSECUTIVE_NIGHTS` non implémentées malgré une configuration réelle existante
+
+- **Contexte** : Lot 6D, audit de `PlanningRuleSetConfiguration` —
+  découverte que `maxDutiesPerFairnessPeriod`,
+  `maxWeekendsPerFairnessPeriod` et `maxConsecutiveNights` existent bel
+  et bien comme champs validés et snapshottés (contrairement à ce qui
+  avait été supposé aux lots précédents). Un audit plus poussé révèle
+  néanmoins des blocages réels et distincts pour chacune :
+  - **MAX_DUTIES/MAX_WEEKENDS** : portée temporelle incompatible. Le nom
+    même du champ ("PerFairnessPeriod") indique une limite cumulative
+    sur tout un `FairnessPeriod` — qui peut couvrir plusieurs
+    `PlanningPeriod` distinctes (confirmé : les fixtures de test
+    construisent couramment un `FairnessPeriod` annuel contenant une
+    `PlanningPeriod` de seulement quelques mois). Or `OptimizationProblem`
+    ne voit jamais qu'une seule `PlanningPeriod` à la fois — aucune
+    donnée de charge historique inter-génération (autres
+    `PlanningPeriod` déjà publiées du même `FairnessPeriod`) n'est
+    aujourd'hui accessible depuis `OptimizationProblem`/`FairnessContext`.
+    Appliquer la limite en ne comptant que les gardes de *ce* solve
+    calculerait silencieusement une chose différente de ce que
+    `maxDutiesPerFairnessPeriod` promet réellement.
+  - **MAX_DUTIES**, en plus : ambiguïté d'unité non tranchée (DutyUnit ?
+    Duty constituante ? workload ?) — le nom pluriel "Duties" suggère un
+    compte de Duty constituantes (cohérent avec la convention déjà
+    établie de `TOTAL_DUTIES`/`DimensionMembershipCalculator`), mais rien
+    ne le confirme explicitement dans le RuleSet.
+  - **MAX_WEEKENDS**, en plus : `WEEKEND_GROUPS` n'existe toujours pas
+    comme dimension réelle (D086, `docs/fairness.md` §3).
+  - **MAX_CONSECUTIVE_NIGHTS** : aucune notion de garde "de nuit" n'est
+    identifiable dans le domaine — confirmé absent depuis les audits des
+    Lots 4-6C (`FairnessDimensionType` ne porte aucun cas NIGHT).
+- **Décision** : aucune des trois n'est implémentée dans ce lot. Chaque
+  gap est documenté précisément plutôt que masqué par une approximation
+  (compter seulement dans la période courante, deviner l'unité, déduire
+  "nuit" d'une heure arbitraire) — tous explicitement interdits par la
+  spécification du lot.
+- **Alternative écartée** : implémenter une version "approximative" de
+  MAX_DUTIES limitée à la `PlanningPeriod` courante, en la présentant
+  comme une première approche — écartée : calculerait silencieusement
+  une règle différente de `maxDutiesPerFairnessPeriod` sans le dire,
+  risquant une confusion produit sérieuse (un admin croirait la limite
+  annuelle respectée alors que seule la période courante a été comptée).
+- **Conséquences** : dette réelle et concrète pour un futur lot —
+  implémenter `MAX_DUTIES`/`MAX_WEEKENDS` correctement nécessite de
+  faire remonter la charge historique réelle (Duty déjà assignées dans
+  les générations publiées antérieures du même `FairnessPeriod`) jusqu'à
+  `OptimizationProblem`, un vrai changement d'architecture, pas
+  seulement une nouvelle contrainte CP-SAT. `MAX_CONSECUTIVE_NIGHTS`
+  reste bloquée sur l'absence de la dimension NIGHT elle-même. Détail :
+  `docs/planning-solver.md` §Hors périmètre.
+
+## D105 — LEGAL_MIN_REST et TEAM_MIN_REST sont des politiques activables par génération ; aucune durée réglementaire n'est déduite automatiquement
+
+- **Contexte** : Lot 6D.1, clarification métier explicite reçue après
+  D101 : `TEAM_MIN_REST` (et, une fois une source de donnée acceptée,
+  `LEGAL_MIN_REST`) ne doivent **jamais** être imposées globalement à
+  toutes les équipes/tous les plannings — ce sont des options que
+  l'utilisateur choisit pour *une génération donnée*, figées à sa
+  création. D101 avait implémenté `TEAM_MIN_REST` en lisant
+  `PlanningRuleSetConfiguration::$teamMinRestHours` (une valeur
+  d'équipe, courante au moment du snapshot) — ce lot corrige cette
+  portée sans jeter le travail de D100/D101 : le calcul géométrique
+  (chevauchement/écart en heures réelles, DST-safe, group-aware) est
+  entièrement réutilisé, seule la source de la configuration change.
+  `LEGAL_MIN_REST` reste sans aucune valeur par défaut devinée (D036
+  réaffirmée une troisième fois) : elle devient implémentable
+  uniquement parce qu'elle est désormais un choix explicite du
+  planificateur pour cette génération, jamais une constante système.
+- **Décision** :
+  - `App\Entity\RestPolicyOptions` (readonly, validée dans son
+    constructeur) porte `{legalMinRestEnabled, legalMinRestHours,
+    teamMinRestEnabled, teamMinRestHours}`. `*Hours` est obligatoire et
+    strictement positif exactement quand `*Enabled` est vrai, `null`
+    sinon — jamais un défaut silencieux dans un sens ou l'autre. Quand
+    les deux sont activées, `teamMinRestHours >= legalMinRestHours` est
+    imposé (une politique d'équipe ne peut jamais prétendre être plus
+    protectrice tout en étant en réalité plus laxiste que le plancher
+    légal qu'elle superpose) — violation = échec de construction
+    explicite, jamais une correction silencieuse.
+  - Ces options appartiennent à `PlanningGeneration` (4 colonnes
+    Doctrine plates, pas d'`#[ORM\Embedded]` — fonctionnalité jamais
+    utilisée ailleurs dans ce projet, introduite maintenant non
+    justifiée pour 4 champs), fixées à la construction et jamais
+    mutées ensuite (seul `$status` change après coup). Contrairement à
+    `PlanningRuleSet` → `PlanningSnapshotRuleSet` (nécessaire car le
+    RuleSet *actif* d'une équipe peut être réassigné après coup — une
+    copie figée séparée est indispensable pour rester interprétable),
+    une ligne `PlanningGeneration` est déjà son propre enregistrement
+    historique permanent : aucune entité `PlanningSnapshotRestPolicy`
+    séparée n'est nécessaire pour satisfaire l'exigence d'immutabilité
+    historique du lot — modèle à 2 couches (génération → options
+    figées) au lieu des 3 couches initialement envisagées
+    (RuleSet-défauts → génération → snapshot figé), qui satisfait
+    pourtant intégralement l'invariant demandé (testé explicitement :
+    `AssignmentConflictAnalyzerTest::testALaterGenerationsRestPolicyNeverAffectsAnEarlierGenerationsConflicts`).
+  - `AssignmentConflictAnalyzer` ne dépend plus de
+    `PlanningSnapshotRuleSetRepository` : il lit exclusivement
+    `$snapshot->getGeneration()->getRestPolicy()`. Il classe chaque
+    paire d'unités selon la précédence CONFLICT → LEGAL_MIN_REST →
+    TEAM_MIN_REST (jamais les deux dernières rapportées pour la même
+    paire — rendu possible et prouvé correct par l'invariant
+    `teamMinRestHours >= legalMinRestHours` de `RestPolicyOptions` :
+    toute violation LEGAL est mathématiquement aussi une violation
+    TEAM, donc rapporter TEAM en plus serait une pure redondance,
+    jamais une information supplémentaire — testé explicitement,
+    `AssignmentConflictAnalyzerTest::testBothEnabledGapViolatingLegalReportsLegalOnlyNeverBothForTheSamePair`).
+  - `PlanningRuleSetConfiguration::$teamMinRestHours` devient un champ
+    historique non lu (docblock mis à jour), conservé uniquement parce
+    que sa suppression n'a pas été démontrée nécessaire pour ce lot —
+    testé explicitement qu'il n'a plus aucun effet
+    (`AssignmentConflictAnalyzerTest::testRuleSetTeamMinRestHoursIsNeverConsultedOnlyTheGenerationsOwnFrozenOptions`).
+  - `POST /api/planning-periods/{id}/generations` accepte un corps JSON
+    optionnel (`CreatePlanningGenerationRequest`, validé via
+    `#[Assert\Callback]` en miroir exact des invariants de
+    `RestPolicyOptions`, jamais dupliqués silencieusement) ; un corps
+    absent/vide préserve exactement le comportement pré-Lot-6D.1 (les
+    deux politiques désactivées). Aucune UI, aucun nouvel endpoint,
+    aucun câblage `AUTO` n'est introduit.
+  - Le tier reste toujours dérivé de `ExclusionReason::tier()` :
+    `LEGAL_MIN_REST` = HARD (jamais relâchable, structurellement
+    impossible à proposer comme relaxation — le constructeur de
+    `DiagnosticRelaxation` refuse tout ce qui n'est pas POLICY_HARD),
+    `TEAM_MIN_REST` = POLICY_HARD (relâchable uniquement
+    via un vrai re-solve, mécanisme D103 réutilisé sans modification —
+    `OrToolsPlanningSolver::buildRelaxations()` ne collecte que les
+    conflits `POLICY_HARD`, donc `LEGAL_MIN_REST` ne peut structurellement
+    jamais apparaître dans `diagnosticRelaxations`, y compris quand elle
+    est la seule cause réelle de l'UNSAT — testé explicitement,
+    `GlobalConstraintsSolveTest::testLegalMinRestAloneNeverProducesAMisleadingRelaxation`).
+    `CONFLICT` reste HARD et inconditionnel, actif quelles que soient
+    les options de repos.
+- **Alternative écartée** : conserver `TEAM_MIN_REST` comme donnée
+  d'équipe (portée D101) et n'ajouter que `LEGAL_MIN_REST` en
+  per-génération — rejetée explicitement par la clarification métier
+  reçue : les deux règles doivent suivre exactement le même modèle
+  (options figées par génération), pas un modèle hybride qui aurait
+  laissé `TEAM_MIN_REST` continuer d'affecter silencieusement tous les
+  plannings d'une équipe. Alternative également écartée : créer
+  `PlanningSnapshotRestPolicy` en miroir de `PlanningSnapshotRuleSet`
+  — inutile, `PlanningGeneration` étant déjà immuable après création.
+- **Conséquences** : deux plannings différents (ou deux générations
+  successives de la même `PlanningPeriod`) peuvent désormais utiliser
+  deux politiques de repos différentes sans modifier le `RuleSet`
+  global de l'équipe ni l'historique d'une génération précédente —
+  critère de validation du lot, vérifié par
+  `PlanningGenerationControllerTest::testDifferentGenerationsOfTheSamePlanningPeriodCanUseDifferentRestPolicies`.
+  Migration `Version20260919053312` : 4 colonnes ajoutées à
+  `planning_generations`, rétro-compatibles par défaut `false`/`NULL`
+  (= `RestPolicyOptions::none()`, comportement pré-Lot-6D.1 exact pour
+  toute génération existante). Détail : `docs/planning-solver.md`
+  §Politiques de repos.
+
+## D106 — Orchestration réelle `PlanningGeneration → solve → DutyAssignment AUTO` : `SolverParameterSet`, seed/snapshotHash, concurrence
+
+- **Contexte** : Lot 6E. Jusqu'ici le moteur (`OptimizationProblemBuilder`,
+  `OrToolsPlanningSolver`) fonctionnait en composant isolé — aucun flux
+  réel ne l'appelait depuis `PlanningGeneration`, aucun `DutyAssignment`
+  automatique n'était jamais créé, `PlanningGenerationStatus` s'arrêtait à
+  `SNAPSHOTTED`, `timeoutBudget`/`SolverParameterSet`/`snapshotHash`
+  restaient absents (D093, D088 non résolues). Audit préalable exhaustif
+  (voir le rapport du lot) confirmant précisément quels champs
+  existaient déjà (`SolverMetadata.solverType/solverVersion/
+  solveDurationMs` réellement peuplés depuis le Lot 6B) et lesquels
+  restaient à ajouter.
+- **Décision** :
+  1. **Lifecycle** — `PlanningGenerationStatus` gagne `SOLVING`,
+     `COMPLETED`, `FAILED` : `DRAFT → SNAPSHOTTED → SOLVING →
+     {COMPLETED, FAILED}`, les deux derniers terminaux (une nouvelle
+     tentative est toujours une nouvelle `PlanningGeneration`, jamais une
+     réouverture — cohérent avec "l'historique n'est jamais recalculé").
+     `COMPLETED` couvre `coverageStatus` COMPLETE **et** INCOMPLETE (un
+     résultat PARTIAL réel est un résultat métier exploitable, jamais un
+     échec) ; `FAILED` est réservé à `SolverStatus::UNKNOWN`/`ERROR` ou à
+     `existingDataConflict` — zéro `DutyAssignment` n'est jamais créé dans
+     ce cas. `SOLVING` reste utile même en solve synchrone : c'est la
+     cible réelle du verrou de concurrence (ci-dessous), pas un état
+     décoratif.
+  2. **Concurrence/idempotence** — `PlanningGeneration::$lockVersion`
+     (`#[ORM\Version]`, verrouillage optimiste Doctrine réel) est la
+     garantie : la transition `SNAPSHOTTED → SOLVING` est un `flush()`
+     séparé, immédiat, avant le solve (potentiellement long) ; un second
+     appel concurrent dont l'`UPDATE ... WHERE lock_version = ?` ne
+     matche plus aucune ligne lève `OptimisticLockException`, traduite en
+     `PlanningGenerationConcurrentSolveException` (409) — jamais une
+     simple vérification `if status === SNAPSHOTTED` en mémoire, qui ne
+     protège pas contre une vraie course (deux requêtes lisant le même
+     statut avant que l'une ou l'autre ne commit).
+  3. **`SolverParameterSet`** (nouvelle entité, système, versionnée,
+     append-only, jamais éditée) : seuls deux champs réellement consommés
+     — `timeoutSeconds` (→ `max_time_in_seconds` CP-SAT, par appel
+     `Solve()`) et `numWorkers` (remplace le littéral `1` jusque-là codé
+     en dur à trois endroits de `CpSatPayloadBuilder`). Version 1 semée
+     directement dans la migration (`timeoutSeconds=60`, `numWorkers=1`)
+     — un choix documenté, versionné, jamais une constante cachée dans
+     `OrToolsPlanningSolver` : contrairement à `LEGAL_MIN_REST` (D036),
+     un budget de solve est une décision d'ingénierie dont MedVue est la
+     seule autorité, pas une donnée réglementaire externe à deviner.
+     `Process::setTimeout()` (le tueur de subprocess PHP) est fixé à
+     `timeoutSeconds × 12` — marge généreuse au-delà du pire cas réel
+     d'appels `Solve()` par subprocess (1 base + 10 phases max = 11).
+     `timeoutHit` est dérivé honnêtement côté Python : avec
+     `max_time_in_seconds` comme seul critère d'arrêt configuré, tout
+     statut `FEASIBLE`/`UNKNOWN` ne peut provenir que de l'expiration du
+     budget — jamais une approximation.
+  4. **Seed/snapshotHash** — `SnapshotHasher` calcule
+     `SHA-256(canonicalSnapshotJson)` sur exactement les données
+     réellement consommées par `EligibilityMatrixBuilder`/
+     `FairnessContextBuilder`/`AssignmentConflictAnalyzer` : membres du
+     snapshot (hors `$role`, documenté "audit uniquement, jamais lu par
+     le moteur"), leurs `participationPeriods`/`availabilityPeriods`/
+     `nonParticipationPeriods` (hors `sourceCreatedAt`/`sourceUpdatedAt`,
+     timestamps techniques), `RestPolicyOptions`, et la liste **vivante**
+     des `Duty` de la `PlanningPeriod` — jamais `PlanningSnapshotRuleSet.configuration`,
+     auditée et confirmée sans le moindre effet sur le calcul aujourd'hui
+     (D104 : aucune de MAX_DUTIES/WEEKENDS/CONSECUTIVE_NIGHTS n'est
+     câblée, et D105 a détaché `TEAM_MIN_REST` du RuleSet). `SeedMaterialBuilder`
+     calcule et persiste `seed` (`teamStableKey + planningPeriodStableKey
+     + rulesVersion + snapshotHash + algorithmVersion +
+     solverParameterSetVersion + explicitSeed`, docs/allocation-algorithm.md
+     §13) — uniquement pour l'audit/l'identité reproductible d'une
+     génération : la phase 8 (`deterministicTieBreak`) reste neutre
+     (D088), ce seed n'est donc consommé par aucun solve dans ce lot,
+     volontairement absent d'`OptimizationProblem`.
+  5. **Concurrence sur les données vivantes** — audit confirmant que
+     `Duty` n'est jamais dupliquée dans le snapshot
+     (docs/planning-generation.md §4) : c'est la seule donnée qu'un solve
+     synchrone peut encore voir changer sous lui (rien n'empêche d'ajouter
+     une `Duty` à la `PlanningPeriod` pendant que le subprocess tourne).
+     `snapshotHash` recalculé juste avant la persistance et comparé à
+     celui calculé juste avant le solve : une différence lève
+     `StalePlanningGenerationDataException` (409), la génération passe
+     `FAILED`, rien n'est jamais persisté contre une configuration devenue
+     obsolète — mais aucune fausse vérification n'est ajoutée pour les
+     données réellement immuables (membres, RuleSet figé, RestPolicy).
+  6. **Persistance AUTO** — `DutyAssignmentService::createAuto()`, une
+     vraie frontière distincte de `createManual()` (jamais un détournement
+     de sa sémantique) : ne flush jamais elle-même, conçue pour un usage
+     en lot. `PlanningGenerationService::persistSuccessfulOutcome()`
+     résout chaque `DutyAssignmentEdge` en `(DutyUnit, PlanningTeamMember)`,
+     puis crée un `DutyAssignment` par `Duty` constituante du `DutyUnit` —
+     un `DutyGroupInstance` assigné produit donc plusieurs `DutyAssignment`,
+     tous vers le même candidat (atomicité du groupe préservée à la
+     persistance, jamais seulement à la décision CP-SAT).
+  7. **Atomicité** — tout (les `DutyAssignment` AUTO, les métadonnées de
+     solve de la génération, sa transition de statut, la transition
+     éventuelle de `PlanningPeriodStatus`) est `persist()`é en mémoire puis
+     un seul `flush()` final — même discipline que
+     `PlanningSnapshotService::createSnapshot()`. Un échec de contrainte
+     unique en cours de flush (testé explicitement en pré-créant un
+     `DutyAssignment` MANUAL en collision) ne laisse strictement rien de
+     committed — vérifié en relisant la génération après `$em->clear()`.
+  8. **`PlanningPeriodStatus::GENERATED`** — désormais réellement
+     déclenché par un solve `COMPLETED` (`DRAFT → GENERATED`, ou
+     `VALIDATED → GENERATED` si une régénération invalide une validation
+     antérieure, déjà prévu par le graphe de transitions existant). Jamais
+     déclenché sur `FAILED`. Un `PlanningPeriod` déjà `PUBLISHED` n'est
+     jamais reculé (son propre graphe l'interdit déjà) — la génération
+     reste quand même son propre enregistrement historique valide.
+  9. **`PUBLISHED` ⇒ `coverageStatus = COMPLETE`** — dette documentée
+     depuis le Lot 3 (`docs/planning-domain.md` §17) enfin fermée :
+     `PlanningPeriodLifecycleService::transition()` vérifie désormais,
+     uniquement pour la cible `PUBLISHED`, qu'une `PlanningGeneration`
+     `COMPLETED` avec `coverageStatus = COMPLETE` existe pour la période —
+     sinon `PlanningPeriodNotReadyToPublishException` (409), distincte
+     d'`InvalidPlanningPeriodTransitionException` (forme du graphe,
+     vérifiée en premier). Aucun endpoint de publication n'est créé dans
+     ce lot — le point d'intégration est prêt pour un futur lot.
+- **Alternative écartée** : un `#[ORM\Embedded]` pour les champs de
+  résultat de solve sur `PlanningGeneration` — écarté pour rester
+  cohérent avec D105 (colonnes plates, cette fonctionnalité Doctrine
+  n'est utilisée nulle part ailleurs dans ce projet). Un enum de statut
+  fusionnant `strictSolverStatus`/`partialSolverStatus`/`coverageStatus`
+  en une seule valeur — explicitement écarté par la spécification du lot,
+  ces trois axes restent indépendants. Vérifier la concurrence par une
+  requête `UPDATE ... WHERE status = 'SNAPSHOTTED'` brute plutôt qu'un
+  verrou optimiste Doctrine — écarté : `#[ORM\Version]` est le mécanisme
+  idiomatique de ce framework pour exactement ce problème, et produit la
+  même garantie DB-level sans SQL à la main.
+- **Conséquences** : une vraie `PlanningGeneration` peut désormais être
+  résolue de bout en bout, produire ses `DutyAssignment` AUTO de manière
+  atomique et historique, sans jamais confondre résultat métier, erreur
+  technique et état de lifecycle — critère de validation du lot. Nouvel
+  endpoint `POST /api/planning-generations/{stableId}/solve` (OWNER/ADMIN
+  uniquement), réponse jamais les structures CP-SAT internes, uniquement
+  le modèle `UnsatReport` déjà typé quand `coverageStatus = INCOMPLETE`.
+  Dette réelle restante : un crash serveur pendant `SOLVING` laisse la
+  génération bloquée dans cet état sans mécanisme de nettoyage
+  automatique (pas de cron/sweep dans ce lot — un futur lot devra
+  décider d'une politique explicite, pas une simple découverte). Seule la
+  liste des `Duty` vivantes est couverte par la vérification de
+  concurrence — une autre donnée lue en direct qui deviendrait éditable
+  plus tard (ex. `DutyType.workloadValue`) ne serait pas automatiquement
+  protégée. `fixedAssignments`, REPAIR, SIMULATE, `MAX_DUTIES`/
+  `MAX_WEEKENDS`/`MAX_CONSECUTIVE_NIGHTS`, UI, validation/publication
+  avancée restent hors périmètre. Détail : `docs/planning-generation.md`
+  §2/§13-16, `docs/planning-solver.md` §37.

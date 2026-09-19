@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Repository;
 
-use App\Entity\TeamMember;
+use App\Entity\PlanningTeamMember;
 use App\Entity\TeamMemberNonParticipationPeriod;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
@@ -34,7 +34,7 @@ class TeamMemberNonParticipationPeriodRepository extends ServiceEntityRepository
     /**
      * @return list<TeamMemberNonParticipationPeriod>
      */
-    public function findByTeamMember(TeamMember $teamMember): array
+    public function findByTeamMember(PlanningTeamMember $teamMember): array
     {
         return $this->createQueryBuilder('p')
             ->andWhere('p.teamMember = :teamMember')
@@ -52,7 +52,7 @@ class TeamMemberNonParticipationPeriodRepository extends ServiceEntityRepository
      * @return list<TeamMemberNonParticipationPeriod>
      */
     public function findOverlappingOrTouchingForTeamMember(
-        TeamMember $teamMember,
+        PlanningTeamMember $teamMember,
         \DateTimeImmutable $startsAt,
         \DateTimeImmutable $endsAt,
         ?TeamMemberNonParticipationPeriod $excluding = null,
@@ -80,7 +80,7 @@ class TeamMemberNonParticipationPeriodRepository extends ServiceEntityRepository
      *
      * @return list<TeamMemberNonParticipationPeriod>
      */
-    public function findIntersecting(TeamMember $teamMember, \DateTimeImmutable $from, \DateTimeImmutable $to): array
+    public function findIntersecting(PlanningTeamMember $teamMember, \DateTimeImmutable $from, \DateTimeImmutable $to): array
     {
         return $this->createQueryBuilder('p')
             ->andWhere('p.teamMember = :teamMember')

@@ -37,7 +37,7 @@ services:
     # self::getContainer()->get(...). Marked public here as a documented,
     # temporary exception; safe to drop once a real controller consumes
     # each one (a real consumer keeps a private service alive on its own).
-    App\Service\TeamMembershipService:
+    App\Service\PlanningTeamMembershipService:
         public: true
     App\Service\ParticipationPeriodService:
         public: true
@@ -48,4 +48,50 @@ services:
     App\Service\PlanningRuleSetService:
         public: true
     App\Service\DutyMaterializationService:
+        public: true
+    # Lot 5 (docs/fairness.md): FairnessContextBuilder and
+    # OptimizationProblemBuilder are the two leaves of the fairness
+    # pipeline — nothing else in the app constructs them as a dependency
+    # yet (no controller/endpoint consumes fairness in this lot, by
+    # design). Same documented exception as above; their own dependencies
+    # (RequiredDemandBuilder, EffectiveExposureService,
+    # FairnessTargetService, StructurallyForcedAnalyzer,
+    # DimensionMembershipCalculator) survive compilation automatically as
+    # real constructor arguments of these two and need no entry of their
+    # own.
+    App\Service\FairnessContextBuilder:
+        public: true
+    App\Service\OptimizationProblemBuilder:
+        public: true
+    # Lot 6A (docs/planning-solver.md): FairnessDimensionClassifier has a
+    # single implementation today (DefaultFairnessDimensionClassifier) —
+    # Symfony's autowiring needs an explicit alias to resolve the interface
+    # type-hint on ObjectivePhaseFactory's constructor.
+    App\Fairness\FairnessDimensionClassifier:
+        alias: App\Fairness\DefaultFairnessDimensionClassifier
+    # Lot 6B (docs/planning-solver.md): OrToolsPlanningSolver has no
+    # consumer yet — no PlanningGeneration pipeline calls PlanningSolver
+    # in this lot, by design (STRICT solve proven in isolation first).
+    # Same documented exception as above; CpSatPayloadBuilder survives
+    # transitively as its real constructor argument.
+    #
+    # Kept `public: true` even though Lot 6E gives it a real consumer
+    # (PlanningGenerationService) — this project has no framework.test
+    # config enabling blanket service access in tests, so many existing
+    # tests still fetch it directly via self::getContainer()->get(...);
+    # removing this would break them for no real benefit.
+    App\Solver\OrToolsPlanningSolver:
+        public: true
+    # Lot 6E (docs/decisions.md D106): the domain must depend on the
+    # PlanningSolver *interface*, never OrToolsPlanningSolver directly
+    # (docs/decisions.md D031) — PlanningGenerationService type-hints the
+    # interface, so autowiring needs this explicit alias (single real
+    # implementation today, same pattern as FairnessDimensionClassifier
+    # above).
+    App\Fairness\PlanningSolver:
+        alias: App\Solver\OrToolsPlanningSolver
+    # PlanningGenerationService is the new orchestration entry point —
+    # public so tests can call ->generate() directly via the container,
+    # same documented exception as every other service in this file.
+    App\Service\PlanningGenerationService:
         public: true

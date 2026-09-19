@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Repository;
 
 use App\Entity\PlanningGeneration;
+use App\Entity\PlanningGenerationStatus;
 use App\Entity\PlanningPeriod;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
@@ -43,5 +44,20 @@ class PlanningGenerationRepository extends ServiceEntityRepository
     public function findByPlanningPeriod(PlanningPeriod $planningPeriod): array
     {
         return $this->findBy(['planningPeriod' => $planningPeriod], ['createdAt' => 'DESC', 'id' => 'DESC']);
+    }
+
+    /**
+     * The generation `PlanningPeriodLifecycleService::transition()` checks
+     * before allowing `PUBLISHED` (docs/decisions.md D106, closing the
+     * `docs/planning-domain.md` §17 debt item). `COMPLETED` only — a
+     * `FAILED`/`SOLVING`/`SNAPSHOTTED`/`DRAFT` generation never counts,
+     * regardless of how recent it is.
+     */
+    public function findMostRecentCompletedByPlanningPeriod(PlanningPeriod $planningPeriod): ?PlanningGeneration
+    {
+        return $this->findOneBy(
+            ['planningPeriod' => $planningPeriod, 'status' => PlanningGenerationStatus::COMPLETED],
+            ['createdAt' => 'DESC', 'id' => 'DESC'],
+        );
     }
 }

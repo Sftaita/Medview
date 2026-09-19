@@ -5,13 +5,15 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Dto\UpsertNonParticipationPeriodRequest;
-use App\Entity\TeamMember;
+use App\Entity\PlanningTeam;
+use App\Entity\PlanningTeamMember;
 use App\Entity\TeamMemberNonParticipationPeriod;
 use App\Exception\OverlappingNonParticipationPeriodException;
+use App\Repository\PlanningRepository;
+use App\Repository\PlanningTeamMemberRepository;
+use App\Repository\PlanningTeamRepository;
 use App\Repository\TeamMemberNonParticipationPeriodRepository;
-use App\Repository\TeamMemberRepository;
-use App\Repository\TeamRepository;
-use App\Security\Voter\TeamRoleVoter;
+use App\Security\Voter\PlanningTeamRoleVoter;
 use App\Service\TeamMemberNonParticipationService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -23,17 +25,21 @@ use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 /**
- * Administrative non-participation windows for one TeamMember
+ * Administrative non-participation windows for one PlanningTeamMember
  * (docs/availability.md) — never confused with the personal calendar
- * (PersonalCalendarController): this is scoped to a single team and only
- * OWNER/ADMIN may write it (TeamRoleVoter::MANAGE_NON_PARTICIPATION); the
- * member themselves may only read their own (TeamRoleVoter::VIEW_NON_PARTICIPATION).
+ * (PersonalCalendarController): this is scoped to a single PlanningTeam
+ * and only OWNER/ADMIN may write it (PlanningTeamRoleVoter::MANAGE_NON_PARTICIPATION); the
+ * member themselves may only read their own (PlanningTeamRoleVoter::VIEW_NON_PARTICIPATION).
+ * Nested under /api/plannings/{planningStableId}/teams/{teamStableId}/... —
+ * a PlanningTeam is never addressed on its own outside its Planning
+ * (docs/decisions.md D079).
  */
 final class TeamMemberNonParticipationController
 {
     public function __construct(
-        private readonly TeamRepository $teamRepository,
-        private readonly TeamMemberRepository $teamMemberRepository,
+        private readonly PlanningRepository $planningRepository,
+        private readonly PlanningTeamRepository $teamRepository,
+        private readonly PlanningTeamMemberRepository $teamMemberRepository,
         private readonly TeamMemberNonParticipationPeriodRepository $repository,
         private readonly TeamMemberNonParticipationService $service,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
@@ -41,12 +47,12 @@ final class TeamMemberNonParticipationController
     ) {
     }
 
-    #[Route('/api/teams/{teamStableId}/members/{memberStableId}/non-participation', name: 'api_team_member_non_participation_list', methods: ['GET'])]
-    public function list(string $teamStableId, string $memberStableId): JsonResponse
+    #[Route('/api/plannings/{planningStableId}/teams/{teamStableId}/members/{memberStableId}/non-participation', name: 'api_team_member_non_participation_list', methods: ['GET'])]
+    public function list(string $planningStableId, string $teamStableId, string $memberStableId): JsonResponse
     {
-        $member = $this->resolveMember($teamStableId, $memberStableId);
+        $member = $this->resolveMember($planningStableId, $teamStableId, $memberStableId);
 
-        if (!$this->authorizationChecker->isGranted(TeamRoleVoter::VIEW_NON_PARTICIPATION, $member)) {
+        if (!$this->authorizationChecker->isGranted(PlanningTeamRoleVoter::VIEW_NON_PARTICIPATION, $member)) {
             throw new AccessDeniedHttpException('You cannot view this member\'s non-participation periods.');
         }
 
@@ -55,10 +61,10 @@ final class TeamMemberNonParticipationController
         return new JsonResponse(array_map($this->toArray(...), $periods));
     }
 
-    #[Route('/api/teams/{teamStableId}/members/{memberStableId}/non-participation', name: 'api_team_member_non_participation_create', methods: ['POST'])]
-    public function create(string $teamStableId, string $memberStableId, Request $request): JsonResponse
+    #[Route('/api/plannings/{planningStableId}/teams/{teamStableId}/members/{memberStableId}/non-participation', name: 'api_team_member_non_participation_create', methods: ['POST'])]
+    public function create(string $planningStableId, string $teamStableId, string $memberStableId, Request $request): JsonResponse
     {
-        $member = $this->resolveMember($teamStableId, $memberStableId);
+        $member = $this->resolveMember($planningStableId, $teamStableId, $memberStableId);
         $this->denyUnlessCanManage($member);
 
         [$dto, $errorResponse] = $this->deserializeAndValidate($request);
@@ -80,10 +86,10 @@ final class TeamMemberNonParticipationController
         return new JsonResponse($this->toArray($period), 201);
     }
 
-    #[Route('/api/teams/{teamStableId}/members/{memberStableId}/non-participation/{stableId}', name: 'api_team_member_non_participation_update', methods: ['PATCH'])]
-    public function update(string $teamStableId, string $memberStableId, string $stableId, Request $request): JsonResponse
+    #[Route('/api/plannings/{planningStableId}/teams/{teamStableId}/members/{memberStableId}/non-participation/{stableId}', name: 'api_team_member_non_participation_update', methods: ['PATCH'])]
+    public function update(string $planningStableId, string $teamStableId, string $memberStableId, string $stableId, Request $request): JsonResponse
     {
-        $member = $this->resolveMember($teamStableId, $memberStableId);
+        $member = $this->resolveMember($planningStableId, $teamStableId, $memberStableId);
         $this->denyUnlessCanManage($member);
         $period = $this->resolvePeriod($member, $stableId);
 
@@ -106,10 +112,10 @@ final class TeamMemberNonParticipationController
         return new JsonResponse($this->toArray($period));
     }
 
-    #[Route('/api/teams/{teamStableId}/members/{memberStableId}/non-participation/{stableId}', name: 'api_team_member_non_participation_delete', methods: ['DELETE'])]
-    public function delete(string $teamStableId, string $memberStableId, string $stableId): Response
+    #[Route('/api/plannings/{planningStableId}/teams/{teamStableId}/members/{memberStableId}/non-participation/{stableId}', name: 'api_team_member_non_participation_delete', methods: ['DELETE'])]
+    public function delete(string $planningStableId, string $teamStableId, string $memberStableId, string $stableId): Response
     {
-        $member = $this->resolveMember($teamStableId, $memberStableId);
+        $member = $this->resolveMember($planningStableId, $teamStableId, $memberStableId);
         $this->denyUnlessCanManage($member);
         $period = $this->resolvePeriod($member, $stableId);
 
@@ -118,25 +124,37 @@ final class TeamMemberNonParticipationController
         return new Response(status: 204);
     }
 
-    private function resolveMember(string $teamStableId, string $memberStableId): TeamMember
+    private function resolveTeam(string $planningStableId, string $teamStableId): PlanningTeam
     {
-        $team = $this->teamRepository->findOneByStableId($teamStableId);
-        if (null === $team) {
-            throw new NotFoundHttpException('Team not found.');
+        $planning = $this->planningRepository->findOneByStableId($planningStableId);
+        if (null === $planning) {
+            throw new NotFoundHttpException('Planning not found.');
         }
+
+        $team = $this->teamRepository->findOneByStableId($teamStableId);
+        if (null === $team || $team->getPlanning() !== $planning) {
+            throw new NotFoundHttpException('PlanningTeam not found.');
+        }
+
+        return $team;
+    }
+
+    private function resolveMember(string $planningStableId, string $teamStableId, string $memberStableId): PlanningTeamMember
+    {
+        $team = $this->resolveTeam($planningStableId, $teamStableId);
 
         $member = $this->teamMemberRepository->findOneByStableId($memberStableId);
 
         // 404 (not just "member not found") when the member exists but
         // belongs to a different team — never confirms cross-team data.
-        if (null === $member || $member->getTeam() !== $team) {
+        if (null === $member || $member->getPlanningTeam() !== $team) {
             throw new NotFoundHttpException('Team member not found.');
         }
 
         return $member;
     }
 
-    private function resolvePeriod(TeamMember $member, string $stableId): TeamMemberNonParticipationPeriod
+    private function resolvePeriod(PlanningTeamMember $member, string $stableId): TeamMemberNonParticipationPeriod
     {
         $period = $this->repository->findOneByStableId($stableId);
         if (null === $period || $period->getTeamMember() !== $member) {
@@ -146,9 +164,9 @@ final class TeamMemberNonParticipationController
         return $period;
     }
 
-    private function denyUnlessCanManage(TeamMember $member): void
+    private function denyUnlessCanManage(PlanningTeamMember $member): void
     {
-        if (!$this->authorizationChecker->isGranted(TeamRoleVoter::MANAGE_NON_PARTICIPATION, $member)) {
+        if (!$this->authorizationChecker->isGranted(PlanningTeamRoleVoter::MANAGE_NON_PARTICIPATION, $member)) {
             throw new AccessDeniedHttpException('Only an OWNER or ADMIN of this team can manage non-participation periods.');
         }
     }

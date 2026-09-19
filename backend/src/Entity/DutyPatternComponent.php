@@ -15,7 +15,7 @@ use Doctrine\ORM\Mapping as ORM;
  *
  * $team is a deliberate denormalization: it lets the database enforce,
  * via a composite foreign key (see migrations), that $dutyType always
- * belongs to the same Team as $pattern — a cross-table invariant a plain
+ * belongs to the same PlanningTeam as $pattern — a cross-table invariant a plain
  * CHECK constraint cannot express. DutyPattern::addComponent() also
  * checks it in PHP for a friendly error before ever reaching the database.
  */
@@ -33,9 +33,9 @@ class DutyPatternComponent
     #[ORM\JoinColumn(nullable: false, onDelete: 'CASCADE')]
     private DutyPattern $pattern;
 
-    #[ORM\ManyToOne(targetEntity: Team::class)]
+    #[ORM\ManyToOne(targetEntity: PlanningTeam::class)]
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
-    private Team $team;
+    private PlanningTeam $team;
 
     /**
      * 0-based offset in days from the DutyGroupInstance's anchor date.

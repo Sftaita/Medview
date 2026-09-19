@@ -6,7 +6,7 @@ namespace App\Repository;
 
 use App\Entity\PlanningRuleSet;
 use App\Entity\PlanningRuleSetStatus;
-use App\Entity\Team;
+use App\Entity\PlanningTeam;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 
@@ -20,12 +20,12 @@ class PlanningRuleSetRepository extends ServiceEntityRepository
         parent::__construct($registry, PlanningRuleSet::class);
     }
 
-    public function findActive(Team $team): ?PlanningRuleSet
+    public function findActive(PlanningTeam $team): ?PlanningRuleSet
     {
         return $this->findOneBy(['team' => $team, 'status' => PlanningRuleSetStatus::ACTIVE]);
     }
 
-    public function findNextVersionNumber(Team $team): int
+    public function findNextVersionNumber(PlanningTeam $team): int
     {
         $maxVersion = $this->createQueryBuilder('r')
             ->select('MAX(r.version)')

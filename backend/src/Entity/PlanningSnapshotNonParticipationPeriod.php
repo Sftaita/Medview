@@ -99,6 +99,15 @@ class PlanningSnapshotNonParticipationPeriod
         return $this->sourceUpdatedAt;
     }
 
+    /**
+     * Exact-instant overlap check against a Duty's real start/end — same
+     * treatment as PlanningSnapshotAvailabilityPeriod::overlapsWith().
+     */
+    public function overlapsWith(Duty $duty): bool
+    {
+        return $this->startsAt < $duty->getEndsAt() && $duty->getStartsAt() < $this->endsAt;
+    }
+
     public function getCreatedAt(): \DateTimeImmutable
     {
         return $this->createdAt;

@@ -8,9 +8,9 @@ use App\Repository\TeamMemberParticipationPeriodRepository;
 use Doctrine\ORM\Mapping as ORM;
 
 /**
- * One segment of a TeamMember's participationFactor timeline
+ * One segment of a PlanningTeamMember's participationFactor timeline
  * (docs/allocation-algorithm.md §20, D035) — never a single mutable field
- * on TeamMember. A change in factor closes the currently open segment and
+ * on PlanningTeamMember. A change in factor closes the currently open segment and
  * appends a new one; past segments are never edited, so
  * participationFactorAt(date) always reads the value that was actually in
  * force at that date, regardless of what changed since.
@@ -34,9 +34,9 @@ class TeamMemberParticipationPeriod
     #[ORM\Column]
     private ?int $id = null;
 
-    #[ORM\ManyToOne(targetEntity: TeamMember::class, inversedBy: 'participationPeriods')]
+    #[ORM\ManyToOne(targetEntity: PlanningTeamMember::class, inversedBy: 'participationPeriods')]
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
-    private TeamMember $teamMember;
+    private PlanningTeamMember $teamMember;
 
     #[ORM\Column(type: 'date_immutable')]
     private \DateTimeImmutable $validFrom;
@@ -61,7 +61,7 @@ class TeamMemberParticipationPeriod
     private \DateTimeImmutable $createdAt;
 
     public function __construct(
-        TeamMember $teamMember,
+        PlanningTeamMember $teamMember,
         \DateTimeImmutable $validFrom,
         float $participationFactor,
         ParticipationFactorChangeReason $changeReason,
@@ -83,7 +83,7 @@ class TeamMemberParticipationPeriod
         return $this->id;
     }
 
-    public function getTeamMember(): TeamMember
+    public function getTeamMember(): PlanningTeamMember
     {
         return $this->teamMember;
     }

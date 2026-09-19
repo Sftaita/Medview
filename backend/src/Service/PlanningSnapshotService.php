@@ -15,9 +15,9 @@ use App\Entity\PlanningSnapshotRuleSet;
 use App\Exception\NoActivePlanningRuleSetException;
 use App\Exception\PlanningGenerationAlreadySnapshottedException;
 use App\Repository\PlanningRuleSetRepository;
+use App\Repository\PlanningTeamMemberRepository;
 use App\Repository\TeamMemberNonParticipationPeriodRepository;
 use App\Repository\TeamMemberParticipationPeriodRepository;
-use App\Repository\TeamMemberRepository;
 use App\Repository\UserAvailabilityPeriodRepository;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
@@ -33,7 +33,7 @@ use Doctrine\ORM\EntityManagerInterface;
 final class PlanningSnapshotService
 {
     public function __construct(
-        private readonly TeamMemberRepository $teamMemberRepository,
+        private readonly PlanningTeamMemberRepository $teamMemberRepository,
         private readonly TeamMemberParticipationPeriodRepository $participationPeriodRepository,
         private readonly UserAvailabilityPeriodRepository $availabilityPeriodRepository,
         private readonly TeamMemberNonParticipationPeriodRepository $nonParticipationPeriodRepository,
@@ -56,7 +56,7 @@ final class PlanningSnapshotService
      *                                                       constraint (see
      *                                                       docs/planning-generation.md
      *                                                       "Concurrence")
-     * @throws NoActivePlanningRuleSetException              if the Team has never activated a PlanningRuleSet
+     * @throws NoActivePlanningRuleSetException              if the PlanningTeam has never activated a PlanningRuleSet
      */
     public function createSnapshot(PlanningGeneration $generation): PlanningSnapshot
     {
@@ -76,7 +76,7 @@ final class PlanningSnapshotService
         // PlanningPeriod's own bounds directly. UserAvailabilityPeriod and
         // TeamMemberNonParticipationPeriod are TIMESTAMPTZ-typed, so the
         // period's calendar-date bounds are resolved into absolute instants
-        // in the Team's timezone first — same technique as
+        // in the PlanningTeam's timezone first — same technique as
         // DutyMaterializationService::resolveInstant().
         $timezone = new \DateTimeZone($team->getTimezone());
         $fromInstant = new \DateTimeImmutable($planningPeriod->getStartsAt()->format('Y-m-d').' 00:00:00', $timezone);
@@ -99,6 +99,7 @@ final class PlanningSnapshotService
                 $member->getMembershipStart(),
                 $member->getMembershipEnd(),
                 $member->getRole(),
+                $member->getUser()->isActive(),
             );
             $this->entityManager->persist($snapshotMember);
 

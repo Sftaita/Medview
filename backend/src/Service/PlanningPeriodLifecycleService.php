@@ -7,8 +7,11 @@ namespace App\Service;
 use App\Entity\FairnessPeriod;
 use App\Entity\PlanningPeriod;
 use App\Entity\PlanningPeriodStatus;
-use App\Entity\Team;
+use App\Entity\PlanningTeam;
 use App\Exception\InvalidPlanningPeriodTransitionException;
+use App\Exception\PlanningPeriodNotReadyToPublishException;
+use App\Fairness\CoverageStatus;
+use App\Repository\PlanningGenerationRepository;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
@@ -17,19 +20,24 @@ use Doctrine\ORM\EntityManagerInterface;
  * enforced in exactly one place, never scattered across future
  * controllers.
  *
- * Known gap (see docs/planning-domain.md "Dette / points ouverts"): the
- * spec requires PUBLISHED to also need coverageStatus = COMPLETE, but
- * PlanningGeneration (which would carry that status) is out of scope for
- * this lot — only the state-machine shape is enforced here today.
+ * docs/decisions.md D106 closes the previous gap (see
+ * docs/planning-domain.md "Dette / points ouverts"): PUBLISHED now also
+ * requires `coverageStatus = COMPLETE` on the most recent COMPLETED
+ * PlanningGeneration — checked here, the one real integration point,
+ * without building any publish endpoint/UI (none exists yet; this method
+ * has no caller in this lot either, exactly like before — the guard is
+ * ready for whichever future lot adds one).
  */
 final class PlanningPeriodLifecycleService
 {
-    public function __construct(private readonly EntityManagerInterface $entityManager)
-    {
+    public function __construct(
+        private readonly EntityManagerInterface $entityManager,
+        private readonly PlanningGenerationRepository $generationRepository,
+    ) {
     }
 
     public function create(
-        Team $team,
+        PlanningTeam $team,
         FairnessPeriod $fairnessPeriod,
         string $name,
         \DateTimeImmutable $startsAt,
@@ -44,9 +52,26 @@ final class PlanningPeriodLifecycleService
 
     /**
      * @throws InvalidPlanningPeriodTransitionException
+     * @throws PlanningPeriodNotReadyToPublishException
      */
     public function transition(PlanningPeriod $planningPeriod, PlanningPeriodStatus $target): void
     {
+        // The state-machine SHAPE is checked first — an illegal transition
+        // (e.g. DRAFT → PUBLISHED directly) must still fail with
+        // InvalidPlanningPeriodTransitionException, never be pre-empted by
+        // the coverage precondition below, which only makes sense once the
+        // transition is otherwise legal.
+        if (!$planningPeriod->getStatus()->canTransitionTo($target)) {
+            throw new InvalidPlanningPeriodTransitionException($planningPeriod->getStatus(), $target);
+        }
+
+        if (PlanningPeriodStatus::PUBLISHED === $target) {
+            $generation = $this->generationRepository->findMostRecentCompletedByPlanningPeriod($planningPeriod);
+            if (null === $generation || CoverageStatus::COMPLETE !== $generation->getCoverageStatus()) {
+                throw new PlanningPeriodNotReadyToPublishException();
+            }
+        }
+
         $planningPeriod->transitionTo($target);
         $this->entityManager->flush();
     }

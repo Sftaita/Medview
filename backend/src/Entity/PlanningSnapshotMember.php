@@ -21,6 +21,11 @@ use Symfony\Component\Uid\Uuid;
  * $role is carried for audit/display only, per docs/planning-generation.md
  * — never read by the future engine, which decides eligibility from
  * membership dates and participation, not from role.
+ *
+ * $active freezes User::isActive() at snapshot time (docs/eligibility.md
+ * §USER_INACTIVE, D067) — added in the eligibility lot specifically so
+ * EligibilityService never has to fall back to reading the live User for a
+ * datum the snapshot should have captured in the first place.
  */
 #[ORM\Entity(repositoryClass: PlanningSnapshotMemberRepository::class)]
 #[ORM\Table(name: 'planning_snapshot_members')]
@@ -52,6 +57,9 @@ class PlanningSnapshotMember
     #[ORM\Column(length: 20, enumType: TeamMemberRole::class)]
     private TeamMemberRole $role;
 
+    #[ORM\Column]
+    private bool $active;
+
     /**
      * @var Collection<int, PlanningSnapshotParticipationPeriod>
      */
@@ -80,6 +88,7 @@ class PlanningSnapshotMember
         \DateTimeImmutable $membershipStart,
         ?\DateTimeImmutable $membershipEnd,
         TeamMemberRole $role,
+        bool $active,
     ) {
         $this->snapshot = $snapshot;
         $this->sourceTeamMemberStableId = $sourceTeamMemberStableId;
@@ -87,6 +96,7 @@ class PlanningSnapshotMember
         $this->membershipStart = $membershipStart;
         $this->membershipEnd = $membershipEnd;
         $this->role = $role;
+        $this->active = $active;
         $this->participationPeriods = new ArrayCollection();
         $this->availabilityPeriods = new ArrayCollection();
         $this->nonParticipationPeriods = new ArrayCollection();
@@ -127,6 +137,25 @@ class PlanningSnapshotMember
     public function getRole(): TeamMemberRole
     {
         return $this->role;
+    }
+
+    public function isActive(): bool
+    {
+        return $this->active;
+    }
+
+    /**
+     * Date-aware membership check, mirroring TeamMember::isActiveAt() —
+     * the frozen equivalent used by EligibilityService for
+     * MEMBERSHIP_OUT_OF_RANGE (docs/eligibility.md).
+     */
+    public function coversLocalDate(\DateTimeImmutable $localDate): bool
+    {
+        if ($localDate < $this->membershipStart) {
+            return false;
+        }
+
+        return null === $this->membershipEnd || $localDate < $this->membershipEnd;
     }
 
     /**

@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace App\Tests\Entity;
 
 use App\Entity\ParticipationFactorChangeReason;
-use App\Entity\Team;
-use App\Entity\TeamMember;
+use App\Entity\Planning;
+use App\Entity\PlanningTeam;
+use App\Entity\PlanningTeamMember;
 use App\Entity\TeamMemberParticipationPeriod;
 use App\Entity\TeamMemberRole;
 use App\Entity\User;
@@ -14,12 +15,19 @@ use PHPUnit\Framework\TestCase;
 
 final class TeamMemberParticipationPeriodTest extends TestCase
 {
-    private function newTeamMember(): TeamMember
+    private function newTeamMember(): PlanningTeamMember
     {
-        $team = new Team('Cardiology', 'cardiology');
+        $planning = new Planning(
+            'Test Planning',
+            new User('creator@example.com', 'Creator', 'User', 'hash'),
+            new \DateTimeImmutable('2027-01-01'),
+            new \DateTimeImmutable('2028-01-01'),
+            'Europe/Brussels',
+        );
+        $team = new PlanningTeam($planning, 'Cardiology');
         $user = new User('a@example.com', 'A', 'User', 'hash');
 
-        return new TeamMember($team, $user, TeamMemberRole::MEMBER, new \DateTimeImmutable('2027-01-01'));
+        return new PlanningTeamMember($team, $user, TeamMemberRole::MEMBER, new \DateTimeImmutable('2027-01-01'));
     }
 
     public function testRejectsNonPositiveFactor(): void

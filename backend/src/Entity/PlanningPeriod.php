@@ -39,9 +39,9 @@ class PlanningPeriod
     #[ORM\Column(type: 'uuid')]
     private Uuid $stableId;
 
-    #[ORM\ManyToOne(targetEntity: Team::class)]
+    #[ORM\ManyToOne(targetEntity: PlanningTeam::class)]
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
-    private Team $team;
+    private PlanningTeam $team;
 
     #[ORM\ManyToOne(targetEntity: FairnessPeriod::class)]
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
@@ -66,7 +66,7 @@ class PlanningPeriod
     private \DateTimeImmutable $updatedAt;
 
     public function __construct(
-        Team $team,
+        PlanningTeam $team,
         FairnessPeriod $fairnessPeriod,
         string $name,
         \DateTimeImmutable $startsAt,
@@ -77,7 +77,7 @@ class PlanningPeriod
         }
 
         if ($fairnessPeriod->getTeam() !== $team) {
-            throw new \InvalidArgumentException('A PlanningPeriod must belong to the same Team as its FairnessPeriod.');
+            throw new \InvalidArgumentException('A PlanningPeriod must belong to the same PlanningTeam as its FairnessPeriod.');
         }
 
         if ($startsAt < $fairnessPeriod->getStartsAt() || $endsAt > $fairnessPeriod->getEndsAt()) {
@@ -105,7 +105,7 @@ class PlanningPeriod
         return $this->stableId;
     }
 
-    public function getTeam(): Team
+    public function getTeam(): PlanningTeam
     {
         return $this->team;
     }

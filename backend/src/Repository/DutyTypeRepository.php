@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Repository;
 
 use App\Entity\DutyType;
-use App\Entity\Team;
+use App\Entity\PlanningTeam;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 
@@ -19,7 +19,7 @@ class DutyTypeRepository extends ServiceEntityRepository
         parent::__construct($registry, DutyType::class);
     }
 
-    public function findOneByTeamAndCode(Team $team, string $code): ?DutyType
+    public function findOneByTeamAndCode(PlanningTeam $team, string $code): ?DutyType
     {
         return $this->findOneBy(['team' => $team, 'code' => $code]);
     }

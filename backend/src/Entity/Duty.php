@@ -29,8 +29,8 @@ use Symfony\Component\Uid\Uuid;
  *    downstream consumer has to re-derive or guess it.
  *
  * $team is a deliberate denormalization enabling a composite foreign key
- * (see migrations) that guarantees $dutyType belongs to the same Team as
- * $planningPeriod, and that $groupInstance (when set) belongs to this
+ * (see migrations) that guarantees $dutyType belongs to the same
+ * PlanningTeam as $planningPeriod, and that $groupInstance (when set) belongs to this
  * exact $planningPeriod — never another one.
  */
 #[ORM\Entity(repositoryClass: DutyRepository::class)]
@@ -49,9 +49,9 @@ class Duty
     #[ORM\Column(type: 'uuid')]
     private Uuid $stableId;
 
-    #[ORM\ManyToOne(targetEntity: Team::class)]
+    #[ORM\ManyToOne(targetEntity: PlanningTeam::class)]
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
-    private Team $team;
+    private PlanningTeam $team;
 
     #[ORM\ManyToOne(targetEntity: PlanningPeriod::class)]
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
@@ -109,11 +109,26 @@ class Duty
         }
 
         if ($dutyType->getTeam() !== $planningPeriod->getTeam()) {
-            throw new \InvalidArgumentException('A Duty must use a DutyType from the same Team as its PlanningPeriod.');
+            throw new \InvalidArgumentException('A Duty must use a DutyType from the same PlanningTeam as its PlanningPeriod.');
         }
 
         if (null !== $groupInstance && $groupInstance->getPlanningPeriod() !== $planningPeriod) {
             throw new \InvalidArgumentException('A Duty must belong to the same PlanningPeriod as its DutyGroupInstance.');
+        }
+
+        // A DutyGroupInstance is one atomic DutyUnit for eligibility AND for
+        // fairness (docs/fairness.md, docs/decisions.md D083): it
+        // must be classifiable as a single requiredDutyUnit/optionalDutyUnit,
+        // never a mix. DutyMaterializationService::materializeGroup() only
+        // ever applies one $demandType to a whole group, so this can never
+        // trigger through the real application code path today — kept as
+        // defense-in-depth against direct entity construction, same style as
+        // the two checks above.
+        if (null !== $groupInstance && !$groupInstance->getDuties()->isEmpty()) {
+            $existingDemandType = $groupInstance->getDuties()->first()->getDemandType();
+            if ($existingDemandType !== $demandType) {
+                throw new \InvalidArgumentException('A DutyGroupInstance cannot mix REQUIRED and OPTIONAL Duties — it must be classifiable as a single requiredDutyUnit or optionalDutyUnit.');
+            }
         }
 
         $this->stableId = Uuid::v7();
@@ -151,7 +166,7 @@ class Duty
         return $this->stableId;
     }
 
-    public function getTeam(): Team
+    public function getTeam(): PlanningTeam
     {
         return $this->team;
     }
