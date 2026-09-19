@@ -1,0 +1,44 @@
+FROM dunglas/frankenphp:1-php8.3 AS vendor
+
+RUN install-php-extensions \
+    pdo_pgsql \
+    intl \
+    opcache \
+    zip
+
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+WORKDIR /app
+COPY composer.json composer.lock symfony.lock ./
+# --no-scripts: auto-scripts (cache:clear, assets:install) need a real .env
+# (DB, secrets) that only exists once the container runs with its real
+# runtime env — never at build time. Run them explicitly after `up -d`.
+RUN composer install --no-dev --optimize-autoloader --no-scripts --no-interaction
+
+FROM dunglas/frankenphp:1-php8.3
+
+RUN install-php-extensions \
+    pdo_pgsql \
+    intl \
+    opcache \
+    zip
+
+# OR-Tools CP-SAT has no official PHP bindings (docs/decisions.md D031,
+# docs/planning-solver.md) — the real solver runs as a Python subprocess
+# invoked by OrToolsPlanningSolver, never linked into the PHP process. A
+# dedicated venv avoids Debian's PEP 668 "externally managed environment"
+# restriction on the system Python without --break-system-packages.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/ortools-venv \
+    && /opt/ortools-venv/bin/pip install --no-cache-dir ortools==9.15.6755
+
+WORKDIR /app
+COPY . .
+COPY --from=vendor /app/vendor ./vendor
+
+ENV APP_ENV=prod
+ENV SERVER_NAME=:80
+EXPOSE 80

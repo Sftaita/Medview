@@ -1,0 +1,81 @@
+services:
+  database:
+    image: postgres:16-alpine
+    container_name: medvue-database
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - medvue_db_data:/var/lib/postgresql/data
+    networks:
+      - medvue-internal
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER}", "-d", "${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    # No published port: only medvue-backend (on medvue-internal) can
+    # reach this database, never the host or another app's stack.
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    image: medvue-backend:${IMAGE_TAG:-local}
+    container_name: medvue-backend
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - proxy
+      - medvue-internal
+    depends_on:
+      database:
+        condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.medvue-api.rule=Host(`api.medvue.be`)"
+      - "traefik.http.routers.medvue-api.entrypoints=websecure"
+      - "traefik.http.routers.medvue-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.medvue-api.middlewares=secure-headers@file,compress@file"
+      - "traefik.http.routers.medvue-api.service=medvue-backend"
+      - "traefik.http.services.medvue-backend.loadbalancer.server.port=80"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: https://api.medvue.be
+    image: medvue-frontend:${IMAGE_TAG:-local}
+    container_name: medvue-frontend
+    restart: unless-stopped
+    networks:
+      - proxy
+    depends_on:
+      - backend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=proxy"
+      - "traefik.http.routers.medvue-web.rule=Host(`medvue.be`) || Host(`www.medvue.be`)"
+      - "traefik.http.routers.medvue-web.entrypoints=websecure"
+      - "traefik.http.routers.medvue-web.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.medvue-web.middlewares=secure-headers@file,compress@file"
+      - "traefik.http.routers.medvue-web.service=medvue-frontend"
+      - "traefik.http.services.medvue-frontend.loadbalancer.server.port=80"
+
+networks:
+  proxy:
+    name: proxy
+    external: true
+  # Private to MedVue only — never shared with surgicalhub/medatwork/medclick's
+  # `backend` network. Created by this compose file, not external.
+  medvue-internal:
+    name: medvue-internal
+
+volumes:
+  medvue_db_data:
+    name: medvue_db_data
