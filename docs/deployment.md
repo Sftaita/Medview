@@ -164,6 +164,7 @@ conservé séparément, hors serveur. Les sauvegardes des autres applications
 | Date | Tag | Commit | Notes |
 |---|---|---|---|
 | 2026-09-20 | `v2026.09.20-prod` | `e15dda4` | Premier déploiement (incidents : §8). **Dérogation à la règle « tag uniquement si tout est vert » : ce tag a été poussé alors que le job backend de GitHub Actions était encore rouge** (cause alors non identifiée, voir §8 points 8 et 9). Le tag est conservé tel quel : il désigne fidèlement le commit réellement mis en production (arbre du serveur vérifié fichier par fichier). Il ne doit être ni supprimé, ni déplacé, ni recréé. |
+| 2026-09-20 | `v2026.09.20-prod-2` | `6a1d389` | **Production validée.** CI GitHub Actions : backend + frontend verts (run `35499282274`). Correctif CI JWT (paire de clés générée avant les tests, §8 point 9), redéploiement du HEAD complet (archive vérifiée fichier par fichier, backend reconstruit et recréé, clés JWT inchangées), 66/66 checks publics. Aucun changement de code applicatif par rapport à `v2026.09.20-prod`. Ce tag remplace, comme référence de production, le précédent, qui reste en place avec sa dérogation. |
 
 ### Dérogations à la règle « tag uniquement si tout est vert »
 
