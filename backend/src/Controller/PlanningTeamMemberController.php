@@ -27,9 +27,11 @@ use Symfony\Component\Validator\Validator\ValidatorInterface;
  * Membership management for one PlanningTeam (docs/decisions.md D079/D080).
  * Every write here is reserved to the Planning's creator
  * (PlanningVoter::MANAGE) — same restriction as PlanningLineController.
- * There is deliberately no team-level OWNER/ADMIN write path in v1: adding
- * or removing a member is Planning-structure work, not team-role work
- * (docs/planning.md §Autorisations) — PlanningTeamRoleVoter still governs
+ * These endpoints deliberately have no team-level OWNER/ADMIN write path:
+ * adding or removing a member by identifier is Planning-structure work, not
+ * team-role work (docs/planning.md §Autorisations). The one exception is
+ * "add a person by email" (TeamInvitationController, TEAM_INVITE, D111),
+ * which OWNER/ADMIN of the team may also use — PlanningTeamRoleVoter still governs
  * generation/snapshot/assignment authority for a team's own line, a
  * separate concern. Listing is open to anyone who can view the Planning.
  */

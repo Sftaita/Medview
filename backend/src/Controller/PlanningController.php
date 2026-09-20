@@ -13,6 +13,7 @@ use App\Exception\OverlappingFairnessPeriodException;
 use App\Repository\PlanningLineRepository;
 use App\Repository\PlanningRepository;
 use App\Repository\PlanningTeamMemberRepository;
+use App\Security\Voter\PlanningTeamRoleVoter;
 use App\Security\Voter\PlanningVoter;
 use App\Service\PlanningService;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -255,6 +256,10 @@ final class PlanningController
             'team' => [
                 'stableId' => (string) $team->getStableId(),
                 'name' => $team->getName(),
+                // Whether the caller may add/invite people to this team
+                // (creator, or OWNER/ADMIN of it) — decided server-side, the
+                // frontend has no way to compute it itself.
+                'canInvite' => $this->authorizationChecker->isGranted(PlanningTeamRoleVoter::INVITE, $team),
             ],
             'memberCount' => $memberCount,
             'planningPeriodStableId' => (string) $line->getPlanningPeriod()->getStableId(),

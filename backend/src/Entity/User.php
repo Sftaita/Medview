@@ -9,6 +9,7 @@ use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface;
 use Symfony\Component\Security\Core\User\UserInterface;
 use Symfony\Component\Serializer\Attribute\Groups;
+use Symfony\Component\Serializer\Attribute\SerializedName;
 use Symfony\Component\Uid\Uuid;
 use Symfony\Component\Validator\Constraints as Assert;
 
@@ -55,6 +56,17 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
      */
     #[ORM\Column(length: 255)]
     private string $passwordHash;
+
+    /**
+     * International E.164 form ("+32470123456"), produced by
+     * PhoneNumberNormalizer — never the raw user input. Nullable only
+     * because accounts created before this field existed have none;
+     * registration itself requires it (docs/decisions.md D112).
+     */
+    #[ORM\Column(length: 20, nullable: true)]
+    #[SerializedName('phone')]
+    #[Groups(['user:read'])]
+    private ?string $phoneE164 = null;
 
     #[ORM\Column]
     #[Groups(['user:read'])]
@@ -120,6 +132,17 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     public function setLastName(string $lastName): void
     {
         $this->lastName = $lastName;
+        $this->touch();
+    }
+
+    public function getPhoneE164(): ?string
+    {
+        return $this->phoneE164;
+    }
+
+    public function setPhoneE164(?string $phoneE164): void
+    {
+        $this->phoneE164 = $phoneE164;
         $this->touch();
     }
 

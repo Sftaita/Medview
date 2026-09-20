@@ -1,5 +1,5 @@
 import { apiFetch } from '../../lib/apiClient'
-import type { CurrentUser, RegisterInput } from './types'
+import type { CurrentUser, RegisterInput, RegisterResult } from './types'
 
 export function login(email: string, password: string): Promise<{ token: string }> {
   return apiFetch<{ token: string }>('/api/login', {
@@ -9,8 +9,8 @@ export function login(email: string, password: string): Promise<{ token: string 
   })
 }
 
-export function register(input: RegisterInput): Promise<CurrentUser> {
-  return apiFetch<CurrentUser>('/api/register', {
+export function register(input: RegisterInput): Promise<RegisterResult> {
+  return apiFetch<RegisterResult>('/api/register', {
     method: 'POST',
     body: input,
     skipAuth: true,

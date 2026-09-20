@@ -1,0 +1,110 @@
+{# ==================================================================
+   MedVue — briques de contenu pour les emails
+   ------------------------------------------------------------------
+   Chaque macro produit UNE ligne de tableau (<tr>) destinée aux blocs
+   « content » et « after_cta » du modèle email/_base.html.twig.
+
+     {% import 'email/_components.html.twig' as ui %}
+
+     {{ ui.p('Bonjour ' ~ firstName ~ ',', 24) }}
+     {{ ui.p('Texte avec ' ~ ui.b(teamName) ~ ' en gras.') }}
+     {{ ui.info('Titre de l’encart', 'Texte explicatif.') }}
+     {{ ui.warning('Lien personnel.', 'Ne le transmettez pas.') }}
+     {{ ui.success('Compte validé.', 'Tout est prêt.') }}
+     {{ ui.small('Mention discrète.') }}
+     {{ ui.rows([['Équipe', teamName], ['Invité par', inviterName]]) }}
+     {{ ui.divider() }}
+
+   Le HTML passé aux macros est rendu tel quel : n’y injectez jamais
+   de saisie utilisateur brute — passez-la par ui.b(), qui échappe son
+   argument, ou par |e.
+   ================================================================== #}
+
+{# Paragraphe courant. top = espace au-dessus (24 pour le premier). #}
+{% macro p(html, top) %}
+              <tr>
+                <td class="sh-pad" style="padding:{{ top|default(14) }}px 40px 0 40px; font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif; font-size:16px; line-height:26px; mso-line-height-rule:exactly; color:#3A4754;">{{ html|raw }}</td>
+              </tr>
+{% endmacro %}
+
+{# Fragment gras, échappé — à composer dans p(). #}
+{% macro b(text) %}<strong style="color:#16202B; font-weight:bold;">{{ text }}</strong>{% endmacro %}
+
+{# Encart neutre : information de contexte. #}
+{% macro info(title, html) %}
+              <tr>
+                <td class="sh-pad" style="padding:24px 40px 0 40px;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%; background-color:#F1F4F7; border:1px solid #E7EBEF; border-radius:12px;">
+                    <tr>
+                      <td style="padding:16px 20px; font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif; font-size:14px; line-height:22px; mso-line-height-rule:exactly; color:#3A4754;">
+                        {% if title %}<span style="font-weight:bold; color:#16202B;">{{ title }}</span><br>{% endif %}{{ html|raw }}
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+{% endmacro %}
+
+{# Encart ambre : précaution, expiration, lien personnel. #}
+{% macro warning(title, html) %}
+              <tr>
+                <td class="sh-pad" style="padding:16px 40px 0 40px;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%; background-color:#FEF6E7; border:1px solid #FBEACB; border-radius:12px;">
+                    <tr>
+                      <td style="padding:14px 18px; font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif; font-size:14px; line-height:21px; mso-line-height-rule:exactly; color:#B7791F;">
+                        {% if title %}<span style="font-weight:bold;">{{ title }}</span> {% endif %}{{ html|raw }}
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+{% endmacro %}
+
+{# Encart vert : confirmation. #}
+{% macro success(title, html) %}
+              <tr>
+                <td class="sh-pad" style="padding:16px 40px 0 40px;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%; background-color:#EFFAF5; border:1px solid #BCE9D6; border-radius:12px;">
+                    <tr>
+                      <td style="padding:14px 18px; font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif; font-size:14px; line-height:21px; mso-line-height-rule:exactly; color:#2C7D5F;">
+                        {% if title %}<span style="font-weight:bold; color:#144D38;">{{ title }}</span> {% endif %}{{ html|raw }}
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+{% endmacro %}
+
+{# Mention discrète. #}
+{% macro small(html) %}
+              <tr>
+                <td class="sh-pad" style="padding:14px 40px 0 40px; font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:#727E8C;">{{ html|raw }}</td>
+              </tr>
+{% endmacro %}
+
+{# Tableau clé / valeur : récapitulatif de mission, de planning… #}
+{% macro rows(pairs) %}
+              <tr>
+                <td class="sh-pad" style="padding:22px 40px 0 40px;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%; border:1px solid #E7EBEF; border-radius:12px;">
+                    {% for pair in pairs %}
+                    <tr>
+                      <td width="170" style="width:170px; padding:13px 8px 13px 18px; font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:#727E8C;{% if not loop.first %} border-top:1px solid #E7EBEF;{% endif %}">{{ pair[0] }}</td>
+                      <td style="padding:13px 18px 13px 8px; font-family:Arial, 'Helvetica Neue', Helvetica, sans-serif; font-size:15px; line-height:22px; mso-line-height-rule:exactly; font-weight:bold; color:#16202B;{% if not loop.first %} border-top:1px solid #E7EBEF;{% endif %}">{{ pair[1] }}</td>
+                    </tr>
+                    {% endfor %}
+                  </table>
+                </td>
+              </tr>
+{% endmacro %}
+
+{# Séparateur horizontal. #}
+{% macro divider() %}
+              <tr>
+                <td class="sh-pad" style="padding:24px 40px 0 40px;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;">
+                    <tr><td height="1" style="height:1px; line-height:1px; font-size:1px; background-color:#E7EBEF;">&nbsp;</td></tr>
+                  </table>
+                </td>
+              </tr>
+{% endmacro %}

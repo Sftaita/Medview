@@ -182,6 +182,10 @@ GET    /api/plannings/{planningStableId}/teams/{teamStableId}/members
 POST   /api/plannings/{planningStableId}/teams/{teamStableId}/members
 POST   /api/plannings/{planningStableId}/teams/{teamStableId}/members/{memberStableId}/end
 
+GET    /api/plannings/{planningStableId}/teams/{teamStableId}/invitations          (§14)
+POST   /api/plannings/{planningStableId}/teams/{teamStableId}/invitations          (§14)
+POST   /api/plannings/{planningStableId}/teams/{teamStableId}/invitations/{invitationStableId}/revoke
+
 GET    /api/plannings/{planningStableId}/teams/{teamStableId}/members/{memberStableId}/non-participation
 POST   /api/plannings/{planningStableId}/teams/{teamStableId}/members/{memberStableId}/non-participation
 PATCH  /api/plannings/{planningStableId}/teams/{teamStableId}/members/{memberStableId}/non-participation/{stableId}
@@ -225,7 +229,9 @@ sur le `PlanningPeriod` de chaque ligne et de revalider chaque
   seul fait. C'est aussi la règle qui gouverne l'ajout/la fin d'adhésion
   d'un membre (`PlanningTeamMemberController`) — gérer les membres d'une
   équipe est un acte de structure du Planning, pas un acte de rôle
-  d'équipe. `PlanningTeamRoleVoter::MANAGE_PLANNING` (OWNER/ADMIN de la
+  d'équipe. **Seule exception (2026-09-20, §14)** : « Ajouter une personne »
+  par email (`TeamInvitationController`, attribut `TEAM_INVITE`) est aussi
+  ouvert aux OWNER/ADMIN de l'équipe concernée. `PlanningTeamRoleVoter::MANAGE_PLANNING` (OWNER/ADMIN de la
   PlanningTeam) reste la seule autorité pour les générations/snapshots/
   assignations manuelles de la ligne de cette équipe — une distinction
   volontairement conservée, pas unifiée avec `PlanningVoter`.
@@ -297,3 +303,45 @@ période différenciée par ligne (toutes les lignes partagent exactement
 UI de non-participation administrative (endpoint existant, plus de point
   d'entrée frontend depuis la suppression de /teams/:teamId, §12)
 ```
+
+## 14. « Ajouter une personne » : invitations d'équipe (2026-09-20, D111-D113)
+
+Ajouter quelqu'un à une `PlanningTeam` se fait maintenant **par email** (plus
+besoin de connaître son `stableId`). Le détail complet — modèle, token,
+atomicité, concurrence, emails — est dans `docs/authentication.md` §15 ; ici,
+ce qui touche au modèle Planning/Team.
+
+**Autorisation** — nouvel attribut `PlanningTeamRoleVoter::INVITE`
+(`TEAM_INVITE`) : vrai pour le **créateur du Planning** (qui n'est pas
+forcément membre d'une équipe) et pour un **OWNER/ADMIN courant de cette
+équipe**. Faux pour un `MEMBER`, pour un OWNER/ADMIN d'une *autre* équipe du
+même Planning et pour tout étranger. C'est le premier chemin d'écriture
+« membres » ouvert à un rôle d'équipe ; les endpoints historiques
+(`POST …/members`, `…/end`) restent réservés au créateur (§10) — c'est aussi
+eux qui permettent de choisir `ADMIN`/`OWNER` et la date d'entrée.
+`canInvite` est exposé par `GET /api/plannings/{id}` (`lines[].team.canInvite`)
+car le frontend ne peut pas le déduire.
+
+**Une invitation n'est jamais un `TeamMember`.** `TeamInvitation` vit dans sa
+propre table ; le `PlanningTeamMember` (avec sa `TeamMemberParticipationPeriod`
+initiale) n'est créé que lorsque la personne existe réellement, via le même
+`PlanningTeamMembershipService::addMember()` que tout le reste — la règle
+« une adhésion ouverte par Planning » (§6, D080) s'applique donc telle quelle :
+inviter quelqu'un qui est déjà dans une *autre* équipe du même Planning donne
+`409 membership_conflict` ; deux invitations pour deux équipes d'un même
+Planning laissent la seconde `PENDING` à la consommation.
+
+**Endpoints** (sous `/api/plannings/{planningStableId}/teams/{teamStableId}`) :
+
+```
+GET  /invitations                          invitations en attente (managers uniquement)
+POST /invitations                          { email, firstName, lastName } → USER_ADDED | INVITATION_CREATED | ALREADY_MEMBER | INVITATION_ALREADY_PENDING
+POST /invitations/{invitationStableId}/revoke
+```
+
+**Frontend** (`PlanningDetailPage` → `TeamInvitePanel`) : bouton « Ajouter une
+personne » (prénom, nom, email), feedback explicite pour chacun des quatre
+états, et section « Invitations en attente » **distincte** de la liste des
+membres (« Marie Dupont (marie@… ) — Invitation en attente », bouton
+« Révoquer »). Le formulaire d'ajout par identifiant reste, sous la mention
+« Utilisateur existant (identifiant connu) ».

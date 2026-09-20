@@ -252,3 +252,20 @@
   gap: 0.5rem;
   font-size: 0.9rem;
 }
+
+/* Registration / invitation flow */
+.registration-invitation-note {
+  padding: 0.75rem 1rem;
+  border-left: 3px solid #3a7bd5;
+  background: #3a7bd511;
+}
+
+.joined-teams-banner {
+  padding: 0.75rem 1rem;
+  border-left: 3px solid #42a882;
+  background: #42a88218;
+}
+
+.team-invite-panel {
+  margin-top: 1rem;
+}

@@ -8,6 +8,7 @@ import {
 } from '../../lib/apiClient'
 import { fetchMe, login as loginRequest, logout as logoutRequest, register as registerRequest } from './api'
 import { AuthContext } from './context'
+import { setJoinedTeamsFlash } from './joinedTeamsFlash'
 import type { CurrentUser, RegisterInput } from './types'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -58,8 +59,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const register = useCallback(
     async (input: RegisterInput) => {
-      await registerRequest(input)
+      const { joinedTeams = [] } = await registerRequest(input)
+      // Before login(): the moment the session exists, PublicOnlyRoute
+      // redirects to the dashboard, which reads this flash when it mounts.
+      setJoinedTeamsFlash(joinedTeams)
       await login(input.email, input.plainPassword)
+      return joinedTeams
     },
     [login],
   )

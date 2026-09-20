@@ -1,0 +1,34 @@
+{# ------------------------------------------------------------------
+   MedVue — 2. Invitation (le destinataire n'a pas encore de compte)
+   Objet suggéré : {{ inviterName }} vous invite à rejoindre l'équipe {{ teamName }} sur MedVue
+   Contexte : firstName, inviterName, teamName, signupUrl
+   signupUrl doit être un lien signé, personnel et à usage unique.
+   ------------------------------------------------------------------ #}
+{% extends 'email/_base.html.twig' %}
+{% import  'email/_components.html.twig' as ui %}
+
+{% set preheader  = inviterName ~ ' vous invite à rejoindre son équipe sur MedVue.' %}
+{% set accent     = '#2D7FF9' %}
+{% set eyebrow    = 'Invitation' %}
+{% set h1         = 'Vous êtes invité à<br>rejoindre une équipe' %}
+{% set panelLabel = 'Équipe' %}
+{% set panelTitle = teamName %}
+{% set panelSub   = 'Invitation de ' ~ inviterName %}
+{% set ctaLabel   = 'Créer mon compte MedVue' %}
+{% set ctaUrl     = signupUrl %}
+{% set footerNote = 'Vous recevez cet email car votre adresse a été utilisée pour une invitation d’équipe sur MedVue.' %}
+
+{% block title %}Invitation à rejoindre une équipe{% endblock %}
+
+{% block content %}
+{{ ui.p('Bonjour ' ~ firstName ~ ',', 24) }}
+{{ ui.p(ui.b(inviterName) ~ ' vous invite à rejoindre l’équipe ' ~ ui.b(teamName) ~ ' sur MedVue.', 18) }}
+{{ ui.p('MedVue est une plateforme permettant aux équipes médicales d’organiser et de gérer leurs plannings.') }}
+{{ ui.p('Vous ne possédez pas encore de compte MedVue. Pour rejoindre cette équipe, créez votre compte à l’aide du lien ci-dessous :') }}
+{% endblock %}
+
+{% block after_cta %}
+{{ ui.info('Vos informations sont déjà pré-remplies.', 'Votre adresse email ainsi que votre prénom et votre nom ont été renseignés par la personne qui vous a invité. Vous pourrez les vérifier et, si nécessaire, corriger votre prénom et votre nom lors de la création de votre compte.') }}
+{{ ui.p('Une fois votre compte créé, vous serez automatiquement ajouté à l’équipe ' ~ ui.b(teamName) ~ '.', 16) }}
+{{ ui.warning('Lien personnel.', 'Ce lien ne doit pas être transmis à une autre personne.') }}
+{% endblock %}

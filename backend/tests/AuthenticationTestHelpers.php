@@ -25,18 +25,31 @@ trait AuthenticationTestHelpers
         return \sprintf('10.%d.%d.%d', random_int(0, 255), random_int(0, 255), random_int(1, 254));
     }
 
+    /**
+     * Body of a valid POST /api/register — every required field present.
+     *
+     * @param array<string, mixed> $overrides
+     *
+     * @return array<string, mixed>
+     */
+    private function registrationPayload(string $email, string $password = 'correct-horse-battery', array $overrides = []): array
+    {
+        return array_merge([
+            'email' => $email,
+            'plainPassword' => $password,
+            'firstName' => 'Test',
+            'lastName' => 'User',
+            'phone' => '+32 470 12 34 56',
+        ], $overrides);
+    }
+
     private function registerUser(KernelBrowser $client, string $email, string $password, ?string $ip = null): void
     {
         $client->request(
             'POST',
             '/api/register',
             server: ['CONTENT_TYPE' => 'application/json', 'REMOTE_ADDR' => $ip ?? $this->randomTestIp()],
-            content: json_encode([
-                'email' => $email,
-                'plainPassword' => $password,
-                'firstName' => 'Test',
-                'lastName' => 'User',
-            ]),
+            content: json_encode($this->registrationPayload($email, $password)),
         );
 
         self::assertResponseStatusCodeSame(201);

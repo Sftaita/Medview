@@ -133,6 +133,13 @@ l'ancienne (voir légende).
 | [D104](#d104--max_duties-max_weekends-max_consecutive_nights-non-implémentées-malgré-une-configuration-réelle) | 2026-09-19 | `MAX_DUTIES`/`MAX_WEEKENDS`/`MAX_CONSECUTIVE_NIGHTS` non implémentées malgré une configuration réelle existante | 🟢 |
 | [D105](#d105--legal_min_rest-et-team_min_rest-sont-des-politiques-activables-par-génération--aucune-durée-réglementaire-nest-déduite-automatiquement) | 2026-09-19 | `LEGAL_MIN_REST`/`TEAM_MIN_REST` deviennent des politiques activables par génération ; remplace la portée équipe-globale de D101 | 🟢 |
 | [D106](#d106--orchestration-réelle-planninggeneration--solve--dutyassignment-auto-solverparameterset-seed-snapshothash-concurrence) | 2026-09-19 | Orchestration réelle `PlanningGeneration → solve → DutyAssignment AUTO` : `SolverParameterSet`, seed/snapshotHash réels, timeout CP-SAT réel, concurrence par verrou optimiste, atomicité, PUBLISHED ⇒ coverage COMPLETE | 🟢 |
+| [D110](#d110--les-hôpitaux-sont-un-référentiel-structuré-hospital-alimenté-par-import-jamais-un-texte-libre-ni-un-jeu-de-données-livré) | 2026-09-20 | Hôpitaux : référentiel `Hospital` + `User.primaryHospital` — **remplacé par D115** | 🔴 |
+| [D111](#d111--une-invitation-nest-jamais-un-faux-user--teaminvitation-et-un-seul-créateur-de-user) | 2026-09-20 | Une invitation n'est jamais un faux `User` : `TeamInvitation`, un seul créateur de `User` | 🟢 |
+| [D112](#d112--téléphone--libphonenumber-stocké-en-e164-validé-côté-serveur) | 2026-09-20 | Téléphone : libphonenumber, E.164, validé côté serveur | 🟢 |
+| [D113](#d113--sécurité-des-invitations--token-haché-transaction-verrouillée-inscription-classique--consommation) | 2026-09-20 | Sécurité des invitations : token haché, transaction verrouillée, inscription classique ≠ consommation | 🟢 |
+| [D114](#d114--emails-transactionnels--symfony-mailer--twig-templates-de-la-maquette-envoi-best-effort) | 2026-09-20 | Emails transactionnels : Symfony Mailer + Twig, envoi best-effort | 🟢 |
+| [D115](#d115--létablissement-nest-pas-une-propriété-du-user--le-référentiel-hospital-est-supprimé) | 2026-09-20 | L'établissement n'est pas une propriété du `User` ; `Hospital` supprimé (remplace D110) | 🟢 |
+| [D116](#d116--les-corps-json-désérialisés-en-dto-rejettent-les-champs-inconnus-422-au-lieu-de-les-ignorer) | 2026-09-20 | Les corps JSON désérialisés en DTO rejettent les champs inconnus (`422`) au lieu de les ignorer | 🟢 |
 
 ---
 
@@ -2980,3 +2987,177 @@ l'ancienne (voir légende).
   RPO 24 h, `.env` à conserver manuellement hors serveur, sauvegardes non
   chiffrées au repos (droits Unix). `docker compose down -v` est explicitement
   interdit en production (`docs/deployment.md` §7).
+
+## D110 — Les hôpitaux sont un référentiel structuré (`Hospital`), alimenté par import, jamais un texte libre ni un jeu de données livré 🔴 Remplacé par [D115](#d115--létablissement-nest-pas-une-propriété-du-user--le-référentiel-hospital-est-supprimé)
+
+> **🔴 Remplacé (2026-09-20, avant tout commit/déploiement)** : l'hôpital
+> n'est pas une propriété durable de l'utilisateur — les médecins/assistants
+> changent d'hôpital d'une année à l'autre. `Hospital`, `User.primaryHospital`,
+> `GET /api/hospitals` et `app:hospitals:import` n'existent plus (D115). Le
+> texte ci-dessous est conservé tel qu'écrit, pour la traçabilité.
+
+- **Contexte** : l'inscription demande l'institution principale, et l'objectif
+  futur est de référencer/rechercher les médecins par institution.
+- **Décision** : entité `Hospital` (`stableId` UUIDv7, nom, ville, code postal,
+  code pays ISO, `active`) et `User.primaryHospital` (FK `RESTRICT`).
+  Recherche côté serveur (`GET /api/hospitals?search=`, publique et limitée en
+  débit) sur une colonne dérivée `search_key` (sans accents ni casse), pour ne
+  pas expédier la liste au navigateur ni exiger l'extension PostgreSQL
+  `unaccent`. Alimentation par `app:hospitals:import` (CSV, idempotent,
+  tout-ou-rien). Clé naturelle unique `(pays, LOWER(nom), LOWER(ville))`.
+- **Alternatives écartées** : chaîne libre sur `User` (non interrogeable, doublons
+  « CHU Liège » / « Chu de Liege ») ; liste statique dans le frontend ; dataset
+  téléchargé ou inventé (aucune source officielle n'est dans le dépôt : décision
+  métier à prendre, cf. `docs/authentication.md` §15.8) ; identifiant externe
+  (aucune source pour le justifier — à ajouter avec elle).
+- **Conséquences** : `hospital` et `phone` sont **obligatoires à l'inscription**
+  mais **nullables en base** (comptes existants). Tant que le référentiel est
+  vide, personne ne peut s'inscrire : l'import précède le déploiement.
+
+## D111 — Une invitation n'est jamais un faux `User` : `TeamInvitation`, et un seul créateur de `User`
+
+- **Contexte** : ajouter par email quelqu'un qui n'a pas de compte.
+- **Décision** : entité `TeamInvitation` (équipe, email normalisé, noms
+  *proposés*, invitant, rôle futur, `tokenHash`, statut, expiration, acceptation).
+  Un `User` incomplet ne doit jamais exister (mot de passe/téléphone/hôpital
+  absents, comptes fantômes authentifiables, unicité d'email consommée par
+  quelqu'un qui n'a rien accepté). Le `PlanningTeamMember` n'est créé que par
+  `PlanningTeamMembershipService::addMember()` quand le `User` existe.
+  `UserRegistrationService` reste le **seul** endroit où un `User` naît. Si
+  l'email correspond déjà à un `User` : membership immédiat, sans acceptation
+  (exigence produit), avec notification.
+- **Autorisation** : `PlanningTeamRoleVoter::INVITE` = créateur du Planning **ou**
+  OWNER/ADMIN de l'équipe. Élargit volontairement D071/D079 (gestion des membres
+  creator-only) pour ce seul chemin ; les endpoints d'ajout par identifiant
+  restent creator-only.
+- **Alternatives écartées** : `User` avec statut `INVITED` (contredit « aucun User
+  incomplet », piège d'authentification) ; `PlanningTeamMember` sans `User`
+  (interdit) ; acceptation obligatoire pour un compte existant (non voulue).
+
+## D112 — Téléphone : libphonenumber, stocké en E.164, validé côté serveur
+
+- **Décision** : dépendance `giggsey/libphonenumber-for-php-lite` (port PHP de la
+  bibliothèque de Google ; variante *lite* : parsing/validation/formatage, sans
+  géocodage/opérateur, bien plus légère). Un regex maison serait faux dès qu'un
+  utilisateur non belge arrive, les plans de numérotation changeant par pays.
+  `PhoneNumberNormalizer::toE164()` ; contrainte de validation `ValidPhoneNumber`
+  sur le DTO ; colonne `users.phone_e164` avec CHECK de forme. `DEFAULT_PHONE_REGION`
+  (BE) ne sert qu'à lire un numéro saisi **sans** préfixe international ; un
+  numéro en `+…` est interprété seul. La validation frontend n'est qu'un confort.
+- **Limites** : validité de plan de numérotation ≠ numéro joignable (pas de SMS
+  de vérification).
+
+## D113 — Sécurité des invitations : token haché, transaction verrouillée, inscription classique ≠ consommation
+
+- **Token** : 256 bits aléatoires, seule l'empreinte SHA-256 en base, usage
+  unique, expiration configurable (`INVITATION_TTL_HOURS`) vérifiée à chaque
+  usage, révocable. L'email est fixé par l'invitation, jamais par le client.
+- **Atomicité/concurrence** : inscription par invitation = une transaction avec
+  `SELECT … FOR UPDATE` sur l'invitation ; index unique partiel « une invitation
+  `PENDING` par (équipe, email) » et index unique `LOWER(email)` ; CHECK de
+  cohérence du statut. Vérifié en vrai parallèle (une `201`, une `410`).
+- **Multi-invitations** : le token prouve l'accès à la boîte, donc *toutes* les
+  invitations `PENDING` utilisables de l'adresse sont consommées ensemble
+  (un `User`, N memberships, un email). Une invitation impossible à honorer
+  (déjà membre d'une autre équipe du même Planning, D080) reste `PENDING`.
+- **Compte créé entre-temps** : jamais de second `User` ; `409
+  account_exists_for_invitation`, l'invitation reste `PENDING`, et un
+  `POST /api/invitations/{token}/accept` authentifié (email du compte = email de
+  l'invitation) crée les memberships.
+- **Inscription classique ne consomme rien** : les emails ne sont pas vérifiés ;
+  s'inscrire avec l'adresse d'un tiers ne doit pas lui voler ses équipes.
+  Conséquence : une personne invitée qui s'inscrit sans passer par le lien doit
+  ensuite ouvrir le lien (et se connecter) pour rejoindre l'équipe.
+- **Email insensible à la casse** (lecture/connexion/unicité) ; `POST
+  /api/register` conserve son `409` historique (fuite d'existence pré-existante,
+  atténuée par le rate limit, hors périmètre).
+- **Rate limiting** : `invitation_lookup`, `team_invitation` (en plus de
+  `register`, inchangé).
+
+## D114 — Emails transactionnels : Symfony Mailer + Twig, templates de la maquette, envoi best-effort
+
+- **Décision** : `symfony/mailer` + `symfony/twig-bundle` (aucun mécanisme d'email
+  n'existait). Templates dans `backend/templates/email/`, copiés de
+  `docs/Design/emails_medvue` (`_base`/`_components` identiques) avec deux
+  écarts : échappement (`|e`) des noms saisis par un tiers — la maquette les
+  injecte en `|raw`, vecteur d'injection HTML dans la boîte d'un tiers — et
+  liste d'équipes dans l'email « Bienvenue » (un seul email, pas un par
+  invitation). Version texte `.txt.twig` pour chacun.
+- **Envoi** : synchrone, **après** validation en base, jamais bloquant : un échec
+  de transport est logué (sans token) et exposé (`emailSent:false`), il ne défait
+  ni l'inscription ni l'invitation. Pas de Messenger (dette). Liens construits
+  depuis `APP_FRONTEND_URL`, jamais depuis l'en-tête `Host`.
+- **Production** : `MAILER_DSN`, `MAILER_FROM`, `SUPPORT_EMAIL`, `APP_FRONTEND_URL`,
+  `INVITATION_TTL_HOURS`, `DEFAULT_PHONE_REGION` dans `.env.prod.example`
+  (imposé par `ProdComposeTest`) ; le défaut de dev `null://null` perdrait
+  silencieusement les emails. Dev : Mailpit dans `docker-compose.yml`.
+- **Placeholders de la maquette** : ses valeurs de démonstration ne doivent
+  jamais atteindre un vrai email. Le pied de page utilise `SUPPORT_EMAIL`
+  (et non le domaine `medvue.app` de la maquette, différent du domaine de
+  production) et le bloc `postal` (adresse inventée) est vidé jusqu'à
+  confirmation de l'adresse légale. Le design lui-même n'est pas modifié : ce
+  sont les variables/blocs que `_base` prévoit pour cela.
+
+## D115 — L'établissement n'est pas une propriété du User ; le référentiel Hospital est supprimé
+
+- **Contexte** : D110 avait fait de l'hôpital une donnée d'inscription
+  (`User.primaryHospital`, obligatoire, choisie dans un référentiel `Hospital`
+  alimenté par import). Décision métier ultérieure : les assistants et médecins
+  changent d'hôpital d'une année à l'autre. L'établissement est donc une donnée
+  **contextuelle et temporelle**, pas une propriété durable de l'identité.
+- **Décision** : `User` ne représente que l'identité durable (nom, email,
+  téléphone, mot de passe). `User.primaryHospital`, l'entité `Hospital`, son
+  repository, `GET /api/hospitals`, la commande `app:hospitals:import`, le
+  limiteur `hospital_search`, l'autocomplete frontend, `primaryHospitalStableId`
+  dans `POST /api/register` et leurs tests/documentations sont **supprimés**.
+  L'inscription ne dépend plus d'aucune table de référence : le problème
+  « référentiel vide = personne ne peut s'inscrire » (D110) disparaît. Le champ
+  n'est plus ni exigé ni utilisé côté API ; un ancien client qui l'enverrait
+  encore reçoit un `422` explicite plutôt qu'un `201` trompeur (D116).
+- **Migration** : `Version20260920111015` n'avait jamais été commitée ni
+  déployée (dernier commit : déploiement prod-2). Elle a donc été **réécrite en
+  place** — elle ne crée plus `hospitals` ni `users.primary_hospital_id` — plutôt
+  que d'empiler une migration qui retire aussitôt ce qu'une autre vient
+  d'ajouter. Aucun environnement partagé n'a jamais porté ces structures ; les
+  bases locales ont été ramenées en arrière (`down`) puis rejouées.
+- **Ce qui est volontairement laissé ouvert** : où porter plus tard
+  l'affiliation hospitalière. Piste naturelle : `PlanningTeamMember`, qui a déjà
+  `membershipStart`/`membershipEnd`, ou une entité dédiée
+  (`Institution`/`Site`/`Affiliation`) — à décider quand le besoin métier sera
+  confirmé. Aucun champ `hospital` n'est ajouté à `PlanningTeam` ni à
+  `PlanningTeamMember` maintenant : ce correctif retire une mauvaise donnée du
+  `User`, il ne construit pas la gestion des institutions.
+- **Alternatives écartées** : garder `Hospital` « au cas où » (aucun consommateur
+  réel, code mort à maintenir) ; garder `User.primaryHospital` nullable/optionnel
+  (reste une donnée d'identité fausse dès la première mutation d'un médecin) ;
+  ajouter tout de suite un `hospital` sur `PlanningTeamMember` (spéculatif).
+- **Conséquences** : si une future recherche « médecins par institution » est
+  voulue, elle s'appuiera sur l'affiliation datée, pas sur le profil. Les emails
+  ne mentionnent aucun établissement (test `InvitationMailerTest`).
+
+## D116 — Les corps JSON désérialisés en DTO rejettent les champs inconnus (`422`), au lieu de les ignorer
+
+- **Contexte** : le Serializer de Symfony ignore par défaut les propriétés
+  inconnues. Après D115, un ancien client qui envoyait encore
+  `primaryHospitalStableId` recevait un `201` : il pouvait croire l'hôpital
+  enregistré. Plus généralement, une API qui accepte silencieusement une donnée
+  que le client croit stockée est trompeuse — et pour `/api/register` un champ
+  comme `active` ou `roles` ne doit jamais sembler « accepté ».
+- **Audit du reste de l'API** : deux chemins désérialisent un DTO avec le
+  Serializer (`POST /api/register`, `POST …/invitations`) ; tous les autres
+  contrôleurs lisent le corps avec `json_decode` et ne retiennent que les clés
+  qu'ils connaissent (plannings, membres, indisponibilités, générations…).
+- **Décision** : ces deux endpoints désérialisent avec
+  `AbstractNormalizer::ALLOW_EXTRA_ATTRIBUTES => false` ; un champ inconnu donne
+  `422` au format habituel (`{"error":"validation_failed","violations":{champ:
+  "This field is not accepted."}}`, une violation par champ), sans effet de bord,
+  avant toute consultation d'invitation. `400 invalid_json` reste réservé à un
+  corps illisible. Helper unique : `UnknownFieldsResponse`. Pas de mécanisme
+  global (listener, normalizer custom) : disproportionné pour deux endpoints.
+- **Conséquence pour l'invitation** : demander un `role` n'est plus un
+  déclassement silencieux en `MEMBER` mais une erreur (le champ n'existe pas en
+  v1).
+- **Dette assumée** : les contrôleurs à `json_decode` manuel restent tolérants
+  aux clés inconnues. À aligner si/quand ils passent à des DTO désérialisés ;
+  ne pas les changer dans ce lot (hors périmètre, risque de régression sans
+  bénéfice identifié).

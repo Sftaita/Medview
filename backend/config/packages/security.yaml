@@ -6,9 +6,10 @@ security:
     # https://symfony.com/doc/current/security.html#loading-the-user-the-user-provider
     providers:
         app_user_provider:
+            # No `property:`: UserRepository::loadUserByIdentifier() does the
+            # (case-insensitive) lookup — see docs/authentication.md §15.
             entity:
                 class: App\Entity\User
-                property: email
 
     firewalls:
         dev:
@@ -50,6 +51,11 @@ security:
     access_control:
         - { path: ^/api/health, roles: PUBLIC_ACCESS }
         - { path: ^/api/register, roles: PUBLIC_ACCESS }
+        # An invitation link is opened by someone who has no account yet, so
+        # looking one up is public; accepting an invitation
+        # (POST /api/invitations/{token}/accept) falls through to the
+        # authenticated catch-all below.
+        - { path: '^/api/invitations/[^/]+$', methods: [GET], roles: PUBLIC_ACCESS }
         - { path: ^/api/login, roles: PUBLIC_ACCESS }
         - { path: ^/api/token/refresh, roles: PUBLIC_ACCESS }
         - { path: ^/api/token/logout, roles: PUBLIC_ACCESS }

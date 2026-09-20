@@ -16,6 +16,8 @@ export type PlanningSummary = {
 export type PlanningLineTeam = {
   stableId: string
   name: string
+  /** Server-decided: the creator of the planning or an OWNER/ADMIN of this team. */
+  canInvite?: boolean
 }
 
 export type PlanningLineSummary = {
@@ -64,4 +66,36 @@ export type AddPlanningTeamMemberInput = {
   userStableId: string
   role: 'OWNER' | 'ADMIN' | 'MEMBER'
   membershipStart: string
+}
+
+export type TeamInvitationStatus = 'PENDING' | 'ACCEPTED' | 'EXPIRED' | 'REVOKED'
+
+/** A pending offer for someone with no account yet — never a TeamMember. */
+export type TeamInvitation = {
+  stableId: string
+  email: string
+  firstName: string
+  lastName: string
+  role: 'OWNER' | 'ADMIN' | 'MEMBER'
+  status: TeamInvitationStatus
+  invitedByName: string
+  expiresAt: string
+  createdAt: string
+}
+
+export type InviteToTeamInput = {
+  email: string
+  firstName: string
+  lastName: string
+}
+
+export type InviteStatus =
+  'USER_ADDED' | 'INVITATION_CREATED' | 'ALREADY_MEMBER' | 'INVITATION_ALREADY_PENDING'
+
+export type InviteResult = {
+  status: InviteStatus
+  /** False when a notification email was due but could not be sent (the change itself stands). */
+  emailSent: boolean
+  member: PlanningTeamMember | null
+  invitation: TeamInvitation | null
 }

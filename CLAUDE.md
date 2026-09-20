@@ -45,7 +45,7 @@ détaillé (encore conceptuel, rien d'implémenté) :
 |---|---|---|
 | Socle technique (Symfony + React + Docker) | ✅ Livré | `README.md` |
 | Authentification (User, register/login/me, rate limiting, access+refresh token rotatif) | ✅ Livré + UAT navigateur complète (2026-09-15, `AUTHENTIFICATION MEDVUE : PASS`) | `docs/authentication.md` §14 |
-| Équipes (`PlanningTeam`, propriété exclusive d'un `Planning`), rôles | ✅ Restructuration livrée (2026-09-18) : plus d'entité globale, création inline par ligne, endpoints + UI de gestion des membres ; pas d'invitations | `docs/planning.md` |
+| Équipes (`PlanningTeam`, propriété exclusive d'un `Planning`), rôles | ✅ Restructuration livrée (2026-09-18) : plus d'entité globale, création inline par ligne, endpoints + UI de gestion des membres ; invitations par email ajoutées ensuite (ligne « Inscription enrichie ») | `docs/planning.md` |
 | Disponibilités (calendrier personnel, non-participation administrative) | ✅ Livré (2026-09-16) | `docs/availability.md` |
 | Campagnes de collecte de disponibilités | ⏳ Pas commencé | — |
 | Génération : `PlanningGeneration`/`PlanningSnapshot`/`DutyAssignment` (persistance, pas d'algorithme) | ✅ Livré (2026-09-16) | `docs/planning-generation.md` |
@@ -59,7 +59,8 @@ détaillé (encore conceptuel, rien d'implémenté) :
 | Politiques de repos par génération : `LEGAL_MIN_REST`/`TEAM_MIN_REST` deviennent des options `RestPolicyOptions` figées par `PlanningGeneration`, jamais un défaut d'équipe | ✅ Livré (2026-09-19) | `docs/planning-solver.md` §36, `docs/decisions.md` D105 |
 | Orchestration réelle `PlanningGeneration → solve → DutyAssignment AUTO` : `SolverParameterSet`, seed/snapshotHash, timeout CP-SAT réel, concurrence par verrou optimiste, atomicité, `PUBLISHED` ⇒ coverage COMPLETE | ✅ Livré (2026-09-19) | `docs/planning-generation.md` §13-16, `docs/planning-solver.md` §37, `docs/decisions.md` D106 |
 | Moteur de génération avancé (`fixedAssignments` réels, REPAIR, SIMULATE, MAX_DUTIES/MAX_WEEKENDS, UI, validation/publication avancée) | ⏳ Design conceptuel écrit, pas implémenté | `docs/allocation-algorithm.md` |
-| Échanges de garde, notifications, export calendrier | ⏳ Pas commencé | — |
+| Inscription enrichie (téléphone E.164, **sans hôpital** : l'établissement n'est pas une propriété du `User`) + invitations d'équipe (`TeamInvitation`, emails Mailer/Twig, inscription par lien, multi-invitations) | ✅ Livré (2026-09-20), UAT navigateur OK. Affiliation hospitalière : à modéliser plus tard dans un contexte daté (D115), pas d'import ni de référentiel | `docs/authentication.md` §15, `docs/decisions.md` D111-D116 |
+| Échanges de garde, notifications (in-app), export calendrier | ⏳ Pas commencé | — |
 
 ## Où trouver quoi
 
@@ -133,6 +134,12 @@ détaillé (encore conceptuel, rien d'implémenté) :
   le solve — phase de tie-break toujours neutre), `algorithmVersion`
   versionné manuellement (`OptimizationProblemBuilder::ALGORITHM_VERSION`)
   — voir §37, `docs/decisions.md` D106.
+- **`docs/authentication.md` §15** — inscription enrichie (téléphone E.164 ;
+  l'hôpital n'est **pas** une donnée du profil, D115) et **invitations d'équipe** : `User` ≠ `TeamInvitation`
+  (jamais de faux `User`), token haché à usage unique, inscription par lien
+  atomique (multi-invitations → un `User`, N memberships, un email), compte créé
+  entre-temps, emails (`backend/templates/email/`, maquette
+  `docs/Design/emails_medvue`), variables d'env requises en production.
 - **`docs/allocation-algorithm.md`** — design du moteur de répartition des
   gardes (équité multidimensionnelle, contraintes, pipeline de
   génération). **Document vivant** : encore conceptuel, à corriger et

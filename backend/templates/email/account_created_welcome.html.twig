@@ -1,0 +1,49 @@
+{# ------------------------------------------------------------------
+   MedVue — 3. Compte créé, utilisateur rattaché à une ou plusieurs équipes
+   Objet : Bienvenue sur MedVue
+   Contexte : firstName, teams (liste de {name, inviterName}), teamUrl
+   Un SEUL email par inscription, quel que soit le nombre d'invitations
+   consommées : une équipe → texte de la maquette ; plusieurs → liste.
+   Repris de docs/Design/emails_medvue ; modifications : gestion de la
+   liste d'équipes, et les noms saisis par un tiers passent par |e avant
+   d'entrer dans ui.p().
+   ------------------------------------------------------------------ #}
+{% extends 'email/_base.html.twig' %}
+{% import  'email/_components.html.twig' as ui %}
+
+{% set single = teams|length == 1 %}
+
+{% set preheader  = single ? 'Votre compte est prêt. Vous avez rejoint l’équipe ' ~ teams[0].name ~ '.' : 'Votre compte est prêt. Vous avez rejoint ' ~ teams|length ~ ' équipes.' %}
+{% set accent     = '#42A882' %}
+{% set eyebrow    = 'Bienvenue' %}
+{% set h1         = 'Votre compte MedVue<br>est prêt' %}
+{% set panelStyle = 'solid' %}
+{% set panelLabel = single ? 'Équipe rejointe' : 'Équipes rejointes' %}
+{% set panelTitle = single ? teams[0].name : teams|length ~ ' équipes' %}
+{% set panelSub   = single ? 'Sur invitation de ' ~ teams[0].inviterName : null %}
+{% set ctaLabel   = single ? 'Accéder à mon équipe' : 'Accéder à mes équipes' %}
+{% set ctaUrl     = teamUrl %}
+{% set footerNote = 'Vous recevez cet email suite à la création de votre compte MedVue.' %}
+
+{% block title %}Bienvenue sur MedVue{% endblock %}
+{# Pas d'adresse postale : celle de la maquette est un exemple ; à renseigner ici une fois l'adresse légale confirmée. #}
+{% block postal %}{% endblock %}
+
+{% block content %}
+{{ ui.p('Bonjour ' ~ firstName|e ~ ',', 24) }}
+{{ ui.p('Votre compte MedVue a bien été créé.', 18) }}
+{% if single %}
+{{ ui.p('Vous avez également été automatiquement ajouté à l’équipe ' ~ ui.b(teams[0].name) ~ ', à laquelle vous aviez été invité par ' ~ ui.b(teams[0].inviterName) ~ '.') }}
+{{ ui.p('Vous pouvez dès maintenant vous connecter à MedVue pour accéder à votre équipe et à son planning.') }}
+{% else %}
+{{ ui.p('Vous avez également été automatiquement ajouté aux équipes auxquelles vous aviez été invité :') }}
+{% set pairs = [] %}
+{% for team in teams %}{% set pairs = pairs|merge([[team.name, 'invité par ' ~ team.inviterName]]) %}{% endfor %}
+{{ ui.rows(pairs) }}
+{{ ui.p('Vous pouvez dès maintenant vous connecter à MedVue pour accéder à vos équipes et à leurs plannings.', 22) }}
+{% endif %}
+{% endblock %}
+
+{% block after_cta %}
+{{ ui.p('<span style="font-weight:bold; color:#16202B;">Bienvenue sur MedVue.</span>', 24) }}
+{% endblock %}

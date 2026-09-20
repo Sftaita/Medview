@@ -9,6 +9,7 @@ import {
   fetchTeamMembers,
   renamePlanning,
 } from '../features/planning/api'
+import { TeamInvitePanel } from '../features/planning/TeamInvitePanel'
 import type { PlanningDetail, PlanningTeamMember } from '../features/planning/types'
 import { ApiError } from '../lib/apiClient'
 
@@ -310,8 +311,23 @@ export function PlanningDetailPage() {
                 </p>
               )}
 
+              {planning.lines.find((line) => line.team.stableId === expandedTeamStableId)?.team.canInvite && (
+                <TeamInvitePanel
+                  key={expandedTeamStableId}
+                  planningStableId={planningId}
+                  teamStableId={expandedTeamStableId}
+                  onMembersChanged={() => loadMembers(expandedTeamStableId)}
+                />
+              )}
+
               {planning.canManage && (
                 <div className="planning-team-member-form">
+                  <p>
+                    <small>
+                      Utilisateur existant (identifiant connu) — permet aussi de choisir le rôle et la date
+                      d'entrée.
+                    </small>
+                  </p>
                   <label>
                     Identifiant de l'utilisateur
                     <input

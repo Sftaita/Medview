@@ -16,6 +16,14 @@ services:
       retries: 10
       start_period: 20s
 
+  # Dev-only SMTP catcher: no email ever leaves the machine, and the UI
+  # (http://localhost:8026) is the only way to read an invitation link in
+  # dev, since only the token's hash is stored (docs/authentication.md §15).
+  mailpit:
+    image: axllent/mailpit
+    ports:
+      - "${MAILPIT_UI_PORT:-8026}:8025"
+
   backend:
     build:
       context: ./backend

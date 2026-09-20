@@ -7,6 +7,7 @@ import { HealthStatus } from './features/system/HealthStatus'
 import { AccountPage } from './pages/AccountPage'
 import { AvailabilityCampaignPage } from './pages/AvailabilityCampaignPage'
 import { DashboardPage } from './pages/DashboardPage'
+import { InvitationPage } from './pages/InvitationPage'
 import { LoginPage } from './pages/LoginPage'
 import { MyAvailabilityPage } from './pages/MyAvailabilityPage'
 import { MyDutiesPage } from './pages/MyDutiesPage'
@@ -73,6 +74,9 @@ function App() {
               </PublicOnlyRoute>
             }
           />
+
+          {/* Public and not PublicOnly: an invitee with an existing account may already be logged in. */}
+          <Route path="/invitations/:token" element={<InvitationPage />} />
 
           <Route
             path="/"

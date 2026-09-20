@@ -20,8 +20,9 @@ oublié, rôles d'équipe.
 | Champ | Type | Notes |
 |---|---|---|
 | `id` | int, auto-increment | Pas d'UUID : pas de besoin identifié à ce stade (voir §9). |
-| `email` | string(180), unique | Identifiant de connexion (`getUserIdentifier()`). |
+| `email` | string(180), unique (insensible à la casse depuis le 2026-09-20, index `LOWER(email)` — §15) | Identifiant de connexion (`getUserIdentifier()`). Normalisé en minuscules à l'inscription. |
 | `firstName` / `lastName` | string(100) | `NotBlank`. |
+| `phoneE164` (`phone_e164`) | `?string(20)` | Numéro normalisé E.164, exposé sous la clé JSON `phone`. Nullable en base (comptes antérieurs) ; obligatoire à l'inscription (§15). **Aucune donnée d'établissement** : l'hôpital n'est pas une propriété du `User` (§15.10, D115). |
 | `passwordHash` | string(255) | Jamais sérialisé (pas de `#[Groups]` dessus) — voir §7. |
 | `active` | bool, défaut `true` | Désactivation = `active = false`, jamais de suppression. |
 | `emailVerifiedAt` | `?DateTimeImmutable` | **Réservé** pour la vérification d'email future (voir §9) ; aucun endpoint ne le renseigne encore. |
@@ -67,8 +68,13 @@ refresh tokens, sans passer par une règle métier explicite.
 
 ```
 POST /api/register
-{ "email", "plainPassword", "firstName", "lastName" }
+{ "email", "plainPassword", "firstName", "lastName", "phone", "invitationToken"? }
 ```
+
+> **Mis à jour le 2026-09-20** (§15) : téléphone obligatoire (stocké en E.164), email
+> normalisé en minuscules, `invitationToken` optionnel. **Aucun hôpital** : ce
+> n'est pas une propriété de l'utilisateur (§15.10, D115). Les étapes ci-dessous
+> décrivent le flux d'origine ; le détail des ajouts est en §15.
 
 1. Rate limiting (§6) : `429` si l'IP a dépassé le quota.
 2. `RegistrationController` désérialise le JSON en `RegisterUserRequest`
@@ -243,6 +249,8 @@ protection JWT.
 |---|---|---|---|
 | `POST /api/login` | `login_throttling` natif de Symfony Security (`security.yaml`) | 5 tentatives / 15 min (local), 25 / 15 min (global) | Local : hash(username + IP). Global : hash(IP) seule — empêche qu'une attaque distribuée sur beaucoup de comptes depuis une IP échappe à toute limite. |
 | `POST /api/register` | `symfony/rate-limiter` direct (`RateLimiterFactory`, `config/packages/rate_limiter.yaml`) | 5 tentatives / heure | IP (`$request->getClientIp()`) |
+| `GET /api/invitations/{token}`, `POST /api/invitations/{token}/accept` | `RateLimiterFactory` `invitation_lookup` | 30 / minute | IP |
+| `POST /api/plannings/{p}/teams/{t}/invitations` | `RateLimiterFactory` `team_invitation` | 100 / heure | `stableId` de l'utilisateur authentifié |
 
 Dépassement → `429 Too Many Requests` avec un en-tête `Retry-After`
 (secondes) et un corps `{"error":"too_many_attempts","message":"..."}`.
@@ -412,7 +420,7 @@ Clés JWT (`JWT_SECRET_KEY`, `JWT_PUBLIC_KEY`, `JWT_PASSPHRASE`) et
 
 | Méthode | Route | Auth requise | Codes de retour |
 |---|---|---|---|
-| `POST` | `/api/register` | Non | `201`, `400` (JSON invalide), `422` (validation), `409` (email déjà utilisé), `429` (rate limit) |
+| `POST` | `/api/register` | Non | `201` (+ `joinedTeams`), `400` (JSON invalide), `422` (validation, email ≠ invitation), `409` (`email_already_used` / `account_exists_for_invitation`), `404`/`410` (invitation inutilisable), `429` (rate limit) — voir §15 |
 | `POST` | `/api/login` | Non | `200` (`{"token"}` + cookie refresh), `401` (identifiants invalides ou compte désactivé), `429` (rate limit) |
 | `GET` | `/api/me` | Oui (Bearer JWT) | `200`, `401` (absent/invalide/expiré) |
 | `POST` | `/api/token/refresh` | Non (cookie refresh) | `200` (`{"token"}` + nouveau cookie refresh), `401` (absent/expiré/révoqué/réutilisé/compte désactivé — message générique) |
@@ -521,3 +529,173 @@ Tous ces correctifs sont couverts par des tests de non-régression
 diagnostic, des sévérités et des preuves : rapport d'UAT du 2026-09-15
 (conservé dans l'historique de conversation du projet) et
 `docs/decisions.md` D026-D030.
+
+---
+
+## 15. Inscription enrichie et invitations d'équipe (2026-09-20)
+
+Décisions : `docs/decisions.md` D110 (hôpitaux), D111 (`User` ≠
+`TeamInvitation`), D112 (téléphone), D113 (sécurité, multi-invitations,
+compte créé entre-temps), D114 (emails). Côté équipes/planning :
+`docs/planning.md` §14.
+
+### 15.1 Deux flux, un seul endroit où un `User` naît
+
+`UserRegistrationService::register()` est le **seul** créateur de `User`.
+
+- **Flux A — classique** (`/register`, sans `invitationToken`) : prénom, nom,
+  email, mot de passe, **téléphone** (obligatoire). Le comportement d'authentification est inchangé :
+  le frontend enchaîne sur `/api/login`. Une inscription classique **ne
+  consomme jamais** d'invitations en attente pour son email (emails non
+  vérifiés : s'inscrire avec l'adresse de quelqu'un d'autre ne doit pas donner
+  accès à ses équipes — seule la possession du lien reçu par email prouve
+  l'accès à la boîte).
+- **Flux B — invitation** (`/invitations/:token`) : le créateur du planning ou un
+  OWNER/ADMIN de l'équipe fait « Ajouter une personne » (email, prénom, nom).
+  - **B1** l'email correspond à un `User` → membership immédiat (mécanisme
+    normal `PlanningTeamMembershipService::addMember`, rôle `MEMBER`, début =
+    aujourd'hui), email « Vous avez été ajouté à une équipe ». Pas d'acceptation.
+  - **B2** aucun `User` → `TeamInvitation` (jamais de `User` incomplet) + email
+    « Vous êtes invité… » avec le lien personnel.
+
+### 15.2 Modèle de données
+
+| Table | Points clés |
+|---|---|
+| `users` (+) | `phone_e164` (CHECK `^\+[1-9][0-9]{6,14}$`). **Nullable en base** : les comptes existants (production comprise) n'ont pas de téléphone ; l'obligation est portée par `RegisterUserRequest`, jamais par un `NOT NULL` qui ferait échouer la migration. Nouvel index unique `LOWER(email)`. |
+| `team_invitations` | `stable_id`, `planning_team_id`, `email` (CHECK minuscules/trim), `proposed_first_name`/`last_name`, `invited_by_id`, `role` (toujours `MEMBER` en v1), `token_hash` (CHECK SHA-256 hex, unique), `status` (CHECK `PENDING/ACCEPTED/EXPIRED/REVOKED`), `expires_at`, `accepted_at`/`accepted_by_id` (CHECK : renseignés **si et seulement si** `ACCEPTED`), `created_at`, `updated_at` (a un sens : change avec le statut). **Unique partiel `(planning_team_id, email) WHERE status='PENDING'`** : au plus une invitation vivante par équipe et adresse. |
+
+Migration : `Version20260920111015` (réversible ; refuse de s'appliquer si deux
+comptes existants ne diffèrent que par la casse de l'email).
+
+### 15.3 Token d'invitation
+
+- 32 octets de `random_bytes` (64 hex), **jamais stocké** : seule son empreinte
+  SHA-256 l'est. Pas de hash lent/salé : un token de 256 bits n'est pas
+  attaquable par force brute, et l'empreinte permet une recherche indexée.
+- Il n'apparaît que dans le lien de l'email (`APP_FRONTEND_URL/invitations/<token>`),
+  jamais dans une réponse API, un log ou un email d'un autre type.
+- Durée de vie : `INVITATION_TTL_HOURS` (défaut 168 h = 7 jours). L'expiration est
+  **vérifiée par le serveur à chaque usage** (`isUsableAt`) ; le statut
+  `EXPIRED` n'est écrit que paresseusement (à la prochaine invitation pour la
+  même équipe+adresse, ou à la consommation) — ne jamais se fier au statut
+  persisté seul.
+- Usage unique : `ACCEPTED` n'est pas rejouable ; `REVOKED`/expiré inutilisable.
+
+### 15.4 Inscription par invitation — atomicité et concurrence
+
+Dans **une seule transaction** (`wrapInTransaction`) : verrou de ligne
+(`SELECT … FOR UPDATE`) sur l'invitation → vérification (utilisable, email
+**exactement** celui de l'invitation, aucun `User` existant) → création du
+`User` → memberships de **toutes** les invitations `PENDING` utilisables de cette
+adresse (le token prouve l'accès à la boîte) → `ACCEPTED`. Toute erreur annule
+l'ensemble : jamais « compte sans membership » ni « invitation acceptée sans
+compte ». Un seul email « Bienvenue » liste les équipes rejointes.
+
+| Situation | Résultat |
+|---|---|
+| Plusieurs invitations (équipes A, B, C) pour la même adresse | 1 `User`, 3 memberships, 3 × `ACCEPTED`, **1** email |
+| Deux invitations de deux équipes **du même planning** | La première est consommée ; l'autre reste `PENDING` (une seule adhésion ouverte par planning, D080) |
+| Deux soumissions simultanées du même lien | L'une `201`, l'autre `410 invitation_already_used` (vérifié en vrai parallèle, UAT) |
+| Inscription classique concurrente sur la même adresse | Index unique ; la perdante reçoit `409` ; invitation intacte |
+| Email différent de celui de l'invitation | `422` (`email`), invitation **non** consommée |
+| **Compte créé entre l'envoi et l'acceptation** | `409 account_exists_for_invitation`, **aucun** second `User`. `GET /api/invitations/{token}` renvoie `accountExists: true` → l'UI demande de se connecter, puis `POST /api/invitations/{token}/accept` (JWT requis, email du compte = email de l'invitation, sinon `403`) crée le(s) membership(s). |
+| Échec d'envoi d'email | Best-effort : la base est déjà validée, l'API répond `emailSent:false` (l'UI l'affiche), l'erreur est loguée sans token |
+
+### 15.5 Endpoints
+
+| Méthode | Route | Auth | Codes |
+|---|---|---|---|
+| `GET` | `/api/invitations/{token}` | Non (le token est le secret) | `200` (email, noms proposés, équipe, planning, invitant, `accountExists`), `404` `invitation_not_found`, `410` `invitation_expired`/`_revoked`/`_already_used`, `429` |
+| `POST` | `/api/invitations/{token}/accept` | JWT | `200`, `403` email ≠ compte, `404`/`410`, `429` |
+| `POST` | `/api/register` | Non | voir §12 ; `invitationToken` optionnel |
+| `GET`/`POST` | `/api/plannings/{p}/teams/{t}/invitations` | JWT, créateur du planning ou OWNER/ADMIN de l'équipe | liste des invitations en attente / « Ajouter une personne » → `201` `USER_ADDED` ou `INVITATION_CREATED`, `200` `ALREADY_MEMBER` ou `INVITATION_ALREADY_PENDING`, `409` `membership_conflict`, `403`, `404`, `422`, `429` |
+| `POST` | `…/invitations/{id}/revoke` | idem | `200`, `409` si non `PENDING`, `404` |
+
+**Corps JSON** : `POST /api/register` et `POST …/invitations` rejettent tout champ
+inconnu par un `422 validation_failed` (une violation par champ, rien n'est
+créé) — ni `primaryHospitalStableId`, ni `role`, ni `active`/`roles` ne sont
+ignorés en silence (D116).
+
+Aucune ressource API Platform sur `User` ni `TeamInvitation`
+(D009) : contrôleurs fins, DTO explicites, logique dans `TeamInvitationService`,
+`UserRegistrationService`, `InvitationMailer`.
+
+### 15.6 Sécurité — synthèse
+
+- Email d'une invitation jamais choisi par le client ; token unique, haché,
+  expirant, révocable ; verrous de ligne + index uniques + CHECK en base.
+- Rate limiting : `register` (5/h/IP, inchangé),
+  `invitation_lookup` (30/min/IP, protège l'oracle de token),
+  `team_invitation` (100/h/utilisateur). Toutes les erreurs sont du JSON
+  (`ApiExceptionListener`), jamais de trace.
+- **Fuites d'existence de compte** : `POST /api/register` renvoie toujours
+  `409` pour un email pris (comportement historique, protégé par le rate
+  limit, **non modifié**). Le nouveau flux n'ajoute de fuite qu'à des
+  personnes autorisées : un OWNER/ADMIN apprend « utilisateur existant ajouté »
+  (exigence produit) et le détenteur d'un lien apprend `accountExists` pour
+  **sa propre** adresse. Un tiers ne peut ni énumérer d'invitations ni
+  d'équipes (`404` identique pour « inexistant » et « autre équipe »).
+- Email et connexion insensibles à la casse (`UserRepository::findOneByEmail`,
+  `loadUserByIdentifier`, index `LOWER(email)`).
+
+### 15.7 Emails
+
+Templates `backend/templates/email/` repris de
+`docs/Design/emails_medvue` (`_base`/`_components` **inchangés**). Deux écarts,
+volontaires : (1) les noms saisis par un tiers passent par `|e` avant
+`ui.p()` — les maquettes le rendent tel quel (`|raw`), ce qui aurait permis
+d'injecter du HTML dans la boîte d'un tiers ; (2) l'email « Bienvenue » accepte
+une **liste** d'équipes. Une version texte `.txt.twig` accompagne chaque email.
+Configuration : `MAILER_DSN`, `MAILER_FROM`, `SUPPORT_EMAIL`, `APP_FRONTEND_URL`,
+`INVITATION_TTL_HOURS`, `DEFAULT_PHONE_REGION` — **toutes** requises dans le
+`.env` de production (`.env.prod.example`, garde `ProdComposeTest`) : sans
+`MAILER_DSN` réel, les emails seraient silencieusement perdus.
+
+**Valeurs de démonstration de la maquette neutralisées** (elles atteindraient de
+vrais emails) : les liens du pied de page (« Centre d'aide », « Nous contacter »)
+viennent de `SUPPORT_EMAIL` (le lien d'aide est un `mailto:` tant qu'aucun centre
+d'aide n'existe) au lieu des défauts `medvue.app` de la maquette, et le bloc
+`postal` (adresse « Rue de la Loi 1 », inventée) est vidé dans les trois
+templates. **À décider avant la mise en production** : une vraie adresse de
+contact dans `SUPPORT_EMAIL` (le `.env.prod.example` impose `<CHANGE_ME…>`) et,
+si une mention légale est voulue, l'adresse postale réelle dans le bloc `postal`.
+Un test (`InvitationMailerTest`) garantit qu'aucune valeur de démonstration ni
+syntaxe non rendue n'apparaît dans les quatre variantes d'email. En dev, Mailpit
+(`docker-compose.yml`, UI `http://localhost:8026`) intercepte tout.
+
+### 15.8 Jeu de données
+
+Aucun : le lot n'embarque ni référentiel ni import (voir §15.10). L'inscription
+ne dépend d'aucune table de référence.
+
+### 15.9 Dette / hors périmètre
+
+- Pas de vérification d'email (d'où la règle « classique ≠ consomme »).
+- Envoi d'email synchrone dans la requête (pas de Messenger/file d'attente) ;
+  pas de « renvoyer l'invitation » (révoquer puis réinviter).
+- Statut `EXPIRED` jamais écrit par une tâche planifiée (paresseux).
+- Pas d'email lors d'un `accept` par un compte déjà existant.
+- Rôle d'invitation fixé à `MEMBER` (le champ existe en base).
+- Le formulaire historique « ajout par identifiant » reste (seul moyen de
+  donner `ADMIN`/`OWNER`, créateur uniquement).
+- Téléphone : pas de vérification par SMS.
+
+### 15.10 L'établissement n'est pas une donnée du profil (D115)
+
+> L'établissement n'est pas une propriété durable de l'utilisateur. Les
+> médecins/assistants pouvant changer de site ou d'hôpital dans le temps,
+> l'affiliation institutionnelle sera modélisée ultérieurement dans un contexte
+> temporel approprié, et non dans `User`.
+
+Une première version de ce lot demandait l'hôpital à l'inscription
+(`User.primaryHospital`, référentiel `Hospital`, `GET /api/hospitals`,
+`app:hospitals:import`, D110). Tout cela a été **supprimé avant le premier
+commit** (D115) : `User` ne porte que l'identité durable (nom, email,
+téléphone, mot de passe), et un `POST /api/register` qui enverrait encore
+`primaryHospitalStableId` est **rejeté** (`422 validation_failed`, violation
+`primaryHospitalStableId: "This field is not accepted."`, rien n'est créé) plutôt
+que d'être ignoré en silence (D116). Où portera
+l'affiliation plus tard — `PlanningTeamMember` (déjà daté par
+`membershipStart`/`membershipEnd`) ou une entité `Institution`/`Site`/`Affiliation` —
+reste à décider quand le besoin sera confirmé ; rien n'est préconstruit.

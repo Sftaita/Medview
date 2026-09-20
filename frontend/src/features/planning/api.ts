@@ -3,10 +3,13 @@ import type {
   AddPlanningTeamMemberInput,
   CreatePlanningInput,
   CreatePlanningLineInput,
+  InviteResult,
+  InviteToTeamInput,
   PlanningDetail,
   PlanningLineSummary,
   PlanningSummary,
   PlanningTeamMember,
+  TeamInvitation,
 } from './types'
 
 export function fetchPlannings(): Promise<PlanningSummary[]> {
@@ -72,6 +75,36 @@ export function endTeamMembership(
 ): Promise<PlanningTeamMember> {
   return apiFetch<PlanningTeamMember>(
     `/api/plannings/${planningStableId}/teams/${teamStableId}/members/${memberStableId}/end`,
+    { method: 'POST', body: {} },
+  )
+}
+
+export function fetchTeamInvitations(
+  planningStableId: string,
+  teamStableId: string,
+): Promise<TeamInvitation[]> {
+  return apiFetch<TeamInvitation[]>(`/api/plannings/${planningStableId}/teams/${teamStableId}/invitations`)
+}
+
+/** "Ajouter une personne": adds an existing user at once, or creates an invitation for a new email. */
+export function inviteToTeam(
+  planningStableId: string,
+  teamStableId: string,
+  input: InviteToTeamInput,
+): Promise<InviteResult> {
+  return apiFetch<InviteResult>(`/api/plannings/${planningStableId}/teams/${teamStableId}/invitations`, {
+    method: 'POST',
+    body: input,
+  })
+}
+
+export function revokeTeamInvitation(
+  planningStableId: string,
+  teamStableId: string,
+  invitationStableId: string,
+): Promise<TeamInvitation> {
+  return apiFetch<TeamInvitation>(
+    `/api/plannings/${planningStableId}/teams/${teamStableId}/invitations/${invitationStableId}/revoke`,
     { method: 'POST', body: {} },
   )
 }

@@ -1,0 +1,240 @@
+{# ==================================================================
+   MedVue — modèle de base des emails transactionnels
+   ------------------------------------------------------------------
+   Toute la mécanique email vit ici : tables imbriquées, largeur 600,
+   styles inline, préheader, bouton bulletproof, correctifs Outlook,
+   media queries, pied de page. Un email enfant ne fait que remplir
+   des variables et deux ou trois blocs.
+
+   USAGE MINIMAL
+   -------------
+     {% extends 'email/_base.html.twig' %}
+     {% import  'email/_components.html.twig' as ui %}
+
+     {% set preheader  = 'Texte d’aperçu, ~85 caractères.' %}
+     {% set accent     = '#2D7FF9' %}
+     {% set eyebrow    = 'Invitation' %}
+     {% set h1         = 'Titre sur<br>deux lignes' %}
+     {% set panelLabel = 'Équipe' %}
+     {% set panelTitle = teamName %}
+     {% set panelSub   = 'Invitation de ' ~ inviterName %}
+     {% set ctaLabel   = 'Créer mon compte' %}
+     {% set ctaUrl     = signupUrl %}
+
+     {% block content %}
+       {{ ui.p('Bonjour ' ~ firstName ~ ',', 24) }}
+       {{ ui.p('Corps du message.') }}
+     {% endblock %}
+
+     {% block after_cta %}
+       {{ ui.info('Titre', 'Texte explicatif.') }}
+       {{ ui.warning('Lien personnel.', 'Ne le transmettez pas.') }}
+     {% endblock %}
+
+   VARIABLES
+   ---------
+     preheader        texte d’aperçu masqué (obligatoire)
+     accent           couleur du filet haut et de l’eyebrow
+                      '#42A882' vert de marque · '#2D7FF9' bleu (action requise)
+     eyebrow          petit label capitales au-dessus du titre
+     h1               titre (le <br> est autorisé)
+     panelLabel / panelTitle / panelSub   panneau d’en-tête
+     panel            false pour masquer le panneau
+     panelStyle       'soft' (fond clair, défaut) | 'solid' (aplat vert)
+     ctaLabel / ctaUrl   bouton ; ctaLabel non défini = pas de bouton
+     showFallbackUrl  URL en clair sous le bouton (défaut true)
+     footerNote       phrase de contexte d’envoi dans le pied de page
+     supportUrl / supportEmail   liens du pied de page (défauts fournis)
+
+   BLOCS
+   -----
+     title       contenu de <title>
+     content     corps principal (obligatoire)
+     after_cta   encarts sous le bouton
+     signature   défaut « Bien à vous, L’équipe MedVue »
+     postal      adresse postale du pied de page
+   ================================================================== #}
+
+{# ---- Couleurs : charte MedVue ---- #}
+{% set brand      = '#42A882' %}
+{% set brandDark  = '#2C7D5F' %}
+{% set blue       = '#2D7FF9' %}
+{% set blueDark   = '#1B5FD0' %}
+{% set ink        = '#16202B' %}
+{% set bodyColor  = '#3A4754' %}
+{% set muted      = '#727E8C' %}
+{% set subtle     = '#98A2AE' %}
+{% set page       = '#F5F7FA' %}
+{% set line       = '#E7EBEF' %}
+{% set font       = "Arial, 'Helvetica Neue', Helvetica, sans-serif" %}
+
+{# ---- Valeurs par défaut ---- #}
+{% set accent          = accent|default(brand) %}
+{% set eyebrowColor    = eyebrowColor|default(accent == blue ? blueDark : brandDark) %}
+{% set panel           = panel|default(true) %}
+{% set panelStyle      = panelStyle|default('soft') %}
+{% set showFallbackUrl = showFallbackUrl|default(true) %}
+{% set ctaLabel        = ctaLabel|default(false) %}
+{% set footerNote      = footerNote|default('Vous recevez cet email dans le cadre de votre utilisation de MedVue.') %}
+
+{% if panelStyle == 'solid' %}
+  {% set panelBg = brand %}{% set panelBorder = brand %}
+  {% set panelLabelColor = '#DDF4EA' %}{% set panelTitleColor = '#FFFFFF' %}{% set panelSubColor = '#DDF4EA' %}
+{% elseif accent == blue %}
+  {% set panelBg = '#EDF4FF' %}{% set panelBorder = '#D6E6FE' %}
+  {% set panelLabelColor = blueDark %}{% set panelTitleColor = ink %}{% set panelSubColor = blueDark %}
+{% else %}
+  {% set panelBg = '#EFFAF5' %}{% set panelBorder = '#BCE9D6' %}
+  {% set panelLabelColor = brandDark %}{% set panelTitleColor = '#144D38' %}{% set panelSubColor = brandDark %}
+{% endif %}
+<!DOCTYPE html>
+<html lang="fr" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<title>{% block title %}MedVue{% endblock %}</title>
+<!--[if mso]>
+<noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript>
+<![endif]-->
+<style type="text/css">
+  @media only screen and (max-width: 620px) {
+    .sh-container { width: 100% !important; }
+    .sh-pad { padding-left: 24px !important; padding-right: 24px !important; }
+    .sh-h1 { font-size: 22px !important; line-height: 30px !important; }
+    .sh-btn a { display: block !important; }
+  }
+</style>
+</head>
+<body style="margin:0; padding:0; width:100%; background-color:{{ page }}; -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%;">
+
+<span style="display:none !important; visibility:hidden; opacity:0; color:transparent; height:0; width:0; max-height:0; max-width:0; overflow:hidden; mso-hide:all; font-size:1px; line-height:1px;">{{ preheader }}</span>
+
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background-color:{{ page }}; margin:0; padding:0;">
+  <tr>
+    <td align="center" style="padding:32px 12px 40px 12px;">
+
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" class="sh-container" style="width:600px; max-width:600px;">
+
+        {# ---- En-tête : marque ---- #}
+        <tr>
+          <td style="padding:0 4px 18px 4px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td width="38" style="width:38px;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="38" style="width:38px; height:38px; background-color:{{ brand }}; border-radius:10px;">
+                    <tr>
+                      <td align="center" valign="middle" height="38" style="height:38px; font-family:{{ font }}; font-size:19px; line-height:38px; mso-line-height-rule:exactly; font-weight:bold; color:#FFFFFF;">M</td>
+                    </tr>
+                  </table>
+                </td>
+                <td style="padding-left:12px; font-family:{{ font }}; font-size:19px; line-height:24px; mso-line-height-rule:exactly; font-weight:bold; letter-spacing:-0.2px; color:{{ ink }};">MedVue</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+
+        {# ---- Carte ---- #}
+        <tr>
+          <td style="background-color:#FFFFFF; border:1px solid {{ line }}; border-radius:12px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;">
+
+              <tr>
+                <td height="6" style="height:6px; line-height:6px; font-size:6px; background-color:{{ accent }}; border-radius:11px 11px 0 0;">&nbsp;</td>
+              </tr>
+
+              {% if eyebrow is defined and eyebrow %}
+              <tr>
+                <td class="sh-pad" style="padding:34px 40px 0 40px; font-family:{{ font }}; font-size:11px; line-height:16px; mso-line-height-rule:exactly; font-weight:bold; letter-spacing:1.2px; text-transform:uppercase; color:{{ eyebrowColor }};">{{ eyebrow }}</td>
+              </tr>
+              {% endif %}
+
+              <tr>
+                <td class="sh-pad sh-h1" style="padding:8px 40px 0 40px; font-family:{{ font }}; font-size:26px; line-height:34px; mso-line-height-rule:exactly; font-weight:bold; letter-spacing:-0.4px; color:{{ ink }};">{{ h1|raw }}</td>
+              </tr>
+
+              {% if panel %}
+              <tr>
+                <td class="sh-pad" style="padding:22px 40px 0 40px;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%; background-color:{{ panelBg }}; border:1px solid {{ panelBorder }}; border-radius:12px;">
+                    <tr>
+                      <td style="padding:16px 20px; font-family:{{ font }};">
+                        <div style="font-size:11px; line-height:16px; mso-line-height-rule:exactly; font-weight:bold; letter-spacing:1.2px; text-transform:uppercase; color:{{ panelLabelColor }};">{{ panelLabel }}</div>
+                        <div style="padding-top:5px; font-size:20px; line-height:27px; mso-line-height-rule:exactly; font-weight:bold; letter-spacing:-0.2px; color:{{ panelTitleColor }};">{{ panelTitle }}</div>
+                        {% if panelSub is defined and panelSub %}
+                        <div style="padding-top:4px; font-size:14px; line-height:20px; mso-line-height-rule:exactly; color:{{ panelSubColor }};">{{ panelSub }}</div>
+                        {% endif %}
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+              {% endif %}
+
+              {% block content %}{% endblock %}
+
+              {% if ctaLabel %}
+              <tr>
+                <td class="sh-pad" style="padding:28px 40px 0 40px;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" class="sh-btn">
+                    <tr>
+                      <td align="center" bgcolor="{{ brand }}" style="background-color:{{ brand }}; border-radius:12px;">
+                        <a href="{{ ctaUrl }}" style="display:inline-block; padding:17px 30px; font-family:{{ font }}; font-size:16px; line-height:20px; mso-line-height-rule:exactly; font-weight:bold; color:#FFFFFF; text-decoration:none; border-radius:12px;">{{ ctaLabel }}</a>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+                {% if showFallbackUrl %}
+              <tr>
+                <td class="sh-pad" style="padding:14px 40px 0 40px; font-family:{{ font }}; font-size:13px; line-height:20px; mso-line-height-rule:exactly; color:{{ subtle }};">
+                  Si le bouton ne fonctionne pas, copiez ce lien dans votre navigateur :<br>
+                  <a href="{{ ctaUrl }}" style="color:{{ brandDark }}; text-decoration:underline; word-break:break-all;">{{ ctaUrl }}</a>
+                </td>
+              </tr>
+                {% endif %}
+              {% endif %}
+
+              {% block after_cta %}{% endblock %}
+
+              <tr>
+                <td class="sh-pad" style="padding:28px 40px 0 40px;">
+                  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;">
+                    <tr><td height="1" style="height:1px; line-height:1px; font-size:1px; background-color:{{ line }};">&nbsp;</td></tr>
+                  </table>
+                </td>
+              </tr>
+              <tr>
+                <td class="sh-pad" style="padding:20px 40px 36px 40px; font-family:{{ font }}; font-size:16px; line-height:26px; mso-line-height-rule:exactly; color:{{ bodyColor }};">
+                  {% block signature %}Bien à vous,<br>
+                  <span style="font-weight:bold; color:{{ ink }};">L'équipe MedVue</span>{% endblock %}
+                </td>
+              </tr>
+
+            </table>
+          </td>
+        </tr>
+
+        {# ---- Pied de page ---- #}
+        <tr>
+          <td style="padding:22px 24px 0 24px; font-family:{{ font }}; font-size:12px; line-height:19px; mso-line-height-rule:exactly; color:{{ muted }}; text-align:center;">
+            {{ footerNote }}<br>
+            <a href="{{ supportUrl|default('https://medvue.app/aide') }}" style="color:{{ muted }}; text-decoration:underline;">Centre d'aide</a>
+            &nbsp;·&nbsp;
+            <a href="mailto:{{ supportEmail|default('support@medvue.app') }}" style="color:{{ muted }}; text-decoration:underline;">Nous contacter</a>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:12px 24px 0 24px; font-family:{{ font }}; font-size:11px; line-height:18px; mso-line-height-rule:exactly; color:{{ subtle }}; text-align:center;">
+            {% block postal %}MedVue — Rue de la Loi 1, 1000 Bruxelles, Belgique{% endblock %}
+          </td>
+        </tr>
+
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>

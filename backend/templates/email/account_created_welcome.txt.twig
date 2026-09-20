@@ -1,0 +1,24 @@
+Bonjour {{ firstName }},
+
+Votre compte MedVue a bien été créé.
+
+{% if teams|length == 1 -%}
+Vous avez également été automatiquement ajouté à l'équipe {{ teams[0].name }}, à laquelle vous aviez été invité par {{ teams[0].inviterName }}.
+
+Vous pouvez dès maintenant vous connecter à MedVue pour accéder à votre équipe et à son planning :
+{%- else -%}
+Vous avez également été automatiquement ajouté aux équipes auxquelles vous aviez été invité :
+{% for team in teams %}
+- {{ team.name }} (invité par {{ team.inviterName }})
+{%- endfor %}
+
+Vous pouvez dès maintenant vous connecter à MedVue pour accéder à vos équipes et à leurs plannings :
+{%- endif %}
+
+{{ teamUrl }}
+
+Bienvenue sur MedVue.
+
+Bien à vous,
+
+L'équipe MedVue

@@ -15,3 +15,16 @@ framework:
             policy: 'sliding_window'
             limit: 5
             interval: '1 hour'
+        # Public, unauthenticated read (docs/authentication.md §15), keyed by
+        # client IP: the invitation lookup is a token oracle that must not
+        # be brute-forceable.
+        invitation_lookup:
+            policy: 'sliding_window'
+            limit: 30
+            interval: '1 minute'
+        # Authenticated, keyed by user: caps how many emails one account can
+        # make MedVue send per hour (invitation spam / address probing).
+        team_invitation:
+            policy: 'sliding_window'
+            limit: 100
+            interval: '1 hour'

@@ -43,6 +43,15 @@ final class PlanningTeamRoleVoter extends Voter
     /** Subject: PlanningTeam. True for OWNER/ADMIN only — generations, snapshots and manual assignments are a management action. */
     public const MANAGE_PLANNING = 'TEAM_MANAGE_PLANNING';
 
+    /**
+     * Subject: PlanningTeam. Add/invite people (docs/decisions.md D111): true
+     * for the creator of the team's Planning (who is not necessarily a
+     * member of any of its teams) and for a current OWNER/ADMIN of that
+     * team. Never for a plain MEMBER, nor for anyone in a *different* team
+     * of the same Planning.
+     */
+    public const INVITE = 'TEAM_INVITE';
+
     public function __construct(private readonly PlanningTeamMemberRepository $teamMemberRepository)
     {
     }
@@ -50,7 +59,7 @@ final class PlanningTeamRoleVoter extends Voter
     protected function supports(string $attribute, mixed $subject): bool
     {
         return match ($attribute) {
-            self::VIEW_TEAM, self::VIEW_PLANNING, self::MANAGE_PLANNING => $subject instanceof PlanningTeam,
+            self::VIEW_TEAM, self::VIEW_PLANNING, self::MANAGE_PLANNING, self::INVITE => $subject instanceof PlanningTeam,
             self::MANAGE_NON_PARTICIPATION, self::VIEW_NON_PARTICIPATION => $subject instanceof PlanningTeamMember,
             default => false,
         };
@@ -66,6 +75,11 @@ final class PlanningTeamRoleVoter extends Voter
         if (self::VIEW_TEAM === $attribute || self::VIEW_PLANNING === $attribute) {
             /* @var PlanningTeam $subject */
             return null !== $this->teamMemberRepository->findOpenMembership($subject, $user);
+        }
+
+        if (self::INVITE === $attribute) {
+            /* @var PlanningTeam $subject */
+            return $subject->getPlanning()->getCreator() === $user || $this->hasManagingRole($subject, $user);
         }
 
         if (self::MANAGE_PLANNING === $attribute) {

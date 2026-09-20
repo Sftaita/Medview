@@ -1,0 +1,32 @@
+{# ------------------------------------------------------------------
+   MedVue — 3. Compte créé, utilisateur rattaché à l'équipe
+   Objet suggéré : Bienvenue sur MedVue — vous avez rejoint l'équipe {{ teamName }}
+   Contexte : firstName, inviterName, teamName, teamUrl
+   ------------------------------------------------------------------ #}
+{% extends 'email/_base.html.twig' %}
+{% import  'email/_components.html.twig' as ui %}
+
+{% set preheader  = 'Votre compte est prêt. Vous avez rejoint l’équipe ' ~ teamName ~ '.' %}
+{% set accent     = '#42A882' %}
+{% set eyebrow    = 'Bienvenue' %}
+{% set h1         = 'Votre compte MedVue<br>est prêt' %}
+{% set panelStyle = 'solid' %}
+{% set panelLabel = 'Équipe rejointe' %}
+{% set panelTitle = teamName %}
+{% set panelSub   = 'Sur invitation de ' ~ inviterName %}
+{% set ctaLabel   = 'Accéder à mon équipe' %}
+{% set ctaUrl     = teamUrl %}
+{% set footerNote = 'Vous recevez cet email suite à la création de votre compte MedVue.' %}
+
+{% block title %}Bienvenue sur MedVue{% endblock %}
+
+{% block content %}
+{{ ui.p('Bonjour ' ~ firstName ~ ',', 24) }}
+{{ ui.p('Votre compte MedVue a bien été créé.', 18) }}
+{{ ui.p('Vous avez également été automatiquement ajouté à l’équipe ' ~ ui.b(teamName) ~ ', à laquelle vous aviez été invité par ' ~ ui.b(inviterName) ~ '.') }}
+{{ ui.p('Vous pouvez dès maintenant vous connecter à MedVue pour accéder à votre équipe et à son planning.') }}
+{% endblock %}
+
+{% block after_cta %}
+{{ ui.p('<span style="font-weight:bold; color:#16202B;">Bienvenue sur MedVue.</span>', 24) }}
+{% endblock %}

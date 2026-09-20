@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Security;
 
+use App\Tests\AuthenticationTestHelpers;
 use Doctrine\DBAL\Connection;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -21,6 +22,8 @@ use Symfony\Component\HttpFoundation\Request;
  */
 final class TrustedProxyClientIpTest extends WebTestCase
 {
+    use AuthenticationTestHelpers;
+
     private const TRAEFIK_IP = '172.18.0.2';
     private const OTHER_CONTAINER_IP = '172.18.0.3';
     private const CLIENT_A = '203.0.113.10';
@@ -85,9 +88,9 @@ final class TrustedProxyClientIpTest extends WebTestCase
         $client = $this->boot(trustedProxy: self::TRAEFIK_IP);
         $email = 'trusted.proxy.ip@example.com';
 
-        $client->request('POST', '/api/register', server: $this->viaProxy(self::CLIENT_A), content: json_encode([
-            'email' => $email, 'plainPassword' => 'correct-horse-battery', 'firstName' => 'Real', 'lastName' => 'Client',
-        ]));
+        $client->request('POST', '/api/register', server: $this->viaProxy(self::CLIENT_A), content: json_encode(
+            $this->registrationPayload($email, overrides: ['firstName' => 'Real', 'lastName' => 'Client']),
+        ));
         self::assertResponseStatusCodeSame(201);
 
         $client->request('POST', '/api/login', server: $this->viaProxy(self::CLIENT_A), content: json_encode([

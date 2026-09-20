@@ -1,0 +1,27 @@
+{# ------------------------------------------------------------------
+   MedVue — 1. Ajouté à une équipe (le destinataire a déjà un compte)
+   Objet suggéré : Vous avez rejoint l'équipe {{ teamName }} sur MedVue
+   Contexte : firstName, inviterName, teamName, loginUrl
+   ------------------------------------------------------------------ #}
+{% extends 'email/_base.html.twig' %}
+{% import  'email/_components.html.twig' as ui %}
+
+{% set preheader  = 'Vous faites désormais partie de l’équipe ' ~ teamName ~ ' sur MedVue.' %}
+{% set accent     = '#42A882' %}
+{% set eyebrow    = 'Équipe' %}
+{% set h1         = 'Vous avez rejoint<br>une nouvelle équipe' %}
+{% set panelLabel = 'Équipe rejointe' %}
+{% set panelTitle = teamName %}
+{% set panelSub   = 'Ajouté par ' ~ inviterName %}
+{% set ctaLabel   = 'Se connecter à MedVue' %}
+{% set ctaUrl     = loginUrl %}
+{% set footerNote = 'Vous recevez cet email car votre compte MedVue a été ajouté à une équipe.' %}
+
+{% block title %}Vous avez rejoint une équipe{% endblock %}
+
+{% block content %}
+{{ ui.p('Bonjour ' ~ firstName ~ ',', 24) }}
+{{ ui.p(ui.b(inviterName) ~ ' vous a ajouté à l’équipe ' ~ ui.b(teamName) ~ ' sur MedVue.', 18) }}
+{{ ui.p('Cette équipe est désormais accessible directement depuis votre compte MedVue.') }}
+{{ ui.p('Vous pouvez vous connecter pour consulter l’équipe et accéder aux fonctionnalités de planning associées.') }}
+{% endblock %}

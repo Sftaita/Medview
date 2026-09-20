@@ -171,7 +171,12 @@ docker compose exec backend php bin/console lexik:jwt:generate-keypair --skip-if
 | Profil courant | `GET` http://localhost:8010/api/me (JWT requis) |
 | Renouveler l'access token | `POST` http://localhost:8010/api/token/refresh (cookie refresh requis) |
 | Déconnexion | `POST` http://localhost:8010/api/token/logout |
+| Emails de dev (Mailpit — invitations, bienvenue) | http://localhost:8026 (`MAILPIT_UI_PORT`) |
 | PostgreSQL | localhost:5432 (user/db: `app`, mot de passe dans `.env`) |
+
+L'inscription ne demande que prénom, nom, email, téléphone et mot de passe :
+aucune donnée de référence (hôpital, etc.) n'est nécessaire pour créer un
+compte (`docs/authentication.md` §15.10).
 
 Détail des endpoints, formats de requête/réponse et codes d'erreur :
 [`docs/authentication.md`](docs/authentication.md).
