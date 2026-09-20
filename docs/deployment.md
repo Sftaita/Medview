@@ -22,8 +22,17 @@
 
 1. Snapshot "avant" des 3 autres apps du serveur (§10 de
    `server-production.md`).
-2. `git archive --format=tar.gz HEAD > /tmp/medvue_deploy_<timestamp>.tar.gz`
-   puis `scp` vers `<SERVER_HOST>:/tmp/`.
+2. Archive **depuis Git uniquement, jamais depuis le working tree**, en LF :
+   `git -c core.autocrlf=false archive --format=tar.gz -o /tmp/medvue_deploy_<timestamp>.tar.gz <COMMIT>`.
+   Sous Windows, le `core.autocrlf=true` du gitconfig *système* de Git for
+   Windows est appliqué par `git archive` et livre des fichiers en CRLF
+   (incident du 2026-09-20, §8) : l'override par commande suffit, ne pas
+   modifier la configuration globale. Avant envoi, vérifier que chaque
+   fichier extrait est identique à son blob
+   (`git hash-object --no-filters <fichier>` == SHA de `git ls-tree -r <COMMIT>`)
+   et qu'aucun octet CR n'est présent (`docker-compose.prod.yml`,
+   `.env.prod.example`, `backend/bin/*.py`, `scripts/**/*.sh`). Puis `scp`
+   vers `<SERVER_HOST>:/tmp/` et comparer le `sha256sum` des deux côtés.
 3. Sur le serveur : `mkdir -p /opt/stack/apps/medvue`, extraction de
    l'archive dedans.
 4. Créer `.env` réel (à partir de `.env.prod.example`, valeurs générées
@@ -34,10 +43,26 @@
    jamais un sous-réseau (D108, §2).
 5. `docker compose -f docker-compose.prod.yml build --no-cache` puis
    `up -d`.
-6. `docker compose -f docker-compose.prod.yml exec -T backend php bin/console doctrine:migrations:migrate --dry-run`
-   → relecture manuelle du SQL → puis la commande réelle
-   (`--no-interaction`).
-7. `docker compose -f docker-compose.prod.yml exec -T backend php bin/console lexik:jwt:generate-keypair --skip-if-exists`
+6. Migrations — **jamais d'exécution avant relecture du SQL** :
+   1. `docker exec medvue-backend php bin/console doctrine:migrations:status`
+   2. produire le SQL **sans l'exécuter** :
+      `docker exec medvue-backend php bin/console doctrine:migrations:migrate --dry-run --write-sql=/tmp/medvue_migrations.sql --no-interaction`.
+      Attention : `--dry-run` **seul** n'imprime pas le SQL (il n'affiche que
+      « N migrations, M requêtes »), et `--write-sql` **seul** l'écrit
+      **et l'exécute** (incident n°2, §8). Les deux variantes créent la
+      table vide d'historique `doctrine_migration_versions`, sans danger.
+   3. relire `docker exec medvue-backend cat /tmp/medvue_migrations.sql` et
+      signaler explicitement toute instruction `DROP`, `DELETE`,
+      `TRUNCATE`, `UPDATE` ou `ALTER … DROP`. Sur une base **non vide**,
+      s'arrêter et faire valider avant d'aller plus loin (sur la base
+      vierge du premier déploiement, ceux de `Version20260917091305`
+      portaient sur des tables encore vides).
+   4. seulement ensuite : `docker exec medvue-backend php bin/console doctrine:migrations:migrate --no-interaction`,
+      puis `doctrine:migrations:up-to-date` (doit répondre « Up-to-date »).
+   5. `doctrine:schema:validate` répondra « not in sync » : attendu (D051,
+      contraintes SQL écrites à la main). Ne **jamais** appliquer
+      `schema:update`, cela annulerait le durcissement.
+7. `docker exec medvue-backend php bin/console lexik:jwt:generate-keypair --skip-if-exists`
    (clés RSA prod, jamais celles de dev). Les clés vivent dans le volume
    nommé `medvue_jwt_keys` monté sur `/app/config/jwt` : elles survivent à
    un `restart`, un recreate ou un rebuild du backend, et cette commande
@@ -81,18 +106,28 @@
   compteurs d'inscription/de login. À refaire après tout recreate de Traefik
   ou reboot du serveur : une valeur périmée échoue en sécurité (pas
   d'usurpation possible, seulement des compteurs de nouveau partagés).
+- Sauvegardes (D109) : `scripts/backup/medvue-backup.sh` réussit, puis
+  `scripts/backup/medvue-restore-test.sh --compare-live` répond
+  `RESTORE TEST: PASS`, et l'entrée cron quotidienne est installée
+  (`docs/backup.md`).
 - Logs backend sans erreur critique liée au déploiement.
 
 ## 3. Déploiement applicatif courant (mises à jour suivantes)
 
 ```bash
+# Artefact LF depuis un HEAD local propre (§1 étape 2), jamais depuis le serveur.
+# Extraction PAR-DESSUS /opt/stack/apps/medvue : le `.env` et les volumes ne
+# sont jamais supprimés (n'effacer que les fichiers suivis absents de la
+# nouvelle archive).
 cd /opt/stack/apps/medvue
-git archive ... # reconstruire l'artefact depuis un HEAD local propre, jamais depuis le serveur
 docker compose -f docker-compose.prod.yml build
-docker compose -f docker-compose.prod.yml up -d
-docker compose -f docker-compose.prod.yml exec -T backend php bin/console doctrine:migrations:migrate --no-interaction
-docker compose -f docker-compose.prod.yml exec -T backend php bin/console cache:clear
+docker compose -f docker-compose.prod.yml up -d --no-build
+# Migrations : séquence complète du §1 étape 6 (status, dry-run + write-sql,
+# relecture, puis migrate). Jamais `migrate` sans relecture préalable.
+docker exec medvue-backend php bin/console cache:clear
+docker exec medvue-backend php bin/console lexik:jwt:generate-keypair --skip-if-exists   # idempotent
 docker compose -f docker-compose.prod.yml restart backend
+scripts/deploy/check-trusted-proxy.sh
 ```
 
 Toujours précédé d'un rapport d'écart si le serveur a plus d'un commit de
@@ -113,20 +148,70 @@ l'archive du commit précédemment taggé, rebuild `--no-cache` + `up -d`.
 Le volume `medvue_jwt_keys` est conservé tel quel (les sessions restent
 valides). Ne jamais taguer un état de rollback.
 
-## 5. Backups
+## 5. Sauvegardes
 
-Le volume `medvue_jwt_keys` doit être inclus dans les sauvegardes de volumes
-au même titre que la base : la clé privée y est chiffrée par `JWT_PASSPHRASE`,
-qui vit dans `.env` et doit être conservée **séparément** de la sauvegarde
-des clés, jamais avec elle.
-
-Script sibling `/opt/stack/backups/scripts/backup-postgres.sh` (créé
-directement sur le serveur, même convention que `backup-mysql.sh` :
-dump compressé, rotation locale, copie `rclone` vers le même remote sous
-un préfixe `medvue/`) — sans toucher aux scripts/crontab MySQL existants.
+Mécanisme, rétention, procédures de restauration et limites :
+[`docs/backup.md`](backup.md) (D109). En bref : `scripts/backup/medvue-backup.sh`
+(cron quotidien) sauvegarde la base PostgreSQL et le volume `medvue_jwt_keys`
+sous `/home/deploy/backups/medvue/` ; `scripts/backup/medvue-restore-test.sh`
+prouve qu'une sauvegarde se restaure, dans une cible jetable. Le `.env`
+(dont `JWT_PASSPHRASE`) n'est **pas** sauvegardé avec les clés : il doit être
+conservé séparément, hors serveur. Les sauvegardes des autres applications
+(`/home/deploy/scripts/*`, crontab existant) ne sont pas modifiées.
 
 ## 6. Historique des déploiements
 
 | Date | Tag | Commit | Notes |
 |---|---|---|---|
 | _(à compléter après le premier déploiement)_ | | | |
+
+## 7. Interdits en production
+
+- **`docker compose down -v` (ou `--volumes`) est interdit.** Il supprime
+  `medvue_db_data` (toutes les données) et `medvue_jwt_keys` (les clés de
+  signature). Même règle pour `docker volume rm`, `docker volume prune` et
+  `docker system prune --volumes`. Un arrêt se fait avec `stop`, jamais avec
+  une commande qui supprime des volumes.
+- Vider `/opt/stack/apps/medvue` sans préserver `.env` : `POSTGRES_PASSWORD`
+  n'est appliqué qu'à la *création* du volume de la base ; régénérer le `.env`
+  après coup laisse la base avec l'ancien mot de passe et le backend ne peut
+  plus s'y connecter. Extraire l'archive par-dessus, ne pas effacer.
+- Régénérer `JWT_PASSPHRASE` sans régénérer les clés (et inversement).
+- `doctrine:migrations:migrate --write-sql` sans `--dry-run`, ou
+  `doctrine:schema:update --force` (§1 étape 6, D051).
+- Restaurer un dump sur la base de production sans dump de sécurité préalable
+  (`docs/backup.md`).
+- Toute intervention sur SurgicalHub, MedAtWork, MedClick, MySQL, Redis,
+  Portainer, phpMyAdmin ou Traefik (`server-production.md` §15).
+
+## 8. Incidents de déploiement
+
+Journal factuel du premier déploiement (2026-09-19/20). Aucun historique
+n'est réécrit : chaque correction est un commit distinct.
+
+1. **Déploiement interrompu** (arrêt du poste de déploiement). Archive
+   extraite, `.env` créé et images construites, mais `docker compose up`
+   jamais exécuté : aucun conteneur, réseau ni volume MedVue n'existait.
+2. **Archive livrée en CRLF.** Cause : `core.autocrlf=true` du gitconfig
+   système de Git for Windows, appliqué par `git archive`. Correction :
+   redéploiement d'une archive `git -c core.autocrlf=false archive` vérifiée
+   blob par blob, nouveau `.env` (nouveaux secrets), images reconstruites ;
+   `.gitattributes` force LF pour `*.sh` (§1 étape 2).
+3. **DNS `api.medvue.be` absent** au premier essai : détecté par les
+   vérifications préalables (résolveurs publics + serveurs faisant
+   autorité), démarrage différé jusqu'à propagation.
+4. **Migrations exécutées avant la relecture du SQL.** `migrate --write-sql`
+   (sans `--dry-run`) a écrit *et* exécuté les 12 migrations. La base était
+   vierge, les instructions destructives (`DELETE FROM planning_*`,
+   `DROP TABLE teams/team_members`) visaient des tables créées dans la même
+   exécution et encore vides : aucune donnée détruite, `up-to-date` vert,
+   écart de schéma = celui, attendu, de D051. Décision : continuer sans
+   rollback. Correction : séquence documentée au §1 étape 6.
+5. **Clés JWT non persistantes** (couche inscriptible du conteneur) :
+   volume `medvue_jwt_keys`, D107 (commit « Persist the production JWT key
+   pair… »).
+6. **`getClientIp()` = adresse de Traefik** pour tous les visiteurs
+   (limiteurs partagés) : proxy de confiance exact, D108 (commit « Trust
+   Traefik's exact address… »).
+7. **Aucune sauvegarde MedVue** : mécanisme et test de restauration réels,
+   D109 (`docs/backup.md`).

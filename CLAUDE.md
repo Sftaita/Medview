@@ -139,6 +139,11 @@ détaillé (encore conceptuel, rien d'implémenté) :
   compléter à chaque étape d'implémentation réelle du moteur — jamais
   laisser le document diverger silencieusement du code une fois que
   celui-ci existe.
+- **`docs/deployment.md`** — déploiement de production MedVue (séquence,
+  checks de santé, mises à jour, interdits en production dont
+  `docker compose down -v`, journal des incidents du premier déploiement).
+  **`docs/backup.md`** — sauvegardes PostgreSQL + clés JWT, rétention,
+  procédures de restauration et limites connues (D107/D108/D109).
 - **`README.md`** — arborescence, choix techniques, commandes pour lancer
   le projet, URLs, tests exécutés.
 

@@ -2939,3 +2939,44 @@ l'ancienne (voir légende).
   (buckets par IP réelle, non-usurpation depuis un autre conteneur, IP
   enregistrée) et garde-fous `ProdComposeTest` (une seule adresse exacte,
   toute clé de `backend/.env` redéfinie dans le `.env` de prod).
+
+## D109 — Sauvegardes MedVue : scripts versionnés, dump exécuté dans le conteneur, restauration prouvée dans une cible jetable
+
+- **Contexte** : au premier déploiement, rien ne sauvegardait MedVue. Le
+  `backup-postgres.sh` annoncé par `docs/deployment.md` n'existait pas et les
+  scripts existants du serveur (`/home/deploy/scripts/*`, crontab de `deploy`)
+  ne couvrent que MySQL et les volumes d'uploads de SurgicalHub. Constat
+  aggravant : `rclone` n'est pas installé, le `sync_gdrive.sh` existant échoue
+  donc chaque nuit et aucune copie hors serveur n'existe.
+- **Décision** : `scripts/backup/medvue-backup.sh` (PostgreSQL + volume
+  `medvue_jwt_keys`) et `scripts/backup/medvue-restore-test.sh`, **versionnés
+  dans le dépôt** (déployés avec l'archive, revus, testés) plutôt que créés à la
+  main sur le serveur. `pg_dump` s'exécute **dans** `medvue-database` par son
+  socket local : aucun mot de passe n'est lu ni transmis. Format `custom`
+  (`--no-owner --no-acl`), validé par `pg_restore --list`, sha256, écriture
+  atomique, `umask 077`, `flock`, rétention locale 30 jours avec les 7 plus
+  récentes toujours conservées, journal propre
+  (`/home/deploy/backups/medvue/backup.log`). La preuve de restauration se fait
+  dans un conteneur PostgreSQL **jetable** : sans réseau, données en `tmpfs`,
+  supprimé même en cas d'échec ; `--compare-live` compare tables, nombre de
+  lignes, contraintes, index, migrations et empreintes des clés. Cron quotidien
+  03:45 UTC, ajouté au crontab existant sans en modifier aucune ligne.
+- **Alternatives écartées** : copier les scripts à la main dans
+  `/opt/stack/backups/scripts/` (non versionné, non testable, et ce répertoire
+  n'est pas celui qu'utilise réellement le cron de SurgicalHub) ; ajouter
+  MedVue à `backup_uploads.sh`/`rotate_backups.sh`/`sync_gdrive.sh` — écarté :
+  consigne de ne pas toucher aux sauvegardes existantes (et leur `find` de
+  rotation ne couvre de toute façon que `mysql` et `uploads`) ; mot de passe
+  PostgreSQL lu dans `.env` par le script — écarté, inutile via le socket
+  local ; sauvegarder `.env` avec les clés — écarté, la passphrase ne doit
+  jamais voyager avec la clé qu'elle protège ; restaurer dans la base de
+  production pour « tester » — écarté, un test de restauration ne doit
+  jamais pouvoir écrire en production.
+- **Conséquences** : un test statique (`tests/Deployment/BackupScriptsTest.php`,
+  `DeployScriptsTest.php`) garantit l'absence de secret, qu'un `pg_restore`
+  ne peut viser que la cible jetable, qu'aucun script ne supprime de volume et
+  ne touche aux autres applications. Limites assumées et documentées
+  (`docs/backup.md` §5) : pas de copie hors serveur (à décider, chiffrée),
+  RPO 24 h, `.env` à conserver manuellement hors serveur, sauvegardes non
+  chiffrées au repos (droits Unix). `docker compose down -v` est explicitement
+  interdit en production (`docs/deployment.md` §7).
