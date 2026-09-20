@@ -106,17 +106,28 @@ fi
 fingerprint() { # $1 = "docker exec <container>" target
   local target="$1"
   # shellcheck disable=SC2086
-  $target psql -U "$user" -d "$db" -At <<'SQL'
+  $target psql -U "$user" -d "$db" -At -v ON_ERROR_STOP=1 <<'SQL'
 select 'table ' || table_name || ' rows=' ||
   (xpath('/row/c/text()', query_to_xml(format('select count(*) as c from %I.%I', table_schema, table_name), false, true, '')))[1]::text
 from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE' order by 1;
-select 'constraint ' || contype || ' = ' || count(*) from pg_constraint c
+select 'constraint ' || contype::text || ' = ' || count(*) from pg_constraint c
   join pg_namespace n on n.oid = c.connamespace where n.nspname = 'public' group by contype order by contype;
 select 'indexes = ' || count(*) from pg_indexes where schemaname = 'public';
 select 'latest migration = ' || coalesce(max(version), 'none') from doctrine_migration_versions;
 SQL
 }
-fingerprint "docker exec -i $name" >"$work/restored.txt"
+# Any SQL error must stop the run: a silently empty fingerprint would make the
+# comparison with the live database meaningless (found by the first real run).
+if ! fingerprint "docker exec -i $name" >"$work/restored.txt" 2>"$work/fingerprint.err"; then
+  fail "fingerprint query failed on the restored database: $(head -c 300 "$work/fingerprint.err")"
+  exit 1
+fi
+for kind in '^table ' '^constraint ' '^indexes ' '^latest migration '; do
+  if ! grep -q "$kind" "$work/restored.txt"; then
+    fail "fingerprint has no '${kind#^}' line (empty comparison would prove nothing)"
+    exit 1
+  fi
+done
 
 tables=$(grep -c '^table ' "$work/restored.txt" || true)
 if [[ "$tables" -gt 0 ]]; then pass "${tables} tables restored"; else fail "no table restored"; fi
@@ -129,7 +140,10 @@ echo "  data-bearing tables: $(grep '^table ' "$work/restored.txt" | grep -v 'ro
 echo "  $(grep '^constraint' "$work/restored.txt" | sed 's/^constraint //' | tr '\n' ';') $(grep '^indexes' "$work/restored.txt")"
 
 if [[ "$compare_live" -eq 1 ]]; then
-  fingerprint "docker exec -i $DB_CONTAINER" >"$work/live.txt"
+  if ! fingerprint "docker exec -i $DB_CONTAINER" >"$work/live.txt" 2>"$work/fingerprint.err"; then
+    fail "fingerprint query failed on the live database: $(head -c 300 "$work/fingerprint.err")"
+    exit 1
+  fi
   if diff -q "$work/live.txt" "$work/restored.txt" >/dev/null; then
     pass "restored database == live database (tables, row counts, constraints, indexes, migrations)"
   else

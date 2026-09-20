@@ -75,6 +75,18 @@ final class BackupScriptsTest extends TestCase
         }
     }
 
+    public function testRestoreTestFailsHardOnSqlErrorsAndComparesConstraints(): void
+    {
+        $script = $this->script('medvue-restore-test.sh');
+
+        // First real run: `contype || text` was a SQL error that psql swallowed, so
+        // the constraint comparison was silently empty on both sides. Errors must be
+        // fatal and every fingerprint section must be present.
+        self::assertStringContainsString('ON_ERROR_STOP=1', $script);
+        self::assertStringContainsString('contype::text', $script);
+        self::assertStringContainsString("'^constraint '", $script, 'An empty constraint section must fail the run.');
+    }
+
     public function testDocumentationStatesTheProductionRules(): void
     {
         $backup = (string) file_get_contents($this->root.'/docs/backup.md');
