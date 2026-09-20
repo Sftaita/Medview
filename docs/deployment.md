@@ -163,7 +163,18 @@ conservé séparément, hors serveur. Les sauvegardes des autres applications
 
 | Date | Tag | Commit | Notes |
 |---|---|---|---|
-| _(à compléter après le premier déploiement)_ | | | |
+| 2026-09-20 | `v2026.09.20-prod` | `e15dda4` | Premier déploiement (incidents : §8). **Dérogation à la règle « tag uniquement si tout est vert » : ce tag a été poussé alors que le job backend de GitHub Actions était encore rouge** (cause alors non identifiée, voir §8 points 8 et 9). Le tag est conservé tel quel : il désigne fidèlement le commit réellement mis en production (arbre du serveur vérifié fichier par fichier). Il ne doit être ni supprimé, ni déplacé, ni recréé. |
+
+### Dérogations à la règle « tag uniquement si tout est vert »
+
+La règle : aucun tag de production tant que la CI et les checks de déploiement
+ne sont pas entièrement verts. Dérogations consenties (jamais silencieuses) :
+
+- **`v2026.09.20-prod`** (2026-09-20) : poussé avec le job backend GitHub Actions
+  rouge. Les checks de déploiement (66/66 fonctionnels, restauration, clés,
+  IP client, autres applications) étaient verts ; la CI ne l'était pas, pour
+  une cause non identifiée au moment du tag. Diagnostic et correction
+  ultérieurs : §8 point 9.
 
 ## 7. Interdits en production
 
