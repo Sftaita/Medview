@@ -215,3 +215,10 @@ n'est réécrit : chaque correction est un commit distinct.
    Traefik's exact address… »).
 7. **Aucune sauvegarde MedVue** : mécanisme et test de restauration réels,
    D109 (`docs/backup.md`).
+8. **CI GitHub rouge à chaque push** (constaté le 2026-09-20, déjà rouge le
+   2026-09-16) : `ci.yml` ne créait jamais la base de test `app_test` (le
+   noyau de test suffixe le nom de base par `_test`), donc tous les tests qui
+   touchent la base échouaient (code de sortie 2). Ce n'était pas une
+   régression du déploiement ; reproduit en local (base absente : 205 erreurs
+   et 79 échecs) puis corrigé par une étape « Prepare the test database »
+   (463 tests verts depuis une base absente).

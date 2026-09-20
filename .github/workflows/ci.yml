@@ -54,6 +54,15 @@ jobs:
       - name: Check coding standards
         run: composer cs-check
 
+      # The test kernel suffixes the database name with `_test` (doctrine.yaml,
+      # dama/doctrine-test-bundle): the service container only provides `app`.
+      # Without this step every database-backed test errors (exit code 2) —
+      # CI was red on every push for that reason alone.
+      - name: Prepare the test database
+        run: |
+          php bin/console doctrine:database:create --env=test --if-not-exists
+          php bin/console doctrine:migrations:migrate --env=test --no-interaction
+
       - name: Run tests
         run: composer test
 
