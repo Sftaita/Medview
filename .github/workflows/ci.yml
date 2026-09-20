@@ -63,6 +63,15 @@ jobs:
           php bin/console doctrine:database:create --env=test --if-not-exists
           php bin/console doctrine:migrations:migrate --env=test --no-interaction
 
+      # config/jwt/*.pem is git-ignored (and must stay so): a clean checkout has
+      # no key pair, so every test that issues a JWT (login, refresh, /api/me...)
+      # failed with JWTEncodeFailureException (67 failures on the runner) while
+      # passing wherever a developer's local keys happened to exist. The
+      # passphrase comes from backend/.env (development value, never used in
+      # production — see docs/decisions.md D107).
+      - name: Generate the JWT test key pair
+        run: php bin/console lexik:jwt:generate-keypair --skip-if-exists --env=test
+
       - name: Run tests
         run: composer test
 

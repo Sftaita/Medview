@@ -233,3 +233,27 @@ n'est réécrit : chaque correction est un commit distinct.
    régression du déploiement ; reproduit en local (base absente : 205 erreurs
    et 79 échecs) puis corrigé par une étape « Prepare the test database »
    (463 tests verts depuis une base absente).
+9. **CI GitHub encore rouge après le point 8 : aucune clé JWT sur le runner.**
+   Diagnostic (run `35497692440`, job `backend`, commit `e15dda4`) : l'étape
+   « Run tests » échouait avec `Tests: 467, Assertions: 1913, Failures: 67`,
+   tous de la même nature : `JWTEncodeFailureException: An error occurred
+   while trying to encode the JWT token. Please verify your configuration
+   (private key/passphrase)` (`LcobucciJWTEncoder.php` ligne 31), premier
+   échec `AuthenticationTest::testLoginWithValidCredentialsReturnsTokenAndRefreshCookie`.
+   Cause : `backend/config/jwt/*.pem` est ignoré par Git (à raison, D107) ; un
+   checkout propre n'a donc aucune paire de clés et le workflow n'en générait
+   pas. Sur toute machine où des clés de dev existaient (poste de
+   développement, conteneur de dev, et mes premières reproductions « fidèles »
+   qui copiaient le dossier de travail), les tests passaient : c'est ce qui a
+   masqué le problème. Classement : **configuration GitHub Actions**
+   (prérequis manquant), pas un bug du code ni un test instable. Reproduit à
+   l'identique depuis une archive `git archive` (mêmes 467/1913/67), puis
+   corrigé par l'étape « Generate the JWT test key pair »
+   (`lexik:jwt:generate-keypair --skip-if-exists --env=test`, passphrase de
+   dev de `backend/.env`, jamais utilisée en production) : 467 tests, 2174
+   assertions verts. Non-régression : `tests/Deployment/CiWorkflowTest.php`
+   impose que la base de test, son schéma et la paire de clés soient préparés
+   avant les tests. Environnement du runner relevé : Ubuntu 24.04.5,
+   noyau 6.17 azure, 4 CPU, ~16 Go, PHP 8.3.33, Composer 2.10.3,
+   Python 3.12.3, OR-Tools 9.15.6755 (numpy 2.5.3, pandas 3.0.6), image
+   `postgres:16-alpine`, `LANG=C.UTF-8`, fuseau UTC ; rien d'autre ne différait.
