@@ -2907,3 +2907,35 @@ l'ancienne (voir légende).
   `.gitignore`/`.dockerignore`). Vérification de déploiement : empreinte de
   `public.pem` identique avant/après `up -d --force-recreate backend`
   (`docs/deployment.md` §2).
+
+## D108 — Traefik est le seul proxy de confiance de MedVue, désigné par son adresse exacte
+
+- **Contexte** : derrière Traefik, chaque requête atteint `medvue-backend` avec
+  `REMOTE_ADDR` = adresse de Traefik sur le réseau `proxy`. Sans
+  `SYMFONY_TRUSTED_PROXIES`, `Request::getClientIp()` renvoyait cette adresse
+  pour tous les visiteurs. Mesure réelle au premier déploiement : le serveur
+  (vu par Traefik comme `187.124.55.15`) épuisait le limiteur d'inscription
+  (5/h) et le login-throttling (5/15 min par identifiant), et un client
+  distinct (`81.240.77.225`) obtenait aussitôt `429` sur les deux. Les
+  refresh tokens enregistraient aussi l'adresse du proxy dans `created_by_ip`.
+- **Décision** : `SYMFONY_TRUSTED_PROXIES` (lu par défaut par
+  `framework.trusted_proxies`, aucun changement de code) vaut l'adresse
+  **exacte** de Traefik sur `proxy` (`172.18.0.2` au 2026-09-20), pas le
+  `/16` du réseau. Traefik écrase de lui-même `X-Forwarded-For` reçu
+  d'Internet (aucun `forwardedHeaders.trustedIPs` configuré sur ses
+  entrypoints) : seule l'adresse réelle du client arrive au backend.
+- **Alternatives écartées** : faire confiance à tout le sous-réseau `proxy`
+  (`172.18.0.0/16`) — écarté, `surgicalhub-nginx` et les conteneurs MedVue y
+  sont attachés et pourraient forger `X-Forwarded-For` pour contourner les
+  limiteurs ; `PRIVATE_SUBNETS`/`REMOTE_ADDR` — encore plus larges ; IP fixe
+  pour Traefik — impossible sans toucher à l'infra partagée (hors périmètre).
+- **Conséquences** : l'adresse est attribuée dynamiquement par Docker et peut
+  changer si Traefik est recréé ou après un reboot. Une valeur périmée
+  *échoue en sécurité* (retour au comportement à compteurs partagés, jamais
+  une usurpation) mais doit être détectée : `scripts/deploy/check-trusted-proxy.sh`
+  compare le `.env` et le backend en marche à l'adresse actuelle de Traefik ;
+  `env_file` n'est lu qu'à la création du conteneur (recreate obligatoire
+  après modification). Tests : `tests/Security/TrustedProxyClientIpTest.php`
+  (buckets par IP réelle, non-usurpation depuis un autre conteneur, IP
+  enregistrée) et garde-fous `ProdComposeTest` (une seule adresse exacte,
+  toute clé de `backend/.env` redéfinie dans le `.env` de prod).

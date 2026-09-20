@@ -54,6 +54,33 @@ final class ProdComposeTest extends TestCase
         self::assertContains('.env.local', $dockerignore, 'backend/.dockerignore must keep local secret overrides out of the prod image.');
     }
 
+    public function testEnvProdExampleTrustsOneExactProxyAddress(): void
+    {
+        $this->requireComposeFile();
+        $env = $this->envAssignments(\dirname($this->composePath()).'/.env.prod.example');
+
+        self::assertArrayHasKey('SYMFONY_TRUSTED_PROXIES', $env, 'D108: Symfony must be told which proxy to trust.');
+        // The placeholder (filled per server) or ONE exact IPv4 address: never a
+        // subnet, a wildcard, REMOTE_ADDR or PRIVATE_SUBNETS, which would let any
+        // container on the shared `proxy` network forge X-Forwarded-For.
+        self::assertMatchesRegularExpression(
+            '/^(<TRAEFIK_PROXY_IP>|(\d{1,3}\.){3}\d{1,3})$/',
+            $env['SYMFONY_TRUSTED_PROXIES'],
+        );
+    }
+
+    public function testEnvProdExampleRedefinesEveryKeyOfTheVersionedDevEnv(): void
+    {
+        $this->requireComposeFile();
+        $prod = $this->envAssignments(\dirname($this->composePath()).'/.env.prod.example');
+        $dev = $this->envAssignments(\dirname(__DIR__, 2).'/.env');
+
+        // Real environment variables win over backend/.env only for the keys the
+        // production .env actually defines: a key missing here would silently
+        // fall back to its development value inside the prod image.
+        self::assertSame([], array_values(array_diff(array_keys($dev), array_keys($prod))));
+    }
+
     private function assertServiceMountsNamedVolume(string $service, string $target, string $volumeName): void
     {
         $this->requireComposeFile();
@@ -87,6 +114,21 @@ final class ProdComposeTest extends TestCase
         if (!is_file($this->composePath())) {
             self::markTestSkipped('docker-compose.prod.yml is not reachable from this checkout (dev container).');
         }
+    }
+
+    /** @return array<string, string> */
+    private function envAssignments(string $file): array
+    {
+        self::assertFileExists($file);
+
+        $assignments = [];
+        foreach (file($file, \FILE_IGNORE_NEW_LINES) ?: [] as $line) {
+            if (1 === preg_match('/^([A-Z][A-Z0-9_]*)=(.*)$/', $line, $m)) {
+                $assignments[$m[1]] = trim($m[2], "\"' ");
+            }
+        }
+
+        return $assignments;
     }
 
     /** @return list<string> */

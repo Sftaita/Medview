@@ -1,0 +1,4 @@
+# Shell scripts run on Linux servers: always LF, whatever core.autocrlf says on
+# the developer machine (a CRLF shebang or a stray CR breaks them; see the
+# first-deployment CRLF incident in docs/deployment.md).
+*.sh text eol=lf

@@ -28,7 +28,10 @@
    l'archive dedans.
 4. Créer `.env` réel (à partir de `.env.prod.example`, valeurs générées
    sur le serveur, jamais réutilisées depuis `backend/.env` de dev),
-   `chmod 600 .env`.
+   `chmod 600 .env`. Remplacer aussi `SYMFONY_TRUSTED_PROXIES=<TRAEFIK_PROXY_IP>`
+   par l'adresse **exacte** de Traefik sur le réseau `proxy`
+   (`docker inspect traefik --format '{{(index .NetworkSettings.Networks "proxy").IPAddress}}'`),
+   jamais un sous-réseau (D108, §2).
 5. `docker compose -f docker-compose.prod.yml build --no-cache` puis
    `up -d`.
 6. `docker compose -f docker-compose.prod.yml exec -T backend php bin/console doctrine:migrations:migrate --dry-run`
@@ -70,6 +73,14 @@
 - `medvue-database` injoignable depuis un conteneur d'une autre app
   (`docker exec surgicalhub-php sh -c "getent hosts medvue-database"`
   doit échouer).
+- IP client réelle derrière Traefik (D108) : `scripts/deploy/check-trusted-proxy.sh`
+  → `OK` (`SYMFONY_TRUSTED_PROXIES` du `.env` et du backend en marche == IP
+  actuelle de Traefik). Puis une vraie connexion via le domaine public doit
+  enregistrer l'IP publique du client dans `refresh_tokens.created_by_ip`
+  (jamais celle de Traefik), et deux clients distincts ne partagent plus les
+  compteurs d'inscription/de login. À refaire après tout recreate de Traefik
+  ou reboot du serveur : une valeur périmée échoue en sécurité (pas
+  d'usurpation possible, seulement des compteurs de nouveau partagés).
 - Logs backend sans erreur critique liée au déploiement.
 
 ## 3. Déploiement applicatif courant (mises à jour suivantes)
