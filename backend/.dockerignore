@@ -1,3 +1,10 @@
 var/
 .git/
 .phpunit.cache/
+# Local secrets must never be baked into an image via `COPY . .`
+# (docs/decisions.md D107): dev JWT keys and local .env overrides are
+# gitignored, but a `docker build` from a working tree would still pick them up.
+config/jwt/
+.env.local
+.env.*.local
+.env.local.php

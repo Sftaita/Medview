@@ -2871,3 +2871,39 @@ l'ancienne (voir légende).
   `MAX_WEEKENDS`/`MAX_CONSECUTIVE_NIGHTS`, UI, validation/publication
   avancée restent hors périmètre. Détail : `docs/planning-generation.md`
   §2/§13-16, `docs/planning-solver.md` §37.
+
+## D107 — Les clés JWT de production vivent dans un volume nommé, jamais dans la couche inscriptible du conteneur
+
+- **Contexte** : au premier déploiement (2026-09-20), `lexik:jwt:generate-keypair`
+  écrit dans `/app/config/jwt` de `medvue-backend`. Ce dossier n'existe pas
+  dans l'image (`config/jwt/*.pem` est gitignoré et absent de l'archive
+  `git archive`), et `docker diff medvue-backend` montre les deux `.pem` comme
+  ajoutés à la couche inscriptible (aucun `VOLUME`, aucun mount). Elles
+  survivent à un `docker compose restart` mais pas à un recreate/rebuild/
+  `down` : chaque déploiement d'une nouvelle image aurait régénéré une paire
+  neuve (étape 7 idempotente uniquement *dans* un conteneur donné) et
+  invalidé silencieusement tous les access tokens émis.
+- **Décision** : volume Docker **nommé et explicite** `medvue_jwt_keys` dans
+  `docker-compose.prod.yml`, monté en écriture sur `/app/config/jwt` du seul
+  service `backend`. `--skip-if-exists` devient réellement idempotent d'un
+  déploiement à l'autre. Complément : `backend/.dockerignore` exclut
+  `config/jwt/`, `.env.local`, `.env.*.local`, `.env.local.php` — un
+  `docker build` depuis un working tree (où les clés de dev existent,
+  gitignorées) les aurait sinon copiées dans l'image de prod via `COPY . .`.
+- **Alternatives écartées** : bind mount vers un dossier de `/opt/stack/apps/
+  medvue` — écarté, un remplacement du contenu de l'application (comme lors
+  du redéploiement propre du 2026-09-20) l'aurait supprimé, et un chemin
+  hôte rend le déploiement dépendant d'un état hors compose ; copie manuelle
+  des clés hors procédure — écartée, non reproductible ; clés cuites dans
+  l'image ou versionnées — écarté, jamais de clé privée dans Git ni dans
+  une image ; Docker secrets — écarté, il faudrait quand même générer et
+  stocker les fichiers sur l'hôte, sans gain sur un serveur mono-nœud.
+- **Conséquences** : `JWT_PASSPHRASE` (`.env`) et le volume forment un couple
+  — régénérer l'un sans l'autre casse la signature. Le volume doit entrer
+  dans les sauvegardes (clé privée chiffrée, passphrase conservée
+  séparément). Garde-fou automatisé :
+  `backend/tests/Deployment/ProdComposeTest.php` (volume nommé pour les clés
+  JWT et pour les données PostgreSQL, aucun secret ni clé dans le compose,
+  `.gitignore`/`.dockerignore`). Vérification de déploiement : empreinte de
+  `public.pem` identique avant/après `up -d --force-recreate backend`
+  (`docs/deployment.md` §2).
