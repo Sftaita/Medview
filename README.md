@@ -178,6 +178,18 @@ L'inscription ne demande que prénom, nom, email, téléphone et mot de passe :
 aucune donnée de référence (hôpital, etc.) n'est nécessaire pour créer un
 compte (`docs/authentication.md` §15.10).
 
+**Latence en développement (Windows + Docker Desktop).** Chaque requête du
+backend de dev coûte ≈ 1,6 s, même `GET /api/health` : Symfony en mode debug
+revérifie la fraîcheur de milliers de fichiers du code monté depuis `C:\`
+(système de fichiers 9p, lent) — le boot passe de ≈ 2,3 s à ≈ 50 ms avec
+`APP_DEBUG=0`. Les vraies opérations s'y ajoutent (bcrypt coût 13 ≈ 0,6 s au
+`register` et au `login`) : une inscription enchaîne `register` → `login` →
+`me` et prend ≈ 7 s en dev contre ≈ 1,5 s attendu en production (≈ 0,1 s de
+socle mesuré sur `api.medvue.be`). Après un `cache:clear` ou un `rm
+var/cache/dev`, la toute première requête peut dépasser 15 s. Ce n'est pas un
+défaut de l'application ; l'interface affiche « Création du compte… » pendant
+toute la chaîne (`docs/authentication.md` §15.9).
+
 Détail des endpoints, formats de requête/réponse et codes d'erreur :
 [`docs/authentication.md`](docs/authentication.md).
 

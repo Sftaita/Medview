@@ -673,7 +673,18 @@ ne dépend d'aucune table de référence.
 
 - Pas de vérification d'email (d'où la règle « classique ≠ consomme »).
 - Envoi d'email synchrone dans la requête (pas de Messenger/file d'attente) ;
-  pas de « renvoyer l'invitation » (révoquer puis réinviter).
+  pas de « renvoyer l'invitation » (révoquer puis réinviter). **Impact mesuré
+  (2026-09-20, backend sans debug)** : Twig ≈ 0,1 ms une fois compilé (≈ 110 ms
+  au tout premier rendu), envoi SMTP vers Mailpit ≈ 50–70 ms (≈ 60–120 ms sur
+  `POST …/invitations`) ; vers le relais réel (`smtp.hostinger.com:465`), la seule
+  poignée de main TCP+TLS coûte ≈ 0,15–0,2 s depuis ce poste, donc compter
+  **≈ 0,3–0,6 s** sur `POST …/invitations` et sur l'inscription par lien. Acceptable
+  tant que ces deux actions restent rares ; à passer en asynchrone (Messenger)
+  si l'usage monte ou si un relais lent bloque les requêtes.
+- **Coût de l'inscription** (hors socle de dev) : `register` ≈ bcrypt coût 13
+  (≈ 0,6 s) puis, côté client, `login` (≈ 0,6 s de vérification) et `/api/me`
+  (≈ 0,1 s) — soit deux hachages pour une inscription. Réduire cette chaîne
+  (renvoyer le token dès `register`) serait un changement de contrat : non fait.
 - Statut `EXPIRED` jamais écrit par une tâche planifiée (paresseux).
 - Pas d'email lors d'un `accept` par un compte déjà existant.
 - Rôle d'invitation fixé à `MEMBER` (le champ existe en base).

@@ -143,6 +143,69 @@ describe('RegisterPage (classic sign-up)', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tableau de bord' })).toBeInTheDocument())
   })
 
+  it('shows visible progress from the click until the redirect, not just a disabled button', async () => {
+    // Registration is followed by a login and a profile fetch: keep each one pending
+    // in turn and check the button never goes back to looking idle in between.
+    const pending: Record<string, (response: Response) => void> = {}
+    const hold = (name: string) =>
+      new Promise<Response>((resolve) => {
+        pending[name] = resolve
+      })
+    const json = (body: unknown, status = 200) =>
+      new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.endsWith('/api/token/refresh')) return jsonResponse({ error: 'invalid_refresh_token' }, 401)
+        if (url.endsWith('/api/register')) return hold('register')
+        if (url.endsWith('/api/login')) return hold('login')
+        if (url.endsWith('/api/me')) return hold('me')
+        return Promise.reject(new Error(`Unexpected fetch to ${url}`))
+      }),
+    )
+    renderRegisterPage()
+    await fillForm()
+
+    const idle = screen.getByRole('button', { name: 'Créer mon compte' })
+    expect(idle).toBeEnabled()
+    expect(idle).toHaveAttribute('aria-busy', 'false')
+
+    fireEvent.click(idle)
+
+    // Immediately: disabled, busy, and the label says what is happening.
+    const busy = await screen.findByRole('button', { name: 'Création du compte…' })
+    expect(busy).toBeDisabled()
+    expect(busy).toHaveAttribute('aria-busy', 'true')
+
+    // Still busy while the follow-up login and profile requests run.
+    await waitFor(() => expect(pending.register).toBeDefined())
+    pending.register(json({ ...ME, joinedTeams: [] }, 201))
+    await waitFor(() => expect(pending.login).toBeDefined())
+    expect(screen.getByRole('button', { name: 'Création du compte…' })).toBeDisabled()
+    pending.login(json({ token: 'fake-jwt' }))
+    await waitFor(() => expect(pending.me).toBeDefined())
+    expect(screen.getByRole('button', { name: 'Création du compte…' })).toBeDisabled()
+
+    pending.me(json(ME))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tableau de bord' })).toBeInTheDocument())
+  })
+
+  it('goes back to an actionable button when the request fails at the network level', async () => {
+    stubFetch((url) =>
+      url.endsWith('/api/register') ? Promise.reject(new TypeError('Failed to fetch')) : undefined,
+    )
+    renderRegisterPage()
+    await fillForm()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Créer mon compte' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Une erreur est survenue')
+    const button = screen.getByRole('button', { name: 'Créer mon compte' })
+    expect(button).toBeEnabled()
+    expect(button).toHaveAttribute('aria-busy', 'false')
+  })
+
   it('shows a clear message for a taken email', async () => {
     stubFetch((url) =>
       url.endsWith('/api/register') ? jsonResponse({ error: 'email_already_used' }, 409) : undefined,

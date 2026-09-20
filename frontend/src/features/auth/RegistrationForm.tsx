@@ -154,8 +154,11 @@ export function RegistrationForm({ invitation, onRegistered }: Props) {
           )}
         </p>
       )}
-      <button type="submit" disabled={isSubmitting}>
-        Créer mon compte
+      {/* Registration is followed by a login and a profile fetch, all under
+          this one submit: the label keeps saying so until the redirect, so a
+          disabled-but-unchanged button never looks like a lost click. */}
+      <button type="submit" disabled={isSubmitting} aria-busy={isSubmitting}>
+        {isSubmitting ? 'Création du compte…' : 'Créer mon compte'}
       </button>
     </form>
   )
