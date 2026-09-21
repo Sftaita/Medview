@@ -86,6 +86,22 @@ class FairnessPeriod
         return $this->endsAt;
     }
 
+    /**
+     * Grows this period in place when its Planning is extended
+     * (docs/decisions.md D122) — never shrinks it. Overlap with the team's
+     * other FairnessPeriods is the caller's concern (and the database's
+     * exclusion constraint).
+     */
+    public function extendTo(\DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt): void
+    {
+        if ($startsAt > $this->startsAt || $endsAt < $this->endsAt) {
+            throw new \InvalidArgumentException('A FairnessPeriod can only be extended: the new range must contain the current one.');
+        }
+
+        $this->startsAt = $startsAt;
+        $this->endsAt = $endsAt;
+    }
+
     public function contains(\DateTimeImmutable $date): bool
     {
         return $date >= $this->startsAt && $date < $this->endsAt;

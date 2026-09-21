@@ -16,6 +16,7 @@ use App\Repository\PlanningTeamMemberRepository;
 use App\Security\Voter\PlanningTeamRoleVoter;
 use App\Security\Voter\PlanningVoter;
 use App\Service\PlanningService;
+use Symfony\Bundle\SecurityBundle\Security;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -41,6 +42,7 @@ final class PlanningController
         private readonly PlanningService $planningService,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
         private readonly ValidatorInterface $validator,
+        private readonly Security $security,
     ) {
     }
 
@@ -58,7 +60,7 @@ final class PlanningController
         }
 
         try {
-            $planning = $this->planningService->create($dto->name, $user, $startsAt, $endsAt, $dto->timezone, $dto->primaryTeamName);
+            $planning = $this->planningService->create($dto->name, $user, $startsAt, $endsAt, $dto->timezone, $dto->primaryTeamName, $dto->includeMe);
         } catch (OverlappingFairnessPeriodException $exception) {
             return new JsonResponse(['error' => 'team_already_scheduled', 'message' => $exception->getMessage()], 409);
         }
@@ -149,6 +151,7 @@ final class PlanningController
             $dto->endsAt = (string) ($raw['endsAt'] ?? '');
             $dto->timezone = (string) ($raw['timezone'] ?? '');
             $dto->primaryTeamName = (string) ($raw['primaryTeam']['name'] ?? '');
+            $dto->includeMe = true === ($raw['includeMe'] ?? false);
         } catch (\JsonException) {
             return [null, new JsonResponse(['error' => 'invalid_json', 'message' => 'The request body is not valid JSON.'], 400)];
         }
@@ -213,11 +216,17 @@ final class PlanningController
      */
     private function planningToArray(Planning $planning, bool $withLines = false): array
     {
+        $currentUser = $this->security->getUser();
+        $currentUser = $currentUser instanceof User ? $currentUser : null;
+
         $data = [
             'stableId' => (string) $planning->getStableId(),
             'name' => $planning->getName(),
             'creatorStableId' => (string) $planning->getCreator()->getStableId(),
             'canManage' => $this->authorizationChecker->isGranted(PlanningVoter::MANAGE, $planning),
+            // Whether the caller is themself in the candidate pool (an open membership) — independent of canManage (D123).
+            'participating' => null !== $currentUser && null !== $this->teamMemberRepository->findOpenMembershipForUserInPlanning($planning, $currentUser),
+            'canManageAvailability' => $this->authorizationChecker->isGranted(PlanningVoter::MANAGE_AVAILABILITY, $planning),
             'startsAt' => $planning->getStartsAt()->format('Y-m-d'),
             'endsAt' => $planning->getEndsAt()->format('Y-m-d'),
             'timezone' => $planning->getTimezone(),

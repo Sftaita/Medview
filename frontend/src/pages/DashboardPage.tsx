@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Icon } from '../components/Icon'
 import { clearJoinedTeamsFlash, readJoinedTeamsFlash } from '../features/auth/joinedTeamsFlash'
 import { useAuth } from '../features/auth/useAuth'
-import { fetchMyCalendar } from '../features/availability/api'
 import { dayIndexOfDate, formatDayLong, formatDayShort } from '../features/availability/calendarAxis'
-import { periodsToRanges, upcomingRanges } from '../features/availability/periodMapping'
+import { CollectionCallout } from '../features/availability/CollectionCallout'
+import { upcomingRanges } from '../features/availability/periodMapping'
 import type { DayRange } from '../features/availability/selection'
+import { useMyAvailability } from '../features/availability/useMyAvailability'
 import { fetchPlannings } from '../features/planning/api'
 import type { PlanningSummary } from '../features/planning/types'
 
@@ -30,9 +31,28 @@ function rangeLabel(range: DayRange): string {
 
 export function DashboardPage() {
   const { user } = useAuth()
+  const { ranges, loadError, collections } = useMyAvailability()
   const [joinedTeams] = useState(readJoinedTeamsFlash)
   const [plannings, setPlannings] = useState<PlanningSummary[] | null>(null)
-  const [upcoming, setUpcoming] = useState<DayRange[] | null>(null)
+
+  // Read from the shared store, never fetched here: whatever was just changed in the calendar is already in it.
+  const upcoming = useMemo(() => {
+    if (ranges === null) {
+      // A failed load leaves an empty summary, never an error: the dashboard is not a gate.
+      return loadError ? [] : null
+    }
+    return upcomingRanges(ranges, dayIndexOfDate(new Date()))
+  }, [ranges, loadError])
+  // What is still to do comes first, then what has been confirmed.
+  const openCollections = useMemo(
+    () =>
+      [...(collections ?? [])].sort(
+        (a, b) =>
+          Number(a.myResponse?.status === 'ACKNOWLEDGED') - Number(b.myResponse?.status === 'ACKNOWLEDGED') ||
+          a.startsAt.localeCompare(b.startsAt),
+      ),
+    [collections],
+  )
 
   // Shown once: cleared as soon as it has been rendered.
   useEffect(() => clearJoinedTeamsFlash(), [])
@@ -46,13 +66,6 @@ export function DashboardPage() {
       })
       .catch(() => {
         if (!cancelled) setPlannings([])
-      })
-    fetchMyCalendar()
-      .then((periods) => {
-        if (!cancelled) setUpcoming(upcomingRanges(periodsToRanges(periods), dayIndexOfDate(new Date())))
-      })
-      .catch(() => {
-        if (!cancelled) setUpcoming([])
       })
     return () => {
       cancelled = true
@@ -83,6 +96,14 @@ export function DashboardPage() {
               ))}
             </ul>
           </div>
+        </div>
+      )}
+
+      {openCollections.length > 0 && (
+        <div className="callouts" aria-label="Disponibilités attendues">
+          {openCollections.map((collection) => (
+            <CollectionCallout key={collection.stableId} collection={collection} mode="dashboard" />
+          ))}
         </div>
       )}
 

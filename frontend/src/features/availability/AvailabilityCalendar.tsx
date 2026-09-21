@@ -30,6 +30,8 @@ type Props = {
   ranges: DayRange[]
   drag: DragPreview
   todayIndex: number
+  /** Days [start, end] (inclusive) an availability collection is asking about, marked lightly. */
+  highlight?: { start: number; end: number } | null
   onPrevious: () => void
   onNext: () => void
   onDayPointerDown: (day: number, event: ReactPointerEvent<HTMLElement>) => void
@@ -62,6 +64,7 @@ export function AvailabilityCalendar({
   ranges,
   drag,
   todayIndex,
+  highlight = null,
   onPrevious,
   onNext,
   onDayPointerDown,
@@ -166,6 +169,7 @@ export function AvailabilityCalendar({
                     weekend || holiday ? 'day--off' : '',
                     outside ? 'day--outside' : '',
                     day === todayIndex ? 'day--today' : '',
+                    highlight && day >= highlight.start && day <= highlight.end ? 'day--window' : '',
                   ]
                     .filter(Boolean)
                     .join(' ')

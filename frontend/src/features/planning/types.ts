@@ -6,6 +6,10 @@ export type PlanningSummary = {
   creatorStableId: string
   /** Computed server-side via PlanningVoter::MANAGE — never derive this from creatorStableId, the frontend has no way to know its own stableId (see docs/decisions.md D078). */
   canManage: boolean
+  /** The caller is themself in the candidate pool (has an open membership) — independent of canManage (D123). */
+  participating?: boolean
+  /** Creator or team OWNER/ADMIN: may follow up availability collections (D124). */
+  canManageAvailability?: boolean
   startsAt: string
   endsAt: string
   timezone: string
@@ -45,6 +49,8 @@ export type CreatePlanningInput = {
   primaryTeam: {
     name: string
   }
+  /** "M'inclure dans le planning": makes the creator a participant of the primary line. */
+  includeMe?: boolean
 }
 
 export type CreatePlanningLineInput = {
@@ -98,4 +104,44 @@ export type InviteResult = {
   emailSent: boolean
   member: PlanningTeamMember | null
   invitation: TeamInvitation | null
+}
+
+export type PlanningAssignment = {
+  stableId: string
+  dutyStableId: string
+  /** The duty's local date, "YYYY-MM-DD". */
+  date: string
+  startsAt: string
+  endsAt: string
+  timezone: string
+  dutyType: { stableId: string; code: string; name: string }
+  lineStableId: string | null
+  lineName: string | null
+  source: string
+  locked: boolean
+  user: { stableId: string; firstName: string; lastName: string }
+}
+
+/** What the engine's actual assignments add up to for one person — counted, never re-estimated. */
+export type PersonSummary = {
+  userStableId: string
+  totalDuties: number
+  weightedWorkload: number
+  fridays: number
+  saturdays: number
+  sundays: number
+  weekendDays: number
+  byDutyType: { dutyTypeStableId: string; code: string; name: string; count: number }[]
+}
+
+export type PlanningAssignments = {
+  generations: {
+    stableId: string
+    lineStableId: string
+    lineName: string
+    generatedAt: string | null
+    coverageStatus: string | null
+  }[]
+  assignments: PlanningAssignment[]
+  summary: PersonSummary | null
 }

@@ -30,6 +30,7 @@ final class PlanningTeamMembershipService
         private readonly PlanningTeamMemberRepository $teamMemberRepository,
         private readonly TeamMemberParticipationPeriodRepository $participationPeriodRepository,
         private readonly EntityManagerInterface $entityManager,
+        private readonly AvailabilityCollectionService $collectionService,
     ) {
     }
 
@@ -68,6 +69,9 @@ final class PlanningTeamMembershipService
         $this->entityManager->persist($initialPeriod);
         $this->entityManager->flush();
 
+        // A new participant is expected in every availability collection still open (docs/availability-collection.md §7).
+        $this->collectionService->registerMember($team->getPlanning(), $user, $membershipStart);
+
         return $teamMember;
     }
 
@@ -85,5 +89,8 @@ final class PlanningTeamMembershipService
         $openPeriod?->close($membershipEnd);
 
         $this->entityManager->flush();
+
+        // No longer expected in the open collections that start once they are gone (docs/availability-collection.md §7).
+        $this->collectionService->withdrawMember($teamMember->getPlanning(), $teamMember->getUser(), $membershipEnd);
     }
 }

@@ -17,12 +17,19 @@ use Doctrine\ORM\EntityManagerInterface;
  * UserAvailabilityType may never overlap or touch, but UNAVAILABLE and
  * PREFER_DUTY may coexist on the same dates — the future engine treats the
  * hard signal as dominant, this service does not need to arbitrate it.
+ *
+ * Every write also tells AvailabilityCollectionService which dates changed
+ * (in the same transaction), so an open collection can note that the person
+ * touched their calendar inside its window (docs/availability-collection.md
+ * §6). That is the only link between the two: the calendar remains the
+ * business truth, the collection only records workflow.
  */
 final class UserAvailabilityService
 {
     public function __construct(
         private readonly UserAvailabilityPeriodRepository $repository,
         private readonly EntityManagerInterface $entityManager,
+        private readonly AvailabilityCollectionService $collectionService,
     ) {
     }
 
@@ -40,8 +47,12 @@ final class UserAvailabilityService
         }
 
         $period = new UserAvailabilityPeriod($user, $type, $startsAt, $endsAt);
-        $this->entityManager->persist($period);
-        $this->entityManager->flush();
+
+        $this->entityManager->wrapInTransaction(function () use ($period, $user, $startsAt, $endsAt): void {
+            $this->entityManager->persist($period);
+            $this->entityManager->flush();
+            $this->collectionService->recordAvailabilityChange($user, [[$startsAt, $endsAt]]);
+        });
 
         return $period;
     }
@@ -62,18 +73,29 @@ final class UserAvailabilityService
             $endsAt,
             excluding: $period,
         );
-
         if ([] !== $overlapping) {
             throw new OverlappingUserAvailabilityPeriodException();
         }
 
-        $period->reschedule($type, $startsAt, $endsAt);
-        $this->entityManager->flush();
+        $previous = [$period->getStartsAt(), $period->getEndsAt()];
+
+        $this->entityManager->wrapInTransaction(function () use ($period, $type, $startsAt, $endsAt, $previous): void {
+            $period->reschedule($type, $startsAt, $endsAt);
+            $this->entityManager->flush();
+            // Both the dates left and the dates taken count as "touched".
+            $this->collectionService->recordAvailabilityChange($period->getUser(), [$previous, [$startsAt, $endsAt]]);
+        });
     }
 
     public function delete(UserAvailabilityPeriod $period): void
     {
-        $this->entityManager->remove($period);
-        $this->entityManager->flush();
+        $user = $period->getUser();
+        $range = [$period->getStartsAt(), $period->getEndsAt()];
+
+        $this->entityManager->wrapInTransaction(function () use ($period, $user, $range): void {
+            $this->entityManager->remove($period);
+            $this->entityManager->flush();
+            $this->collectionService->recordAvailabilityChange($user, [$range]);
+        });
     }
 }

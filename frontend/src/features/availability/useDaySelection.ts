@@ -16,16 +16,19 @@ type Options = {
   /** Months shown side by side (1 on a phone, 2 on desktop). */
   visible: number
   initialPage: number
-  initialRanges?: DayRange[]
+  /** The runs on screen. Owned by the caller (the shared, autosaving store), not by this hook. */
+  ranges: DayRange[]
+  /** Applies an edit to `ranges`: it is saved as soon as it is made — there is no pending selection. */
+  setRanges: (updater: (previous: DayRange[]) => DayRange[]) => void
 }
 
 /**
- * State and gestures of the multi-selection calendar. One set of pointer
- * gestures serves mouse and touch: tap toggles a day, press-and-drag draws a
- * period (each drag *adds* one), dragging to the edge scrolls the rail.
+ * Gestures of the multi-selection calendar. One set of pointer gestures
+ * serves mouse and touch: tap toggles a day, press-and-drag draws a period
+ * (each drag *adds* one), dragging to the edge scrolls the rail. Every
+ * completed gesture is an edit that is saved at once (see MyAvailabilityProvider).
  */
-export function useDaySelection({ months, visible, initialPage, initialRanges = [] }: Options) {
-  const [ranges, setRanges] = useState<DayRange[]>(initialRanges)
+export function useDaySelection({ months, visible, initialPage, ranges, setRanges }: Options) {
   const [type, setType] = useState<UserAvailabilityType>('UNAVAILABLE')
   const [requestedPage, setPageState] = useState(initialPage)
   const [drag, setDrag] = useState<Drag | null>(null)
@@ -120,7 +123,7 @@ export function useDaySelection({ months, visible, initialPage, initialRanges = 
       setRanges((previous) => addRange(previous, current.from, current.to, current.type))
     }
     setAnchor(current.from)
-  }, [stopTimer])
+  }, [stopTimer, setRanges])
 
   useEffect(() => {
     window.addEventListener('pointerup', commit)
@@ -164,7 +167,7 @@ export function useDaySelection({ months, visible, initialPage, initialRanges = 
       stopTimer()
       timer.current = setInterval(tick, EDGE_TICK_MS)
     },
-    [anchor, type, tick, stopTimer],
+    [anchor, type, tick, stopTimer, setRanges],
   )
 
   /** pointermove on the grid: resolves the day under the pointer (a touch stays bound to its first cell). */
@@ -194,14 +197,13 @@ export function useDaySelection({ months, visible, initialPage, initialRanges = 
       setRanges((previous) => toggleDay(previous, day, type))
       setAnchor(day)
     },
-    [type],
+    [type, setRanges],
   )
 
   const effectiveRanges = drag && drag.moved ? addRange(ranges, drag.from, drag.to, drag.type) : ranges
 
   return {
     ranges,
-    setRanges,
     effectiveRanges,
     type,
     setType,
@@ -215,7 +217,7 @@ export function useDaySelection({ months, visible, initialPage, initialRanges = 
     removeRange: (start: number, end: number) =>
       setRanges((previous) => mergeRanges(cutRange(previous, start, end))),
     clear: () => {
-      setRanges([])
+      setRanges(() => [])
       setAnchor(null)
     },
     /** Called by the rail when the pointer moves over it (used for edge scrolling). */

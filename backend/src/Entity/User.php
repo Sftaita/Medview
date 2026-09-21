@@ -33,6 +33,7 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
      * only this stable identifier.
      */
     #[ORM\Column(type: 'uuid')]
+    #[Groups(['user:read'])]
     private Uuid $stableId;
 
     #[ORM\Column(length: 180, unique: true)]

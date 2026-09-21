@@ -17,6 +17,8 @@ export function PlanningsPage() {
   const [endsAt, setEndsAt] = useState('')
   const [timezone, setTimezone] = useState('Europe/Brussels')
   const [primaryTeamName, setPrimaryTeamName] = useState('')
+  // Ticked by default: most creators are on the rota themselves. Independent of their right to manage the planning.
+  const [includeMe, setIncludeMe] = useState(true)
   const [formError, setFormError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -42,11 +44,19 @@ export function PlanningsPage() {
     setSaving(true)
     setFormError(null)
     try {
-      await createPlanning({ name, startsAt, endsAt, timezone, primaryTeam: { name: primaryTeamName } })
+      await createPlanning({
+        name,
+        startsAt,
+        endsAt,
+        timezone,
+        primaryTeam: { name: primaryTeamName },
+        includeMe,
+      })
       setName('')
       setStartsAt('')
       setEndsAt('')
       setPrimaryTeamName('')
+      setIncludeMe(true)
       setShowForm(false)
       load()
     } catch (err) {
@@ -115,6 +125,7 @@ export function PlanningsPage() {
               type="date"
               value={endsAt}
               onChange={(event) => setEndsAt(event.target.value)}
+              hint="Date exclue : pour finir le 31 décembre, saisissez le 1er janvier."
             />
           </div>
           <Field
@@ -131,6 +142,21 @@ export function PlanningsPage() {
             placeholder="ex. Première ligne"
             hint="Vous pourrez ajouter d'autres lignes de garde ensuite."
           />
+
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={includeMe}
+              onChange={(event) => setIncludeMe(event.target.checked)}
+            />
+            <span>
+              <strong>M&apos;inclure dans le planning</strong>
+              <small>
+                Vous serez l&apos;un des candidats à la répartition des gardes, soumis aux mêmes règles que
+                les autres. Cela ne change rien à vos droits de gestion du planning.
+              </small>
+            </span>
+          </label>
 
           {formError && (
             <p role="alert" className="alert alert--error">

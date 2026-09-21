@@ -34,4 +34,12 @@ final class CreatePlanningRequest
      */
     #[Assert\NotBlank]
     public string $primaryTeamName = '';
+
+    /**
+     * "M'inclure dans le planning": makes the creator a participant of the
+     * primary line (an open membership) — independent of their right to
+     * manage the Planning (docs/decisions.md D123). Defaults to false, the
+     * behaviour before this option existed.
+     */
+    public bool $includeMe = false;
 }

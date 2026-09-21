@@ -39,41 +39,74 @@ export function rangeToInput(range: DayRange): UpsertUserAvailabilityPeriodInput
   }
 }
 
-export type SavePlan = {
+export type SyncPlan = {
   /** Stored periods that no longer match anything on screen. */
   toDelete: UserAvailabilityPeriod[]
-  /** Runs on screen that are not stored yet. */
+  /** Stored periods whose dates changed on screen: edited in place (PATCH), keeping their identifier. */
+  toUpdate: { period: UserAvailabilityPeriod; range: DayRange }[]
+  /** Runs on screen that have no stored counterpart. */
   toCreate: DayRange[]
 }
 
-/**
- * What must change on the server so that it matches the screen. A stored
- * period whose days are exactly a run on screen is left alone (untouched, so
- * it keeps its identifier and any time of day it might carry).
- */
-export function planSave(stored: UserAvailabilityPeriod[], screen: DayRange[]): SavePlan {
-  const unmatched = mergeRanges(screen).map((range) => ({ range, matched: false }))
-  const toDelete: UserAvailabilityPeriod[] = []
+function overlapDays(a: DayRange, b: DayRange): number {
+  return Math.max(0, Math.min(a.end, b.end) - Math.max(a.start, b.start) + 1)
+}
 
-  for (const period of stored) {
-    const covered = periodToRange(period)
-    const match = unmatched.find(
-      (entry) =>
-        !entry.matched &&
-        entry.range.type === covered.type &&
-        entry.range.start === covered.start &&
-        entry.range.end === covered.end,
+/**
+ * What must change on the server so that it matches the screen — the diff
+ * behind the autosave. A stored period whose days are exactly a run on screen
+ * is left alone (so it keeps its identifier and any time of day it might
+ * carry). A run that overlaps a stored period of the same nature *edits* it
+ * (a resize or a move is one PATCH, not a delete plus a create). What is left
+ * is deleted or created.
+ */
+export function planSync(stored: UserAvailabilityPeriod[], screen: DayRange[]): SyncPlan {
+  const runs = mergeRanges(screen).map((range) => ({ range, matched: false }))
+  const periods = stored.map((period) => ({ period, covered: periodToRange(period), matched: false }))
+
+  for (const entry of periods) {
+    const match = runs.find(
+      (run) =>
+        !run.matched &&
+        run.range.type === entry.covered.type &&
+        run.range.start === entry.covered.start &&
+        run.range.end === entry.covered.end,
     )
     if (match) {
       match.matched = true
-    } else {
-      toDelete.push(period)
+      entry.matched = true
     }
   }
 
-  return { toDelete, toCreate: unmatched.filter((entry) => !entry.matched).map((entry) => entry.range) }
-}
+  const toUpdate: SyncPlan['toUpdate'] = []
+  for (const run of runs.filter((candidate) => !candidate.matched)) {
+    const best = periods
+      .filter((entry) => !entry.matched && entry.covered.type === run.range.type)
+      .map((entry) => ({ entry, overlap: overlapDays(entry.covered, run.range) }))
+      .filter(({ overlap }) => overlap > 0)
+      .sort((a, b) => b.overlap - a.overlap)[0]
+    if (best) {
+      run.matched = true
+      best.entry.matched = true
+      toUpdate.push({ period: best.entry.period, range: run.range })
+    }
+  }
 
+  // Shrinks first: growing a period into dates another one is about to leave would briefly touch it,
+  // which the backend (rightly) refuses for two periods of the same nature.
+  const covers = (outer: DayRange, inner: DayRange) => outer.start <= inner.start && outer.end >= inner.end
+  toUpdate.sort((a, b) => {
+    const shrinkA = covers(periodToRange(a.period), a.range) ? 0 : 1
+    const shrinkB = covers(periodToRange(b.period), b.range) ? 0 : 1
+    return shrinkA - shrinkB
+  })
+
+  return {
+    toDelete: periods.filter((entry) => !entry.matched).map((entry) => entry.period),
+    toUpdate,
+    toCreate: runs.filter((run) => !run.matched).map((run) => run.range),
+  }
+}
 /** Convenience for the dashboard: ranges that are not entirely in the past. */
 export function upcomingRanges(ranges: DayRange[], todayIndex: number): DayRange[] {
   return ranges.filter((range) => range.end >= todayIndex)

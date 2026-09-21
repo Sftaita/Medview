@@ -345,3 +345,18 @@ personne » (prénom, nom, email), feedback explicite pour chacun des quatre
 membres (« Marie Dupont (marie@… ) — Invitation en attente », bouton
 « Révoquer »). Le formulaire d'ajout par identifiant reste, sous la mention
 « Utilisateur existant (identifiant connu) ».
+
+## 15. Lot 2026-09-21 : prolongation, participation du créateur, planning par personne
+
+Détail complet : `docs/availability-collection.md`.
+
+- **Prolonger** (`POST /api/plannings/{id}/extensions`, créateur seul) : agrandit en place le `Planning`
+  et le `FairnessPeriod`/`PlanningPeriod` de chaque ligne (D075 préservé) et ouvre une collecte de
+  disponibilités pour les seules dates ajoutées (D122). Refusé si une ligne est validée/publiée.
+  `PATCH /api/plannings/{id}` reste limité au nom (D077).
+- **`includeMe`** à la création (D123) : le créateur devient membre `OWNER` de la ligne principale.
+  Les réponses `Planning` exposent `participating` (adhésion ouverte du demandeur) et
+  `canManageAvailability`, en plus de `canManage`.
+- **`GET /api/plannings/{id}/assignments`** (D125) : affectations de la génération `COMPLETED` la plus
+  récente de chaque ligne, filtrables par personne et par mois, avec résumé par personne.
+- Chaque planning ouvre à sa création une collecte sur toute sa plage.

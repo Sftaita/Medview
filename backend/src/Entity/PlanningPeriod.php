@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Entity;
 
 use App\Exception\InvalidPlanningPeriodTransitionException;
+use App\Exception\PlanningPeriodLockedException;
 use App\Repository\PlanningPeriodRepository;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Uid\Uuid;
@@ -149,6 +150,32 @@ class PlanningPeriod
         }
 
         $this->status = $target;
+        $this->touch();
+    }
+
+    /**
+     * Grows this period in place when its Planning is extended
+     * (docs/decisions.md D122). Refused once the period is VALIDATED,
+     * PUBLISHED or ARCHIVED: a published period is never edited
+     * (docs/allocation-algorithm.md §18) and the engine cannot yet generate
+     * an additional slice next to an already validated one.
+     *
+     * @throws PlanningPeriodLockedException
+     */
+    public function extendTo(\DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt): void
+    {
+        if ($startsAt > $this->startsAt || $endsAt < $this->endsAt) {
+            throw new \InvalidArgumentException('A PlanningPeriod can only be extended: the new range must contain the current one.');
+        }
+        if (!\in_array($this->status, [PlanningPeriodStatus::DRAFT, PlanningPeriodStatus::GENERATED], true)) {
+            throw new PlanningPeriodLockedException();
+        }
+        if ($startsAt < $this->fairnessPeriod->getStartsAt() || $endsAt > $this->fairnessPeriod->getEndsAt()) {
+            throw new \InvalidArgumentException('Extend the FairnessPeriod before the PlanningPeriod: a PlanningPeriod must fall entirely within its FairnessPeriod.');
+        }
+
+        $this->startsAt = $startsAt;
+        $this->endsAt = $endsAt;
         $this->touch();
     }
 

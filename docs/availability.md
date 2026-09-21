@@ -299,3 +299,14 @@ optimisation/solveur, scoring des préférences, résolution automatique des
 conflits entre équipes, notifications, échanges de gardes. Ce lot fournit
 uniquement le modèle de données et les API sur lesquels ces couches futures
 s'appuieront.
+
+## 10. Lot 2026-09-21 : sauvegarde automatique et collectes
+
+- `/my-availability` n'a plus de bouton « Enregistrer » : chaque geste est appliqué à l'écran puis
+  sauvegardé (`DELETE`/`PATCH`/`POST`) ; en cas d'échec l'écran revient à l'état du serveur avec un message
+  (D126, `docs/availability-collection.md` §13). Le tableau de bord lit le même état partagé.
+- Les règles de `UserAvailabilityPeriod` ci-dessus sont inchangées. Ce qui s'ajoute : toute écriture prévient
+  `AvailabilityCollectionService` (même transaction) pour mettre à jour `lastAvailabilityChangeAt` des collectes
+  ouvertes concernées — information de workflow, jamais d'éligibilité (D120).
+- "Avoir revu ses disponibilités" pour une tranche de planning n'est **pas** déduit des périodes présentes :
+  c'est la confirmation explicite décrite dans `docs/availability-collection.md`.

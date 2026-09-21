@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Security\Voter;
 
 use App\Entity\Planning;
+use App\Entity\TeamMemberRole;
 use App\Entity\User;
 use App\Repository\PlanningTeamMemberRepository;
 use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
@@ -25,6 +26,14 @@ final class PlanningVoter extends Voter
     /** Subject: Planning. True only for the creator — never merely by holding a managing role in an associated PlanningTeam. */
     public const MANAGE = 'PLANNING_MANAGE';
 
+    /**
+     * Subject: Planning. The availability-collection workflow (open a collection, set its deadline,
+     * close it, read everyone's answers): the creator, or a current OWNER/ADMIN of any PlanningTeam of
+     * the Planning (docs/decisions.md D124). Wider than MANAGE on purpose — chasing late answers is
+     * team-role work, not Planning-structure work — and never granted to a plain MEMBER.
+     */
+    public const MANAGE_AVAILABILITY = 'PLANNING_MANAGE_AVAILABILITY';
+
     public function __construct(
         private readonly PlanningTeamMemberRepository $teamMemberRepository,
     ) {
@@ -32,7 +41,7 @@ final class PlanningVoter extends Voter
 
     protected function supports(string $attribute, mixed $subject): bool
     {
-        return \in_array($attribute, [self::VIEW, self::MANAGE], true) && $subject instanceof Planning;
+        return \in_array($attribute, [self::VIEW, self::MANAGE, self::MANAGE_AVAILABILITY], true) && $subject instanceof Planning;
     }
 
     protected function voteOnAttribute(string $attribute, mixed $subject, TokenInterface $token): bool
@@ -45,6 +54,16 @@ final class PlanningVoter extends Voter
         /* @var Planning $subject */
         if (self::MANAGE === $attribute) {
             return $subject->getCreator() === $user;
+        }
+
+        if (self::MANAGE_AVAILABILITY === $attribute) {
+            if ($subject->getCreator() === $user) {
+                return true;
+            }
+
+            $membership = $this->teamMemberRepository->findOpenMembershipForUserInPlanning($subject, $user);
+
+            return null !== $membership && \in_array($membership->getRole(), [TeamMemberRole::OWNER, TeamMemberRole::ADMIN], true);
         }
 
         if ($subject->getCreator() === $user) {

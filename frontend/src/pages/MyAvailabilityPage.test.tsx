@@ -1,213 +1,290 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { dayIndex } from '../features/availability/calendarAxis'
+import { MyAvailabilityProvider } from '../features/availability/MyAvailabilityProvider'
+import type { UserAvailabilityPeriod } from '../features/availability/types'
+import { createFakeBackend, makeCollection } from '../testUtils/fakeBackend'
 import { MyAvailabilityPage } from './MyAvailabilityPage'
-
-function jsonResponse(body: unknown, status = 200) {
-  // A 204 has no body, hence no Content-Type (the real backend sends none either).
-  return Promise.resolve(
-    status === 204
-      ? new Response(null, { status })
-      : new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }),
-  )
-}
-
-type Stored = { stableId: string; type: string; startsAt: string; endsAt: string }
-type Created = { type: string; startsAt: string; endsAt: string }
 
 const now = new Date()
 const YEAR = now.getFullYear()
 const MONTH = now.getMonth()
 
 /** Day 15+ of the current month is always an in-month cell (never a duplicated trailing day). */
-function cell(day: number): HTMLElement {
-  const element = document.querySelector<HTMLElement>(`[data-day="${dayIndex(YEAR, MONTH, day)}"]`)
-  if (!element) throw new Error(`No cell for day ${day}`)
+function cell(day: number, year = YEAR, month = MONTH): HTMLElement {
+  const element = document.querySelector<HTMLElement>(`[data-day="${dayIndex(year, month, day)}"]`)
+  if (!element) throw new Error(`No cell for ${year}-${month + 1}-${day}`)
   return element
 }
 
-function storedPeriod(stableId: string, type: string, fromDay: number, toDayExclusive: number): Stored {
+function storedPeriod(
+  stableId: string,
+  type: 'UNAVAILABLE' | 'PREFER_DUTY',
+  fromDay: number,
+  toDayExclusive: number,
+): UserAvailabilityPeriod {
   return {
     stableId,
     type,
     startsAt: new Date(YEAR, MONTH, fromDay).toISOString(),
     endsAt: new Date(YEAR, MONTH, toDayExclusive).toISOString(),
+    createdAt: '',
+    updatedAt: '',
   }
 }
 
-/** A tiny in-memory backend for /api/me/calendar. */
-function stubCalendar(initial: Stored[], options: { failCreateWith?: number } = {}) {
-  let stored = [...initial]
-  const created: Created[] = []
-  const deleted: string[] = []
-
-  vi.stubGlobal(
-    'fetch',
-    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input)
-
-      if (url.endsWith('/api/me/calendar') && init?.method === 'POST') {
-        if (options.failCreateWith) {
-          return jsonResponse({ error: 'overlapping_period', message: 'conflict' }, options.failCreateWith)
-        }
-        const body = JSON.parse(String(init.body)) as Created
-        created.push(body)
-        stored.push({ stableId: `new-${created.length}`, ...body })
-        return jsonResponse(stored[stored.length - 1], 201)
-      }
-      if (url.endsWith('/api/me/calendar')) {
-        return jsonResponse(stored)
-      }
-      if (init?.method === 'DELETE' && url.includes('/api/me/calendar/')) {
-        const id = url.split('/').pop() as string
-        deleted.push(id)
-        stored = stored.filter((period) => period.stableId !== id)
-        return jsonResponse(null, 204)
-      }
-      return Promise.reject(new Error(`Unexpected fetch to ${url}`))
-    }),
-  )
-
-  return { created, deleted }
+function summary() {
+  return within(screen.getByRole('region', { name: 'Récapitulatif' }))
 }
 
-async function renderLoaded() {
-  render(<MyAvailabilityPage />)
+function renderPage(entry = '/my-availability') {
+  render(
+    <MemoryRouter initialEntries={[entry]}>
+      <MyAvailabilityProvider>
+        <MyAvailabilityPage />
+      </MyAvailabilityProvider>
+    </MemoryRouter>,
+  )
+}
+
+async function renderLoaded(entry?: string) {
+  renderPage(entry)
   await waitFor(() => expect(screen.queryByText('Chargement…')).not.toBeInTheDocument())
 }
 
 afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
-describe('MyAvailabilityPage', () => {
+describe('MyAvailabilityPage — optimistic autosave', () => {
   it('shows the stored periods on the calendar and in the summary', async () => {
-    stubCalendar([storedPeriod('u1', 'UNAVAILABLE', 15, 18)])
+    createFakeBackend({ periods: [storedPeriod('u1', 'UNAVAILABLE', 15, 18)] }).install()
     await renderLoaded()
 
-    const summary = screen.getByRole('region', { name: 'Récapitulatif' })
-    expect(within(summary).getByText('période sélectionnée')).toBeInTheDocument()
-    expect(within(summary).getByText('3 jours au total')).toBeInTheDocument()
+    expect(summary().getByText('période sélectionnée')).toBeInTheDocument()
+    expect(summary().getByText('3 jours au total')).toBeInTheDocument()
     expect(cell(15)).toHaveAttribute('aria-pressed', 'true')
     expect(cell(17)).toHaveAttribute('aria-pressed', 'true')
     expect(cell(18)).toHaveAttribute('aria-pressed', 'false')
   })
 
-  it('keeps Enregistrer disabled until something changes', async () => {
-    stubCalendar([storedPeriod('u1', 'UNAVAILABLE', 15, 18)])
+  it('has no global save button: nothing to press after editing', async () => {
+    createFakeBackend().install()
     await renderLoaded()
 
-    expect(screen.getByRole('button', { name: 'Enregistrer' })).toBeDisabled()
-
     fireEvent.click(cell(20))
-    expect(screen.getByRole('button', { name: 'Enregistrer' })).toBeEnabled()
 
-    // Undoing the change makes the screen equal to the stored data again.
-    fireEvent.click(cell(20))
-    expect(screen.getByRole('button', { name: 'Enregistrer' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: /enregistrer/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /sauvegarder/i })).not.toBeInTheDocument()
   })
 
-  it('creates a whole-day UNAVAILABLE period for a tapped day', async () => {
-    const { created } = stubCalendar([])
+  it('shows a created period at once, before the server has answered, then persists it', async () => {
+    const backend = createFakeBackend()
+    backend.install()
+    const release = backend.hold('POST', '/api/me/calendar')
     await renderLoaded()
 
-    // detail === 0: a click without a pointer, i.e. keyboard activation of a focused day.
     fireEvent.click(cell(20))
-    expect(
-      within(screen.getByRole('region', { name: 'Récapitulatif' })).getByText('date sélectionnée'),
-    ).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }))
+    // The request is still pending: the screen already shows the day.
+    expect(cell(20)).toHaveAttribute('aria-pressed', 'true')
+    expect(summary().getByText('date sélectionnée')).toBeInTheDocument()
+    await waitFor(() => expect(backend.requests('POST', '/api/me/calendar')).toHaveLength(1))
+    expect(screen.getByText('Enregistrement…')).toBeInTheDocument()
 
-    await waitFor(() => expect(created).toHaveLength(1))
-    expect(created[0].type).toBe('UNAVAILABLE')
-    expect(new Date(created[0].startsAt)).toEqual(new Date(YEAR, MONTH, 20))
-    expect(new Date(created[0].endsAt)).toEqual(new Date(YEAR, MONTH, 21))
-    expect(await screen.findByText('Modifications enregistrées.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Enregistrer' })).toBeDisabled()
+    release()
+
+    await waitFor(() => expect(screen.getByText(/Enregistré automatiquement/)).toBeInTheDocument())
+    const [{ body }] = backend.requests('POST', '/api/me/calendar')
+    const created = body as { type: string; startsAt: string; endsAt: string }
+    expect(created.type).toBe('UNAVAILABLE')
+    expect(new Date(created.startsAt)).toEqual(new Date(YEAR, MONTH, 20))
+    expect(new Date(created.endsAt)).toEqual(new Date(YEAR, MONTH, 21))
+    expect(backend.periods).toHaveLength(1)
   })
 
-  it('draws one continuous period with a press-and-drag, sent as a single API period', async () => {
-    const { created } = stubCalendar([])
+  it('draws one continuous period with a press-and-drag, saved as a single API period', async () => {
+    const backend = createFakeBackend()
+    backend.install()
     await renderLoaded()
 
     fireEvent.pointerDown(cell(20), { button: 0, pointerId: 1 })
     fireEvent.pointerMove(cell(22), { pointerId: 1 })
     fireEvent.pointerUp(document.body, { pointerId: 1 })
 
-    const summary = screen.getByRole('region', { name: 'Récapitulatif' })
-    expect(within(summary).getByText('3 jours au total')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }))
-
-    await waitFor(() => expect(created).toHaveLength(1))
-    expect(new Date(created[0].startsAt)).toEqual(new Date(YEAR, MONTH, 20))
-    expect(new Date(created[0].endsAt)).toEqual(new Date(YEAR, MONTH, 23))
+    expect(summary().getByText('3 jours au total')).toBeInTheDocument()
+    await waitFor(() => expect(backend.requests('POST', '/api/me/calendar')).toHaveLength(1))
+    const created = backend.requests('POST', '/api/me/calendar')[0].body as {
+      startsAt: string
+      endsAt: string
+    }
+    expect(new Date(created.startsAt)).toEqual(new Date(YEAR, MONTH, 20))
+    expect(new Date(created.endsAt)).toEqual(new Date(YEAR, MONTH, 23))
   })
 
   it('adds a second period instead of replacing the first one', async () => {
-    const { created } = stubCalendar([])
+    const backend = createFakeBackend()
+    backend.install()
     await renderLoaded()
 
     fireEvent.pointerDown(cell(16), { button: 0 })
     fireEvent.pointerMove(cell(17))
     fireEvent.pointerUp(document.body)
+    await waitFor(() => expect(backend.periods).toHaveLength(1))
     fireEvent.pointerDown(cell(25), { button: 0 })
     fireEvent.pointerMove(cell(26))
     fireEvent.pointerUp(document.body)
 
-    expect(
-      within(screen.getByRole('region', { name: 'Récapitulatif' })).getByText('périodes sélectionnées'),
-    ).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }))
-    await waitFor(() => expect(created).toHaveLength(2))
+    expect(summary().getByText('périodes sélectionnées')).toBeInTheDocument()
+    await waitFor(() => expect(backend.periods).toHaveLength(2))
   })
 
-  it('sends PREFER_DUTY when the preference nature is active', async () => {
-    const { created } = stubCalendar([])
+  it('saves PREFER_DUTY when the preference nature is active', async () => {
+    const backend = createFakeBackend()
+    backend.install()
     await renderLoaded()
 
     fireEvent.click(screen.getByRole('button', { name: 'Préférence de garde' }))
     fireEvent.click(cell(20))
-    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }))
 
-    await waitFor(() => expect(created).toHaveLength(1))
-    expect(created[0].type).toBe('PREFER_DUTY')
+    await waitFor(() => expect(backend.requests('POST', '/api/me/calendar')).toHaveLength(1))
+    expect((backend.requests('POST', '/api/me/calendar')[0].body as { type: string }).type).toBe(
+      'PREFER_DUTY',
+    )
   })
 
-  it('deletes a stored period removed from the summary', async () => {
-    const { deleted, created } = stubCalendar([storedPeriod('u1', 'UNAVAILABLE', 15, 18)])
+  it('removes a period at once and deletes it on the server', async () => {
+    const backend = createFakeBackend({ periods: [storedPeriod('u1', 'UNAVAILABLE', 15, 18)] })
+    backend.install()
+    const release = backend.hold('DELETE', '/api/me/calendar')
     await renderLoaded()
 
     fireEvent.click(screen.getByRole('button', { name: /^Retirer 15/ }))
-    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }))
 
-    await waitFor(() => expect(deleted).toEqual(['u1']))
-    expect(created).toHaveLength(0)
+    expect(cell(15)).toHaveAttribute('aria-pressed', 'false')
+    expect(summary().getByRole('heading', { name: 'Aucune date sélectionnée' })).toBeInTheDocument()
+    await waitFor(() => expect(backend.requests('DELETE', '/api/me/calendar/u1')).toHaveLength(1))
+    release()
+    await waitFor(() => expect(backend.periods).toHaveLength(0))
+    expect(backend.requests('POST', '/api/me/calendar')).toHaveLength(0)
   })
 
-  it('replaces a stored period whose days changed (delete, then create)', async () => {
-    const { deleted, created } = stubCalendar([storedPeriod('u1', 'UNAVAILABLE', 15, 18)])
+  it('edits a stored period in place with a PATCH — never delete then create', async () => {
+    const backend = createFakeBackend({ periods: [storedPeriod('u1', 'UNAVAILABLE', 15, 18)] })
+    backend.install()
+    const release = backend.hold('PATCH', '/api/me/calendar')
     await renderLoaded()
 
     fireEvent.click(cell(18)) // extends 15–17 to 15–18
 
-    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }))
+    expect(cell(18)).toHaveAttribute('aria-pressed', 'true')
+    expect(summary().getByText('4 jours au total')).toBeInTheDocument()
+    await waitFor(() => expect(backend.requests('PATCH', '/api/me/calendar/u1')).toHaveLength(1))
+    release()
 
-    await waitFor(() => expect(created).toHaveLength(1))
-    expect(deleted).toEqual(['u1'])
-    expect(new Date(created[0].endsAt)).toEqual(new Date(YEAR, MONTH, 19))
+    await waitFor(() => expect(screen.getByText(/Enregistré automatiquement/)).toBeInTheDocument())
+    const patch = backend.requests('PATCH', '/api/me/calendar/u1')[0].body as { endsAt: string }
+    expect(new Date(patch.endsAt)).toEqual(new Date(YEAR, MONTH, 19))
+    expect(backend.requests('DELETE', '/api/me/calendar')).toHaveLength(0)
+    expect(backend.requests('POST', '/api/me/calendar')).toHaveLength(0)
+    expect(backend.periods.map((p) => p.stableId)).toEqual(['u1'])
   })
 
-  it('shows a friendly message on a 409 overlap conflict', async () => {
-    stubCalendar([], { failCreateWith: 409 })
+  it('serializes rapid edits: a second edit made while a save is in flight is saved after it, never in parallel', async () => {
+    const backend = createFakeBackend()
+    backend.install()
+    const release = backend.hold('POST', '/api/me/calendar')
     await renderLoaded()
 
     fireEvent.click(cell(20))
-    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }))
+    await waitFor(() => expect(backend.requests('POST', '/api/me/calendar')).toHaveLength(1))
+    fireEvent.click(cell(21)) // while the first POST is still pending
+    expect(summary().getByText('2 jours au total')).toBeInTheDocument()
+    expect(backend.calls.filter((c) => c.method !== 'GET')).toHaveLength(1)
+
+    release()
+
+    await waitFor(() => expect(screen.getByText(/Enregistré automatiquement/)).toBeInTheDocument())
+    // The follow-up is one edit of the period the first request created.
+    expect(backend.requests('PATCH', '/api/me/calendar/')).toHaveLength(1)
+    expect(backend.periods).toHaveLength(1)
+    expect(new Date(backend.periods[0].endsAt)).toEqual(new Date(YEAR, MONTH, 22))
+  })
+
+  it('rolls back a creation refused by the API and says so', async () => {
+    const backend = createFakeBackend()
+    backend.install()
+    backend.failNext('POST', '/api/me/calendar', 409, { error: 'overlapping_period' })
+    await renderLoaded()
+
+    fireEvent.click(cell(20))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('chevauche ou touche déjà ces dates')
+    expect(screen.getByRole('alert')).toHaveTextContent('annulée')
+    expect(cell(20)).toHaveAttribute('aria-pressed', 'false')
+    expect(summary().getByRole('heading', { name: 'Aucune date sélectionnée' })).toBeInTheDocument()
+    expect(screen.queryByText(/Enregistré automatiquement/)).not.toBeInTheDocument()
+  })
+
+  it('rolls back a modification refused by the API to what the server really holds', async () => {
+    const backend = createFakeBackend({ periods: [storedPeriod('u1', 'UNAVAILABLE', 15, 18)] })
+    backend.install()
+    backend.failNext('PATCH', '/api/me/calendar', 422)
+    await renderLoaded()
+
+    fireEvent.click(cell(18))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('invalide')
+    expect(cell(18)).toHaveAttribute('aria-pressed', 'false')
+    expect(cell(17)).toHaveAttribute('aria-pressed', 'true')
+    expect(summary().getByText('3 jours au total')).toBeInTheDocument()
+  })
+
+  it('rolls back a deletion that never reached the server', async () => {
+    const backend = createFakeBackend({ periods: [storedPeriod('u1', 'UNAVAILABLE', 15, 18)] })
+    backend.install()
+    backend.failNext('DELETE', '/api/me/calendar', 500)
+    await renderLoaded()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Retirer 15/ }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Impossible')
+    await waitFor(() => expect(cell(15)).toHaveAttribute('aria-pressed', 'true'))
+    expect(backend.periods).toHaveLength(1)
+  })
+
+  it('can be edited again after a failure, and the error goes away', async () => {
+    const backend = createFakeBackend()
+    backend.install()
+    backend.failNext('POST', '/api/me/calendar', 500)
+    await renderLoaded()
+
+    fireEvent.click(cell(20))
+    await screen.findByRole('alert')
+
+    fireEvent.click(cell(21))
+
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+    await waitFor(() => expect(backend.periods).toHaveLength(1))
+    expect(cell(21)).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('asks for a second click before erasing everything', async () => {
+    const backend = createFakeBackend({ periods: [storedPeriod('u1', 'UNAVAILABLE', 15, 18)] })
+    backend.install()
+    await renderLoaded()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Tout effacer' }))
+    expect(cell(15)).toHaveAttribute('aria-pressed', 'true')
+    expect(backend.requests('DELETE', '/api/me/calendar')).toHaveLength(0)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmer : tout effacer' }))
+
+    expect(cell(15)).toHaveAttribute('aria-pressed', 'false')
+    await waitFor(() => expect(backend.requests('DELETE', '/api/me/calendar/u1')).toHaveLength(1))
   })
 
   it('shows an error when the calendar cannot be loaded', async () => {
@@ -215,13 +292,13 @@ describe('MyAvailabilityPage', () => {
       'fetch',
       vi.fn(() => Promise.reject(new Error('down'))),
     )
-    render(<MyAvailabilityPage />)
+    renderPage()
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Impossible de charger votre calendrier.')
   })
 
   it('scrolls the rail one month at a time, only after the pointer has dwelt at the edge', async () => {
-    stubCalendar([])
+    createFakeBackend().install()
     await renderLoaded()
     const label = () => document.querySelector('.cal__nav-label')?.textContent
 
@@ -255,10 +332,159 @@ describe('MyAvailabilityPage', () => {
   })
 
   it('never offers a time of day: availability is whole-day only', async () => {
-    stubCalendar([])
+    createFakeBackend().install()
     await renderLoaded()
 
     expect(screen.queryByLabelText(/heure|horaire|plage horaire/i)).not.toBeInTheDocument()
     expect(document.querySelector('input[type="time"], input[type="datetime-local"]')).toBeNull()
+  })
+})
+
+describe('MyAvailabilityPage — answering a collection', () => {
+  function frozenDecember() {
+    // Only `Date` is faked: promises and timers keep running normally.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-12-14T09:00:00Z'))
+  }
+
+  it('opens on the collection window, marks its dates and states the deadline', async () => {
+    frozenDecember()
+    createFakeBackend({ collections: [makeCollection()] }).install()
+
+    await renderLoaded('/my-availability?collection=col-1')
+
+    expect(screen.getByRole('region', { name: /Disponibilités janvier–mars 2027/ })).toBeInTheDocument()
+    expect(screen.getByText('Vos disponibilités sont attendues pour janvier–mars 2027')).toBeInTheDocument()
+    expect(screen.getByText('À renseigner avant le 20 décembre')).toBeInTheDocument()
+    expect(document.querySelector('.cal__nav-label')?.textContent).toMatch(/Janvier/)
+    expect(cell(15, 2027, 0)).toHaveClass('day--window')
+    expect(cell(15, 2026, 11)).not.toHaveClass('day--window')
+  })
+
+  it('answers "no unavailability" and immediately shows the confirmation', async () => {
+    frozenDecember()
+    const backend = createFakeBackend({ collections: [makeCollection()] })
+    backend.install()
+    await renderLoaded('/my-availability?collection=col-1')
+
+    fireEvent.click(screen.getByRole('button', { name: "Je n'ai aucune indisponibilité sur cette période" }))
+
+    expect(await screen.findByText(/Disponibilités confirmées le/)).toHaveTextContent('14/12')
+    expect(screen.getByText(/aucune indisponibilité/)).toBeInTheDocument()
+    expect(
+      backend.requests('POST', '/api/availability-collections/col-1/acknowledge')[0].body as object,
+    ).toEqual({
+      noUnavailability: true,
+    })
+    expect(screen.queryByRole('button', { name: /Confirmer que mes disponibilités/ })).not.toBeInTheDocument()
+  })
+
+  it('confirms that the availabilities are up to date after entering absences', async () => {
+    frozenDecember()
+    const backend = createFakeBackend({ collections: [makeCollection()] })
+    backend.install()
+    await renderLoaded('/my-availability?collection=col-1')
+
+    fireEvent.click(cell(10, 2027, 0))
+    await waitFor(() => expect(backend.periods).toHaveLength(1))
+    // Absences now sit inside the window: "no unavailability" would contradict them, so it is not offered.
+    expect(
+      screen.queryByRole('button', { name: /aucune indisponibilité sur cette période/ }),
+    ).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmer que mes disponibilités sont à jour' }))
+
+    expect(await screen.findByText(/Disponibilités confirmées le/)).toBeInTheDocument()
+    expect(backend.requests('POST', '/api/availability-collections/col-1/acknowledge')[0].body).toEqual({})
+  })
+
+  it('does not treat existing absences as a confirmation', async () => {
+    frozenDecember()
+    createFakeBackend({
+      collections: [makeCollection()],
+      periods: [
+        {
+          stableId: 'old',
+          type: 'UNAVAILABLE',
+          startsAt: new Date(2027, 0, 15).toISOString(),
+          endsAt: new Date(2027, 0, 18).toISOString(),
+          createdAt: '',
+          updatedAt: '',
+        },
+      ],
+    }).install()
+
+    await renderLoaded('/my-availability?collection=col-1')
+
+    expect(screen.getByText('Vos disponibilités sont attendues pour janvier–mars 2027')).toBeInTheDocument()
+    expect(screen.queryByText(/Disponibilités confirmées/)).not.toBeInTheDocument()
+  })
+
+  it('explains an answer the server refuses', async () => {
+    frozenDecember()
+    const backend = createFakeBackend({ collections: [makeCollection()] })
+    backend.install()
+    await renderLoaded('/my-availability?collection=col-1')
+    backend.failNext('POST', '/api/availability-collections/col-1/acknowledge', 409, {
+      error: 'collection_closed',
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmer que mes disponibilités sont à jour' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('clôturée')
+    expect(screen.queryByText(/Disponibilités confirmées/)).not.toBeInTheDocument()
+  })
+
+  it('re-reads the calendar when the server refuses "no unavailability" because of absences the screen did not know', async () => {
+    frozenDecember()
+    const backend = createFakeBackend({ collections: [makeCollection()] })
+    backend.install()
+    await renderLoaded('/my-availability?collection=col-1')
+    expect(
+      screen.getByRole('button', { name: "Je n'ai aucune indisponibilité sur cette période" }),
+    ).toBeInTheDocument()
+
+    // Another tab of the same person saves an absence inside the window.
+    backend.periods.push({
+      stableId: 'other-tab',
+      type: 'UNAVAILABLE',
+      startsAt: new Date(2027, 0, 19).toISOString(),
+      endsAt: new Date(2027, 0, 20).toISOString(),
+      createdAt: '',
+      updatedAt: '',
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: "Je n'ai aucune indisponibilité sur cette période" }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Vous avez encore des indisponibilités')
+    // The screen now agrees with the message: the absence is shown and the contradicting answer is no longer offered.
+    await waitFor(() => expect(cell(19, 2027, 0)).toHaveAttribute('aria-pressed', 'true'))
+    expect(
+      screen.queryByRole('button', { name: "Je n'ai aucune indisponibilité sur cette période" }),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText(/Disponibilités confirmées/)).not.toBeInTheDocument()
+  })
+  it('does not send a double click twice', async () => {
+    frozenDecember()
+    const backend = createFakeBackend({ collections: [makeCollection()] })
+    backend.install()
+    const release = backend.hold('POST', '/api/availability-collections/')
+    await renderLoaded('/my-availability?collection=col-1')
+
+    const button = screen.getByRole('button', { name: 'Confirmer que mes disponibilités sont à jour' })
+    fireEvent.click(button)
+    fireEvent.click(button)
+    release()
+
+    await screen.findByText(/Disponibilités confirmées le/)
+    expect(backend.requests('POST', '/api/availability-collections/col-1/acknowledge')).toHaveLength(1)
+  })
+
+  it('says so when the collection is not open anymore', async () => {
+    createFakeBackend({ collections: [] }).install()
+
+    await renderLoaded('/my-availability?collection=gone')
+
+    expect(screen.getByText(/n'est plus ouverte/)).toBeInTheDocument()
   })
 })

@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthProvider } from '../features/auth/AuthContext'
+import { MyAvailabilityProvider } from '../features/availability/MyAvailabilityProvider'
 import { DashboardPage } from './DashboardPage'
 import { InvitationPage } from './InvitationPage'
 
@@ -68,7 +69,14 @@ function renderInvitationPage(token = TOKEN) {
         <Routes>
           <Route path="/invitations/:token" element={<InvitationPage />} />
           <Route path="/login" element={<div>Page de connexion</div>} />
-          <Route path="/" element={<DashboardPage />} />
+          <Route
+            path="/"
+            element={
+              <MyAvailabilityProvider>
+                <DashboardPage />
+              </MyAvailabilityProvider>
+            }
+          />
         </Routes>
       </AuthProvider>
     </MemoryRouter>,

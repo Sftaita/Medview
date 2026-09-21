@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { dayIndex } from './calendarAxis'
-import { periodToRange, periodsToRanges, planSave, rangeToInput } from './periodMapping'
+import { periodToRange, periodsToRanges, planSync, rangeToInput } from './periodMapping'
 import type { DayRange } from './selection'
 import type { UserAvailabilityPeriod, UserAvailabilityType } from './types'
 
@@ -78,14 +78,15 @@ describe('rangeToInput', () => {
   })
 })
 
-describe('planSave', () => {
+describe('planSync', () => {
   const stored = [
     period('u1', 'UNAVAILABLE', [2026, 9, 12], [2026, 9, 15]),
     period('p1', 'PREFER_DUTY', [2026, 9, 6], [2026, 9, 8]),
   ]
+  const none = { toDelete: [], toUpdate: [], toCreate: [] }
 
   it('does nothing when the screen equals the stored data', () => {
-    expect(planSave(stored, periodsToRanges(stored))).toEqual({ toDelete: [], toCreate: [] })
+    expect(planSync(stored, periodsToRanges(stored))).toEqual(none)
   })
 
   it('creates a new run and leaves untouched periods alone', () => {
@@ -93,39 +94,100 @@ describe('planSave', () => {
       ...periodsToRanges(stored),
       { start: d(9, 20), end: d(9, 22), type: 'UNAVAILABLE' as const },
     ]
-    const plan = planSave(stored, screen)
+    const plan = planSync(stored, screen)
     expect(plan.toDelete).toEqual([])
+    expect(plan.toUpdate).toEqual([])
     expect(plan.toCreate).toEqual([{ start: d(9, 20), end: d(9, 22), type: 'UNAVAILABLE' }])
   })
 
   it('deletes a stored period removed from the screen', () => {
-    const plan = planSave(stored, [{ start: d(9, 6), end: d(9, 7), type: 'PREFER_DUTY' }])
+    const plan = planSync(stored, [{ start: d(9, 6), end: d(9, 7), type: 'PREFER_DUTY' }])
     expect(plan.toDelete.map((p) => p.stableId)).toEqual(['u1'])
+    expect(plan.toUpdate).toEqual([])
     expect(plan.toCreate).toEqual([])
   })
 
-  it('replaces a stored period whose days changed (delete + create)', () => {
+  it('edits a stored period in place when a run is extended (one PATCH, same identifier)', () => {
     const screen: DayRange[] = [
       { start: d(9, 12), end: d(9, 16), type: 'UNAVAILABLE' },
       { start: d(9, 6), end: d(9, 7), type: 'PREFER_DUTY' },
     ]
-    const plan = planSave(stored, screen)
-    expect(plan.toDelete.map((p) => p.stableId)).toEqual(['u1'])
-    expect(plan.toCreate).toEqual([{ start: d(9, 12), end: d(9, 16), type: 'UNAVAILABLE' }])
+    const plan = planSync(stored, screen)
+    expect(plan.toDelete).toEqual([])
+    expect(plan.toCreate).toEqual([])
+    expect(plan.toUpdate.map((u) => [u.period.stableId, u.range])).toEqual([
+      ['u1', { start: d(9, 12), end: d(9, 16), type: 'UNAVAILABLE' }],
+    ])
   })
 
-  it('treats a day converted to the other nature as a delete and a create', () => {
+  it('edits a stored period in place when a run is shortened', () => {
+    const plan = planSync(stored, [
+      { start: d(9, 12), end: d(9, 13), type: 'UNAVAILABLE' },
+      { start: d(9, 6), end: d(9, 7), type: 'PREFER_DUTY' },
+    ])
+    expect(plan.toUpdate.map((u) => u.period.stableId)).toEqual(['u1'])
+    expect(plan.toDelete).toEqual([])
+    expect(plan.toCreate).toEqual([])
+  })
+
+  it('splits a run in two: the first half is edited, the second one is created', () => {
+    const plan = planSync(stored, [
+      { start: d(9, 6), end: d(9, 7), type: 'PREFER_DUTY' },
+      { start: d(9, 12), end: d(9, 12), type: 'UNAVAILABLE' },
+      { start: d(9, 14), end: d(9, 14), type: 'UNAVAILABLE' },
+    ])
+    expect(plan.toUpdate.map((u) => [u.period.stableId, u.range.start, u.range.end])).toEqual([
+      ['u1', d(9, 12), d(9, 12)],
+    ])
+    expect(plan.toCreate).toEqual([{ start: d(9, 14), end: d(9, 14), type: 'UNAVAILABLE' }])
+    expect(plan.toDelete).toEqual([])
+  })
+
+  it('merges two stored runs bridged on screen: one is edited, the other deleted', () => {
+    const two = [
+      period('a', 'UNAVAILABLE', [2026, 9, 1], [2026, 9, 4]),
+      period('b', 'UNAVAILABLE', [2026, 9, 6], [2026, 9, 9]),
+    ]
+    const plan = planSync(two, [{ start: d(9, 1), end: d(9, 8), type: 'UNAVAILABLE' }])
+    expect(plan.toUpdate).toHaveLength(1)
+    expect(plan.toDelete).toHaveLength(1)
+    expect(plan.toCreate).toEqual([])
+    // Deleting the leftover happens before the edit, so the edited period never touches it.
+    expect([plan.toUpdate[0].period.stableId, plan.toDelete[0].stableId].sort()).toEqual(['a', 'b'])
+  })
+
+  it('orders edits so that shrinking always comes before growing', () => {
+    const two = [
+      period('a', 'UNAVAILABLE', [2026, 9, 1], [2026, 9, 6]), // 1–5
+      period('b', 'UNAVAILABLE', [2026, 9, 10], [2026, 9, 13]), // 10–12
+    ]
+    const plan = planSync(two, [
+      { start: d(9, 1), end: d(9, 9), type: 'UNAVAILABLE' }, // a grows into 6–9
+      { start: d(9, 11), end: d(9, 12), type: 'UNAVAILABLE' }, // b shrinks
+    ])
+    expect(plan.toUpdate.map((u) => u.period.stableId)).toEqual(['b', 'a'])
+  })
+
+  it('treats a day converted to the other nature as an edit of the run it was cut from plus a create', () => {
     const screen: DayRange[] = [
       { start: d(9, 12), end: d(9, 14), type: 'PREFER_DUTY' },
       { start: d(9, 6), end: d(9, 7), type: 'PREFER_DUTY' },
     ]
-    const plan = planSave(stored, screen)
+    const plan = planSync(stored, screen)
+    // The stored UNAVAILABLE run has no run of its own nature left on screen…
     expect(plan.toDelete.map((p) => p.stableId)).toEqual(['u1'])
+    // …and the preference that now covers those days is a new one.
     expect(plan.toCreate).toEqual([{ start: d(9, 12), end: d(9, 14), type: 'PREFER_DUTY' }])
+    expect(plan.toUpdate).toEqual([])
+  })
+
+  it('never turns a stored period of one nature into the other nature', () => {
+    const plan = planSync(stored, [{ start: d(9, 12), end: d(9, 14), type: 'PREFER_DUTY' }])
+    expect(plan.toUpdate.every((u) => u.period.type === u.range.type)).toBe(true)
   })
 
   it('leaves a legacy period with a time of day untouched when its days are unchanged', () => {
     const legacy = [period('t1', 'UNAVAILABLE', [2026, 9, 12, 8], [2026, 9, 12, 18])]
-    expect(planSave(legacy, periodsToRanges(legacy))).toEqual({ toDelete: [], toCreate: [] })
+    expect(planSync(legacy, periodsToRanges(legacy))).toEqual(none)
   })
 })

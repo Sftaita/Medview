@@ -1,5 +1,7 @@
 export type CurrentUser = {
   id: number
+  /** The identifier the API uses everywhere else (URLs, comparisons) — never the numeric id. */
+  stableId: string
   email: string
   firstName: string
   lastName: string

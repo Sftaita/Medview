@@ -106,6 +106,24 @@ class Planning
         $this->touch();
     }
 
+    /**
+     * Grows the range, never shrinks it (docs/availability-collection.md §5,
+     * docs/decisions.md D122): every date already planned stays planned.
+     * The caller — PlanningExtensionService — is responsible for cascading
+     * the same change to each PlanningLine's periods (D075) in the same
+     * transaction.
+     */
+    public function extendTo(\DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt): void
+    {
+        if ($startsAt > $this->startsAt || $endsAt < $this->endsAt) {
+            throw new \InvalidArgumentException('A planning can only be extended: the new range must contain the current one.');
+        }
+
+        $this->startsAt = $startsAt;
+        $this->endsAt = $endsAt;
+        $this->touch();
+    }
+
     public function getCreator(): User
     {
         return $this->creator;

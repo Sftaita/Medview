@@ -140,6 +140,13 @@ l'ancienne (voir légende).
 | [D114](#d114--emails-transactionnels--symfony-mailer--twig-templates-de-la-maquette-envoi-best-effort) | 2026-09-20 | Emails transactionnels : Symfony Mailer + Twig, envoi best-effort | 🟢 |
 | [D115](#d115--létablissement-nest-pas-une-propriété-du-user--le-référentiel-hospital-est-supprimé) | 2026-09-20 | L'établissement n'est pas une propriété du `User` ; `Hospital` supprimé (remplace D110) | 🟢 |
 | [D116](#d116--les-corps-json-désérialisés-en-dto-rejettent-les-champs-inconnus-422-au-lieu-de-les-ignorer) | 2026-09-20 | Les corps JSON désérialisés en DTO rejettent les champs inconnus (`422`) au lieu de les ignorer | 🟢 |
+| [D120](#d120--availabilitycollectionresponse-revue-dune-fenêtre--useravailabilityperiod-vérité-de-disponibilité) | 2026-09-21 | `AvailabilityCollectionResponse` (revue d'une fenêtre) ≠ `UserAvailabilityPeriod` (vérité de disponibilité) | 🟢 |
+| [D121](#d121--une-modification-après-confirmation-ne-rouvre-pas-la-réponse) | 2026-09-21 | Une modification après confirmation ne rouvre pas la réponse | 🟢 |
+| [D122](#d122--prolonger-un-planning--agrandissement-en-place-collecte-de-la-seule-tranche-nouvelle) | 2026-09-21 | Prolonger un planning : agrandissement en place, collecte de la seule tranche nouvelle | 🟡 |
+| [D123](#d123--le-créateur-participe-par-une-adhésion-pas-par-un-booléen) | 2026-09-21 | Le créateur participe par une adhésion, pas par un booléen | 🟢 |
+| [D124](#d124--planning_manage_availability--créateur-ou-owneradmin-plus-large-que-manage) | 2026-09-21 | `PLANNING_MANAGE_AVAILABILITY` : créateur ou OWNER/ADMIN | 🟡 |
+| [D125](#d125--lecture-des-affectations--dernière-génération-completed-de-chaque-ligne) | 2026-09-21 | Lecture des affectations : dernière génération `COMPLETED` de chaque ligne | 🟢 |
+| [D126](#d126--frontend--magasin-partagé-sauvegarde-optimiste-par-diff-retour-à-la-vérité-serveur) | 2026-09-21 | Frontend : magasin partagé, sauvegarde optimiste par diff | 🟢 |
 
 ---
 
@@ -3252,3 +3259,93 @@ l'ancienne (voir légende).
   barre mobile).
 - Le tableau de bord ne bloque jamais sur un appel en échec : chaque carte se
   charge seule et retombe sur un état vide.
+
+## D120 — `AvailabilityCollectionResponse` (revue d'une fenêtre) ≠ `UserAvailabilityPeriod` (vérité de disponibilité)
+
+- **Contexte** : posséder des indisponibilités ne prouve pas avoir revu une
+  nouvelle tranche de planning (X saisit le 07/08, le planning est prolongé le
+  10/12 : rien ne dit qu'il a regardé janvier–mars).
+- **Décision** : `UserAvailabilityPeriod` reste la seule vérité sur « suis-je
+  indisponible à cette date » (éligibilité, snapshots). Une
+  `AvailabilityCollectionResponse` est la **preuve explicite** qu'une personne
+  a confirmé ses disponibilités pour une fenêtre d'un planning. Elle ne
+  modifie jamais l'éligibilité ; le snapshot capture le calendrier quel que
+  soit le statut de réponse (testé). La réponse est rattachée au `User` (pas
+  au stint `PlanningTeamMember`, cf. D082) et créée à l'ouverture, pour que
+  l'effectif et les compteurs restent un fait historique.
+- **Rejeté** : déduire « répondu » de l'existence d'absences (faux dans les deux
+  sens) ; recalculer l'historique depuis l'état courant (interdit par CLAUDE.md).
+- **Détail** : `docs/availability-collection.md`.
+
+## D121 — Une modification après confirmation ne rouvre pas la réponse
+
+- **Décision** : modifier son calendrier dans la fenêtre met à jour
+  `lastAvailabilityChangeAt` (collectes ouvertes seulement) mais laisse la
+  réponse confirmée ; l'UI affiche « calendrier modifié depuis le … ». « Je
+  n'ai aucune indisponibilité » est refusé (409) tant qu'une `UNAVAILABLE`
+  recoupe la fenêtre ; la confirmation est idempotente (première gagnante,
+  verrou pessimiste).
+- **Pourquoi** : imposer une reconfirmation à chaque retouche est pénible et
+  n'apporte rien que l'admin ne voie déjà ; aucune raison métier forte de
+  rouvrir automatiquement.
+
+## D122 — Prolonger un planning : agrandissement en place, collecte de la seule tranche nouvelle
+
+- **Contexte** : D077 avait laissé les dates du `Planning` immuables. La collecte
+  par tranche exige de pouvoir prolonger.
+- **Décision** : `POST /plannings/{id}/extensions` agrandit en place `Planning`,
+  puis `FairnessPeriod` et `PlanningPeriod` de chaque ligne (D075 préservé), et
+  ouvre une collecte par tranche nouvelle (`AvailabilityWindowCalculator` :
+  fin, début, ou les deux ; jamais vide, jamais les dates déjà couvertes).
+  Verrou sur la ligne `Planning` pour sérialiser les extensions concurrentes.
+  Réduction refusée.
+- **Limite assumée** : refusé (409) si une ligne est `VALIDATED`/`PUBLISHED`/
+  `ARCHIVED` — une période publiée n'est jamais éditée et le moteur ne sait pas
+  générer une tranche additionnelle à côté. Étendre à un planning publié
+  demandera un modèle « plusieurs périodes par ligne » (D073 le permet en
+  principe), hors lot.
+- **Suite de D077** : le `PATCH /plannings/{id}` reste limité au nom.
+
+## D123 — Le créateur participe par une adhésion, pas par un booléen
+
+- **Décision** : participer = avoir une adhésion ouverte dans le planning. Option
+  `includeMe` à la création (défaut API `false`, case cochée par défaut dans
+  l'UI) : adhésion `OWNER` de la ligne principale, facteur 1.0, début = min
+  (aujourd'hui, début du planning). Aucun traitement particulier dans le
+  moteur ; indépendant de `Planning.creator` (gestion, D071).
+- **Pourquoi `OWNER`** : c'est ce qui rend les endpoints de génération
+  accessibles au créateur (`TEAM_MANAGE_PLANNING` exige un OWNER/ADMIN de
+  l'équipe) ; les règles d'éligibilité ne lisent pas le rôle.
+- `/api/me` expose désormais `stableId` (le front en a besoin pour s'ajouter).
+
+## D124 — `PLANNING_MANAGE_AVAILABILITY` : créateur ou OWNER/ADMIN, plus large que `MANAGE`
+
+- **Décision** : ouvrir/clôturer une collecte, fixer l'échéance et lire les
+  réponses de tous est ouvert au créateur **et** à un OWNER/ADMIN ouvert d'une
+  équipe du planning. Prolonger le planning reste `MANAGE` (créateur seul, D071).
+  MEMBER : ses métadonnées et sa propre réponse, jamais les compteurs ni les
+  autres. Élargissement ponctuel de D071, motivé par la demande d'identifier les
+  retardataires ; réévaluable avec le modèle de collaborateurs.
+
+## D125 — Lecture des affectations : dernière génération `COMPLETED` de chaque ligne
+
+- **Décision** : `GET /plannings/{id}/assignments` (VIEW) lit les affectations de
+  la génération `COMPLETED` la plus récente de chaque ligne ; résumé par personne
+  = comptage des affectations réelles via `DimensionMembershipCalculator`,
+  sur tout le planning. Pas de métrique « nuits » (dimension non modélisée) ni de
+  « week-ends » au sens groupes (D086) : jours de week-end (sam.+dim.).
+- **Rejeté** : recalculer cibles/écarts de fairness pour l'affichage.
+
+## D126 — Frontend : magasin partagé, sauvegarde optimiste par diff, retour à la vérité serveur
+
+- **Décision** : `MyAvailabilityProvider` (contexte, pas de bibliothèque de cache)
+  porte calendrier et collectes ; sauvegarde par `planSync` (DELETE / PATCH /
+  POST), un cycle à la fois, échec → relecture du serveur + message. Le bouton
+  « Enregistrer » disparaît ; « Tout effacer » exige un second clic.
+- **Révise D118** : « un PATCH par période modifiée » avait été rejeté (une
+  suppression + création suffisait) ; la demande d'édition immédiate le rend
+  utile (identifiant conservé, une requête, pas de fenêtre où la période
+  n'existe pas).
+- **Rejeté** : react-query / SWR (refonte non justifiée pour un état de deux
+  ressources) ; un PATCH/POST par geste sans diff (impossible d'assurer l'ordre
+  ni de fusionner des périodes adjacentes).

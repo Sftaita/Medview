@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthProvider } from '../features/auth/AuthContext'
+import { MyAvailabilityProvider } from '../features/availability/MyAvailabilityProvider'
 import { DashboardPage } from './DashboardPage'
 import { RegisterPage } from './RegisterPage'
 
@@ -43,7 +44,14 @@ function renderRegisterPage() {
       <AuthProvider>
         <Routes>
           <Route path="/register" element={<RegisterPage />} />
-          <Route path="/" element={<DashboardPage />} />
+          <Route
+            path="/"
+            element={
+              <MyAvailabilityProvider>
+                <DashboardPage />
+              </MyAvailabilityProvider>
+            }
+          />
         </Routes>
       </AuthProvider>
     </MemoryRouter>,

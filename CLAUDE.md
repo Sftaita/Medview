@@ -61,7 +61,8 @@ détaillé (encore conceptuel, rien d'implémenté) :
 | Moteur de génération avancé (`fixedAssignments` réels, REPAIR, SIMULATE, MAX_DUTIES/MAX_WEEKENDS, UI, validation/publication avancée) | ⏳ Design conceptuel écrit, pas implémenté | `docs/allocation-algorithm.md` |
 | Inscription enrichie (téléphone E.164, **sans hôpital** : l'établissement n'est pas une propriété du `User`) + invitations d'équipe (`TeamInvitation`, emails Mailer/Twig, inscription par lien, multi-invitations) | ✅ Livré (2026-09-20), UAT navigateur OK. Affiliation hospitalière : à modéliser plus tard dans un contexte daté (D115), pas d'import ni de référentiel | `docs/authentication.md` §15, `docs/decisions.md` D111-D116 |
 | Refonte de l'interface (charte, tokens, mobile d'abord) : cadre, connexion/inscription/invitations, tableau de bord, plannings, calendrier d'indisponibilités en **jour entier** (sélection multiple, tactile) | ✅ Livré (2026-09-21) — tests Vitest, vérifié dans un navigateur | `docs/decisions.md` D117-D119, `docs/availability.md` §8 |
-| Échanges de garde, notifications (in-app), export calendrier | ⏳ Pas commencé | — |
+| Collecte des disponibilités par fenêtre (`AvailabilityCollection`/`Response`), prolongation d'un planning, participation du créateur, planning par personne, calendrier optimiste sans « Enregistrer » | ✅ Livré (2026-09-21) — tests backend/frontend + UAT navigateur complète (deux comptes, deux onglets) | `docs/availability-collection.md`, `docs/decisions.md` D120-D126 |
+| Échanges de garde, notifications (in-app), rappels email de collecte, export calendrier | ⏳ Pas commencé | — |
 
 ## Où trouver quoi
 
@@ -100,6 +101,11 @@ détaillé (encore conceptuel, rien d'implémenté) :
   inline par sa ligne, règle "une adhésion ouverte par Planning, jamais
   par Team seule" (D079/D080), endpoints et UI du lot Planning +
   restructuration Team.
+- **`docs/availability-collection.md`** — collecte des disponibilités par
+  fenêtre : "répondu" = événement explicite distinct de
+  `UserAvailabilityPeriod` (D120), extension d'un planning (D122), participation
+  du créateur (D123), autorisations (D124), lecture des affectations par
+  personne (D125), calendrier optimiste (D126).
 - **`docs/fairness.md`** — `FairnessContext` (dimensions supportées/non
   supportées, `RequiredDemand`, `EffectiveExposure`, targets bruts et
   discrétionnaires, `STRUCTURALLY_FORCED`) et l'`OptimizationProblem`

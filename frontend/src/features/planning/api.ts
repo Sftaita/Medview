@@ -5,6 +5,7 @@ import type {
   CreatePlanningLineInput,
   InviteResult,
   InviteToTeamInput,
+  PlanningAssignments,
   PlanningDetail,
   PlanningLineSummary,
   PlanningSummary,
@@ -107,4 +108,21 @@ export function revokeTeamInvitation(
     `/api/plannings/${planningStableId}/teams/${teamStableId}/invitations/${invitationStableId}/revoke`,
     { method: 'POST', body: {} },
   )
+}
+
+/**
+ * A planning's assignments, whole team or one person (`userStableId`), for
+ * the months [from, to) ("YYYY-MM-DD", `to` exclusive). The summary, present
+ * for one person, always covers the whole planning whatever the month.
+ */
+export function fetchAssignments(
+  planningStableId: string,
+  filter: { userStableId?: string; from?: string; to?: string } = {},
+): Promise<PlanningAssignments> {
+  const query = new URLSearchParams()
+  for (const [name, value] of Object.entries(filter)) {
+    if (value) query.set(name, value)
+  }
+  const suffix = query.size > 0 ? `?${query}` : ''
+  return apiFetch<PlanningAssignments>(`/api/plannings/${planningStableId}/assignments${suffix}`)
 }

@@ -11,12 +11,17 @@ import {
   fetchTeamMembers,
   renamePlanning,
 } from '../features/planning/api'
+import { useAuth } from '../features/auth/useAuth'
+import { AvailabilityCollectionsPanel } from '../features/planning/AvailabilityCollectionsPanel'
+import { ExtendPlanningForm } from '../features/planning/ExtendPlanningForm'
+import { PersonalPlanningView } from '../features/planning/PersonalPlanningView'
 import { TeamInvitePanel } from '../features/planning/TeamInvitePanel'
 import type { PlanningDetail, PlanningTeamMember } from '../features/planning/types'
 import { ApiError } from '../lib/apiClient'
 
 export function PlanningDetailPage() {
   const { planningId } = useParams<{ planningId: string }>()
+  const { user } = useAuth()
   const [planning, setPlanning] = useState<PlanningDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -36,6 +41,8 @@ export function PlanningDetailPage() {
   const [memberError, setMemberError] = useState<string | null>(null)
 
   const [actionError, setActionError] = useState<string | null>(null)
+  // Bumped after an extension so the availability follow-up shows the collection it just opened.
+  const [collectionsReload, setCollectionsReload] = useState(0)
   const [saving, setSaving] = useState(false)
 
   function load() {
@@ -43,7 +50,7 @@ export function PlanningDetailPage() {
       return
     }
 
-    setLoading(true)
+    // No spinner on a reload: the page stays as it is (and keeps its notices) while the data refreshes.
     setError(null)
     fetchPlanning(planningId)
       .then(setPlanning)
@@ -60,6 +67,7 @@ export function PlanningDetailPage() {
   }
 
   useEffect(() => {
+    setLoading(true)
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planningId])
@@ -78,6 +86,38 @@ export function PlanningDetailPage() {
       load()
     } catch {
       setActionError('Impossible de renommer ce planning.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  /**
+   * "M'inclure dans ce planning" for a creator who was not a participant: an
+   * ordinary membership of the primary line, like anyone else's (docs/decisions.md D123).
+   */
+  async function handleIncludeMe() {
+    const primary = planning?.lines.find((line) => line.type === 'PRIMARY')
+    if (!planningId || !planning || !primary || !user) {
+      return
+    }
+
+    setSaving(true)
+    setActionError(null)
+    try {
+      const today = new Date().toISOString().slice(0, 10)
+      await addTeamMember(planningId, primary.team.stableId, {
+        userStableId: user.stableId,
+        role: 'OWNER',
+        // From the start of the planning, so the whole range is covered.
+        membershipStart: today < planning.startsAt ? today : planning.startsAt,
+      })
+      load()
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        setActionError('Vous participez déjà à ce planning.')
+      } else {
+        setActionError('Impossible de vous inclure dans ce planning.')
+      }
     } finally {
       setSaving(false)
     }
@@ -232,6 +272,23 @@ export function PlanningDetailPage() {
               <h1>{planning.name}</h1>
               <p className="page__lead tnum">
                 {planning.startsAt} → {planning.endsAt} ({planning.timezone})
+              </p>
+              <p className="page__participation">
+                {planning.participating ? (
+                  <span className="tag tag--green">Vous participez à ce planning</span>
+                ) : (
+                  <span className="muted">Vous ne figurez pas parmi les candidats de ce planning.</span>
+                )}
+                {planning.canManage && !planning.participating && (
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--sm"
+                    onClick={handleIncludeMe}
+                    disabled={saving}
+                  >
+                    M&apos;inclure dans ce planning
+                  </button>
+                )}
               </p>
             </div>
             {planning.canManage && !renaming && (
@@ -477,6 +534,23 @@ export function PlanningDetailPage() {
               </div>
             )}
           </div>
+
+          <AvailabilityCollectionsPanel
+            planningStableId={planning.stableId}
+            reloadToken={collectionsReload}
+          />
+
+          {planning.canManage && (
+            <ExtendPlanningForm
+              planning={planning}
+              onExtended={() => {
+                setCollectionsReload((count) => count + 1)
+                load()
+              }}
+            />
+          )}
+
+          <PersonalPlanningView planning={planning} />
         </>
       )}
     </section>

@@ -80,6 +80,30 @@ class PlanningTeamMemberRepository extends ServiceEntityRepository
     }
 
     /**
+     * Members of any PlanningTeam of $planning whose membership stint
+     * intersects [$from, $to) — who is expected to answer an availability
+     * collection over that window (docs/availability-collection.md §2).
+     *
+     * @return list<PlanningTeamMember>
+     */
+    public function findIntersectingForPlanning(Planning $planning, \DateTimeImmutable $from, \DateTimeImmutable $to): array
+    {
+        return $this->createQueryBuilder('m')
+            ->addSelect('u')
+            ->join('m.user', 'u')
+            ->andWhere('m.planning = :planning')
+            ->andWhere('m.membershipStart < :to')
+            ->andWhere('m.membershipEnd IS NULL OR m.membershipEnd > :from')
+            ->setParameter('planning', $planning)
+            ->setParameter('from', $from)
+            ->setParameter('to', $to)
+            ->orderBy('m.membershipStart', 'ASC')
+            ->addOrderBy('m.id', 'ASC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
      * Members of $planningTeam whose membership stint intersects
      * [$from, $to) — the "relevant members" a PlanningSnapshot must capture
      * (docs/planning-generation.md §Membres). A member who joined and left

@@ -4,6 +4,7 @@ import { AppShell } from './components/AppShell'
 import { AuthLayout } from './components/AuthLayout'
 import { ProtectedRoute } from './features/auth/ProtectedRoute'
 import { PublicOnlyRoute } from './features/auth/PublicOnlyRoute'
+import { MyAvailabilityProvider } from './features/availability/MyAvailabilityProvider'
 import { AccountPage } from './pages/AccountPage'
 import { AvailabilityCampaignPage } from './pages/AvailabilityCampaignPage'
 import { DashboardPage } from './pages/DashboardPage'
@@ -46,7 +47,10 @@ function App() {
       <Route
         element={
           <ProtectedRoute>
-            <AppShell />
+            {/* Above the routes: the dashboard and the calendar share one optimistic, autosaving store. */}
+            <MyAvailabilityProvider>
+              <AppShell />
+            </MyAvailabilityProvider>
           </ProtectedRoute>
         }
       >
