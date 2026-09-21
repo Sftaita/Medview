@@ -3161,3 +3161,94 @@ l'ancienne (voir légende).
   aux clés inconnues. À aligner si/quand ils passent à des DTO désérialisés ;
   ne pas les changer dans ce lot (hors périmètre, risque de régression sans
   bénéfice identifié).
+
+## D117 — Refonte de l'interface : tokens du design system Surgery Hub, mobile d'abord, sans bibliothèque de composants
+
+- **Contexte** : le frontend n'avait aucune charte (HTML brut, un en-tête de
+  liens). Une maquette complète (`docs/Design/`, canvas de design) a été
+  produite : charte, parcours mobile et desktop, connexion / inscription /
+  invitations, plannings, calendrier d'indisponibilités.
+- **Décision** :
+  - les **tokens** du design system (`docs/Design/Calendrier_selection_multiple/_ds`)
+    sont copiés dans `frontend/src/styles/tokens.css` — les variables CSS
+    (`--green-700`, `--surface-card`, `--radius-md`…) sont la source de vérité,
+    jamais de valeur brute dans les composants ;
+  - **pas de MUI ni de bibliothèque de composants** : les composants du design
+    system Surgery Hub sont des primitives CSS-tokens ; une poignée de classes
+    (`.btn`, `.field`, `.card`, `.tag`, `.alert` — `styles/ui.css`) et trois
+    composants React (`Field`/`PasswordField`, `Icon`, `Logo`) suffisent, ce qui
+    garde l'« empreinte minimale » du projet (voir `docs/availability.md` §8) ;
+  - **Inter auto-hébergée** via `@fontsource/inter` (poids 400–800), pas de
+    requête vers Google Fonts (vie privée, hors-ligne, pas de CSP à ouvrir).
+    Seule dépendance ajoutée ;
+  - **un seul DOM, deux mises en page** (breakpoint 900 px, CSS) : barre latérale
+    (`AppShell`) sur desktop, barre de marque + navigation basse à 5 entrées sur
+    téléphone ; pages publiques dans `AuthLayout` (panneau de marque + formulaire
+    sur desktop, formulaire seul sur mobile). Les routes publiques et protégées
+    sont des *layout routes* : plus aucun lien de navigation pour un visiteur
+    déconnecté ;
+  - le bouton principal est en `green-700` (pas le vert de marque `green-500`) :
+    le texte blanc sur `#42A882` ne passe pas 4,5:1. Le vert de marque reste
+    réservé à l'identité (logo, points d'état) ;
+  - le **logo est un marqueur provisoire** (pictogramme d'activité) : aucun logo
+    officiel n'a été fourni.
+- **Conséquences** : le tableau de bord n'affiche que des données réelles
+  (prochaines indisponibilités, plannings) — la carte « Prochaine garde » de la
+  maquette est volontairement absente tant qu'aucune API de gardes personnelles
+  n'existe. Le titre de page passe de « Tableau de bord » à « Bonjour,
+  {prénom} ! » (tests adaptés).
+
+## D118 — Disponibilités : jour entier uniquement, axe de jours absolus, enregistrement par différence
+
+- **Contexte** : le produit a tranché — indisponibilités *et* préférences de
+  garde concernent toujours des **journées entières** (plus de plage horaire pour
+  un jour unique, contrairement à `docs/availability.md` §8 avant ce lot).
+- **Décision** :
+  - **modèle client** : `DayRange {start, end, type}` en **index de jours
+    absolus** (jours locaux depuis 1970, `calendarAxis.ts`) — une période à
+    cheval sur deux mois ou deux années est un simple intervalle d'entiers ;
+    conversion en `Date` uniquement à l'affichage et à l'API (`periodMapping.ts`) ;
+  - **algèbre pure** (`selection.ts`, testée) : `mergeRanges` fusionne les plages
+    adjacentes *de même nature* seulement, `cutRange` scinde, `addRange` fait
+    gagner la nouvelle plage sur la zone commune, `toggleDay` retire / convertit /
+    ajoute. Un jour a **une seule nature** côté écran, alors que le backend
+    autorise `UNAVAILABLE` et `PREFER_DUTY` à se chevaucher (`docs/availability.md`
+    §4) : au chargement, l'indisponibilité l'emporte (signal dur) ;
+  - **une période API = une plage contiguë** (règle « chevauche ou touche » du
+    backend) : `[minuit local du 1er jour, minuit local du lendemain du dernier[` ;
+  - **enregistrement explicite** (`planSave`) : la page compare l'écran aux
+    périodes stockées ; une période stockée dont les jours sont exactement une
+    plage à l'écran n'est **pas touchée** (garde son identifiant, et son éventuelle
+    heure si c'est une ancienne donnée) ; les autres sont supprimées **puis** les
+    nouvelles créées (l'inverse serait refusé en `409`). Pas d'appel par clic :
+    « Enregistrer » est désactivé tant que rien n'a changé ;
+  - **anciennes périodes avec heure** : affichées comme les jours qu'elles
+    touchent, jamais modifiées tant que l'utilisateur ne touche pas à ces jours ;
+  - **gestes** : un seul jeu d'événements `pointer*` pour souris et tactile (tap
+    = bascule, glisser = nouvelle période, `Ctrl/Cmd`+clic = retirer, `Maj`+clic =
+    étendre, clavier = activation du bouton). Le défilement automatique aux bords
+    est temporisé (450 ms de maintien, 900 ms entre deux avances, un mois à la
+    fois) — exigence d'ergonomie du prototype, testée avec des timers factices ;
+  - **fenêtre** : 18 mois à partir du mois courant, étendue pour couvrir toute
+    période déjà stockée (jamais de période hors axe). Deux mois côte à côte dès
+    1280 px, un seul en dessous ;
+  - **jours fériés belges** calculés (fixes + Pâques, `holidaysOfYear`), à titre
+    **informatif** : la teinte n'empêche jamais la sélection. Hypothèse assumée
+    (fuseau par défaut `Europe/Brussels`) ; à rendre configurable le jour où une
+    équipe hors Belgique existe.
+- **Rejeté** : une bibliothèque de calendrier (aucune ne couvre la sélection
+  multi-périodes au doigt avec défilement aux bords) ; un `PATCH` par période
+  modifiée (complexité pour un gain nul : suppression + création suffisent).
+- **Non implémenté** : les gardes déjà attribuées ne sont pas affichées sur le
+  calendrier (aucune API « mes gardes » — `docs/planning-generation.md`), ni
+  l'avertissement de chevauchement de la maquette.
+
+## D119 — Frontend : conventions de la refonte
+
+- Les états asynchrones des pages (`Chargement…`, erreurs) gardent leurs
+  libellés et leurs `role` (`status` / `alert`) : les tests de comportement
+  existants n'ont changé que là où le *contenu* de la page a changé (titre du
+  tableau de bord ; marque présente deux fois dans le DOM — barre latérale et
+  barre mobile).
+- Le tableau de bord ne bloque jamais sur un appel en échec : chaque carte se
+  charge seule et retombe sur un état vide.

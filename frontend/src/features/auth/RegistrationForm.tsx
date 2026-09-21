@@ -1,5 +1,7 @@
 import { useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
+import { Field, LockedIndicator, PasswordField } from '../../components/Field'
+import { Icon } from '../../components/Icon'
 import { ApiError } from '../../lib/apiClient'
 import { formatWaitTime } from '../../lib/formatWaitTime'
 import { describeInvitationError, invitationErrorCode, type InvitationInfo } from '../invitations/api'
@@ -66,23 +68,26 @@ export function RegistrationForm({ invitation, onRegistered }: Props) {
   }
 
   return (
-    <form onSubmit={handleSubmit}>
+    <form onSubmit={handleSubmit} className="form">
       {invitation && (
-        <p role="note" className="registration-invitation-note">
-          <strong>{invitation.info.inviterName}</strong> vous invite à rejoindre l'équipe{' '}
-          <strong>{invitation.info.teamName}</strong>. Vous serez ajouté à cette équipe automatiquement une
-          fois votre compte créé.
-        </p>
+        <div role="note" className="alert alert--brand">
+          <Icon name="users" size={22} strokeWidth={1.9} />
+          <p>
+            <strong>{invitation.info.inviterName}</strong> vous invite à rejoindre l'équipe{' '}
+            <strong>{invitation.info.teamName}</strong>. Vous serez ajouté à cette équipe automatiquement une
+            fois votre compte créé.
+          </p>
+        </div>
       )}
       {invitation && (
-        <p role="note" className="registration-invitation-note">
+        <p role="note" className="alert alert--info">
           Votre prénom et votre nom ont été renseignés par la personne qui vous a invité. Vérifiez-les avant
           de continuer.
         </p>
       )}
-      <label>
-        Prénom
-        <input
+      <div className="auth__names">
+        <Field
+          label="Prénom"
           type="text"
           value={firstName}
           onChange={(event) => setFirstName(event.target.value)}
@@ -90,10 +95,8 @@ export function RegistrationForm({ invitation, onRegistered }: Props) {
           maxLength={100}
           required
         />
-      </label>
-      <label>
-        Nom
-        <input
+        <Field
+          label="Nom"
           type="text"
           value={lastName}
           onChange={(event) => setLastName(event.target.value)}
@@ -101,63 +104,69 @@ export function RegistrationForm({ invitation, onRegistered }: Props) {
           maxLength={100}
           required
         />
-      </label>
-      <label>
-        Email
-        <input
-          type="email"
-          value={email}
-          onChange={(event) => setEmail(event.target.value)}
-          autoComplete="email"
-          readOnly={Boolean(invitation)}
-          aria-readonly={Boolean(invitation)}
-          required
-        />
-      </label>
-      {invitation && (
-        <small>
-          Cette adresse est celle à laquelle l'invitation a été envoyée ; elle ne peut pas être modifiée.
-        </small>
-      )}
-      <label>
-        Téléphone
-        <input
-          type="tel"
-          value={phone}
-          onChange={(event) => setPhone(event.target.value)}
-          autoComplete="tel"
-          placeholder="+32 470 12 34 56"
-          required
-        />
-      </label>
-      <label>
-        Mot de passe
-        <input
-          type="password"
-          value={plainPassword}
-          onChange={(event) => setPlainPassword(event.target.value)}
-          autoComplete="new-password"
-          minLength={8}
-          required
-        />
-      </label>
+      </div>
+      <Field
+        label="Email"
+        type="email"
+        value={email}
+        onChange={(event) => setEmail(event.target.value)}
+        autoComplete="email"
+        placeholder="prenom.nom@exemple.be"
+        readOnly={Boolean(invitation)}
+        aria-readonly={Boolean(invitation)}
+        trailing={invitation ? <LockedIndicator /> : undefined}
+        hint={
+          invitation
+            ? "Cette adresse est celle à laquelle l'invitation a été envoyée ; elle ne peut pas être modifiée."
+            : undefined
+        }
+        required
+      />
+      <Field
+        label="Téléphone"
+        type="tel"
+        value={phone}
+        onChange={(event) => setPhone(event.target.value)}
+        autoComplete="tel"
+        placeholder="+32 470 12 34 56"
+        hint="Format international, par exemple +32 470 12 34 56."
+        required
+      />
+      <PasswordField
+        label="Mot de passe"
+        value={plainPassword}
+        onChange={(event) => setPlainPassword(event.target.value)}
+        autoComplete="new-password"
+        minLength={8}
+        hint="8 caractères minimum."
+        required
+      />
       {error && (
-        <p role="alert">
-          {error}
-          {error === ACCOUNT_EXISTS_MESSAGE && invitation && (
-            <>
-              {' '}
-              <Link to="/login" state={{ from: { pathname: `/invitations/${invitation.token}` } }}>
-                Se connecter
-              </Link>
-            </>
-          )}
+        <p role="alert" className="alert alert--error">
+          <Icon name="alert" size={18} strokeWidth={2} />
+          <span>
+            {error}
+            {error === ACCOUNT_EXISTS_MESSAGE && invitation && (
+              <>
+                {' '}
+                <Link to="/login" state={{ from: { pathname: `/invitations/${invitation.token}` } }}>
+                  Se connecter
+                </Link>
+              </>
+            )}
+          </span>
         </p>
       )}
       {/* Registration is followed by a login and a profile fetch, all under
           this one submit: the label keeps saying so until the redirect, so a
           disabled-but-unchanged button never looks like a lost click. */}
-      <button type="submit" disabled={isSubmitting} aria-busy={isSubmitting}>
+      <button
+        type="submit"
+        className="btn btn--primary btn--lg btn--full"
+        disabled={isSubmitting}
+        aria-busy={isSubmitting}
+      >
+        {isSubmitting && <Icon name="loader" size={20} strokeWidth={2.4} />}
         {isSubmitting ? 'Création du compte…' : 'Créer mon compte'}
       </button>
     </form>

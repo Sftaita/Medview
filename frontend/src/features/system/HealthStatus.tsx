@@ -4,7 +4,12 @@ import { fetchHealth, type HealthStatus as HealthStatusType } from '../../lib/ap
 type State =
   { kind: 'loading' } | { kind: 'success'; health: HealthStatusType } | { kind: 'error'; message: string }
 
-export function HealthStatus() {
+type Props = {
+  /** Light text, for use on the dark green surface. */
+  inverse?: boolean
+}
+
+export function HealthStatus({ inverse = false }: Props) {
   const [state, setState] = useState<State>({ kind: 'loading' })
 
   useEffect(() => {
@@ -28,14 +33,16 @@ export function HealthStatus() {
     }
   }, [])
 
+  const modifier = inverse ? ' health--inverse' : ''
+
   if (state.kind === 'loading') {
-    return <span className="health-status health-status--loading">API : vérification…</span>
+    return <span className={`health health--loading${modifier}`}>Vérification du service…</span>
   }
 
   if (state.kind === 'error') {
     return (
-      <span className="health-status health-status--error" title={state.message}>
-        API : injoignable
+      <span className={`health health--error${modifier}`} title={state.message}>
+        Service injoignable
       </span>
     )
   }
@@ -43,8 +50,11 @@ export function HealthStatus() {
   const isHealthy = state.health.status === 'ok' && state.health.database === 'ok'
 
   return (
-    <span className={`health-status ${isHealthy ? 'health-status--ok' : 'health-status--error'}`}>
-      API : {state.health.status} · DB : {state.health.database}
+    <span
+      className={`health ${isHealthy ? 'health--ok' : 'health--error'}${modifier}`}
+      title={`API : ${state.health.status} · DB : ${state.health.database}`}
+    >
+      {isHealthy ? 'Service opérationnel' : 'Service dégradé'}
     </span>
   )
 }

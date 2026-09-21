@@ -1,523 +1,256 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Icon } from '../components/Icon'
+import { AvailabilityCalendar, CalendarLegend } from '../features/availability/AvailabilityCalendar'
+import { TYPE_LABEL } from '../features/availability/labels'
+import { createCalendarPeriod, deleteCalendarPeriod, fetchMyCalendar } from '../features/availability/api'
 import {
-  createCalendarPeriod,
-  deleteCalendarPeriod,
-  fetchMyCalendar,
-  updateCalendarPeriod,
-} from '../features/availability/api'
-import {
-  groupContiguousDateKeys,
-  startOfDay,
-  startOfNextDay,
-  toDateKey,
-} from '../features/availability/dateUtils'
-import type {
-  UpsertUserAvailabilityPeriodInput,
-  UserAvailabilityPeriod,
-  UserAvailabilityType,
-} from '../features/availability/types'
+  buildMonths,
+  dayIndexOfDate,
+  monthIndexOfDay,
+  type MonthInfo,
+} from '../features/availability/calendarAxis'
+import { periodsToRanges, planSave, rangeToInput } from '../features/availability/periodMapping'
+import { countDays, type DayRange } from '../features/availability/selection'
+import { SelectionSummary } from '../features/availability/SelectionSummary'
+import type { UserAvailabilityPeriod, UserAvailabilityType } from '../features/availability/types'
+import { useDaySelection } from '../features/availability/useDaySelection'
+import { useVisibleMonths } from '../features/availability/useVisibleMonths'
 import { ApiError } from '../lib/apiClient'
 
-const WEEKDAY_LABELS = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim']
+/** Months offered ahead of the current one. */
+const MONTHS_AHEAD = 18
 
-function startOfMonth(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), 1)
-}
+/** The month rail always covers the current window *and* every stored period. */
+function buildAxis(periods: UserAvailabilityPeriod[], today: Date): MonthInfo[] {
+  let first = today.getFullYear() * 12 + today.getMonth()
+  let last = first + MONTHS_AHEAD - 1
 
-/** Monday-first 6-week grid covering the whole month, including the leading/trailing days from neighboring months. */
-function buildMonthGrid(monthCursor: Date): Date[] {
-  const first = startOfMonth(monthCursor)
-  const firstWeekday = (first.getDay() + 6) % 7 // 0 = Monday
-  const gridStart = new Date(first)
-  gridStart.setDate(gridStart.getDate() - firstWeekday)
-
-  return Array.from({ length: 42 }, (_, index) => {
-    const day = new Date(gridStart)
-    day.setDate(day.getDate() + index)
-    return day
-  })
-}
-
-function periodsByDay(periods: UserAvailabilityPeriod[]): Map<string, UserAvailabilityPeriod[]> {
-  const map = new Map<string, UserAvailabilityPeriod[]>()
   for (const period of periods) {
     const start = new Date(period.startsAt)
-    const end = new Date(period.endsAt)
-    const cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate())
-    while (cursor < end) {
-      const key = toDateKey(cursor)
-      const dayStart = new Date(cursor)
-      const dayEnd = new Date(cursor)
-      dayEnd.setDate(dayEnd.getDate() + 1)
-      if (start < dayEnd && end > dayStart) {
-        const existing = map.get(key) ?? []
-        existing.push(period)
-        map.set(key, existing)
-      }
-      cursor.setDate(cursor.getDate() + 1)
-    }
+    const end = new Date(new Date(period.endsAt).getTime() - 1)
+    first = Math.min(first, start.getFullYear() * 12 + start.getMonth())
+    last = Math.max(last, end.getFullYear() * 12 + end.getMonth())
   }
-  return map
+
+  return buildMonths(Math.floor(first / 12), first % 12, last - first + 1)
 }
 
-function toDatetimeLocalValue(iso: string): string {
-  const date = new Date(iso)
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+function saveErrorMessage(err: unknown): string {
+  if (err instanceof ApiError && err.status === 409) {
+    return 'Une période de même type chevauche ou touche déjà ces dates.'
+  }
+  if (err instanceof ApiError && err.status === 422) {
+    return 'Cette période est invalide.'
+  }
+  return 'Une erreur est survenue. Merci de réessayer.'
+}
+
+const NATURE_HELP: Record<UserAvailabilityType, string> = {
+  UNAVAILABLE: 'Les dates touchées seront déclarées comme non travaillables.',
+  PREFER_DUTY: 'Les dates touchées seront proposées en priorité pour une garde.',
 }
 
 export function MyAvailabilityPage() {
-  const [monthCursor, setMonthCursor] = useState(() => startOfMonth(new Date()))
-  const [periods, setPeriods] = useState<UserAvailabilityPeriod[]>([])
-  const [loading, setLoading] = useState(true)
+  const [periods, setPeriods] = useState<UserAvailabilityPeriod[] | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  const [selectionMode, setSelectionMode] = useState<'days' | 'range'>('days')
-  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set())
-  const [rangeAnchor, setRangeAnchor] = useState<string | null>(null)
-
-  const [formType, setFormType] = useState<UserAvailabilityType>('UNAVAILABLE')
-  const [useCustomTime, setUseCustomTime] = useState(false)
-  const [customStart, setCustomStart] = useState('08:00')
-  const [customEnd, setCustomEnd] = useState('18:00')
-  const [saving, setSaving] = useState(false)
-  const [formError, setFormError] = useState<string | null>(null)
-
-  const [editingPeriod, setEditingPeriod] = useState<UserAvailabilityPeriod | null>(null)
-  const [editType, setEditType] = useState<UserAvailabilityType>('UNAVAILABLE')
-  const [editStart, setEditStart] = useState('')
-  const [editEnd, setEditEnd] = useState('')
-  const [editError, setEditError] = useState<string | null>(null)
-  const [confirmingDelete, setConfirmingDelete] = useState(false)
-
-  function loadPeriods() {
-    setLoading(true)
-    setLoadError(null)
-    fetchMyCalendar()
-      .then(setPeriods)
-      .catch(() => setLoadError('Impossible de charger votre calendrier.'))
-      .finally(() => setLoading(false))
-  }
-
   useEffect(() => {
-    loadPeriods()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false
+    fetchMyCalendar()
+      .then((result) => {
+        if (!cancelled) setPeriods(result)
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError('Impossible de charger votre calendrier.')
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
-  const dayMap = useMemo(() => periodsByDay(periods), [periods])
-  const grid = useMemo(() => buildMonthGrid(monthCursor), [monthCursor])
-
-  function clearSelection() {
-    setSelectedKeys(new Set())
-    setRangeAnchor(null)
-    setFormError(null)
-  }
-
-  function handleDayClick(day: Date) {
-    const key = toDateKey(day)
-    const existing = dayMap.get(key)
-
-    if (existing && existing.length > 0) {
-      const period = existing[0]
-      setEditingPeriod(period)
-      setEditType(period.type)
-      setEditStart(toDatetimeLocalValue(period.startsAt))
-      setEditEnd(toDatetimeLocalValue(period.endsAt))
-      setEditError(null)
-      setConfirmingDelete(false)
-      return
-    }
-
-    setEditingPeriod(null)
-
-    if (selectionMode === 'days') {
-      setSelectedKeys((previous) => {
-        const next = new Set(previous)
-        if (next.has(key)) {
-          next.delete(key)
-        } else {
-          next.add(key)
-        }
-        return next
-      })
-      return
-    }
-
-    // Range mode: first click sets the anchor, second click fills the range.
-    if (rangeAnchor === null) {
-      setRangeAnchor(key)
-      setSelectedKeys(new Set([key]))
-      return
-    }
-
-    const [from, to] = [rangeAnchor, key].sort()
-    const filled = new Set<string>()
-    const cursor = startOfDay(from)
-    const end = startOfDay(to)
-    while (cursor <= end) {
-      filled.add(toDateKey(cursor))
-      cursor.setDate(cursor.getDate() + 1)
-    }
-    setSelectedKeys(filled)
-    setRangeAnchor(null)
-  }
-
-  async function handleCreateSubmit() {
-    if (selectedKeys.size === 0) {
-      return
-    }
-
-    setSaving(true)
-    setFormError(null)
-
-    const runs = groupContiguousDateKeys(selectedKeys)
-    try {
-      for (const run of runs) {
-        let input: UpsertUserAvailabilityPeriodInput
-
-        if (useCustomTime && selectedKeys.size === 1) {
-          const day = run[0]
-          input = {
-            type: formType,
-            startsAt: new Date(`${day}T${customStart}`).toISOString(),
-            endsAt: new Date(`${day}T${customEnd}`).toISOString(),
-          }
-        } else {
-          input = {
-            type: formType,
-            startsAt: startOfDay(run[0]).toISOString(),
-            endsAt: startOfNextDay(run[run.length - 1]).toISOString(),
-          }
-        }
-
-        await createCalendarPeriod(input)
-      }
-
-      clearSelection()
-      loadPeriods()
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        setFormError('Une période de même type chevauche ou touche déjà ces dates.')
-      } else if (err instanceof ApiError && err.status === 422) {
-        setFormError('Cette période est invalide.')
-      } else {
-        setFormError('Une erreur est survenue. Merci de réessayer.')
-      }
-      loadPeriods()
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function handleEditSave() {
-    if (!editingPeriod) {
-      return
-    }
-
-    setSaving(true)
-    setEditError(null)
-
-    try {
-      await updateCalendarPeriod(editingPeriod.stableId, {
-        type: editType,
-        startsAt: new Date(editStart).toISOString(),
-        endsAt: new Date(editEnd).toISOString(),
-      })
-      setEditingPeriod(null)
-      loadPeriods()
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        setEditError('Une période de même type chevauche ou touche déjà ces dates.')
-      } else if (err instanceof ApiError && err.status === 422) {
-        setEditError('Cette période est invalide.')
-      } else {
-        setEditError('Une erreur est survenue. Merci de réessayer.')
-      }
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function handleDeleteConfirmed() {
-    if (!editingPeriod) {
-      return
-    }
-
-    setSaving(true)
-    try {
-      await deleteCalendarPeriod(editingPeriod.stableId)
-      setEditingPeriod(null)
-      setConfirmingDelete(false)
-      loadPeriods()
-    } catch {
-      setEditError('Impossible de supprimer cette période.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const monthLabel = monthCursor.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
-  const todayKey = toDateKey(new Date())
-
   return (
-    <section className="availability-page">
-      <h1>Mes indisponibilités</h1>
-      <p>
-        Indiquez les dates où vous êtes indisponible ou préférez être de garde. Ces informations sont
-        partagées par toutes vos équipes.
-      </p>
-
-      <div className="availability-legend">
-        <span className="availability-legend-item">
-          <span className="availability-dot availability-dot--unavailable" /> Indisponible
-        </span>
-        <span className="availability-legend-item">
-          <span className="availability-dot availability-dot--prefer" /> Préférence de garde
-        </span>
-      </div>
-
-      <div className="availability-toolbar">
-        <div className="availability-month-nav">
-          <button
-            type="button"
-            onClick={() =>
-              setMonthCursor((current) => new Date(current.getFullYear(), current.getMonth() - 1, 1))
-            }
-          >
-            ‹
-          </button>
-          <strong>{monthLabel}</strong>
-          <button
-            type="button"
-            onClick={() =>
-              setMonthCursor((current) => new Date(current.getFullYear(), current.getMonth() + 1, 1))
-            }
-          >
-            ›
-          </button>
+    <section className="page availability availability__page">
+      <header className="page__header">
+        <div>
+          <div className="eyebrow">Calendrier personnel</div>
+          <h1>Mes indisponibilités</h1>
+          <p className="page__lead">
+            Indiquez les jours où vous êtes indisponible ou préférez être de garde. Ces informations sont
+            partagées par toutes vos équipes.
+          </p>
         </div>
+      </header>
 
-        <div className="availability-mode-toggle" role="group" aria-label="Mode de sélection">
-          <button
-            type="button"
-            className={selectionMode === 'days' ? 'is-active' : ''}
-            onClick={() => {
-              setSelectionMode('days')
-              clearSelection()
-            }}
-          >
-            Jours
-          </button>
-          <button
-            type="button"
-            className={selectionMode === 'range' ? 'is-active' : ''}
-            onClick={() => {
-              setSelectionMode('range')
-              clearSelection()
-            }}
-          >
-            Plage
-          </button>
-        </div>
-      </div>
-
-      {loading && <p>Chargement…</p>}
-      {loadError && (
-        <p role="alert" className="availability-error">
-          {loadError}
+      {periods === null && !loadError && (
+        <p role="status" className="muted">
+          Chargement…
         </p>
       )}
+      {loadError && (
+        <p role="alert" className="alert alert--error">
+          <Icon name="alert" size={18} strokeWidth={2} />
+          <span>{loadError}</span>
+        </p>
+      )}
+      {periods !== null && <AvailabilityEditor initialPeriods={periods} />}
+    </section>
+  )
+}
 
-      {!loading && !loadError && (
-        <div className="availability-calendar">
-          {WEEKDAY_LABELS.map((label) => (
-            <div key={label} className="availability-weekday">
-              {label}
-            </div>
+function AvailabilityEditor({ initialPeriods }: { initialPeriods: UserAvailabilityPeriod[] }) {
+  const today = useMemo(() => new Date(), [])
+  const todayIndex = dayIndexOfDate(today)
+  // The axis is fixed for the life of the editor, so a save never moves the rail under the user.
+  const months = useMemo(() => buildAxis(initialPeriods, today), [initialPeriods, today])
+  const visible = useVisibleMonths()
+  const initialRanges = useMemo(() => periodsToRanges(initialPeriods), [initialPeriods])
+
+  const selection = useDaySelection({
+    months,
+    visible,
+    initialPage: Math.max(0, monthIndexOfDay(months, todayIndex)),
+    initialRanges,
+  })
+
+  const [stored, setStored] = useState(initialPeriods)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  // The message is tied to the selection it was shown for: any later edit hides it.
+  const [savedNotice, setSavedNotice] = useState<{ message: string; ranges: DayRange[] } | null>(null)
+  // Same reason as the login form: `disabled` alone does not stop a fast double click.
+  const savingRef = useRef(false)
+
+  const plan = useMemo(() => planSave(stored, selection.ranges), [stored, selection.ranges])
+  const dirty = plan.toDelete.length + plan.toCreate.length > 0
+  const days = countDays(selection.ranges)
+
+  const notice = savedNotice && savedNotice.ranges === selection.ranges ? savedNotice.message : null
+
+  async function handleSave() {
+    if (savingRef.current || !dirty) {
+      return
+    }
+    savingRef.current = true
+    setSaving(true)
+    setError(null)
+    setSavedNotice(null)
+    const savedRanges = selection.ranges
+
+    try {
+      // Deletions first: the backend refuses same-type periods that overlap or touch.
+      for (const period of plan.toDelete) {
+        await deleteCalendarPeriod(period.stableId)
+      }
+      for (const range of plan.toCreate) {
+        await createCalendarPeriod(rangeToInput(range))
+      }
+      setStored(await fetchMyCalendar())
+      setSavedNotice({ message: 'Modifications enregistrées.', ranges: savedRanges })
+    } catch (err) {
+      setError(saveErrorMessage(err))
+      // Some calls may have gone through: show the truth on the next save.
+      fetchMyCalendar()
+        .then(setStored)
+        .catch(() => undefined)
+    } finally {
+      savingRef.current = false
+      setSaving(false)
+    }
+  }
+
+  return (
+    <>
+      <div className={`nature${selection.type === 'PREFER_DUTY' ? ' nature--prefer' : ''}`}>
+        <div role="group" aria-label="Nature de la sélection" className="nature__group">
+          {(['UNAVAILABLE', 'PREFER_DUTY'] as const).map((type) => (
+            <button
+              key={type}
+              type="button"
+              aria-pressed={selection.type === type}
+              className={`nature__option nature__option--${type === 'UNAVAILABLE' ? 'unavailable' : 'prefer'}`}
+              onClick={() => selection.setType(type)}
+            >
+              <span className="nature__dot" />
+              {TYPE_LABEL[type]}
+            </button>
           ))}
-          {grid.map((day) => {
-            const key = toDateKey(day)
-            const inMonth = day.getMonth() === monthCursor.getMonth()
-            const dayPeriods = dayMap.get(key) ?? []
-            const hasUnavailable = dayPeriods.some((p) => p.type === 'UNAVAILABLE')
-            const hasPrefer = dayPeriods.some((p) => p.type === 'PREFER_DUTY')
-            const isSelected = selectedKeys.has(key)
-
-            return (
-              <button
-                key={key}
-                type="button"
-                onClick={() => handleDayClick(day)}
-                className={[
-                  'availability-day',
-                  inMonth ? '' : 'availability-day--outside',
-                  isSelected ? 'availability-day--selected' : '',
-                  key === todayKey ? 'availability-day--today' : '',
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
-              >
-                <span>{day.getDate()}</span>
-                <span className="availability-day-dots">
-                  {hasUnavailable && <span className="availability-dot availability-dot--unavailable" />}
-                  {hasPrefer && <span className="availability-dot availability-dot--prefer" />}
-                </span>
-              </button>
-            )
-          })}
         </div>
-      )}
+        <p className="nature__help">{NATURE_HELP[selection.type]}</p>
+      </div>
 
-      {selectedKeys.size > 0 && !editingPeriod && (
-        <div className="availability-form">
-          <h2>
-            {selectedKeys.size} jour{selectedKeys.size > 1 ? 's' : ''} sélectionné
-            {selectedKeys.size > 1 ? 's' : ''}
-          </h2>
-
-          <div className="availability-type-choice" role="group" aria-label="Type">
-            <label>
-              <input
-                type="radio"
-                name="type"
-                checked={formType === 'UNAVAILABLE'}
-                onChange={() => setFormType('UNAVAILABLE')}
-              />
-              Indisponible
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="type"
-                checked={formType === 'PREFER_DUTY'}
-                onChange={() => setFormType('PREFER_DUTY')}
-              />
-              Préférence de garde
-            </label>
-          </div>
-
-          {selectedKeys.size === 1 && (
-            <label className="availability-custom-time-toggle">
-              <input
-                type="checkbox"
-                checked={useCustomTime}
-                onChange={(event) => setUseCustomTime(event.target.checked)}
-              />
-              Préciser une plage horaire
-            </label>
-          )}
-
-          {useCustomTime && selectedKeys.size === 1 && (
-            <div className="availability-time-range">
-              <label>
-                De
-                <input
-                  type="time"
-                  value={customStart}
-                  onChange={(event) => setCustomStart(event.target.value)}
-                />
-              </label>
-              <label>
-                À
-                <input type="time" value={customEnd} onChange={(event) => setCustomEnd(event.target.value)} />
-              </label>
-            </div>
-          )}
-
-          {formError && (
-            <p role="alert" className="availability-error">
-              {formError}
-            </p>
-          )}
-
-          <div className="availability-form-actions">
-            <button type="button" onClick={handleCreateSubmit} disabled={saving}>
-              Enregistrer
-            </button>
-            <button type="button" onClick={clearSelection} disabled={saving}>
-              Annuler
-            </button>
-          </div>
+      <div className="availability__layout">
+        <div className="card cal-card">
+          <AvailabilityCalendar
+            months={months}
+            page={selection.page}
+            visible={visible}
+            ranges={selection.effectiveRanges}
+            drag={selection.drag}
+            todayIndex={todayIndex}
+            onPrevious={() => selection.setPage(selection.page - 1)}
+            onNext={() => selection.setPage(selection.page + 1)}
+            onDayPointerDown={selection.startDrag}
+            onGridPointerMove={selection.trackPointer}
+            onRailPointerMove={selection.trackRailPointer}
+            onDayKeyboardToggle={selection.toggleFromKeyboard}
+          />
+          <CalendarLegend />
+          <p className="cal__help cal__help--mobile">
+            Touchez une date pour l&apos;ajouter ou la retirer · Glissez pour tracer une période · Glissez
+            jusqu&apos;au bord pour passer au mois suivant
+          </p>
+          <p className="cal__help cal__help--desktop">
+            Clic : ajouter ou retirer une journée · Clic-glisser : période continue — chaque glisser crée une
+            période <em>supplémentaire</em> · En glissant au-delà du dernier jour affiché, le calendrier
+            défile vers le mois suivant · Ctrl/Cmd + clic : retirer · Maj + clic : étendre la dernière plage
+          </p>
         </div>
-      )}
 
-      {editingPeriod && (
-        <div className="availability-form">
-          <h2>Modifier la période</h2>
+        <div className="availability__aside">
+          <SelectionSummary
+            ranges={selection.ranges}
+            activeType={selection.type}
+            onRemove={selection.removeRange}
+          />
 
-          <div className="availability-type-choice" role="group" aria-label="Type">
-            <label>
-              <input
-                type="radio"
-                name="edit-type"
-                checked={editType === 'UNAVAILABLE'}
-                onChange={() => setEditType('UNAVAILABLE')}
-              />
-              Indisponible
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="edit-type"
-                checked={editType === 'PREFER_DUTY'}
-                onChange={() => setEditType('PREFER_DUTY')}
-              />
-              Préférence de garde
-            </label>
-          </div>
-
-          <div className="availability-time-range">
-            <label>
-              Début
-              <input
-                type="datetime-local"
-                value={editStart}
-                onChange={(event) => setEditStart(event.target.value)}
-              />
-            </label>
-            <label>
-              Fin
-              <input
-                type="datetime-local"
-                value={editEnd}
-                onChange={(event) => setEditEnd(event.target.value)}
-              />
-            </label>
-          </div>
-
-          {editError && (
-            <p role="alert" className="availability-error">
-              {editError}
-            </p>
-          )}
-
-          <div className="availability-form-actions">
-            <button type="button" onClick={handleEditSave} disabled={saving}>
-              Enregistrer
-            </button>
-            {!confirmingDelete && (
-              <button type="button" onClick={() => setConfirmingDelete(true)} disabled={saving}>
-                Supprimer
-              </button>
-            )}
-            {confirmingDelete && (
-              <button type="button" onClick={handleDeleteConfirmed} disabled={saving}>
-                Confirmer la suppression
-              </button>
-            )}
+          <div className="availability__actions">
             <button
               type="button"
-              onClick={() => {
-                setEditingPeriod(null)
-                setConfirmingDelete(false)
-              }}
-              disabled={saving}
+              className="btn btn--ghost btn--sm"
+              onClick={selection.clear}
+              disabled={saving || selection.ranges.length === 0}
             >
-              Annuler
+              Tout effacer
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={handleSave}
+              disabled={saving || !dirty}
+            >
+              {saving ? 'Enregistrement…' : 'Enregistrer'}
             </button>
           </div>
+
+          <div aria-live="polite" className="availability__status">
+            {dirty && !saving && !error && (
+              <p className="muted">Modifications non enregistrées : {days} jour(s) affiché(s).</p>
+            )}
+            {notice && (
+              <p role="status" className="alert alert--success">
+                <Icon name="check" size={18} strokeWidth={2} />
+                <span>{notice}</span>
+              </p>
+            )}
+          </div>
+          {error && (
+            <p role="alert" className="alert alert--error">
+              <Icon name="alert" size={18} strokeWidth={2} />
+              <span>{error}</span>
+            </p>
+          )}
         </div>
-      )}
-    </section>
+      </div>
+    </>
   )
 }

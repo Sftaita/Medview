@@ -60,6 +60,7 @@ détaillé (encore conceptuel, rien d'implémenté) :
 | Orchestration réelle `PlanningGeneration → solve → DutyAssignment AUTO` : `SolverParameterSet`, seed/snapshotHash, timeout CP-SAT réel, concurrence par verrou optimiste, atomicité, `PUBLISHED` ⇒ coverage COMPLETE | ✅ Livré (2026-09-19) | `docs/planning-generation.md` §13-16, `docs/planning-solver.md` §37, `docs/decisions.md` D106 |
 | Moteur de génération avancé (`fixedAssignments` réels, REPAIR, SIMULATE, MAX_DUTIES/MAX_WEEKENDS, UI, validation/publication avancée) | ⏳ Design conceptuel écrit, pas implémenté | `docs/allocation-algorithm.md` |
 | Inscription enrichie (téléphone E.164, **sans hôpital** : l'établissement n'est pas une propriété du `User`) + invitations d'équipe (`TeamInvitation`, emails Mailer/Twig, inscription par lien, multi-invitations) | ✅ Livré (2026-09-20), UAT navigateur OK. Affiliation hospitalière : à modéliser plus tard dans un contexte daté (D115), pas d'import ni de référentiel | `docs/authentication.md` §15, `docs/decisions.md` D111-D116 |
+| Refonte de l'interface (charte, tokens, mobile d'abord) : cadre, connexion/inscription/invitations, tableau de bord, plannings, calendrier d'indisponibilités en **jour entier** (sélection multiple, tactile) | ✅ Livré (2026-09-21) — tests Vitest, vérifié dans un navigateur | `docs/decisions.md` D117-D119, `docs/availability.md` §8 |
 | Échanges de garde, notifications (in-app), export calendrier | ⏳ Pas commencé | — |
 
 ## Où trouver quoi

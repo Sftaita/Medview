@@ -1,8 +1,8 @@
 export function MyDutiesPage() {
   return (
-    <section>
+    <section className="page">
       <h1>Mes gardes</h1>
-      <p>Cette page sera implémentée dans une itération ultérieure.</p>
+      <p className="muted">Cette page sera implémentée dans une itération ultérieure.</p>
     </section>
   )
 }

@@ -70,8 +70,10 @@ describe('App', () => {
       </MemoryRouter>,
     )
 
-    expect(screen.getByText('MedVue')).toBeInTheDocument()
-    expect(await screen.findByRole('heading', { name: 'Tableau de bord' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /Bonjour, Alice/ })).toBeInTheDocument()
+    // The brand appears in the sidebar and in the phone top bar (one DOM, switched by CSS).
+    expect(screen.getAllByText('MedVue').length).toBeGreaterThan(0)
+    expect(screen.getByRole('navigation', { name: 'Navigation principale' })).toBeInTheDocument()
   })
 
   // Regression test for a UAT finding: /login (and /register) stayed
@@ -107,7 +109,7 @@ describe('App', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByRole('heading', { name: 'Tableau de bord' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /Bonjour, Alice/ })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Connexion' })).not.toBeInTheDocument()
   })
 
@@ -145,7 +147,7 @@ describe('App', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByRole('heading', { name: 'Tableau de bord' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /Bonjour, Alice/ })).toBeInTheDocument()
 
     // Simulate another tab's logout: it removed the key and the browser
     // dispatches a StorageEvent to every *other* same-origin tab.

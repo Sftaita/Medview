@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { Field } from '../../components/Field'
+import { Icon } from '../../components/Icon'
 import { ApiError } from '../../lib/apiClient'
 import { fetchTeamInvitations, inviteToTeam, revokeTeamInvitation } from './api'
 import type { InviteResult, TeamInvitation } from './types'
@@ -109,69 +111,81 @@ export function TeamInvitePanel({ planningStableId, teamStableId, onMembersChang
   return (
     <div className="team-invite-panel">
       <h4>Invitations en attente</h4>
-      <ul>
+      <ul className="list team-invite-panel__list">
         {invitations.map((invitation) => (
-          <li key={invitation.stableId}>
-            {fullName(invitation)} ({invitation.email}) —{' '}
-            {invitation.status === 'PENDING' ? 'Invitation en attente' : 'Invitation expirée'}
-            <button type="button" onClick={() => handleRevoke(invitation)}>
+          <li key={invitation.stableId} className="team-invite-panel__item">
+            <span className="team-invite-panel__text">
+              {fullName(invitation)} ({invitation.email}) —{' '}
+              {invitation.status === 'PENDING' ? 'Invitation en attente' : 'Invitation expirée'}
+            </span>
+            <button type="button" className="btn btn--ghost btn--sm" onClick={() => handleRevoke(invitation)}>
               Révoquer
             </button>
           </li>
         ))}
-        {invitations.length === 0 && <li>Aucune invitation en attente.</li>}
+        {invitations.length === 0 && <li className="muted">Aucune invitation en attente.</li>}
       </ul>
 
-      {feedback && <p role="status">{feedback}</p>}
+      {feedback && (
+        <p role="status" className="alert alert--success">
+          <Icon name="check" size={18} strokeWidth={2} />
+          <span>{feedback}</span>
+        </p>
+      )}
       {error && (
-        <p role="alert" className="availability-error">
-          {error}
+        <p role="alert" className="alert alert--error">
+          <Icon name="alert" size={18} strokeWidth={2} />
+          <span>{error}</span>
         </p>
       )}
 
       {!showForm && (
-        <button type="button" onClick={() => setShowForm(true)}>
+        <button type="button" className="btn btn--primary btn--full" onClick={() => setShowForm(true)}>
+          <Icon name="plus" size={18} strokeWidth={2} />
           Ajouter une personne
         </button>
       )}
       {showForm && (
-        <form onSubmit={handleSubmit} className="planning-team-member-form">
-          <label>
-            Prénom
-            <input
+        <form onSubmit={handleSubmit} className="form">
+          <div className="form-grid">
+            <Field
+              label="Prénom"
               type="text"
               value={firstName}
               onChange={(e) => setFirstName(e.target.value)}
               maxLength={100}
               required
             />
-          </label>
-          <label>
-            Nom
-            <input
+            <Field
+              label="Nom"
               type="text"
               value={lastName}
               onChange={(e) => setLastName(e.target.value)}
               maxLength={100}
               required
             />
-          </label>
-          <label>
-            Email
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              maxLength={180}
-              required
-            />
-          </label>
-          <button type="submit" disabled={isSubmitting}>
-            Ajouter
-          </button>
-          <button type="button" onClick={() => setShowForm(false)} disabled={isSubmitting}>
-            Fermer
-          </button>
+          </div>
+          <Field
+            label="Email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            maxLength={180}
+            required
+          />
+          <div className="form-actions">
+            <button type="submit" className="btn btn--primary" disabled={isSubmitting}>
+              Ajouter
+            </button>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => setShowForm(false)}
+              disabled={isSubmitting}
+            >
+              Fermer
+            </button>
+          </div>
         </form>
       )}
     </div>

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
+import { Field } from '../components/Field'
+import { Icon } from '../components/Icon'
 import {
   addTeamMember,
   createPlanningLine,
@@ -204,200 +206,285 @@ export function PlanningDetailPage() {
   }
 
   return (
-    <section>
-      {loading && <p>Chargement…</p>}
+    <section className="page">
+      <nav aria-label="Fil d'Ariane" className="breadcrumb">
+        <Link to="/plannings">Plannings</Link>
+        <Icon name="right" size={14} />
+        <span aria-current="page">{planning?.name ?? '…'}</span>
+      </nav>
+
+      {loading && (
+        <p role="status" className="muted">
+          Chargement…
+        </p>
+      )}
       {error && (
-        <p role="alert" className="availability-error">
-          {error}
+        <p role="alert" className="alert alert--error">
+          <Icon name="alert" size={18} strokeWidth={2} />
+          <span>{error}</span>
         </p>
       )}
 
       {!loading && !error && planning && (
         <>
-          <h1>{planning.name}</h1>
-          <p>
-            {planning.startsAt} → {planning.endsAt} ({planning.timezone})
-          </p>
-
-          {planning.canManage && (
-            <div className="planning-actions">
-              {!renaming && (
-                <button type="button" onClick={() => setRenaming(true)}>
-                  Modifier le nom
-                </button>
-              )}
-              {renaming && (
-                <div className="planning-rename-form">
-                  <input
-                    type="text"
-                    value={newName}
-                    placeholder={planning.name}
-                    onChange={(event) => setNewName(event.target.value)}
-                  />
-                  <button type="button" onClick={handleRename} disabled={saving || !newName}>
-                    Enregistrer
-                  </button>
-                  <button type="button" onClick={() => setRenaming(false)} disabled={saving}>
-                    Annuler
-                  </button>
-                </div>
-              )}
+          <header className="page__header">
+            <div>
+              <h1>{planning.name}</h1>
+              <p className="page__lead tnum">
+                {planning.startsAt} → {planning.endsAt} ({planning.timezone})
+              </p>
             </div>
-          )}
+            {planning.canManage && !renaming && (
+              <button type="button" className="btn btn--secondary" onClick={() => setRenaming(true)}>
+                <Icon name="pencil" size={18} strokeWidth={2} />
+                Modifier le nom
+              </button>
+            )}
+          </header>
 
-          <h2>Lignes de garde</h2>
-          <table className="planning-lines-table">
-            <thead>
-              <tr>
-                <th>Nom</th>
-                <th>Équipe</th>
-                <th>Membres</th>
-                <th>Rôle</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {planning.lines.map((line) => (
-                <tr key={line.stableId}>
-                  <td>{line.name}</td>
-                  <td>{line.team.name}</td>
-                  <td>{line.memberCount ?? '—'}</td>
-                  <td>{line.type === 'PRIMARY' ? 'Principale' : 'Secondaire'}</td>
-                  <td>
-                    <button type="button" onClick={() => toggleTeam(line.team.stableId)}>
-                      {expandedTeamStableId === line.team.stableId
-                        ? 'Masquer les membres'
-                        : 'Gérer les membres'}
-                    </button>
-                    {planning.canManage && line.type === 'SECONDARY' && (
-                      <button type="button" onClick={() => handleDeleteLine(line.stableId)} disabled={saving}>
-                        Supprimer
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {expandedTeamStableId && (
-            <div className="planning-team-members">
-              <h3>Membres de l'équipe</h3>
-              {membersLoading && <p>Chargement des membres…</p>}
-              {!membersLoading && (
-                <ul>
-                  {members.map((member) => (
-                    <li key={member.stableId}>
-                      {member.firstName} {member.lastName} — {member.role}
-                      {member.membershipEnd ? ` (terminée le ${member.membershipEnd})` : ''}
-                      {planning.canManage && !member.membershipEnd && (
-                        <button
-                          type="button"
-                          onClick={() => handleEndMembership(expandedTeamStableId, member.stableId)}
-                          disabled={saving}
-                        >
-                          Terminer l'adhésion
-                        </button>
-                      )}
-                    </li>
-                  ))}
-                  {members.length === 0 && <li>Aucun membre pour le moment.</li>}
-                </ul>
-              )}
-
-              {memberError && (
-                <p role="alert" className="availability-error">
-                  {memberError}
-                </p>
-              )}
-
-              {planning.lines.find((line) => line.team.stableId === expandedTeamStableId)?.team.canInvite && (
-                <TeamInvitePanel
-                  key={expandedTeamStableId}
-                  planningStableId={planningId}
-                  teamStableId={expandedTeamStableId}
-                  onMembersChanged={() => loadMembers(expandedTeamStableId)}
-                />
-              )}
-
-              {planning.canManage && (
-                <div className="planning-team-member-form">
-                  <p>
-                    <small>
-                      Utilisateur existant (identifiant connu) — permet aussi de choisir le rôle et la date
-                      d'entrée.
-                    </small>
-                  </p>
-                  <label>
-                    Identifiant de l'utilisateur
-                    <input
-                      type="text"
-                      value={memberUserStableId}
-                      onChange={(event) => setMemberUserStableId(event.target.value)}
-                      placeholder="stableId de l'utilisateur"
-                    />
-                  </label>
-                  <label>
-                    Rôle
-                    <select
-                      value={memberRole}
-                      onChange={(event) => setMemberRole(event.target.value as 'OWNER' | 'ADMIN' | 'MEMBER')}
-                    >
-                      <option value="MEMBER">Membre</option>
-                      <option value="ADMIN">Admin</option>
-                      <option value="OWNER">Owner</option>
-                    </select>
-                  </label>
-                  <label>
-                    Date d'entrée
-                    <input
-                      type="date"
-                      value={memberStart}
-                      onChange={(event) => setMemberStart(event.target.value)}
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => handleAddMember(expandedTeamStableId)}
-                    disabled={saving || !memberUserStableId || !memberStart}
-                  >
-                    Ajouter
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {actionError && (
-            <p role="alert" className="availability-error">
-              {actionError}
-            </p>
-          )}
-
-          {planning.canManage && !showLineForm && (
-            <button type="button" onClick={() => setShowLineForm(true)}>
-              Ajouter une ligne
-            </button>
-          )}
-
-          {planning.canManage && showLineForm && (
-            <div className="planning-line-form">
-              <label>
-                Nom de la ligne
-                <input type="text" value={lineName} onChange={(event) => setLineName(event.target.value)} />
-              </label>
-              <div className="availability-form-actions">
-                <button type="button" onClick={handleAddLine} disabled={saving || !lineName}>
-                  Ajouter
+          {planning.canManage && renaming && (
+            <div className="card form planning-rename">
+              <Field
+                label="Nouveau nom"
+                type="text"
+                value={newName}
+                placeholder={planning.name}
+                onChange={(event) => setNewName(event.target.value)}
+              />
+              <div className="form-actions">
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={handleRename}
+                  disabled={saving || !newName}
+                >
+                  Enregistrer
                 </button>
-                <button type="button" onClick={() => setShowLineForm(false)} disabled={saving}>
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  onClick={() => setRenaming(false)}
+                  disabled={saving}
+                >
                   Annuler
                 </button>
               </div>
             </div>
           )}
+
+          <div className="planning-detail">
+            <div className="planning-detail__lines">
+              <div className="section-title">
+                <h2>Lignes de garde</h2>
+                {planning.canManage && !showLineForm && (
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--sm"
+                    onClick={() => setShowLineForm(true)}
+                  >
+                    <Icon name="plus" size={16} strokeWidth={2} />
+                    Ajouter une ligne
+                  </button>
+                )}
+              </div>
+
+              {actionError && (
+                <p role="alert" className="alert alert--error">
+                  <Icon name="alert" size={18} strokeWidth={2} />
+                  <span>{actionError}</span>
+                </p>
+              )}
+
+              {planning.canManage && showLineForm && (
+                <div className="card form">
+                  <Field
+                    label="Nom de la ligne"
+                    type="text"
+                    value={lineName}
+                    onChange={(event) => setLineName(event.target.value)}
+                  />
+                  <div className="form-actions">
+                    <button
+                      type="button"
+                      className="btn btn--primary"
+                      onClick={handleAddLine}
+                      disabled={saving || !lineName}
+                    >
+                      Ajouter
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--secondary"
+                      onClick={() => setShowLineForm(false)}
+                      disabled={saving}
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <ul className="list planning-lines">
+                {planning.lines.map((line) => {
+                  const open = expandedTeamStableId === line.team.stableId
+                  return (
+                    <li
+                      key={line.stableId}
+                      className={`card planning-line${open ? ' planning-line--open' : ''}`}
+                    >
+                      <div className="planning-line__head">
+                        <div className="planning-line__main">
+                          <h3>{line.name}</h3>
+                          <p className="muted">
+                            {line.team.name} · {line.memberCount ?? '—'} membre
+                            {(line.memberCount ?? 0) > 1 ? 's' : ''}
+                          </p>
+                        </div>
+                        <span className={`tag ${line.type === 'PRIMARY' ? 'tag--green' : 'tag--blue'}`}>
+                          {line.type === 'PRIMARY' ? 'Principale' : 'Secondaire'}
+                        </span>
+                      </div>
+                      <div className="planning-line__actions">
+                        <button
+                          type="button"
+                          className="btn btn--secondary btn--sm"
+                          aria-expanded={open}
+                          onClick={() => toggleTeam(line.team.stableId)}
+                        >
+                          <Icon name={open ? 'down' : 'users'} size={16} strokeWidth={2} />
+                          {open ? 'Masquer les membres' : 'Gérer les membres'}
+                        </button>
+                        {planning.canManage && line.type === 'SECONDARY' && (
+                          <button
+                            type="button"
+                            className="btn btn--danger btn--sm"
+                            onClick={() => handleDeleteLine(line.stableId)}
+                            disabled={saving}
+                          >
+                            Supprimer
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+
+            {expandedTeamStableId && (
+              <div className="planning-detail__members card card--flush">
+                <div className="card__header">
+                  <h2>Membres de l'équipe</h2>
+                </div>
+                {membersLoading && <p className="muted planning-members__note">Chargement des membres…</p>}
+                {!membersLoading && (
+                  <ul className="list">
+                    {members.map((member) => (
+                      <li key={member.stableId} className="list-row">
+                        <span className="avatar">
+                          {`${member.firstName.charAt(0)}${member.lastName.charAt(0)}`.toUpperCase()}
+                        </span>
+                        <div className="list-row__main">
+                          <div className="list-row__title">
+                            {member.firstName} {member.lastName}
+                          </div>
+                          <div className="list-row__meta">
+                            <span className={`tag ${ROLE_TAG[member.role].tone}`}>
+                              {ROLE_TAG[member.role].label}
+                            </span>
+                            {member.membershipEnd ? ` Adhésion terminée le ${member.membershipEnd}` : ''}
+                          </div>
+                        </div>
+                        {planning.canManage && !member.membershipEnd && (
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--sm"
+                            onClick={() => handleEndMembership(expandedTeamStableId, member.stableId)}
+                            disabled={saving}
+                          >
+                            Terminer l'adhésion
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                    {members.length === 0 && <li className="list-row muted">Aucun membre pour le moment.</li>}
+                  </ul>
+                )}
+
+                {memberError && (
+                  <p role="alert" className="alert alert--error planning-members__note">
+                    <Icon name="alert" size={18} strokeWidth={2} />
+                    <span>{memberError}</span>
+                  </p>
+                )}
+
+                {planning.lines.find((line) => line.team.stableId === expandedTeamStableId)?.team
+                  .canInvite && (
+                  <TeamInvitePanel
+                    key={expandedTeamStableId}
+                    planningStableId={planningId}
+                    teamStableId={expandedTeamStableId}
+                    onMembersChanged={() => loadMembers(expandedTeamStableId)}
+                  />
+                )}
+
+                {planning.canManage && (
+                  <div className="planning-members__existing form">
+                    <p className="muted">
+                      Utilisateur existant (identifiant connu) — permet aussi de choisir le rôle et la date
+                      d'entrée.
+                    </p>
+                    <Field
+                      label="Identifiant de l'utilisateur"
+                      type="text"
+                      value={memberUserStableId}
+                      onChange={(event) => setMemberUserStableId(event.target.value)}
+                      placeholder="stableId de l'utilisateur"
+                    />
+                    <div className="field">
+                      <label htmlFor="member-role" className="field__label">
+                        Rôle
+                      </label>
+                      <select
+                        id="member-role"
+                        className="field__input"
+                        value={memberRole}
+                        onChange={(event) =>
+                          setMemberRole(event.target.value as 'OWNER' | 'ADMIN' | 'MEMBER')
+                        }
+                      >
+                        <option value="MEMBER">Membre</option>
+                        <option value="ADMIN">Admin</option>
+                        <option value="OWNER">Propriétaire</option>
+                      </select>
+                    </div>
+                    <Field
+                      label="Date d'entrée"
+                      type="date"
+                      value={memberStart}
+                      onChange={(event) => setMemberStart(event.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn--primary"
+                      onClick={() => handleAddMember(expandedTeamStableId)}
+                      disabled={saving || !memberUserStableId || !memberStart}
+                    >
+                      Ajouter
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </>
       )}
     </section>
   )
+}
+
+const ROLE_TAG: Record<'OWNER' | 'ADMIN' | 'MEMBER', { label: string; tone: string }> = {
+  OWNER: { label: 'Propriétaire', tone: 'tag--green' },
+  ADMIN: { label: 'Admin', tone: 'tag--blue' },
+  MEMBER: { label: 'Membre', tone: '' },
 }

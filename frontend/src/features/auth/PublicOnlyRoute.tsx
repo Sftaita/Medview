@@ -13,7 +13,11 @@ export function PublicOnlyRoute({ children }: { children: ReactNode }) {
   const { user, isLoading } = useAuth()
 
   if (isLoading) {
-    return <p>Chargement…</p>
+    return (
+      <p role="status" className="app-loading">
+        Chargement…
+      </p>
+    )
   }
 
   if (user) {

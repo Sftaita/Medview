@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { Field } from '../components/Field'
+import { Icon } from '../components/Icon'
 import { createPlanning, fetchPlannings } from '../features/planning/api'
 import type { PlanningSummary } from '../features/planning/types'
 import { ApiError } from '../lib/apiClient'
@@ -60,88 +62,118 @@ export function PlanningsPage() {
     }
   }
 
-  return (
-    <section>
-      <h1>Mes plannings</h1>
+  const canSubmit = Boolean(name && startsAt && endsAt && timezone && primaryTeamName)
 
-      {loading && <p>Chargement…</p>}
-      {error && (
-        <p role="alert" className="availability-error">
-          {error}
+  return (
+    <section className="page">
+      <header className="page__header">
+        <div>
+          <h1>Mes plannings</h1>
+          <p className="page__lead">
+            Un planning regroupe une période de garde et ses lignes ; chaque ligne appartient à une équipe.
+          </p>
+        </div>
+        {!showForm && (
+          <button type="button" className="btn btn--primary" onClick={() => setShowForm(true)}>
+            <Icon name="plus" size={18} strokeWidth={2} />
+            Créer un planning
+          </button>
+        )}
+      </header>
+
+      {loading && (
+        <p role="status" className="muted">
+          Chargement…
         </p>
+      )}
+      {error && (
+        <p role="alert" className="alert alert--error">
+          <Icon name="alert" size={18} strokeWidth={2} />
+          <span>{error}</span>
+        </p>
+      )}
+
+      {showForm && (
+        <form
+          className="card form planning-create"
+          onSubmit={(event) => {
+            event.preventDefault()
+            void handleCreate()
+          }}
+        >
+          <h2>Créer un planning</h2>
+          <Field label="Nom" type="text" value={name} onChange={(event) => setName(event.target.value)} />
+          <div className="form-grid">
+            <Field
+              label="Début"
+              type="date"
+              value={startsAt}
+              onChange={(event) => setStartsAt(event.target.value)}
+            />
+            <Field
+              label="Fin"
+              type="date"
+              value={endsAt}
+              onChange={(event) => setEndsAt(event.target.value)}
+            />
+          </div>
+          <Field
+            label="Fuseau horaire"
+            type="text"
+            value={timezone}
+            onChange={(event) => setTimezone(event.target.value)}
+          />
+          <Field
+            label="Nom de l'équipe principale"
+            type="text"
+            value={primaryTeamName}
+            onChange={(event) => setPrimaryTeamName(event.target.value)}
+            placeholder="ex. Première ligne"
+            hint="Vous pourrez ajouter d'autres lignes de garde ensuite."
+          />
+
+          {formError && (
+            <p role="alert" className="alert alert--error">
+              <Icon name="alert" size={18} strokeWidth={2} />
+              <span>{formError}</span>
+            </p>
+          )}
+
+          <div className="form-actions">
+            <button type="submit" className="btn btn--primary" disabled={saving || !canSubmit}>
+              Créer
+            </button>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => setShowForm(false)}
+              disabled={saving}
+            >
+              Annuler
+            </button>
+          </div>
+        </form>
       )}
 
       {!loading && !error && (
         <>
-          {plannings.length === 0 && <p>Aucun planning pour le moment.</p>}
-          <ul className="planning-list">
+          {plannings.length === 0 && <p className="muted">Aucun planning pour le moment.</p>}
+          <ul className="list plannings-list">
             {plannings.map((planning) => (
               <li key={planning.stableId}>
-                <Link to={`/plannings/${planning.stableId}`}>{planning.name}</Link>
-                <span>
-                  {' '}
-                  ({planning.startsAt} → {planning.endsAt})
-                </span>
+                <Link to={`/plannings/${planning.stableId}`} className="card plannings-list__item">
+                  <span className="plannings-list__main">
+                    <span className="plannings-list__name">{planning.name}</span>
+                    <span className="muted tnum">
+                      {planning.startsAt} → {planning.endsAt}
+                    </span>
+                  </span>
+                  <Icon name="right" size={20} />
+                </Link>
               </li>
             ))}
           </ul>
         </>
-      )}
-
-      {!showForm && (
-        <button type="button" onClick={() => setShowForm(true)}>
-          Créer un planning
-        </button>
-      )}
-
-      {showForm && (
-        <div className="planning-create-form">
-          <h2>Créer un planning</h2>
-          <label>
-            Nom
-            <input type="text" value={name} onChange={(event) => setName(event.target.value)} />
-          </label>
-          <label>
-            Début
-            <input type="date" value={startsAt} onChange={(event) => setStartsAt(event.target.value)} />
-          </label>
-          <label>
-            Fin
-            <input type="date" value={endsAt} onChange={(event) => setEndsAt(event.target.value)} />
-          </label>
-          <label>
-            Fuseau horaire
-            <input type="text" value={timezone} onChange={(event) => setTimezone(event.target.value)} />
-          </label>
-          <label>
-            Nom de l'équipe principale
-            <input
-              type="text"
-              value={primaryTeamName}
-              onChange={(event) => setPrimaryTeamName(event.target.value)}
-              placeholder="ex. Première ligne"
-            />
-          </label>
-
-          {formError && (
-            <p role="alert" className="availability-error">
-              {formError}
-            </p>
-          )}
-
-          <div className="availability-form-actions">
-            <button
-              type="button"
-              onClick={handleCreate}
-              disabled={saving || !name || !startsAt || !endsAt || !timezone || !primaryTeamName}
-            >
-              Créer
-            </button>
-            <button type="button" onClick={() => setShowForm(false)} disabled={saving}>
-              Annuler
-            </button>
-          </div>
-        </div>
       )}
     </section>
   )

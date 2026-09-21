@@ -1,0 +1,277 @@
+/* Pages : tableau de bord, plannings, détail, compte. */
+
+.form-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--gray-600);
+}
+
+/* ---------- Tableau de bord ---------- */
+.dashboard {
+  display: grid;
+  gap: 16px;
+  align-items: start;
+}
+
+.dashboard__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.dashboard__ranges {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dashboard__range {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--red-100);
+  border-radius: var(--radius-md);
+  background: var(--red-50);
+  color: var(--red-700);
+  font-weight: var(--weight-bold);
+}
+
+.dashboard__range--prefer {
+  border-color: var(--green-200);
+  background: var(--green-50);
+  color: var(--green-800);
+}
+
+.dashboard__range-dot {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--red-600);
+}
+
+.dashboard__range--prefer .dashboard__range-dot {
+  background: var(--brand);
+}
+
+.dashboard__range-type {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+}
+
+.dashboard__note {
+  margin: 14px 0 16px;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.dashboard__empty {
+  margin-bottom: 4px;
+}
+
+.dashboard__empty--padded {
+  padding: 8px 16px 16px;
+}
+
+.dashboard__link {
+  display: block;
+  text-decoration: none;
+}
+
+/* ---------- Plannings ---------- */
+.plannings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.plannings-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.plannings-list__item:hover {
+  border-color: var(--border-strong);
+}
+
+.plannings-list__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.plannings-list__name {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-bold);
+  color: var(--text-strong);
+}
+
+.planning-create {
+  max-width: 560px;
+}
+
+.planning-rename {
+  max-width: 560px;
+}
+
+/* ---------- Détail d'un planning ---------- */
+.planning-detail {
+  display: grid;
+  gap: 24px;
+  align-items: start;
+}
+
+.planning-detail__lines {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.planning-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.planning-line--open {
+  border-color: var(--green-200);
+}
+
+.planning-line__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.planning-line__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.planning-members__note {
+  margin: 8px 16px;
+}
+
+.planning-members__existing {
+  padding: 16px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-sunken);
+}
+
+.team-invite-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface-sunken);
+}
+
+.team-invite-panel h4 {
+  font-size: var(--text-base);
+}
+
+.team-invite-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.team-invite-panel__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--text-sm);
+  color: var(--gray-700);
+}
+
+/* ---------- Compte ---------- */
+.account__header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.account__avatar {
+  width: 56px;
+  height: 56px;
+  font-size: var(--text-lg);
+}
+
+.account__details {
+  margin: 0;
+}
+
+.account__details > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+}
+
+.account__details > div + div {
+  border-top: 1px solid var(--border-subtle);
+}
+
+.account__details dt {
+  color: var(--gray-600);
+}
+
+.account__details dd {
+  margin: 0;
+  font-weight: var(--weight-semibold);
+  color: var(--text-strong);
+  text-align: right;
+}
+
+.account__logout {
+  align-self: flex-start;
+}
+
+@media (min-width: 900px) {
+  .form-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .dashboard {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 24px;
+  }
+
+  .planning-detail {
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  }
+}

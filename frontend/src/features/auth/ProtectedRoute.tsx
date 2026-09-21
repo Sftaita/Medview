@@ -7,7 +7,11 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
   const location = useLocation()
 
   if (isLoading) {
-    return <p>Chargement…</p>
+    return (
+      <p role="status" className="app-loading">
+        Chargement…
+      </p>
+    )
   }
 
   if (!user) {

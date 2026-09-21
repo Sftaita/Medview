@@ -1,5 +1,7 @@
 import { useRef, useState, type FormEvent } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Field, PasswordField } from '../components/Field'
+import { Icon } from '../components/Icon'
 import { useAuth } from '../features/auth/useAuth'
 import { ApiError } from '../lib/apiClient'
 import { formatWaitTime } from '../lib/formatWaitTime'
@@ -53,37 +55,44 @@ export function LoginPage() {
   }
 
   return (
-    <section>
-      <h1>Connexion</h1>
-      <form onSubmit={handleSubmit}>
-        <label>
-          Email
-          <input
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            autoComplete="email"
-            required
-          />
-        </label>
-        <label>
-          Mot de passe
-          <input
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            autoComplete="current-password"
-            required
-          />
-        </label>
-        {error && <p role="alert">{error}</p>}
-        <button type="submit" disabled={isSubmitting}>
+    <section className="auth__stack">
+      <div>
+        <h1 className="auth__title">Connexion</h1>
+        <p className="auth__intro">
+          Accédez à vos gardes, à vos plannings et à votre calendrier d&apos;indisponibilités.
+        </p>
+      </div>
+      <form onSubmit={handleSubmit} className="form">
+        <Field
+          label="Email"
+          type="email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          autoComplete="email"
+          placeholder="prenom.nom@exemple.be"
+          required
+        />
+        <PasswordField
+          label="Mot de passe"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          autoComplete="current-password"
+          required
+        />
+        {error && (
+          <p role="alert" className="alert alert--error">
+            <Icon name="alert" size={18} strokeWidth={2} />
+            <span>{error}</span>
+          </p>
+        )}
+        <button type="submit" className="btn btn--primary btn--lg btn--full" disabled={isSubmitting}>
           Se connecter
         </button>
       </form>
-      <p>
-        Pas encore de compte ? <Link to="/register">Créer un compte</Link>
-      </p>
+      <div className="auth__divider">Pas encore de compte&nbsp;?</div>
+      <Link to="/register" className="btn btn--secondary btn--full">
+        Créer un compte
+      </Link>
     </section>
   )
 }

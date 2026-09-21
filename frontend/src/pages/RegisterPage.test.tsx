@@ -92,7 +92,7 @@ describe('RegisterPage (classic sign-up)', () => {
     await fillForm()
     fireEvent.click(screen.getByRole('button', { name: 'Créer mon compte' }))
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tableau de bord' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /Bonjour, Alice/ })).toBeInTheDocument())
     const [, init] = registerCalls(fetchMock)[0]
     expect(JSON.parse(String(init?.body))).toEqual({
       email: 'alice@example.com',
@@ -140,7 +140,7 @@ describe('RegisterPage (classic sign-up)', () => {
         headers: { 'Content-Type': 'application/json' },
       }),
     )
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tableau de bord' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /Bonjour, Alice/ })).toBeInTheDocument())
   })
 
   it('shows visible progress from the click until the redirect, not just a disabled button', async () => {
@@ -188,7 +188,7 @@ describe('RegisterPage (classic sign-up)', () => {
     expect(screen.getByRole('button', { name: 'Création du compte…' })).toBeDisabled()
 
     pending.me(json(ME))
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tableau de bord' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: /Bonjour, Alice/ })).toBeInTheDocument())
   })
 
   it('goes back to an actionable button when the request fails at the network level', async () => {

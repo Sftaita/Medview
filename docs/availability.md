@@ -256,17 +256,30 @@ service, mise en forme JSON).
 
 ## 8. Frontend
 
-`/my-availability` (`MyAvailabilityPage.tsx`) : calendrier mensuel maison
-(pas de nouvelle dépendance npm — aucune bibliothèque de calendrier
-n'était déjà présente, et l'empreinte du projet reste volontairement
-minimale). Sélection de jour(s) individuels ou d'une plage (mode dédié,
-plus fiable au tactile qu'un shift-clic), choix `UNAVAILABLE`/
-`PREFER_DUTY`, plage horaire optionnelle pour un jour unique, clic sur un
-jour déjà couvert pour modifier/supprimer. Une sélection multi-jours
-contiguë est fusionnée côté client
-(`groupContiguousDateKeys`) en **une seule** période — créer un jour à la
-fois violerait la politique "chevauche ou touche" du §4 dès le deuxième
-jour consécutif.
+`/my-availability` (`MyAvailabilityPage.tsx`) : calendrier de **sélection
+multiple** maison (pas de nouvelle dépendance de calendrier). Décisions et
+raisons : `docs/decisions.md` D117 (charte) et D118 (modèle et enregistrement).
+Résumé :
+
+- **Jour entier uniquement** pour `UNAVAILABLE` *comme* pour `PREFER_DUTY` : plus
+  de plage horaire (l'ancien champ « Préciser une plage horaire » est supprimé).
+  L'API, elle, accepte toujours des instants — d'anciennes périodes avec heure
+  restent lisibles (affichées comme les jours qu'elles touchent) et ne sont
+  jamais modifiées sans action de l'utilisateur sur ces jours.
+- **Gestes** : tap / clic = bascule d'une journée ; appui-glisser = période
+  continue (chaque glisser en **ajoute** une) ; glisser jusqu'au bord fait défiler
+  d'un mois (temporisé) ; `Ctrl/Cmd`+clic retire, `Maj`+clic étend. Deux mois
+  côte à côte à partir de 1280 px, un seul en dessous (dont le téléphone).
+- **Deux natures** jamais fusionnées : indisponibilité (rouge) et préférence de
+  garde (vert). Une garde tracée sur une indisponibilité la remplace sur la zone
+  commune.
+- **Enregistrement** : bouton « Enregistrer » (désactivé tant qu'il n'y a rien à
+  changer) ; les plages contiguës sont envoyées comme **une** période chacune
+  (règle §4) ; suppressions avant créations ; `409` → « Une période de même type
+  chevauche ou touche déjà ces dates. »
+- Code : `src/features/availability/` (`calendarAxis`, `selection`,
+  `periodMapping` : purs et testés ; `useDaySelection` : gestes ;
+  `AvailabilityCalendar`, `SelectionSummary`, `calendar.css`).
 
 `TeamDetailPage.tsx` : table minimale des membres (D059) + panneau de
 gestion de la non-participation administrative par membre (liste, création,

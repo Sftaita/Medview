@@ -90,11 +90,15 @@ medvue/
 └── frontend/                   # React 19 + TypeScript + Vite
     ├── Dockerfile
     └── src/
-        ├── App.tsx             # routing + layout + nav conditionnelle (connecté/non)
+        ├── App.tsx             # routes : pages publiques (AuthLayout) / authentifiées (AppShell)
+        ├── components/         # AppShell (sidebar / nav basse), AuthLayout, Field, Icon, Logo
+        ├── styles/             # tokens.css (design system), ui.css, pages.css
         ├── features/
         │   ├── auth/            # context.ts, AuthContext.tsx, useAuth.ts, api.ts,
         │   │                    # ProtectedRoute.tsx, PublicOnlyRoute.tsx, types.ts
-        │   └── teams/ availability/ planning/ duties/ swaps/ notifications/
+        │   ├── availability/    # calendrier jour entier : selection, calendarAxis, periodMapping
+        │   │                    # (purs, testés), useDaySelection (gestes), composants
+        │   └── teams/ planning/ duties/ swaps/ notifications/
         │       fairness/ system/  (vides ou minimales, structure prête pour la suite)
         ├── pages/               # Dashboard, MyAvailability, MyDuties, Teams,
         │                        # TeamDetail, PlanningPeriod, AvailabilityCampaign,
@@ -248,7 +252,10 @@ Suite complète (backend + frontend), exécutée dans les conteneurs :
 - `AuthenticationTest` : connexion valide, mauvais mot de passe,
   utilisateur désactivé, `GET /api/me` avec/sans token.
 - `docker compose exec frontend npm run test` (Vitest) : rendu de `App`,
-  flux `LoginPage`.
+  flux `LoginPage`/`RegisterPage`/invitations, tableau de bord, composants
+  `Field`, et pour le calendrier d'indisponibilités : algèbre de sélection,
+  axe de jours, correspondance périodes ↔ écran, gestes (tap, glisser,
+  défilement temporisé aux bords) et enregistrement.
 - Vérification manuelle bout-en-bout via `curl` avant l'écriture des tests
   automatisés, pour valider le comportement réel avant de le figer dans
   des assertions.
