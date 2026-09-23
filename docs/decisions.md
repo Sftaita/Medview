@@ -3349,3 +3349,107 @@ l'ancienne (voir légende).
 - **Rejeté** : react-query / SWR (refonte non justifiée pour un état de deux
   ressources) ; un PATCH/POST par geste sans diff (impossible d'assurer l'ordre
   ni de fusionner des périodes adjacentes).
+
+## D127 — Vue de pilotage OWNER/ADMIN : deadline informative, rappels audités, jamais un nouveau système d'état
+
+- **Contexte** : un OWNER/ADMIN doit pouvoir suivre qui a confirmé ses
+  disponibilités, relancer les retardataires, fixer une date théorique de fin
+  d'encodage et lancer une génération — sans dupliquer ce qui existe déjà
+  (`AvailabilityCollectionResponse`, `PlanningGenerationService`,
+  `PlanningSnapshotService`).
+- **Décision — état de collecte** : `PlanningCollectionStatusService` est un
+  service de lecture pur, construit au-dessus des `AvailabilityCollectionResponse`
+  existantes (D120) et du calendrier personnel (`UserAvailabilityPeriod`, lu en
+  direct, jamais copié par planning). Un état à trois valeurs
+  (`MemberCollectionState` : `PENDING` / `ACKNOWLEDGED` / `NOT_EXPECTED`),
+  jamais déduit du nombre d'indisponibilités — une absence de saisie reste
+  `PENDING` tant que personne n'a confirmé, y compris « je n'ai aucune
+  indisponibilité » (D120 inchangé). Quand plusieurs collectes existent
+  (prolongation), les collectes *ouvertes* sont pertinentes ; s'il n'en reste
+  aucune, les dernières collectes closes le restent (historique figé,
+  jamais recalculé).
+- **Décision — `availabilityDeadline`** : un champ *par planning*, pas par
+  collecte : `PATCH /plannings/{id}/settings` fixe en une transaction
+  l'échéance de **toutes** les collectes ouvertes (le mécanisme existant,
+  `AvailabilityCollection.deadline`, D120) — aucune nouvelle colonne. Nom
+  choisi précisément pour ne jamais suggérer une fermeture réelle (jamais
+  `availabilityClosesAt`/`lockedAt`). Strictement informative : elle ne bloque
+  aucun endpoint (`/my-availability`, confirmation, génération) — testé
+  explicitement. Un `deadlineOverdueDays` calculé (jamais stocké) alimente
+  l'avertissement visuel « dépassée depuis N jours ».
+- **Décision — rappels** : historique **append-only**,
+  `PlanningAvailabilityReminder` (`planning`, `recipient`, `sentBy`, `channel`,
+  `bulk`, `pendingCollectionCount`, `sentAt`), jamais un champ mutable
+  `lastReminderAt` — un trigger Postgres refuse `UPDATE`/`DELETE` sur la table.
+  Une ligne n'existe que si le transport a réellement accepté l'email
+  (`AvailabilityReminderMailer`, best-effort comme `InvitationMailer`, D114) :
+  un échec d'envoi n'est jamais audité comme un rappel envoyé, et ne déclenche
+  pas la fenêtre de garde anti-doublon qui suit. Audience = exactement les
+  personnes `PENDING` sur au moins une collecte ouverte
+  (`AvailabilityCollectionService::pendingResponses()`), jamais recalculée
+  autrement. Anti-doublon : une même personne n'est jamais relancée deux fois
+  en moins de 5 minutes (`AvailabilityReminderService::MIN_INTERVAL`), et
+  `remind()`/`remindPending()` verrouillent la ligne `Planning`
+  (`PESSIMISTIC_WRITE`) le temps de l'opération — deux admins qui cliquent en
+  même temps sont sérialisés, le second voit l'audit du premier. Le lien de
+  l'email pointe vers `/my-availability?collection=<stableId>`, une URL déjà
+  stable et publique (jamais un id technique) ; le contenu ne mentionne jamais
+  le détail d'une indisponibilité ni les données d'un autre membre.
+- **Rejeté** : un job asynchrone (aucune infrastructure de queue n'existe
+  encore, l'envoi est synchrone et court, comme les invitations) ; déduire
+  « répondu » du nombre d'indisponibilités (interdit par D120) ; un `Voter`
+  dédié — tout est `PlanningVoter::MANAGE_AVAILABILITY` (D124), inchangé.
+
+## D128 — `MemberCollectionState` distinct de `AvailabilityResponseStatus`
+
+- **Décision** : `AvailabilityResponseStatus` (`PENDING`/`ACKNOWLEDGED`/
+  `WITHDRAWN`) reste le statut d'**une réponse à une collecte**. La vue de
+  pilotage a besoin d'un statut **par personne, agrégé sur les collectes
+  pertinentes du planning** (une personne peut avoir plusieurs collectes après
+  une prolongation) : `MemberCollectionState` (`PENDING`/`ACKNOWLEDGED`/
+  `NOT_EXPECTED`) est un type de lecture séparé, jamais une modification du
+  premier. `NOT_EXPECTED` couvre un membre parti avant de répondre ou un
+  compte désactivé — il n'est compté ni confirmé ni en attente.
+- **Pourquoi pas réutiliser `AvailabilityResponseStatus` tel quel** : un même
+  enum aurait mélangé deux échelles (une réponse vs une personne), et
+  aurait forcé un statut arbitraire quand une personne a plusieurs réponses
+  en désaccord (une confirmée, une nouvelle fenêtre encore `PENDING`).
+
+## D129 — Génération au niveau du planning : façade fine, préflight non bloquant, jamais un second solveur
+
+- **Contexte** : le pipeline de génération (`PlanningGenerationService::create`
+  → `PlanningSnapshotService::createSnapshot` → `PlanningGenerationService::generate`,
+  D106) existe déjà par `PlanningPeriod`, donc par ligne. `Planning` regroupe
+  plusieurs lignes (D073) mais n'avait aucun point d'entrée unique pour « générer
+  ce planning ».
+- **Décision** : `PlanningGenerationLauncher` est une façade qui répète le
+  pipeline existant pour chaque `PlanningLine` active, sans réimplémenter ni le
+  solveur ni le snapshot. `preflight()` construit un rapport de contrôle à
+  partir de données déjà lisibles (statut de collecte via D127, comptage des
+  `Duty`/membres, `PlanningRuleSet` actif, statut du `PlanningPeriod`) —
+  purement informatif, il ne capture rien. Deux catégories strictement
+  séparées (`PreflightIssueCode::isBlocker()`) :
+  - **bloquants** (empêchent réellement le pipeline : pas de règle active, pas
+    de garde, période `PUBLISHED`/`ARCHIVED`, pas de `SolverParameterSet`) ;
+  - **avertissements** (jamais bloquants : membres en attente, deadline
+    dépassée, ligne sans membre, période `VALIDATED` qui sera invalidée).
+    Aucune donnée organisationnelle (confirmation, deadline) n'est
+    jamais un bloqueur — testé explicitement.
+- **Snapshot** : le principe `current state → snapshot immuable → generation
+  → assignments` (CLAUDE.md) n'est pas touché : le snapshot est pris par
+  `PlanningSnapshotService::createSnapshot()` au moment réel du lancement,
+  jamais à la deadline ni à un autre instant. Une indisponibilité ajoutée
+  après la deadline mais avant le lancement fait partie du snapshot ; une
+  autre ajoutée après le lancement ne modifie jamais rétroactivement une
+  génération déjà créée — testé avec deux lancements successifs.
+- **Concurrence** : un verrou consultatif Postgres par `Planning`
+  (`pg_try_advisory_lock`) refuse un second lancement pendant qu'un premier
+  tourne (409 `generation_in_progress`), sans toucher au verrouillage
+  optimiste existant de `PlanningGenerationService::generate()` (D106) : les
+  deux mécanismes restent séparés, à deux granularités différentes (le
+  planning entier vs une génération précise).
+- **Rejeté** : un deuxième modèle de snapshot ou de solveur ; bloquer la
+  génération sur la deadline ou sur les confirmations manquantes (contredit
+  explicitement le cahier des charges de ce lot) ; fusionner le nouvel
+  endpoint avec `POST /planning-generations/{id}/solve` (routes distinctes,
+  le premier orchestrant plusieurs appels du second en substance).

@@ -15,8 +15,11 @@ import { useAuth } from '../features/auth/useAuth'
 import { AvailabilityCollectionsPanel } from '../features/planning/AvailabilityCollectionsPanel'
 import { ExtendPlanningForm } from '../features/planning/ExtendPlanningForm'
 import { PersonalPlanningView } from '../features/planning/PersonalPlanningView'
+import { CollectionStatusPanel } from '../features/planning/pilot/CollectionStatusPanel'
+import { PilotHeaderActions } from '../features/planning/pilot/PilotHeaderActions'
+import { usePlanningPilot } from '../features/planning/pilot/usePlanningPilot'
 import { TeamInvitePanel } from '../features/planning/TeamInvitePanel'
-import type { PlanningDetail, PlanningTeamMember } from '../features/planning/types'
+import type { PlanningDetail, PlanningPeriodStatus, PlanningTeamMember } from '../features/planning/types'
 import { ApiError } from '../lib/apiClient'
 
 export function PlanningDetailPage() {
@@ -43,7 +46,12 @@ export function PlanningDetailPage() {
   const [actionError, setActionError] = useState<string | null>(null)
   // Bumped after an extension so the availability follow-up shows the collection it just opened.
   const [collectionsReload, setCollectionsReload] = useState(0)
+  // Bumped after a generation so the per-person view (which reads on mount) shows the new assignments.
+  const [generationVersion, setGenerationVersion] = useState(0)
+  // The per-collection detail (history, close) is one click away for a manager, not the first thing they see.
+  const [showCollectionHistory, setShowCollectionHistory] = useState(false)
   const [saving, setSaving] = useState(false)
+  const pilot = usePlanningPilot(planningId ?? '', planning?.canManageAvailability === true)
 
   function load() {
     if (!planningId) {
@@ -112,6 +120,7 @@ export function PlanningDetailPage() {
         membershipStart: today < planning.startsAt ? today : planning.startsAt,
       })
       load()
+      void pilot.reload()
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         setActionError('Vous participez déjà à ce planning.')
@@ -211,6 +220,7 @@ export function PlanningDetailPage() {
       setMemberStart('')
       setMemberRole('MEMBER')
       loadMembers(teamStableId)
+      void pilot.reload()
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
         setMemberError('Utilisateur introuvable — vérifiez son identifiant.')
@@ -234,6 +244,7 @@ export function PlanningDetailPage() {
     try {
       await endTeamMembership(planningId, teamStableId, memberStableId)
       loadMembers(teamStableId)
+      void pilot.reload()
     } catch {
       setMemberError('Impossible de mettre fin à cette adhésion.')
     } finally {
@@ -244,6 +255,8 @@ export function PlanningDetailPage() {
   if (!planningId) {
     return <p role="alert">Planning introuvable.</p>
   }
+
+  const primaryLine = planning?.lines.find((line) => line.type === 'PRIMARY')
 
   return (
     <section className="page">
@@ -274,6 +287,11 @@ export function PlanningDetailPage() {
                 {planning.startsAt} → {planning.endsAt} ({planning.timezone})
               </p>
               <p className="page__participation">
+                {primaryLine?.periodStatus && (
+                  <span className={`tag ${PERIOD_STATUS[primaryLine.periodStatus].tone}`}>
+                    {PERIOD_STATUS[primaryLine.periodStatus].label}
+                  </span>
+                )}
                 {planning.participating ? (
                   <span className="tag tag--green">Vous participez à ce planning</span>
                 ) : (
@@ -291,12 +309,26 @@ export function PlanningDetailPage() {
                 )}
               </p>
             </div>
-            {planning.canManage && !renaming && (
-              <button type="button" className="btn btn--secondary" onClick={() => setRenaming(true)}>
-                <Icon name="pencil" size={18} strokeWidth={2} />
-                Modifier le nom
-              </button>
-            )}
+            <div className="page__actions">
+              {planning.canManage && !renaming && (
+                <button type="button" className="btn btn--secondary" onClick={() => setRenaming(true)}>
+                  <Icon name="pencil" size={18} strokeWidth={2} />
+                  Modifier le nom
+                </button>
+              )}
+              {planning.canGenerate && (
+                <PilotHeaderActions
+                  planningStableId={planning.stableId}
+                  timezone={planning.timezone}
+                  status={pilot.status}
+                  onChanged={() => void pilot.reload()}
+                  onGenerated={() => {
+                    setGenerationVersion((count) => count + 1)
+                    load()
+                  }}
+                />
+              )}
+            </div>
           </header>
 
           {planning.canManage && renaming && (
@@ -481,7 +513,10 @@ export function PlanningDetailPage() {
                     key={expandedTeamStableId}
                     planningStableId={planningId}
                     teamStableId={expandedTeamStableId}
-                    onMembersChanged={() => loadMembers(expandedTeamStableId)}
+                    onMembersChanged={() => {
+                      loadMembers(expandedTeamStableId)
+                      void pilot.reload()
+                    }}
                   />
                 )}
 
@@ -535,26 +570,72 @@ export function PlanningDetailPage() {
             )}
           </div>
 
-          <AvailabilityCollectionsPanel
-            planningStableId={planning.stableId}
-            reloadToken={collectionsReload}
-          />
+          {planning.canManageAvailability ? (
+            <>
+              {pilot.error && (
+                <p role="alert" className="alert alert--error">
+                  <Icon name="alert" size={18} strokeWidth={2} />
+                  <span>{pilot.error}</span>
+                </p>
+              )}
+              {!pilot.status && !pilot.error && (
+                <p role="status" className="muted">
+                  Chargement du suivi de la collecte…
+                </p>
+              )}
+              {pilot.status && (
+                <CollectionStatusPanel status={pilot.status} onChanged={() => void pilot.reload()} />
+              )}
+              <div>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  aria-expanded={showCollectionHistory}
+                  onClick={() => setShowCollectionHistory((value) => !value)}
+                >
+                  <Icon name={showCollectionHistory ? 'down' : 'right'} size={16} strokeWidth={2} />
+                  Collectes par fenêtre (échéances, clôture)
+                </button>
+              </div>
+              {showCollectionHistory && (
+                <AvailabilityCollectionsPanel
+                  planningStableId={planning.stableId}
+                  reloadToken={collectionsReload}
+                />
+              )}
+            </>
+          ) : (
+            <AvailabilityCollectionsPanel
+              planningStableId={planning.stableId}
+              reloadToken={collectionsReload}
+            />
+          )}
 
           {planning.canManage && (
             <ExtendPlanningForm
               planning={planning}
               onExtended={() => {
                 setCollectionsReload((count) => count + 1)
+                void pilot.reload()
                 load()
               }}
             />
           )}
 
-          <PersonalPlanningView planning={planning} />
+          <PersonalPlanningView key={generationVersion} planning={planning} />
         </>
       )}
     </section>
   )
+}
+
+/** Lifecycle of a line's period, as shown next to the planning's title. */
+const PERIOD_STATUS: Record<PlanningPeriodStatus, { label: string; tone: string }> = {
+  DRAFT: { label: 'Brouillon', tone: '' },
+  GENERATED: { label: 'Généré', tone: 'tag--blue' },
+  VALIDATED: { label: 'Validé', tone: 'tag--blue' },
+  PUBLISHED: { label: 'Publié', tone: 'tag--green' },
+  ARCHIVED: { label: 'Archivé', tone: '' },
 }
 
 const ROLE_TAG: Record<'OWNER' | 'ADMIN' | 'MEMBER', { label: string; tone: string }> = {

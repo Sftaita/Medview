@@ -285,6 +285,15 @@ la surface API (lister les `PlanningPeriod`, au minimum), hors du périmètre
 explicitement demandé pour ce lot ("privilégie le backend + tests et
 documente l'absence d'UI plutôt que d'élargir fortement le scope").
 
+> **Mise à jour lot pilotage (docs/decisions.md D129)** : un point d'entrée
+> *planning* existe désormais — `GET /plannings/{id}/generation-preflight` et
+> `POST /plannings/{id}/generations` (`PlanningGenerationLauncher`, façade
+> fine sur `PlanningGenerationService`/`PlanningSnapshotService`, une ligne à
+> la fois) — avec une UI (préflight, avertissements, résultat) dans
+> `frontend/src/features/planning/pilot/GenerationModal.tsx`. Les endpoints
+> `PlanningGenerationController` par `PlanningPeriod` restent inchangés et
+> sont ce que la façade appelle en interne.
+
 ## 12. Hors périmètre de ce lot
 
 > **Mise à jour Lot 4** : `EligibilityService`, `EligibilityMatrixBuilder`

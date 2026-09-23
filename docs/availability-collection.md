@@ -193,14 +193,23 @@ Contrôleurs minces (autorisation + codes HTTP) ; toute la règle est dans
 `AvailabilityCollectionService` / `PlanningExtensionService`. Aucune ressource
 API Platform générique. Des `stableId` partout.
 
-## 11. Rappels (préparé, non implémenté)
+## 11. Rappels (implémenté — Lot pilotage, docs/decisions.md D127)
 
 `GET …/responses?status=PENDING` et
 `AvailabilityCollectionService::pendingResponses()` renvoient exactement les
-personnes encore attendues : c'est l'audience d'un futur « envoyer un rappel ».
-**Aucun email n'est envoyé** dans ce lot : le mailer existant sert aux
-invitations (token, gabarits dédiés) et y greffer un rappel demanderait un
-gabarit, une limite de fréquence et une trace d'envoi — un lot en soi.
+personnes encore attendues — l'audience d'un rappel, réutilisée telle quelle
+par `AvailabilityReminderService`.
+
+`PlanningAvailabilityReminder` (append-only, trigger Postgres refusant
+`UPDATE`/`DELETE`) audite chaque envoi réellement accepté par le transport
+(gabarit dédié `templates/email/availability_reminder.*.twig`, best-effort
+comme les emails d'invitation, D114). Un envoi individuel
+(`POST /plannings/{id}/members/{memberId}/reminders`) ou groupé
+(`POST /plannings/{id}/reminders/pending`, cible uniquement les `PENDING`)
+sont tous deux réservés à `PLANNING_MANAGE_AVAILABILITY` (D124, inchangé) et
+protégés contre le double envoi : verrou consultatif sur la ligne `Planning`
++ une même personne jamais relancée deux fois en moins de 5 minutes. Voir
+`docs/decisions.md` D127.
 
 ## 12. Planning d'une personne (D125)
 
@@ -242,15 +251,27 @@ exposition) : ce sont des comptages.
 - Page planning : suivi des collectes (X/Y, échéance, filtre Tous / Répondu /
   À renseigner, historique), formulaire de prolongation, planning par personne
   (sélecteur, mois par mois, retour à l'équipe entière, résumé).
+- **Vue de pilotage OWNER/ADMIN** (D127-D129) : synthèse « X / Y ont confirmé »
+  + barre de progression, avertissement d'échéance dépassée (jamais bloquant),
+  « Relancer les membres en attente » (garde anti-double-clic), tableau des
+  membres (état, indisponibilités, dernier rappel) → panneau latéral (drawer)
+  au clic — identité, état de confirmation, indisponibilités/préférences de
+  la période, historique des rappels, bouton « Envoyer un rappel » —, modale
+  Paramètres (deadline, texte explicite non bloquant) et modale de génération
+  (préflight complet, avertissements, résultat par ligne). Composants dans
+  `frontend/src/features/planning/pilot/`.
 
 ## 14. Limites connues
 
 - Prolonger un planning dont une ligne est déjà validée/publiée est refusé : le
   moteur ne sait pas encore générer une tranche additionnelle à côté d'une
   période publiée. À lever avec le moteur avancé (`docs/allocation-algorithm.md`).
-- Aucun envoi de rappel (§11), aucune notification in-app.
-- Aucun écran de génération n'existe : le planning par personne affiche ce que
-  les services/l'API de génération ont produit.
+- Aucune notification in-app (seul le canal email existe pour les rappels,
+  `ReminderChannel::EMAIL`).
 - Le rollback d'une sauvegarde annule tout le cycle en cours, pas seulement le
   dernier geste fautif.
+- La génération au niveau du planning (D129) répète le pipeline existant ligne
+  par ligne, séquentiellement ; pas de parallélisation, pas de génération
+  partielle (une ligne en échec n'empêche pas les suivantes, mais rien ne les
+  relance automatiquement).
 - Un membre retiré en milieu de fenêtre reste attendu pour cette fenêtre.

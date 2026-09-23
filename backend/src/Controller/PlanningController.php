@@ -227,6 +227,7 @@ final class PlanningController
             // Whether the caller is themself in the candidate pool (an open membership) — independent of canManage (D123).
             'participating' => null !== $currentUser && null !== $this->teamMemberRepository->findOpenMembershipForUserInPlanning($planning, $currentUser),
             'canManageAvailability' => $this->authorizationChecker->isGranted(PlanningVoter::MANAGE_AVAILABILITY, $planning),
+            'canGenerate' => $this->authorizationChecker->isGranted(PlanningVoter::GENERATE, $planning),
             'startsAt' => $planning->getStartsAt()->format('Y-m-d'),
             'endsAt' => $planning->getEndsAt()->format('Y-m-d'),
             'timezone' => $planning->getTimezone(),
@@ -272,6 +273,8 @@ final class PlanningController
             ],
             'memberCount' => $memberCount,
             'planningPeriodStableId' => (string) $line->getPlanningPeriod()->getStableId(),
+            // The line's lifecycle (DRAFT → GENERATED → VALIDATED → PUBLISHED → ARCHIVED).
+            'periodStatus' => $line->getPlanningPeriod()->getStatus()->value,
             'createdAt' => $line->getCreatedAt()->format(\DATE_ATOM),
             'updatedAt' => $line->getUpdatedAt()->format(\DATE_ATOM),
         ];

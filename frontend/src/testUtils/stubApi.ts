@@ -3,7 +3,7 @@ import { vi } from 'vitest'
 type Context = { body: unknown; query: URLSearchParams }
 type Reply = unknown | { __status: number; body?: unknown }
 
-export type Route = (context: Context) => Reply
+export type Route = (context: Context) => Reply | Promise<Reply>
 
 /** Make a route answer with a given HTTP status. */
 export function status(code: number, body: unknown = {}): Reply {
@@ -42,11 +42,14 @@ export function stubApi(routes: Record<string, Route>) {
       if (!route) {
         return Promise.reject(new Error(`Unexpected fetch to ${method} ${url.pathname}`))
       }
-      const reply = route({ body, query: url.searchParams }) as { __status?: number; body?: unknown }
-      if (reply && typeof reply === 'object' && '__status' in reply) {
-        return Promise.resolve(json(reply.body, reply.__status))
-      }
-      return Promise.resolve(json(reply))
+      // A route may return a promise, to hold the response while a test looks at the "in progress" screen.
+      return Promise.resolve(route({ body, query: url.searchParams })).then((value) => {
+        const reply = value as { __status?: number; body?: unknown }
+        if (reply && typeof reply === 'object' && '__status' in reply) {
+          return json(reply.body, reply.__status)
+        }
+        return json(reply)
+      })
     }),
   )
 

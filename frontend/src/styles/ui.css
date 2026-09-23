@@ -382,3 +382,16 @@ button.field__trailing {
   white-space: nowrap;
   border: 0;
 }
+
+/* Avertissement : signal visuel seulement (échéance dépassée, membres en attente…), jamais un blocage. */
+.alert--warning {
+  background: var(--amber-50);
+  border-color: var(--amber-100);
+  color: var(--amber-700);
+}
+
+.tag--amber {
+  background: var(--amber-50);
+  border-color: var(--amber-100);
+  color: var(--amber-700);
+}

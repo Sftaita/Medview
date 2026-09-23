@@ -34,6 +34,13 @@ final class PlanningVoter extends Voter
      */
     public const MANAGE_AVAILABILITY = 'PLANNING_MANAGE_AVAILABILITY';
 
+    /**
+     * Subject: Planning. The planning-level "Générer le planning" and its preflight (D129): the same
+     * population as MANAGE_AVAILABILITY — the creator, or a current OWNER/ADMIN of any PlanningTeam
+     * of the Planning — decided by the same rule, not a second role system. Never a plain MEMBER.
+     */
+    public const GENERATE = 'PLANNING_GENERATE';
+
     public function __construct(
         private readonly PlanningTeamMemberRepository $teamMemberRepository,
     ) {
@@ -41,7 +48,7 @@ final class PlanningVoter extends Voter
 
     protected function supports(string $attribute, mixed $subject): bool
     {
-        return \in_array($attribute, [self::VIEW, self::MANAGE, self::MANAGE_AVAILABILITY], true) && $subject instanceof Planning;
+        return \in_array($attribute, [self::VIEW, self::MANAGE, self::MANAGE_AVAILABILITY, self::GENERATE], true) && $subject instanceof Planning;
     }
 
     protected function voteOnAttribute(string $attribute, mixed $subject, TokenInterface $token): bool
@@ -56,7 +63,7 @@ final class PlanningVoter extends Voter
             return $subject->getCreator() === $user;
         }
 
-        if (self::MANAGE_AVAILABILITY === $attribute) {
+        if (self::MANAGE_AVAILABILITY === $attribute || self::GENERATE === $attribute) {
             if ($subject->getCreator() === $user) {
                 return true;
             }

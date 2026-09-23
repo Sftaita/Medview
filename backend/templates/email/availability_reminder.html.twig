@@ -1,0 +1,34 @@
+{# ------------------------------------------------------------------
+   MedVue — 4. Rappel de disponibilités (envoyé par un gestionnaire du planning)
+   Objet : Merci de vérifier vos disponibilités — <planning>
+   Contexte : firstName, planningName, periodLabel, deadlineLabel (ou null), availabilityUrl
+   Jamais de détail d'indisponibilité ni de donnée d'un autre membre dans ce message.
+   Même charte que les emails d'invitation ; les noms saisis par un tiers
+   passent par |e avant d'entrer dans ui.p().
+   ------------------------------------------------------------------ #}
+{% extends 'email/_base.html.twig' %}
+{% import  'email/_components.html.twig' as ui %}
+
+{% set preheader  = 'Merci de vérifier vos indisponibilités pour ' ~ planningName ~ '.' %}
+{% set accent     = '#42A882' %}
+{% set eyebrow    = 'Disponibilités' %}
+{% set h1         = 'Vos disponibilités<br>sont attendues' %}
+{% set panelLabel = 'Planning' %}
+{% set panelTitle = planningName %}
+{% set panelSub   = 'Période du ' ~ periodLabel %}
+{% set ctaLabel   = 'Accéder à mes disponibilités' %}
+{% set ctaUrl     = availabilityUrl %}
+{% set footerNote = 'Vous recevez cet email car vous participez à un planning de garde sur MedVue.' %}
+
+{% block title %}Rappel de disponibilités{% endblock %}
+{# Pas d'adresse postale : à renseigner une fois l'adresse légale confirmée (voir les autres emails). #}
+{% block postal %}{% endblock %}
+
+{% block content %}
+{{ ui.p('Bonjour ' ~ firstName|e ~ ',', 24) }}
+{{ ui.p('Le planning de garde ' ~ ui.b(planningName) ~ ' pour la période du ' ~ periodLabel|e ~ ' est en préparation.', 18) }}
+{{ ui.p('Merci de vérifier vos indisponibilités et de confirmer, dans MedVue, qu’elles sont à jour — y compris si vous n’en avez aucune.') }}
+{% if deadlineLabel %}
+{{ ui.p('La date souhaitée pour cette étape est le ' ~ deadlineLabel|e ~ '. Vous pouvez néanmoins encore compléter ou modifier vos disponibilités après cette date.') }}
+{% endif %}
+{% endblock %}

@@ -1,5 +1,7 @@
 export type PlanningLineType = 'PRIMARY' | 'SECONDARY'
 
+export type PlanningPeriodStatus = 'DRAFT' | 'GENERATED' | 'VALIDATED' | 'PUBLISHED' | 'ARCHIVED'
+
 export type PlanningSummary = {
   stableId: string
   name: string
@@ -10,6 +12,8 @@ export type PlanningSummary = {
   participating?: boolean
   /** Creator or team OWNER/ADMIN: may follow up availability collections (D124). */
   canManageAvailability?: boolean
+  /** Creator or team OWNER/ADMIN: may open the generation preflight and launch a generation (D129). */
+  canGenerate?: boolean
   startsAt: string
   endsAt: string
   timezone: string
@@ -33,6 +37,8 @@ export type PlanningLineSummary = {
   team: PlanningLineTeam
   memberCount?: number
   planningPeriodStableId: string
+  /** Lifecycle of the line's period: DRAFT, GENERATED, VALIDATED, PUBLISHED, ARCHIVED. */
+  periodStatus?: PlanningPeriodStatus
   createdAt: string
   updatedAt: string
 }

@@ -16,6 +16,7 @@ use App\Exception\AvailabilityCollectionOutsidePlanningException;
 use App\Exception\AvailabilityCollectionOverlapException;
 use App\Exception\ConflictingUnavailabilityException;
 use App\Exception\InvalidAvailabilityDeadlineException;
+use App\Exception\NoOpenAvailabilityCollectionException;
 use App\Exception\NotAnAvailabilityRespondentException;
 use App\Repository\AvailabilityCollectionRepository;
 use App\Repository\AvailabilityCollectionResponseRepository;
@@ -99,6 +100,34 @@ final class AvailabilityCollectionService
 
         $collection->changeDeadline($deadline, $this->now());
         $this->entityManager->flush();
+    }
+
+    /**
+     * The planning-level "date souhaitée de fin d'encodage" (docs/decisions.md
+     * D127): the deadline of every OPEN collection of the planning, set in one
+     * transaction. Informative only — nothing anywhere refuses an answer, an
+     * edit of the calendar or a generation because it is passed. Closed
+     * collections are frozen history and keep theirs. Returns how many
+     * collections were updated.
+     *
+     * @throws NoOpenAvailabilityCollectionException
+     * @throws InvalidAvailabilityDeadlineException
+     */
+    public function changePlanningDeadline(Planning $planning, ?\DateTimeImmutable $deadline): int
+    {
+        $open = $this->collectionRepository->findOpenByPlanning($planning);
+        if ([] === $open) {
+            throw new NoOpenAvailabilityCollectionException();
+        }
+        $this->assertDeadlineNotPast($planning, $deadline);
+
+        $now = $this->now();
+        foreach ($open as $collection) {
+            $collection->changeDeadline($deadline, $now);
+        }
+        $this->entityManager->flush();
+
+        return \count($open);
     }
 
     public function close(AvailabilityCollection $collection): void
