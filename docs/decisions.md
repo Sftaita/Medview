@@ -147,6 +147,7 @@ l'ancienne (voir légende).
 | [D124](#d124--planning_manage_availability--créateur-ou-owneradmin-plus-large-que-manage) | 2026-09-21 | `PLANNING_MANAGE_AVAILABILITY` : créateur ou OWNER/ADMIN | 🟡 |
 | [D125](#d125--lecture-des-affectations--dernière-génération-completed-de-chaque-ligne) | 2026-09-21 | Lecture des affectations : dernière génération `COMPLETED` de chaque ligne | 🟢 |
 | [D126](#d126--frontend--magasin-partagé-sauvegarde-optimiste-par-diff-retour-à-la-vérité-serveur) | 2026-09-21 | Frontend : magasin partagé, sauvegarde optimiste par diff | 🟢 |
+| [D134](#d134--semaine-type--composant-weekstructureeditor-intégré-tel-quel-boutons-de-lapp-pas-de-mui-pas-encore-branché) | 2026-09-23 | Semaine type : `WeekStructureEditor` intégré tel quel, boutons `.btn` (pas de MUI), pas encore branché | 🟡 |
 
 ---
 
@@ -3453,3 +3454,28 @@ l'ancienne (voir légende).
   explicitement le cahier des charges de ce lot) ; fusionner le nouvel
   endpoint avec `POST /planning-generations/{id}/solve` (routes distinctes,
   le premier orchestrant plusieurs appels du second en substance).
+
+## D134 — Semaine type : composant `WeekStructureEditor` intégré tel quel, boutons de l'app (pas de MUI), pas encore branché
+
+- **Contexte** : le package de design `docs/Design/react_semaine_type/`
+  fournit un éditeur de structure hebdomadaire (garde isolée / bloc atomique
+  A–D / pas de garde) déjà écrit et testé, avec consigne de ne pas le
+  réécrire. Détail : `docs/week-structure.md`.
+- **Choix** : copie dans `frontend/src/features/week-structure/` ; logique
+  pure `weeklyStructure.ts` et ses tests conservés à l'identique ; composant
+  contrôlé (`value`/`onChange`), seule la sélection est interne.
+- **Écarts assumés par rapport au package** : le package suppose MUI, que
+  l'app n'utilise pas — les boutons passent sur les classes `.btn` de
+  `styles/ui.css` (libellés exacts et 48 px au palier `s` conservés) ;
+  `tokens.css` du package non copié (toutes ses variables existent dans
+  `styles/tokens.css`) ; `aria-label` explicite par tuile (nom accessible
+  illisible sinon, réduit à l'initiale en palier `s`) ; `readOnly` dérivé
+  plutôt qu'un `setState` dans un `useEffect`.
+- **Hors périmètre, volontairement** : aucune page, aucun endpoint, aucune
+  persistance. La conversion payload → `DutyPattern` (D052) touche le
+  modèle de génération et doit être conçue à part (versionnement, effet
+  uniquement sur les générations futures, jamais sur un planning publié).
+- **Rejeté** : ajouter MUI pour un seul composant ; réécrire le composant
+  dans le style des autres features ; poser les paliers en media queries
+  (le composant doit se comporter pareil en colonne latérale ou en pleine
+  page).

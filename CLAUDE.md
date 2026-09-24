@@ -63,6 +63,7 @@ détaillé (encore conceptuel, rien d'implémenté) :
 | Refonte de l'interface (charte, tokens, mobile d'abord) : cadre, connexion/inscription/invitations, tableau de bord, plannings, calendrier d'indisponibilités en **jour entier** (sélection multiple, tactile) | ✅ Livré (2026-09-21) — tests Vitest, vérifié dans un navigateur | `docs/decisions.md` D117-D119, `docs/availability.md` §8 |
 | Collecte des disponibilités par fenêtre (`AvailabilityCollection`/`Response`), prolongation d'un planning, participation du créateur, planning par personne, calendrier optimiste sans « Enregistrer » | ✅ Livré (2026-09-21) — tests backend/frontend + UAT navigateur complète (deux comptes, deux onglets) | `docs/availability-collection.md`, `docs/decisions.md` D120-D126 |
 | Vue de pilotage OWNER/ADMIN d'un planning : statut de collecte par membre (drawer, indisponibilités de la période), rappels email individuels/groupés (audit append-only), paramètre `availabilityDeadline` informatif, préflight + génération au niveau du planning (façade sur le pipeline existant, snapshot pris au lancement) | ✅ Livré (2026-09-23) — tests backend/frontend + UAT navigateur complète (génération réelle OR-Tools bout en bout, email réel via Mailpit, immutabilité du snapshot vérifiée) ; vérification mobile non complétée (limite de l'environnement de test, cf. rapport) | `docs/availability-collection.md` §11/§13/§14, `docs/planning-generation.md` §11, `docs/decisions.md` D127-D129 |
+| Semaine type : composant `WeekStructureEditor` (garde isolée / bloc atomique / pas de garde, payload prêt pour `DutyPattern`) | 🟡 Composant frontend livré et testé (2026-09-23), **pas encore branché** (ni page, ni endpoint, ni persistance) | `docs/week-structure.md`, `docs/decisions.md` D134 |
 | Échanges de garde, notifications (in-app), export calendrier | ⏳ Pas commencé | — |
 
 ## Où trouver quoi
@@ -107,6 +108,12 @@ détaillé (encore conceptuel, rien d'implémenté) :
   `UserAvailabilityPeriod` (D120), extension d'un planning (D122), participation
   du créateur (D123), autorisations (D124), lecture des affectations par
   personne (D125), calendrier optimiste (D126).
+- **`docs/week-structure.md`** — composant réutilisable `WeekStructureEditor`
+  (`frontend/src/features/week-structure/`) : structure hebdomadaire d'une
+  ligne (garde isolée, bloc attribué d'un seul tenant, jour sans garde =
+  absent de la demande), props, règles métier, payload
+  `blocks`/`solo`/`excluded` et correspondance prévue avec `DutyPattern`,
+  paliers responsive sur la largeur du composant. Pas encore branché.
 - **`docs/fairness.md`** — `FairnessContext` (dimensions supportées/non
   supportées, `RequiredDemand`, `EffectiveExposure`, targets bruts et
   discrétionnaires, `STRUCTURALLY_FORCED`) et l'`OptimizationProblem`

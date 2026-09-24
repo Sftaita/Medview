@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/surgery-hub-design-system-d9910452-cae4-4658-bd1e-a9360bed9e01/tokens/fonts.css">
+<link rel="stylesheet" href="_ds/surgery-hub-design-system-d9910452-cae4-4658-bd1e-a9360bed9e01/tokens/colors.css">
+<link rel="stylesheet" href="_ds/surgery-hub-design-system-d9910452-cae4-4658-bd1e-a9360bed9e01/tokens/typography.css">
+<link rel="stylesheet" href="_ds/surgery-hub-design-system-d9910452-cae4-4658-bd1e-a9360bed9e01/tokens/spacing.css">
+<link rel="stylesheet" href="_ds/surgery-hub-design-system-d9910452-cae4-4658-bd1e-a9360bed9e01/tokens/effects.css">
+<link rel="stylesheet" href="_ds/surgery-hub-design-system-d9910452-cae4-4658-bd1e-a9360bed9e01/tokens/base.css">
+<link rel="stylesheet" href="_ds/surgery-hub-design-system-d9910452-cae4-4658-bd1e-a9360bed9e01/styles.css">
+<script src="_ds/surgery-hub-design-system-d9910452-cae4-4658-bd1e-a9360bed9e01/_ds_bundle.js"></script>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--surface-page);font-family:var(--font-sans);color:var(--text-body);-webkit-font-smoothing:antialiased}
+a{color:var(--text-link);text-decoration:none}
+a:hover{color:var(--green-800);text-decoration:underline}
+</style>
+</helmet>
+
+<section style="{{ cardStyle }}" ref="{{ rootRef }}">
+<div style="display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:4px 12px; margin-bottom:14px">
+<h2 style="margin:0; font-size:15px; font-weight:800; letter-spacing:-0.01em; color:var(--text-strong)">La semaine type</h2>
+<span style="font-size:12.5px; font-weight:700; color:var(--text-muted); font-variant-numeric:tabular-nums">{{ weekSummary }}</span>
+</div>
+
+<div style="{{ tileGrid }}">
+<sc-for list="{{ tiles }}" as="d" hint-placeholder-count="7">
+<button style="{{ d.tileStyle }}" onClick="{{ d.onClick }}" title="{{ d.title }}" aria-pressed="{{ d.pressed }}">
+<span style="{{ d.barStyle }}"></span>
+<span style="{{ d.shortStyle }}">{{ d.short }}</span>
+<span style="{{ d.nameStyle }}">{{ d.name }}</span>
+<span style="{{ d.stateStyle }}">{{ d.state }}</span>
+<span style="{{ d.pickStyle }}"><span style="{{ d.pickDot }}"></span></span>
+</button>
+</sc-for>
+</div>
+
+<sc-for list="{{ rails }}" as="r" hint-placeholder-count="1">
+<div style="{{ railGrid }}">
+<sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="7">
+<div style="position:relative; height:22px">
+<span style="{{ c.barStyle }}"></span>
+<span style="{{ c.linkStyle }}"></span>
+<sc-if value="{{ c.letter }}" hint-placeholder-val="{{ false }}"><span style="{{ c.letterStyle }}">{{ c.letter }}</span></sc-if>
+</div>
+</sc-for>
+</div>
+</sc-for>
+
+<div style="{{ actionStyle }}">
+<sc-if value="{{ hasSel }}" hint-placeholder-val="{{ false }}">
+<div style="flex:1 1 200px; min-width:0">
+<div style="font-size:13.5px; font-weight:800; color:var(--text-strong)">{{ selTitle }}</div>
+<div style="margin-top:2px; font-size:12px; line-height:1.4; color:var(--text-muted)">{{ selSub }}</div>
+</div>
+<div style="{{ btnGrid }}">
+<x-import component-from-global-scope="DesignSystem_d99104.Button" variant="primary" size="{{ btnSize }}" full-width="{{ btnFull }}" disabled="{{ cantBlock }}" on-click="{{ makeBlock }}" hint-size="auto,40px">Créer un bloc</x-import>
+<x-import component-from-global-scope="DesignSystem_d99104.Button" variant="secondary" size="{{ btnSize }}" full-width="{{ btnFull }}" on-click="{{ makeSolo }}" hint-size="auto,40px">Garde isolée</x-import>
+<x-import component-from-global-scope="DesignSystem_d99104.Button" variant="secondary" size="{{ btnSize }}" full-width="{{ btnFull }}" on-click="{{ makeNone }}" hint-size="auto,40px">Pas de garde</x-import>
+<x-import component-from-global-scope="DesignSystem_d99104.Button" variant="ghost" size="{{ btnSize }}" full-width="{{ btnFull }}" on-click="{{ clearSel }}" hint-size="auto,40px">Annuler</x-import>
+</div>
+</sc-if>
+<sc-if value="{{ noSel }}" hint-placeholder-val="{{ true }}">
+<span style="font-size:12.5px; line-height:1.5; color:var(--text-muted); text-wrap:pretty">Touchez un ou plusieurs jours pour changer leur rôle. Un bloc peut réunir des jours non consécutifs — vendredi et dimanche sans le samedi, par exemple.</span>
+</sc-if>
+</div>
+
+<sc-if value="{{ hasBlocks }}" hint-placeholder-val="{{ true }}">
+<div style="display:flex; flex-direction:column; gap:10px; margin-top:14px; padding-top:14px; border-top:1px solid var(--border-subtle)">
+<sc-for list="{{ blockRows }}" as="b" hint-placeholder-count="1">
+<div style="display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px">
+<span style="{{ b.chipStyle }}">{{ b.id }}</span>
+<input type="text" value="{{ b.name }}" onChange="{{ b.onName }}" aria-label="Nom du bloc" style="flex:1 1 160px; min-width:0; height:40px; padding:0 12px; border:1px solid var(--border-default); border-radius:10px; background:var(--surface-card); font-family:var(--font-sans); font-size:14px; font-weight:700; color:var(--text-strong); outline:none" style-focus="border-color:var(--brand); box-shadow:0 0 0 3px var(--green-100)">
+<span style="{{ membersStyle }}">{{ b.members }}</span>
+<button style="{{ dissolveStyle }}" style-hover="background:var(--status-crit-surface); border-color:var(--red-100); color:var(--red-700)" onClick="{{ b.onDissolve }}">Dissoudre</button>
+</div>
+</sc-for>
+</div>
+</sc-if>
+
+<sc-for list="{{ warnings }}" as="w" hint-placeholder-count="0">
+<div style="{{ w.style }}">
+<span style="{{ w.dotStyle }}"></span>
+<span>{{ w.text }}</span>
+</div>
+</sc-for>
+</section>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:900},&quot;modele&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;V·S·D en bloc&quot;,&quot;Bloc V·D, samedi seul&quot;,&quot;Sans dimanche&quot;,&quot;Bloc semaine + bloc week-end&quot;,&quot;Tous isolés&quot;],&quot;default&quot;:&quot;V·S·D en bloc&quot;,&quot;tsType&quot;:&quot;'V·S·D en bloc' | 'Bloc V·D, samedi seul' | 'Sans dimanche' | 'Bloc semaine + bloc week-end' | 'Tous isolés'&quot;,&quot;section&quot;:&quot;Structure&quot;},&quot;onChange&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;(s: { blocks: { id: string; name: string; days: string[] }[]; solo: string[]; excluded: string[] }) =&gt; void&quot;}}">
+const NAMES = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
+const SHORT = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+const CODES = ['LUN','MAR','MER','JEU','VEN','SAM','DIM'];
+const LETTERS = ['A','B','C','D'];
+const TONES = {
+  A:{mark:'var(--brand)', bg:'var(--green-50)', bd:'var(--green-200)', ink:'var(--green-800)'},
+  B:{mark:'var(--blue-600)', bg:'var(--blue-50)', bd:'var(--blue-100)', ink:'var(--blue-700)'},
+  C:{mark:'var(--gray-700)', bg:'var(--gray-100)', bd:'var(--gray-300)', ink:'var(--gray-900)'},
+  D:{mark:'var(--amber-700)', bg:'var(--status-warn-surface)', bd:'var(--amber-100)', ink:'var(--amber-700)'}
+};
+const MODELES = {
+  'V·S·D en bloc':'vsd', 'Bloc V·D, samedi seul':'vd', 'Sans dimanche':'nosun',
+  'Bloc semaine + bloc week-end':'two', 'Tous isolés':'solo'
+};
+
+function preset(kind) {
+  const days = [0,1,2,3,4,5,6].map(() => ({mode:'solo', block:null}));
+  const blocks = [];
+  const put = (id, name, idx) => { blocks.push({id:id, name:name}); idx.forEach(i => { days[i] = {mode:'block', block:id}; }); };
+  if (kind === 'vsd') put('A', 'Week-end', [4,5,6]);
+  if (kind === 'vd') put('A', 'Vendredi + dimanche', [4,6]);
+  if (kind === 'nosun') days[6] = {mode:'none', block:null};
+  if (kind === 'two') { put('A', 'Semaine', [0,1,2,3]); put('B', 'Week-end', [4,5,6]); }
+  return {days:days, blocks:blocks};
+}
+
+class Component extends DCLogic {
+  _ref = React.createRef();
+  _modele = null;
+  state = Object.assign({sel:[], w:900}, preset('vsd'));
+
+  componentDidMount() {
+    this.syncModele();
+    if (typeof ResizeObserver !== 'undefined' && this._ref.current) {
+      this._ro = new ResizeObserver(es => {
+        const w = es[0].contentRect.width;
+        if (Math.abs(w - this.state.w) > 4) this.setState({w:w});
+      });
+      this._ro.observe(this._ref.current);
+    }
+  }
+  componentDidUpdate(prevProps, prevState) {
+    this.syncModele();
+    if ((prevState.days !== this.state.days || prevState.blocks !== this.state.blocks) && typeof this.props.onChange === 'function') {
+      this.props.onChange(this.structure());
+    }
+  }
+  componentWillUnmount() { if (this._ro) this._ro.disconnect(); }
+
+  syncModele() {
+    const m = this.props.modele || 'V·S·D en bloc';
+    if (m === this._modele) return;
+    this._modele = m;
+    this.setState(Object.assign({sel:[]}, preset(MODELES[m] || 'vsd')));
+  }
+  structure() {
+    const st = this.state;
+    return {
+      blocks: st.blocks.map(b => ({id:b.id, name:b.name, days:this.members(st.days, b.id).map(i => CODES[i])})),
+      solo: st.days.map((d, i) => d.mode === 'solo' ? CODES[i] : null).filter(Boolean),
+      excluded: st.days.map((d, i) => d.mode === 'none' ? CODES[i] : null).filter(Boolean)
+    };
+  }
+
+  members(days, id) { const out = []; days.forEach((d, i) => { if (d.block === id) out.push(i); }); return out; }
+  apply(fn) {
+    const days = this.state.days.map(d => Object.assign({}, d));
+    let blocks = this.state.blocks.map(b => Object.assign({}, b));
+    blocks = fn(days, blocks) || blocks;
+    const keep = [];
+    blocks.forEach(b => {
+      const m = this.members(days, b.id);
+      if (m.length >= 2) keep.push(b);
+      else m.forEach(i => { days[i] = {mode:'solo', block:null}; });
+    });
+    this.setState({days:days, blocks:keep, sel:[]});
+  }
+  list(idx) { return idx.map(i => SHORT[i]).join(' · '); }
+
+  renderVals() {
+    const st = this.state, w = st.w;
+    /* trois paliers, calculés sur la largeur réelle du composant */
+    const tier = w >= 820 ? 'l' : (w >= 480 ? 'm' : 's');
+    const L = tier === 'l', S = tier === 's';
+    const gap = S ? 5 : 8;
+    const sel = st.sel.slice().sort((a, b) => a - b);
+    const blocks = st.blocks.filter(b => this.members(st.days, b.id).length >= 2);
+    const solos = [], nones = [];
+    st.days.forEach((d, i) => { if (d.mode === 'solo') solos.push(i); if (d.mode === 'none') nones.push(i); });
+    const units = solos.length + blocks.length, dutyDays = 7 - nones.length;
+
+    const tiles = st.days.map((d, i) => {
+      const picked = sel.indexOf(i) !== -1;
+      const T = d.mode === 'block' ? TONES[d.block] : null;
+      const blk = T ? st.blocks.filter(b => b.id === d.block)[0] : null;
+      const none = d.mode === 'none';
+      return {key:'t'+i, pressed: picked ? 'true' : 'false', name:NAMES[i],
+        short: S ? SHORT[i].charAt(0) : SHORT[i],
+        state: L ? (none ? 'Pas de garde' : (T ? 'Bloc ' + d.block : 'Garde isolée')) : (none ? '—' : (T ? d.block : 'G')),
+        title:NAMES[i] + ' · ' + (none ? 'pas de garde' : (T ? 'bloc ' + d.block + (blk ? ' (' + blk.name + ')' : '') : 'garde isolée')),
+        tileStyle:{position:'relative', display:'flex', flexDirection:'column', alignItems: L ? 'flex-start' : 'center', gap:'3px', minWidth:0,
+          minHeight: L ? '104px' : (S ? '72px' : '80px'), padding: L ? '14px 12px 12px' : (S ? '13px 2px 9px' : '14px 4px 10px'),
+          textAlign: L ? 'left' : 'center', cursor:'pointer', fontFamily:'var(--font-sans)', overflow:'hidden', borderRadius: S ? '10px' : '12px',
+          background: none ? 'var(--surface-sunken)' : (T ? T.bg : 'var(--surface-card)'),
+          border:'1px ' + (none ? 'dashed' : 'solid') + ' ' + (none ? 'var(--border-strong)' : (T ? T.bd : 'var(--border-default)')),
+          boxShadow: picked ? (L ? '0 0 0 2px var(--text-strong)' : '0 0 0 2.5px var(--text-strong), 0 0 0 5px var(--surface-card)') : 'none'},
+        barStyle:{position:'absolute', top:0, left:0, right:0, height:'4px', background: T ? T.mark : 'transparent'},
+        shortStyle: L
+          ? {fontSize:'10.5px', fontWeight:800, letterSpacing:'.08em', textTransform:'uppercase', color:'var(--text-subtle)'}
+          : {fontSize: S ? '15px' : '14px', fontWeight:800, letterSpacing: S ? 0 : '-0.01em', textTransform: S ? 'uppercase' : 'none', color: none ? 'var(--text-subtle)' : 'var(--text-strong)'},
+        nameStyle:{display: L ? 'block' : 'none', fontSize:'15px', fontWeight:800, letterSpacing:'-0.01em', color: none ? 'var(--text-subtle)' : 'var(--text-strong)'},
+        stateStyle: L
+          ? {marginTop:'auto', fontSize:'12.5px', fontWeight:700, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:'100%', color: none ? 'var(--text-subtle)' : (T ? T.ink : 'var(--text-body)')}
+          : {marginTop:'auto', display:'flex', alignItems:'center', justifyContent:'center', minWidth:'20px', height:'20px', padding:'0 4px', borderRadius:'6px', fontSize:'11px', fontWeight:800, lineHeight:1,
+              background: none ? 'transparent' : (T ? T.mark : 'var(--gray-100)'), border: none ? '1px dashed var(--border-strong)' : '1px solid transparent',
+              color: none ? 'var(--text-subtle)' : (T ? 'var(--white)' : 'var(--text-muted)')},
+        pickStyle: L ? {position:'absolute', top:'10px', right:'10px', display:'flex', alignItems:'center', justifyContent:'center', width:'18px', height:'18px', borderRadius:'50%',
+          border:'1.5px solid ' + (picked ? 'var(--text-strong)' : 'var(--border-strong)'), background: picked ? 'var(--text-strong)' : 'var(--surface-card)'} : {display:'none'},
+        pickDot:{width:'6px', height:'6px', borderRadius:'50%', background: picked ? 'var(--white)' : 'transparent'},
+        onClick:(() => this.setState({sel: picked ? st.sel.filter(x => x !== i) : st.sel.concat([i])}))};
+    });
+
+    const rails = blocks.map(b => {
+      const m = this.members(st.days, b.id), T = TONES[b.id];
+      const first = m[0], last = m[m.length - 1];
+      return {key:'r'+b.id, cells:[0,1,2,3,4,5,6].map(i => {
+        const isM = m.indexOf(i) !== -1, inSpan = i >= first && i <= last;
+        return {key:'c'+i, letter: i === first ? b.id : '',
+          barStyle: isM ? {position:'absolute', top:'7px', height:'8px', left: i === first ? '10%' : 0, right: i === last ? '10%' : (-gap) + 'px',
+            background:T.mark, borderRadius: (i === first ? '4px' : '0') + ' ' + (i === last ? '4px 4px' : '0 0') + ' ' + (i === first ? '4px' : '0')} : {display:'none'},
+          linkStyle: (!isM && inSpan) ? {position:'absolute', top:'10px', left:0, right:(-gap) + 'px', borderTop:'2px dashed ' + T.mark, opacity:.7} : {display:'none'},
+          letterStyle:{position:'absolute', top:'2px', left:'calc(10% - 9px)', display:'flex', alignItems:'center', justifyContent:'center', width:'18px', height:'18px', borderRadius:'6px',
+            background:'var(--surface-card)', border:'2px solid ' + T.mark, color:T.ink, fontSize:'10px', fontWeight:800, lineHeight:1}};
+      })};
+    });
+
+    const blockRows = blocks.map(b => {
+      const m = this.members(st.days, b.id), T = TONES[b.id];
+      const gaps = m[m.length - 1] - m[0] + 1 > m.length;
+      return {key:'b'+b.id, id:b.id, name:b.name,
+        members:this.list(m) + ' · ' + m.length + ' jours' + (gaps ? ' · non consécutifs' : ''),
+        chipStyle:{flex:'none', display:'flex', alignItems:'center', justifyContent:'center', width:'32px', height:'32px', borderRadius:'9px', background:T.mark, color:'var(--white)', fontSize:'13px', fontWeight:800},
+        onName:(e => { const v = e.target.value; this.setState({blocks:st.blocks.map(x => x.id === b.id ? Object.assign({}, x, {name:v}) : x)}); }),
+        onDissolve:(() => this.apply(days => { days.forEach((d, i) => { if (d.block === b.id) days[i] = {mode:'solo', block:null}; }); }))};
+    });
+
+    const warnings = [];
+    const warn = (text, tone) => warnings.push({key:'w'+warnings.length, text:text,
+      style:{display:'flex', gap:'9px', marginTop:'12px', padding:'11px 12px', borderRadius:'11px', fontSize:'12.5px', lineHeight:1.45,
+        background: tone === 'warn' ? 'var(--status-warn-surface)' : 'var(--status-info-surface)',
+        border:'1px solid ' + (tone === 'warn' ? 'var(--amber-100)' : 'var(--blue-100)'),
+        color: tone === 'warn' ? 'var(--amber-700)' : 'var(--blue-700)'},
+      dotStyle:{flex:'none', width:'6px', height:'6px', marginTop:'6px', borderRadius:'50%', background: tone === 'warn' ? 'var(--amber-700)' : 'var(--accent)'}});
+    if (nones.length === 7) warn('Aucune garde ne sera générée pour cette ligne de planning.', 'warn');
+    blocks.forEach(b => {
+      const n = this.members(st.days, b.id).length;
+      if (n >= 5) warn('Le bloc ' + b.id + ' couvre ' + n + ' jours : une seule personne sera de garde presque toute la semaine.', 'warn');
+    });
+    if (nones.length && nones.length < 7) warn(this.list(nones) + ' : aucune garde ne sera créée. Ce n\u2019est pas une indisponibilité — le jour n\u2019existe simplement pas dans la demande.', 'info');
+
+    const free = LETTERS.filter(l => !blocks.some(b => b.id === l));
+
+    return {
+      rootRef:this._ref,
+      cardStyle:{width:'100%', minWidth:0, background:'var(--surface-card)', border:'1px solid var(--border-subtle)', borderRadius:'12px', padding: S ? '14px' : '18px', fontFamily:'var(--font-sans)'},
+      tileGrid:{display:'grid', gridTemplateColumns:'repeat(7, minmax(0,1fr))', gap: gap + 'px'},
+      railGrid:{display:'grid', gridTemplateColumns:'repeat(7, minmax(0,1fr))', gap: gap + 'px', marginTop:'6px'},
+      weekSummary: units + ' unité' + (units > 1 ? 's' : '') + ' à attribuer · ' + dutyDays + ' jour' + (dutyDays > 1 ? 's' : '') + ' de garde',
+      tiles:tiles, rails:rails, blockRows:blockRows, hasBlocks: blocks.length > 0, warnings:warnings,
+      membersStyle:{flex: S ? '1 1 100%' : 'none', order: S ? 3 : 0, fontSize:'12.5px', fontWeight:700, color:'var(--text-muted)', fontVariantNumeric:'tabular-nums', whiteSpace: S ? 'normal' : 'nowrap'},
+
+      hasSel: sel.length > 0, noSel: sel.length === 0,
+      selTitle: sel.length + (sel.length > 1 ? ' jours sélectionnés' : ' jour sélectionné'),
+      selSub: this.list(sel) + (sel.length === 1 ? ' · un bloc réunit au moins deux jours' : ''),
+      cantBlock: sel.length < 2 || !free.length,
+      btnFull: S,
+      btnSize: S ? 'md' : 'sm',
+      dissolveStyle:{flex:'none', height: S ? '48px' : '34px', padding: S ? '0 16px' : '0 12px', border:'1px solid var(--border-subtle)', borderRadius: S ? '12px' : '9px', background:'var(--surface-card)', fontFamily:'var(--font-sans)', fontSize: S ? '14px' : '12.5px', fontWeight:700, color:'var(--text-muted)', cursor:'pointer'},
+      btnGrid: S ? {display:'grid', gridTemplateColumns:'1fr 1fr', gap:'8px', width:'100%'} : {display:'flex', flexWrap:'wrap', gap:'8px'},
+      actionStyle:{display:'flex', flexWrap:'wrap', alignItems:'center', gap:'12px', marginTop:'14px', padding: S ? '12px' : '12px 14px', minHeight:'64px', borderRadius:'12px',
+        background: sel.length ? 'var(--surface-sunken)' : 'transparent', border:'1px ' + (sel.length ? 'solid' : 'dashed') + ' var(--border-default)'},
+      makeBlock:(() => {
+        if (sel.length < 2 || !free.length) return;
+        const id = free[0];
+        this.apply((days, bl) => { sel.forEach(i => { days[i] = {mode:'block', block:id}; }); bl.push({id:id, name:this.list(sel)}); return bl; });
+      }),
+      makeSolo:(() => this.apply(days => { sel.forEach(i => { days[i] = {mode:'solo', block:null}; }); })),
+      makeNone:(() => this.apply(days => { sel.forEach(i => { days[i] = {mode:'none', block:null}; }); })),
+      clearSel:(() => this.setState({sel:[]}))
+    };
+  }
+}
+
+</script>
+</body>
+</html>
