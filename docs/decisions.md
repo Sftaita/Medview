@@ -3479,3 +3479,29 @@ l'ancienne (voir légende).
   dans le style des autres features ; poser les paliers en media queries
   (le composant doit se comporter pareil en colonne latérale ou en pleine
   page).
+
+## D135 — Kit PWA et marque officielle : `frontend/public`, service worker en production seulement
+
+- **Contexte** : le kit `docs/Design/pwa_medvue/` (icônes, manifest, service
+  worker, page hors ligne, écrans de lancement iOS) est écrit pour Symfony
+  (`public/`, `base.html.twig`). L'interface de MedVue est servie par le
+  frontend Vite/nginx (`www.medvue.be`), l'API sur un autre domaine.
+- **Choix** : fichiers du kit copiés tels quels dans `frontend/public/`
+  (sauf `head.html`/README), balises de `head.html` reportées dans
+  `frontend/index.html`. Raccourcis du manifest adaptés aux vraies routes
+  (`/my-availability`, `/my-duties`, `/plannings` — « Planning d'équipe »
+  devient « Mes plannings », il n'existe pas de route d'équipe globale).
+  `sw.js` et `manifest.webmanifest` servis par nginx en `no-cache`, manifest
+  en `application/manifest+json` (absent des `mime.types` de nginx 1.27).
+  Le service worker est enregistré depuis `src/registerServiceWorker.ts`,
+  **uniquement en build de production** : en dev, son cache-first sur les
+  assets statiques gênerait le HMR de Vite. Le composant `Logo` (placeholder
+  « pulse ») dessine désormais la marque officielle (grille de semaine, deux
+  jours fusionnés en un bloc), même géométrie que les icônes.
+- **Invariants testés** (`src/pwa.test.ts`) : chaque fichier référencé par
+  le manifest, `index.html` et la liste de précache existe ; chaque
+  raccourci pointe vers une route de `App.tsx` ; le service worker ignore
+  les requêtes non GET et `/api/`.
+- **Limites héritées du kit** : pas de mode hors ligne réel (page d'attente
+  seulement), pas de notifications push. Incrémenter `VERSION` dans `sw.js`
+  à chaque déploiement modifiant un fichier précaché.
