@@ -610,10 +610,167 @@
   color: var(--text-strong);
 }
 
+/* ---------- Résultat de la génération (couverture, gardes non couvertes) ---------- */
+.coverage-header {
+  display: grid;
+  gap: 6px;
+}
+
+.coverage-header__empty {
+  margin: 0;
+}
+
+.coverage-header__badge {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+}
+
+.coverage-header__badge--complete {
+  background: var(--status-ok-surface);
+  border-color: var(--green-200);
+  color: var(--green-800);
+}
+
+.coverage-header__badge--incomplete {
+  background: var(--amber-50);
+  border-color: var(--amber-100);
+  color: var(--amber-700);
+}
+
+.coverage-header__title {
+  margin: 0;
+  font-weight: var(--weight-bold);
+}
+
+.coverage-header__count {
+  margin: 2px 0 0;
+  font-size: var(--text-sm);
+}
+
+.coverage-header__uncovered {
+  margin: 0;
+  color: var(--amber-700);
+  font-weight: var(--weight-semibold);
+  font-size: var(--text-sm);
+}
+
+.coverage-header__line {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.uncovered-duty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+
+.uncovered-duty__why summary {
+  cursor: pointer;
+  color: var(--text-body);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.uncovered-duty__reasons {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--text-body);
+  font-size: var(--text-sm);
+}
+
+.uncovered-duty__unknown {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.duty__edit {
+  margin-left: auto;
+}
+
+/* ---------- Réaffectation d'une garde (modal, docs/decisions.md D131) ---------- */
+.reassignment-block-summary {
+  margin: 0 0 12px;
+}
+
+.reassignment-recap {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+
+.reassignment-candidates {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.reassignment-candidate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.reassignment-candidate__name {
+  font-weight: var(--weight-medium);
+  color: var(--text-strong);
+}
+
+.reassignment-candidate__note {
+  font-size: var(--text-sm);
+}
+
+/* ---------- Statistiques de répartition (docs/decisions.md D132) ---------- */
+.stats-panel__tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.stats-panel__bounds {
+  margin: 0 0 12px;
+}
+
+.stats-panel__group + .stats-panel__group {
+  margin-top: 20px;
+}
+
+.stats-panel__group-title {
+  margin: 0 0 8px;
+  font-size: var(--text-base);
+}
+
+/* ---------- Statut / publication (docs/decisions.md D133) ---------- */
+.planning-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
 @media (max-width: 520px) {
   .duty-day {
     grid-template-columns: 1fr;
     gap: 4px;
+  }
+
+  .reassignment-candidate {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
 
@@ -796,6 +953,40 @@
   margin: 0 0 12px;
   padding: 0;
   list-style: none;
+}
+
+.rest-policy-fields {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.rest-policy-fields legend {
+  font-weight: 600;
+  padding: 0 4px;
+}
+
+.rest-policy-fields__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.rest-policy-fields__row input[type='number'] {
+  width: 4em;
+}
+
+.diagnostics-body {
+  margin: 8px 0 0;
+  padding: 0 0 0 30px;
+}
+
+.diagnostics-body ul {
+  margin: 4px 0;
+  padding-left: 18px;
 }
 
 /* ---------- Dialogues : modale et panneau latéral ---------- */

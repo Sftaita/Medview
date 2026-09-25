@@ -255,6 +255,24 @@ duty_types(id, team_id)`, garantissant en base — pas seulement en PHP —
 que le `DutyType` d'un composant appartient à la même équipe que son
 pattern (voir §11).
 
+> **Statut d'implémentation (Lot Semaine type, docs/decisions.md D136)** :
+> `DutyPattern` porte désormais deux champs supplémentaires, tous deux
+> nullable/à défaut rétrocompatible :
+>
+> - `family: ?AllocationFamily` — classe le pattern dans une famille
+>   d'équité générique (« Week-end », « Semaine », ...), nouvelle entité
+>   calquée sur `DutyType` (catalogue par équipe, `code` unique par équipe,
+>   `stableId` immuable). Nullable et immuable une fois posé — un pattern
+>   sans famille ne contribue jamais à la dimension `ALLOCATION_FAMILY`
+>   (`docs/fairness.md`).
+> - `recurring: bool` (défaut `false`) — distingue un pattern appartenant à
+>   la structure hebdomadaire récurrente d'une ligne (`WeekStructureService`,
+>   `dayOffset` réinterprété comme jour ISO 0=Lundi..6=Dimanche) d'un
+>   pattern ad hoc construit directement (ex. par un test, ou un futur
+>   pattern « 24+25 décembre » ponctuel). Délibérément distinct d'`active` :
+>   les deux notions ne se recouvrent pas, et les confondre a provoqué une
+>   régression réelle corrigée pendant ce lot (voir D136).
+
 ## 10. DutyGroupInstance
 
 Instance datée concrète d'un `DutyPattern` au sein d'une `PlanningPeriod`
@@ -274,6 +292,15 @@ régénération de la même `PlanningPeriod` — condition dure pour la
 stabilité du futur tie-break (§13 de l'algorithme). `demandType`
 (`REQUIRED`/`OPTIONAL`) et `criticality` (`STANDARD`/`CRITICAL`) portent
 directement les concepts déjà actés en spécification (§5, §10, §21).
+
+> **Statut d'implémentation (Lot Semaine type, docs/decisions.md D136)** :
+> `Duty.pattern: ?DutyPattern` — nullable, rétrocompatible avec toute
+> `Duty` antérieure à ce lot. Pour une `Duty` groupée, toujours dérivé de
+> `groupInstance.pattern` (jamais une valeur divergente) ; pour une `Duty`
+> isolée matérialisée depuis un pattern à un seul composant
+> (`WeeklyDutyCalendarService`), c'est la seule voie d'accès à son pattern.
+> `Duty::getAllocationFamily()` (= `pattern?->getFamily()`) est le point
+> d'entrée unique, identique que la `Duty` soit groupée ou isolée.
 
 `overlapsWith()` compare des **instants absolus** (`startsAt`/`endsAt`),
 jamais des dates locales — correct par construction y compris à travers

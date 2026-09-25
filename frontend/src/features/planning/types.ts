@@ -14,6 +14,10 @@ export type PlanningSummary = {
   canManageAvailability?: boolean
   /** Creator or team OWNER/ADMIN: may open the generation preflight and launch a generation (D129). */
   canGenerate?: boolean
+  /** Creator or team OWNER/ADMIN: may view reassignment candidates and reassign a duty (D131). */
+  canManageCalendar?: boolean
+  /** Creator or team OWNER/ADMIN: may run the publication preflight and publish (D133). */
+  canPublish?: boolean
   startsAt: string
   endsAt: string
   timezone: string

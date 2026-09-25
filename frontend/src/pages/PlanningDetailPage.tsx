@@ -321,6 +321,8 @@ export function PlanningDetailPage() {
                   planningStableId={planning.stableId}
                   timezone={planning.timezone}
                   status={pilot.status}
+                  primaryLineStableId={primaryLine?.stableId}
+                  primaryLineName={primaryLine?.name}
                   onChanged={() => void pilot.reload()}
                   onGenerated={() => {
                     setGenerationVersion((count) => count + 1)

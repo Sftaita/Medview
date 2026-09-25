@@ -1,6 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Icon } from '../../components/Icon'
 import { fetchAssignments, fetchTeamMembers } from './api'
+import { CoverageHeader } from './result/CoverageHeader'
+import { fetchPlanningResult } from './result/api'
+import { PublishModal } from './result/PublishModal'
+import { ReassignmentModal } from './result/ReassignmentModal'
+import { StatisticsPanel } from './result/StatisticsPanel'
+import type { PlanningResult, PlanningResultDuty } from './result/types'
+import { UncoveredDuty } from './result/UncoveredDuty'
 import type { PlanningAssignment, PlanningAssignments, PlanningDetail, PlanningTeamMember } from './types'
 
 type Props = {
@@ -58,18 +65,38 @@ function timeOf(iso: string, timeZone: string): string {
   )
 }
 
+type FlatResultDuty = PlanningResultDuty & { lineName: string; lineStableId: string }
+
 /**
- * "Planning par personne": pick one member and see only their duties, month
- * by month, with a summary of what they have been given — or go back to the
- * whole team (docs/planning.md §14). Reads the assignments the engine
- * produced; nothing is computed or estimated here.
+ * "Planning par personne" and — now — the team's generated result
+ * (docs/decisions.md D130): whole team shows the coverage picture (every
+ * REQUIRED duty, covered or not, with real reasons for an uncovered one);
+ * picking one person switches to their own duties and workload summary,
+ * exactly as before. Reads what the engine produced; nothing is computed
+ * or estimated here.
  */
 export function PersonalPlanningView({ planning }: Props) {
   const [people, setPeople] = useState<PlanningTeamMember[]>([])
   const [selected, setSelected] = useState(WHOLE_TEAM)
   const [month, setMonth] = useState(() => initialMonth(planning))
   const [result, setResult] = useState<PlanningAssignments | null>(null)
+  const [teamResult, setTeamResult] = useState<PlanningResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [editingDutyStableId, setEditingDutyStableId] = useState<string | null>(null)
+  const [statsRefreshKey, setStatsRefreshKey] = useState(0)
+  const [showingPublishModal, setShowingPublishModal] = useState(false)
+  // `planning` is a prop owned by the parent screen — a successful publish doesn't automatically
+  // refresh it, so the real per-line statuses the POST /publish response returned are kept here
+  // and preferred over the (now stale) prop, exactly like teamResult's own refresh pattern.
+  const [publishedPeriodStatuses, setPublishedPeriodStatuses] = useState<Record<string, string>>({})
+
+  /** Re-reads the team result as-is — used after a reassignment is saved (no cancellation guard needed: a deliberate, one-off refresh, not a rapid navigation sequence). Also bumps the statistics panel's own refresh (D132 §39: both scopes must reflect a saved reassignment). */
+  const refreshTeamResult = useCallback(() => {
+    fetchPlanningResult(planning.stableId, { from: month, to: monthStart(month, 1) })
+      .then((data) => setTeamResult(data))
+      .catch(() => setError('Impossible de charger le planning.'))
+    setStatsRefreshKey((key) => key + 1)
+  }, [planning.stableId, month])
 
   // Everyone who has been in one of the planning's teams, once each (the same person may have left and rejoined).
   useEffect(() => {
@@ -91,12 +118,39 @@ export function PersonalPlanningView({ planning }: Props) {
     }
   }, [planning.stableId, planning.lines])
 
+  // Whole team: the generated result (coverage, uncovered duties included).
   useEffect(() => {
+    if (selected !== WHOLE_TEAM) {
+      return
+    }
+    let cancelled = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTeamResult(null)
+    fetchPlanningResult(planning.stableId, { from: month, to: monthStart(month, 1) })
+      .then((data) => {
+        if (!cancelled) {
+          setTeamResult(data)
+          setError(null)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setError('Impossible de charger le planning.')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [planning.stableId, selected, month])
+
+  // One person: their own duties and workload summary — unchanged.
+  useEffect(() => {
+    if (selected === WHOLE_TEAM) {
+      return
+    }
     let cancelled = false
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setResult(null)
     fetchAssignments(planning.stableId, {
-      userStableId: selected || undefined,
+      userStableId: selected,
       from: month,
       to: monthStart(month, 1),
     })
@@ -125,6 +179,24 @@ export function PersonalPlanningView({ planning }: Props) {
     }
     return [...groups.entries()]
   }, [result])
+
+  const byDayResult = useMemo(() => {
+    const flat: FlatResultDuty[] = (teamResult?.lines ?? []).flatMap((line) =>
+      line.duties.map((duty) => ({ ...duty, lineName: line.lineName, lineStableId: line.lineStableId })),
+    )
+    const groups = new Map<string, FlatResultDuty[]>()
+    for (const duty of flat) {
+      groups.set(duty.date, [...(groups.get(duty.date) ?? []), duty])
+    }
+    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))
+  }, [teamResult])
+
+  const activeLines = useMemo(() => planning.lines.filter((line) => line.active), [planning.lines])
+  const statusOf = (lineStableId: string, fallback?: string) =>
+    publishedPeriodStatuses[lineStableId] ?? fallback ?? 'DRAFT'
+  const isFullyPublished =
+    activeLines.length > 0 &&
+    activeLines.every((line) => statusOf(line.stableId, line.periodStatus) === 'PUBLISHED')
 
   return (
     <section className="card person-view" aria-label="Planning par personne">
@@ -188,91 +260,186 @@ export function PersonalPlanningView({ planning }: Props) {
           <span>{error}</span>
         </p>
       )}
-      {result === null && !error && (
-        <p role="status" className="muted">
-          Chargement…
-        </p>
-      )}
 
-      {result !== null && result.summary && (
-        <dl
-          className="person-summary"
-          aria-label={`Résumé de ${selectedPerson ? fullName(selectedPerson) : 'la personne'}`}
-        >
-          <div>
-            <dt>Gardes</dt>
-            <dd className="tnum">{result.summary.totalDuties}</dd>
+      {selected === WHOLE_TEAM ? (
+        <>
+          {teamResult === null && !error && (
+            <p role="status" className="muted">
+              Chargement…
+            </p>
+          )}
+          <div className="planning-status">
+            <span className={`tag ${isFullyPublished ? 'tag--green' : ''}`}>
+              Statut : {isFullyPublished ? 'Publié' : 'Non publié'}
+            </span>
+            {planning.canPublish && (
+              <button
+                type="button"
+                className="btn btn--sm btn--primary"
+                onClick={() => setShowingPublishModal(true)}
+              >
+                Publier le planning
+              </button>
+            )}
           </div>
-          <div>
-            <dt>Charge pondérée</dt>
-            <dd className="tnum">{result.summary.weightedWorkload}</dd>
-          </div>
-          <div>
-            <dt>Week-ends (sam. + dim.)</dt>
-            <dd className="tnum">{result.summary.weekendDays}</dd>
-          </div>
-          <div>
-            <dt>Vendredis</dt>
-            <dd className="tnum">{result.summary.fridays}</dd>
-          </div>
-          <div>
-            <dt>Samedis</dt>
-            <dd className="tnum">{result.summary.saturdays}</dd>
-          </div>
-          <div>
-            <dt>Dimanches</dt>
-            <dd className="tnum">{result.summary.sundays}</dd>
-          </div>
-          {result.summary.byDutyType.map((row) => (
-            <div key={row.dutyTypeStableId}>
-              <dt>{row.name}</dt>
-              <dd className="tnum">{row.count}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
-      {result !== null && result.summary && (
-        <p className="muted person-view__note">Sur l&apos;ensemble du planning, tous mois confondus.</p>
-      )}
+          {teamResult !== null && <CoverageHeader lines={teamResult.lines} />}
+          {teamResult !== null &&
+            byDayResult.length === 0 &&
+            teamResult.lines.some((line) => null !== line.generationStableId) && (
+              <p className="muted">Aucune garde en {monthLabel(month)}.</p>
+            )}
+          {byDayResult.length > 0 && (
+            <ul className="list duties" aria-label="Gardes du mois">
+              {byDayResult.map(([date, duties]) => (
+                <li key={date} className="duty-day">
+                  <div className="duty-day__date tnum">
+                    {capitalize(DAY_LABEL.format(new Date(`${date}T00:00:00Z`)))}
+                  </div>
+                  <ul className="list duty-day__items">
+                    {duties.map((duty) => (
+                      <li key={duty.dutyStableId} className="duty">
+                        <span className="duty__type tag">{duty.dutyType.name}</span>
+                        <span className="duty__time tnum">
+                          {timeOf(duty.startsAt, duty.timezone)}–{timeOf(duty.endsAt, duty.timezone)}
+                        </span>
+                        {duty.covered && duty.assignment && (
+                          <span className="duty__who">{fullName(duty.assignment.user)}</span>
+                        )}
+                        {!duty.covered && duty.required && <UncoveredDuty reasons={duty.reasons} />}
+                        {planning.lines.length > 1 && (
+                          <span className="muted duty__line">{duty.lineName}</span>
+                        )}
+                        {planning.canManageCalendar && (
+                          <button
+                            type="button"
+                            className="btn btn--ghost btn--sm duty__edit"
+                            onClick={() => setEditingDutyStableId(duty.dutyStableId)}
+                          >
+                            {duty.covered ? 'Réattribuer' : 'Attribuer'}
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+          )}
+          <StatisticsPanel planningStableId={planning.stableId} refreshKey={statsRefreshKey} />
+        </>
+      ) : (
+        <>
+          {result === null && !error && (
+            <p role="status" className="muted">
+              Chargement…
+            </p>
+          )}
 
-      {result !== null && result.generations.length === 0 && (
-        <p className="muted">
-          Aucune génération terminée pour ce planning : il n&apos;y a pas encore de garde à afficher.
-        </p>
-      )}
-      {result !== null && result.generations.length > 0 && byDay.length === 0 && (
-        <p className="muted">
-          {selectedPerson ? `${fullName(selectedPerson)} n'a aucune garde` : 'Aucune garde'} en{' '}
-          {monthLabel(month)}.
-        </p>
-      )}
-      {byDay.length > 0 && (
-        <ul className="list duties" aria-label="Gardes du mois">
-          {byDay.map(([date, assignments]) => (
-            <li key={date} className="duty-day">
-              <div className="duty-day__date tnum">
-                {capitalize(DAY_LABEL.format(new Date(`${date}T00:00:00Z`)))}
+          {result !== null && result.summary && (
+            <dl
+              className="person-summary"
+              aria-label={`Résumé de ${selectedPerson ? fullName(selectedPerson) : 'la personne'}`}
+            >
+              <div>
+                <dt>Gardes</dt>
+                <dd className="tnum">{result.summary.totalDuties}</dd>
               </div>
-              <ul className="list duty-day__items">
-                {assignments.map((assignment) => (
-                  <li key={assignment.stableId} className="duty">
-                    <span className="duty__type tag">{assignment.dutyType.name}</span>
-                    <span className="duty__time tnum">
-                      {timeOf(assignment.startsAt, assignment.timezone)}–
-                      {timeOf(assignment.endsAt, assignment.timezone)}
-                    </span>
-                    {selected === WHOLE_TEAM && (
-                      <span className="duty__who">{fullName(assignment.user)}</span>
-                    )}
-                    {assignment.lineName && planning.lines.length > 1 && (
-                      <span className="muted duty__line">{assignment.lineName}</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </li>
-          ))}
-        </ul>
+              <div>
+                <dt>Charge pondérée</dt>
+                <dd className="tnum">{result.summary.weightedWorkload}</dd>
+              </div>
+              <div>
+                <dt>Week-ends (sam. + dim.)</dt>
+                <dd className="tnum">{result.summary.weekendDays}</dd>
+              </div>
+              <div>
+                <dt>Vendredis</dt>
+                <dd className="tnum">{result.summary.fridays}</dd>
+              </div>
+              <div>
+                <dt>Samedis</dt>
+                <dd className="tnum">{result.summary.saturdays}</dd>
+              </div>
+              <div>
+                <dt>Dimanches</dt>
+                <dd className="tnum">{result.summary.sundays}</dd>
+              </div>
+              {result.summary.byDutyType.map((row) => (
+                <div key={row.dutyTypeStableId}>
+                  <dt>{row.name}</dt>
+                  <dd className="tnum">{row.count}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+          {result !== null && result.summary && (
+            <p className="muted person-view__note">Sur l&apos;ensemble du planning, tous mois confondus.</p>
+          )}
+
+          {result !== null && result.generations.length === 0 && (
+            <p className="muted">
+              Aucune génération terminée pour ce planning : il n&apos;y a pas encore de garde à afficher.
+            </p>
+          )}
+          {result !== null && result.generations.length > 0 && byDay.length === 0 && (
+            <p className="muted">
+              {selectedPerson ? `${fullName(selectedPerson)} n'a aucune garde` : 'Aucune garde'} en{' '}
+              {monthLabel(month)}.
+            </p>
+          )}
+          {byDay.length > 0 && (
+            <ul className="list duties" aria-label="Gardes du mois">
+              {byDay.map(([date, assignments]) => (
+                <li key={date} className="duty-day">
+                  <div className="duty-day__date tnum">
+                    {capitalize(DAY_LABEL.format(new Date(`${date}T00:00:00Z`)))}
+                  </div>
+                  <ul className="list duty-day__items">
+                    {assignments.map((assignment) => (
+                      <li key={assignment.stableId} className="duty">
+                        <span className="duty__type tag">{assignment.dutyType.name}</span>
+                        <span className="duty__time tnum">
+                          {timeOf(assignment.startsAt, assignment.timezone)}–
+                          {timeOf(assignment.endsAt, assignment.timezone)}
+                        </span>
+                        {assignment.lineName && planning.lines.length > 1 && (
+                          <span className="muted duty__line">{assignment.lineName}</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+
+      {editingDutyStableId && (
+        <ReassignmentModal
+          planningStableId={planning.stableId}
+          dutyStableId={editingDutyStableId}
+          onClose={() => setEditingDutyStableId(null)}
+          onReassigned={refreshTeamResult}
+        />
+      )}
+
+      {showingPublishModal && (
+        <PublishModal
+          planningStableId={planning.stableId}
+          onClose={() => setShowingPublishModal(false)}
+          onPublished={(result) => {
+            // The POST /publish response itself carries the real, authoritative per-line
+            // statuses — never assumed, never re-derived client-side.
+            setPublishedPeriodStatuses((current) => {
+              const next = { ...current }
+              for (const line of result.lines) {
+                next[line.lineStableId] = line.periodStatus
+              }
+              return next
+            })
+          }}
+        />
       )}
     </section>
   )

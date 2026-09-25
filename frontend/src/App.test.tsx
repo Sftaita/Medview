@@ -15,7 +15,7 @@ describe('App', () => {
     localStorage.clear()
   })
 
-  it('redirects to the login page when not authenticated', async () => {
+  it('shows the public homepage on / when not authenticated', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((input: RequestInfo | URL) => {
@@ -29,6 +29,32 @@ describe('App', () => {
 
     render(
       <MemoryRouter initialEntries={['/']}>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </MemoryRouter>,
+    )
+
+    expect(
+      await screen.findByRole('heading', { level: 1, name: /Le planning de gardes médicales/ }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('navigation', { name: 'Navigation principale' })).not.toBeInTheDocument()
+  })
+
+  it('still redirects to the login page from any other protected route when not authenticated', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.endsWith('/api/health')) return jsonResponse({ status: 'ok', database: 'ok' })
+        // No valid refresh cookie: the bootstrap's silent refresh fails.
+        if (url.endsWith('/api/token/refresh')) return jsonResponse({ error: 'invalid_refresh_token' }, 401)
+        return Promise.reject(new Error(`Unexpected fetch to ${url}`))
+      }),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/my-duties']}>
         <AuthProvider>
           <App />
         </AuthProvider>
@@ -161,6 +187,10 @@ describe('App', () => {
       )
     })
 
-    expect(await screen.findByRole('heading', { name: 'Connexion' })).toBeInTheDocument()
+    // Signed out on "/": the public homepage replaces the dashboard.
+    expect(
+      await screen.findByRole('heading', { level: 1, name: /Le planning de gardes médicales/ }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /Bonjour, Alice/ })).not.toBeInTheDocument()
   })
 })

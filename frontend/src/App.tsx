@@ -4,6 +4,7 @@ import { AppShell } from './components/AppShell'
 import { AuthLayout } from './components/AuthLayout'
 import { ProtectedRoute } from './features/auth/ProtectedRoute'
 import { PublicOnlyRoute } from './features/auth/PublicOnlyRoute'
+import { GuestHomeGate } from './features/home/GuestHomeGate'
 import { MyAvailabilityProvider } from './features/availability/MyAvailabilityProvider'
 import { AccountPage } from './pages/AccountPage'
 import { AvailabilityCampaignPage } from './pages/AvailabilityCampaignPage'
@@ -43,15 +44,18 @@ function App() {
         <Route path="/invitations/:token" element={<InvitationPage />} />
       </Route>
 
-      {/* Authenticated pages: sidebar (desktop) / bottom navigation (phone). */}
+      {/* Authenticated pages: sidebar (desktop) / bottom navigation (phone).
+          An anonymous visitor on "/" gets the public homepage instead of /login. */}
       <Route
         element={
-          <ProtectedRoute>
-            {/* Above the routes: the dashboard and the calendar share one optimistic, autosaving store. */}
-            <MyAvailabilityProvider>
-              <AppShell />
-            </MyAvailabilityProvider>
-          </ProtectedRoute>
+          <GuestHomeGate>
+            <ProtectedRoute>
+              {/* Above the routes: the dashboard and the calendar share one optimistic, autosaving store. */}
+              <MyAvailabilityProvider>
+                <AppShell />
+              </MyAvailabilityProvider>
+            </ProtectedRoute>
+          </GuestHomeGate>
         }
       >
         <Route path="/" element={<DashboardPage />} />
