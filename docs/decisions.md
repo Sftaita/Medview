@@ -147,7 +147,15 @@ l'ancienne (voir légende).
 | [D124](#d124--planning_manage_availability--créateur-ou-owneradmin-plus-large-que-manage) | 2026-09-21 | `PLANNING_MANAGE_AVAILABILITY` : créateur ou OWNER/ADMIN | 🟡 |
 | [D125](#d125--lecture-des-affectations--dernière-génération-completed-de-chaque-ligne) | 2026-09-21 | Lecture des affectations : dernière génération `COMPLETED` de chaque ligne | 🟢 |
 | [D126](#d126--frontend--magasin-partagé-sauvegarde-optimiste-par-diff-retour-à-la-vérité-serveur) | 2026-09-21 | Frontend : magasin partagé, sauvegarde optimiste par diff | 🟢 |
+| [D127](#d127--vue-de-pilotage-owneradmin--deadline-informative-rappels-audités-jamais-un-nouveau-système-détat) | 2026-09-22 | Vue de pilotage OWNER/ADMIN : deadline informative, rappels audités | 🟢 |
+| [D128](#d128--membercollectionstate-distinct-de-availabilityresponsestatus) | 2026-09-22 | `MemberCollectionState` distinct de `AvailabilityResponseStatus` | 🟢 |
+| [D129](#d129--génération-au-niveau-du-planning--façade-fine-préflight-non-bloquant-jamais-un-second-solveur) | 2026-09-22 | Génération au niveau du planning : façade fine, préflight non bloquant | 🟢 |
+| [D130](#d130--planninggenerationdiagnostics-persisté--lecture-du-résultat-via-un-nouvel-endpoint-result-jamais-une-reconstruction-a-posteriori) | 2026-09-23 | `PlanningGeneration.diagnostics` persisté ; lecture via `/result` | 🟢 |
+| [D131](#d131--calendrier-dynamique--dutyassignment-remplaçable-current-éligibilité-live-distincte-du-snapshot-concurrence-par-identité-historique-append-only) | 2026-09-23 | Calendrier dynamique : `DutyAssignment` remplaçable, éligibilité live, historique append-only | 🟢 |
+| [D132](#d132--statistiques-currentperiodcumulative--deux-périmètres-réels-mais-qui-coïncident-aujourdhui-gap-de-modèle-documenté-pas-simulé) | 2026-09-23 | Statistiques `currentPeriod`/`cumulative` — deux périmètres réels, gap de modèle documenté | 🟢 |
+| [D133](#d133--publication--préflight-sur-le-calendrier-courant-validated-jamais-exposé-séparément-published-reste-éditable) | 2026-09-23 | Publication : préflight sur le calendrier courant, `VALIDATED` non exposé, `PUBLISHED` éditable | 🟢 |
 | [D134](#d134--semaine-type--composant-weekstructureeditor-intégré-tel-quel-boutons-de-lapp-pas-de-mui-pas-encore-branché) | 2026-09-23 | Semaine type : `WeekStructureEditor` intégré tel quel, boutons `.btn` (pas de MUI), pas encore branché | 🟡 |
+| [D136](#d136--structure-hebdomadaire-configurable-par-ligne-familles-déquité-génériques-allocationfamily-remplace-weekend_groups) | 2026-09-24 | Structure hebdomadaire configurable par `PlanningLine`, familles d'équité génériques `ALLOCATION_FAMILY` | 🟢 |
 
 ---
 
@@ -3455,6 +3463,253 @@ l'ancienne (voir légende).
   endpoint avec `POST /planning-generations/{id}/solve` (routes distinctes,
   le premier orchestrant plusieurs appels du second en substance).
 
+## D130 — `PlanningGeneration.diagnostics` persisté ; lecture du résultat via un nouvel endpoint `/result`, jamais une reconstruction a posteriori
+
+- **Contexte** : le lot « Consultation du planning généré » doit afficher,
+  pour chaque garde `REQUIRED` non couverte, la ou les vraies raisons
+  d'exclusion déjà calculées par le solve (`UnsatReport`). Audit préalable
+  (explicitement demandé, pas supposé) : avant ce lot, `UnsatReport` n'existait
+  que le temps de la requête HTTP `POST /planning-generations/{id}/solve` —
+  `PlanningGenerationController` le sérialisait directement dans la réponse
+  sans jamais l'écrire en base. Une garde non couverte consultée plus tard
+  (rafraîchissement de page, autre session, autre appareil) n'avait donc
+  **aucune** raison disponible, y compris juste après un solve réel.
+- **Décision** : `PlanningGeneration` gagne une colonne `diagnostics` (JSON,
+  nullable — migration `Version20260923090000`), peuplée par
+  `recordSolverRun()` à partir du même `UnsatReport` que celui déjà retourné
+  par `/solve`, uniquement quand `coverageStatus === INCOMPLETE` (jamais pour
+  un outcome `COMPLETE`, jamais pour un snapshot périmé rejeté — ce dernier
+  passe explicitement `null`). Le formatage JSON est extrait dans
+  `UnsatReportPresenter`, seul point réutilisé par le contrôleur `/solve`
+  existant et par le nouveau lot — jamais deux implémentations divergentes du
+  même mapping.
+- **Jamais recalculé** : `PlanningResultService` ne réinvoque ni ne
+  réévalue rien — il lit `PlanningGeneration::getDiagnostics()` tel quel et
+  l'indexe par `dutyUnitStableKey`. Une garde non couverte dont la génération
+  est antérieure à ce lot (donc `diagnostics === null`) affiche « raison non
+  disponible », jamais une exclusion fabriquée (D095) ni un statut inventé.
+- **Nouvel endpoint dédié** (`GET /api/plannings/{id}/result`) plutôt qu'un
+  enrichissement de `/assignments` : le contrat existant de `/assignments`
+  (fenêtré par mois, filtrable par personne, ne montre que les affectations
+  réellement existantes) est sémantiquement incompatible avec une vue de
+  couverture pleine période devant inclure les gardes `REQUIRED` **sans**
+  affectation. Superposer les deux aurait soit cassé `/assignments` pour ses
+  appelants existants, soit produit une réponse à double sens selon le
+  contexte. `PlanningResultService` réutilise au maximum l'existant :
+  `findMostRecentCompletedByPlanningPeriod` (D125, appliqué indépendamment par
+  ligne, jamais un historique multi-génération), les mêmes repositories, la
+  même autorisation `PlanningVoter::VIEW`.
+- **Rejeté** : recalculer un diagnostic à la volée à partir de l'état courant
+  du planning (produirait une fausse causalité — un membre parti depuis ne
+  doit jamais réapparaître comme raison) ; un historique de plusieurs
+  générations par ligne (hors périmètre, cahier des charges D125 inchangé) ;
+  fusionner `/result` dans `/assignments`.
+
+## D131 — Calendrier dynamique : `DutyAssignment` remplaçable (`current`), éligibilité live distincte du snapshot, concurrence par identité, historique append-only
+
+- **Contexte** : le calendrier généré (D130) doit devenir modifiable
+  manuellement (réattribution d'une garde, y compris après publication),
+  sans jamais perdre l'historique ni recalculer une exclusion à partir de
+  l'état courant. Avant ce lot, `DutyAssignment` était strictement immuable
+  (aucun setter, contrainte unique stricte `(generation_id, duty_id)`) —
+  une contrainte structurelle, pas un oubli : une réaffectation ne peut donc
+  jamais être une simple `UPDATE`.
+- **Décision — `current` plutôt qu'une mutation** : `DutyAssignment` gagne
+  un booléen `current` et une seule méthode de mutation contrôlée,
+  `markSuperseded()` (même discipline que `PlanningPeriod::transitionTo()` —
+  jamais un setter libre). La contrainte unique stricte est remplacée par un
+  index unique **partiel** `(generation_id, duty_id) WHERE current` —
+  plusieurs lignes historiques peuvent coexister pour la même garde, une
+  seule est jamais courante. Toute lecture qui signifie « l'affectation de
+  cette garde maintenant » (`PlanningResultService`,
+  `PlanningAssignmentViewService`, via `DutyAssignmentRepository::
+  findForGenerations()`) filtre désormais explicitement `current = true`.
+- **Décision — écriture en deux `flush()` explicites, dans une seule
+  transaction** : l'index partiel est vérifié immédiatement par Postgres, à
+  chaque instruction, jamais différé à la validation (un index partiel ne
+  peut pas être `DEFERRABLE`). Insérer la nouvelle ligne avant d'avoir
+  marqué l'ancienne `current = false` violerait donc l'index en plein
+  milieu de la transaction, même si l'état final est valide.
+  `DutyReassignmentService` ouvre explicitement une transaction Doctrine et
+  fait deux `flush()` dans le bon ordre (UPDATE puis INSERT) — dérogation
+  délibérée et documentée à la convention « un seul `flush()` final »
+  (`docs/planning-generation.md` §16), pas un oubli.
+- **Décision — éligibilité live, jamais une réutilisation
+  d'`EligibilityService`/`AssignmentConflictAnalyzer`** : ces deux services
+  n'opèrent que sur le `PlanningSnapshot` figé (« never reads live data »,
+  leur propre docblock) — exactement l'inverse de ce qu'il faut pour une
+  réaffectation manuelle, qui doit voir le calendrier tel qu'il est
+  réellement maintenant. `ReassignmentCandidateService` est un service
+  **séparé**, qui relit les `UserAvailabilityPeriod`/
+  `TeamMemberNonParticipationPeriod` en direct et les autres
+  `DutyAssignment` **courantes** du candidat — seule l'arithmétique pure de
+  repos (`RestGapCalculator`, extrait d'`AssignmentConflictAnalyzer` pour
+  que les deux ne divergent jamais) et les seuils de `RestPolicyOptions`
+  (lus sur la génération éditée, jamais redevinés) sont réellement
+  partagés.
+- **Décision — concurrence par identité du candidat courant, pas par
+  compteur de version** : le payload de réaffectation porte
+  `expectedCurrentTeamMemberStableId` (le `teamMemberStableId` vu à
+  l'ouverture du modal, ou `null` si la garde semblait non couverte) plutôt
+  qu'un numéro de version générique — plus simple, et directement vérifiable
+  contre l'état réel au moment de l'enregistrement (`StaleReassignmentException`,
+  409). Le candidat choisi est lui aussi entièrement revalidé côté serveur à
+  cet instant (`InvalidReassignmentCandidateException`) — la liste affichée
+  par le modal n'est jamais approuvée telle quelle.
+- **Décision — historique append-only, `DutyAssignmentEvent`** : même
+  patron que `PlanningAvailabilityReminder` (D127, trigger Postgres
+  refusant `UPDATE`/`DELETE`). Une ligne par `Duty` constituante (jamais une
+  ligne par bloc) — parallèle exact de `DutyAssignment` lui-même, pas une
+  deuxième dualité bloc/garde. `wasPublished` fige si la `PlanningPeriod`
+  était déjà `PUBLISHED` au moment du changement, pour piloter plus tard la
+  décision "faut-il un email" sans jamais redériver ce fait du statut
+  courant (potentiellement déjà différent).
+- **Décision — nouvel attribut de Voter, même population** :
+  `PlanningVoter::MANAGE_CALENDAR` réutilise exactement la même règle que
+  `MANAGE_AVAILABILITY`/`GENERATE` (créateur ou OWNER/ADMIN d'une équipe du
+  Planning) — un nouveau nom pour une nouvelle action, jamais une nouvelle
+  politique d'autorisation.
+- **Rejeté** : muter `DutyAssignment` en place (perdrait l'historique,
+  contredit `CLAUDE.md` "jamais recalculé depuis l'état courant") ; réutiliser
+  `EligibilityService`/`AssignmentConflictAnalyzer` tels quels pour la
+  réaffectation live (state frozen, faux résultats) ; un compteur de version
+  générique pour la concurrence (moins précis que l'identité réelle du
+  candidat courant) ; une ligne d'historique par bloc plutôt que par garde.
+
+## D132 — Statistiques `currentPeriod`/`cumulative` : deux périmètres réels, mais qui coïncident aujourd'hui (gap de modèle documenté, pas simulé)
+
+- **Audit préalable (obligatoire avant code)** : `PlanningLine.planningPeriod`
+  est un `ManyToOne` simple — une ligne n'a jamais qu'un seul
+  `PlanningPeriod`, pour toujours. `PlanningPeriodLifecycleService::create()`
+  n'est appelé qu'une fois, à la création de la ligne
+  (`PlanningLineService`). `PlanningExtensionService::extend()` (D122) ne
+  crée jamais un second `PlanningPeriod` : il appelle `$period->extendTo()`
+  sur le même period, et refuse dès que celui-ci est
+  `VALIDATED`/`PUBLISHED`/`ARCHIVED` (« *the engine cannot yet generate an
+  extra slice next to it* », commentaire déjà présent dans le code).
+  `FairnessPeriod` suit la même règle 1:1, étendu en même temps que son
+  `PlanningPeriod`. Aucune méthode de repository ne liste "tous les
+  `PlanningPeriod` historiques d'une ligne" — parce que ce concept n'existe
+  pas dans le modèle actuel.
+- **Conséquence factuelle, vérifiée par les tests** : pour tout `Planning`
+  donné, `currentPeriod` et `cumulative` sont aujourd'hui **rigoureusement
+  identiques** (`testASinglePeriodMeansCurrentEqualsCumulative`). Ce n'est
+  pas un raccourci d'implémentation : il n'existe littéralement aucune
+  deuxième donnée historique à sommer en plus de l'état courant unique de
+  chaque ligne.
+- **Décision** : construire quand même l'architecture réelle à deux
+  périmètres (`PlanningStatistics{currentPeriod, cumulative}`,
+  `StatisticsScope{startsAt, endsAt, groups}`) plutôt que de renvoyer un
+  objet unique — parce que le mécanisme qui produit *aujourd'hui* plusieurs
+  `PlanningPeriod` sous un même `Planning` est réel et déjà exploité par
+  les tests : **plusieurs `PlanningLine`** (PRIMARY + SECONDARY). `cumulative`
+  somme donc, de façon générale et jamais codée en dur sur "une seule
+  période", tous les `PlanningPeriod` des lignes du planning — le jour où
+  un lot futur ajoute un vrai mécanisme de "nouvelle période après
+  archivage", `cumulative` recommencera à diverger de `currentPeriod` sans
+  qu'aucune ligne de `PlanningStatisticsService` ne change.
+- **Lien avec le solveur (§46 du cahier des charges)** : `FairnessPeriod`
+  existe déjà et est bien la structure que le moteur utilise pour ses
+  calculs d'équité — mais elle est, elle aussi, 1:1 avec un seul
+  `PlanningPeriod` aujourd'hui. Il n'y a donc **pas encore** de lien réel à
+  documenter entre des statistiques cumulées sur plusieurs périodes et une
+  compensation multi-périodes côté solveur ; ce lot ne branche rien
+  d'artificiel dans l'algorithme, conformément à l'instruction explicite.
+- **Gap noté pour un lot ultérieur** : un vrai mécanisme de rotation
+  ("archiver cette période, en ouvrir une nouvelle pour la même équipe")
+  n'existe pas. Tant qu'il n'existe pas, `cumulative` ne peut être
+  réellement plus riche que `currentPeriod` que par l'ajout de lignes
+  supplémentaires au même Planning — jamais par le temps.
+- **Compteurs toujours recalculés à la lecture, jamais stockés** (§39) :
+  `PlanningStatisticsService` lit `DutyAssignmentRepository::
+  findForGenerations()` (donc uniquement les affectations `current`, D131)
+  à chaque appel — jamais un compteur persistant, qui deviendrait
+  immédiatement faux après une réaffectation.
+- **Un bloc compte sur ses vrais jours, jamais comme une unité** (§6) : le
+  regroupement se fait sur `Duty::getLocalDate()` de chaque `DutyAssignment`
+  individuelle, jamais sur le `DutyGroupInstance` — un week-end de 2 jours
+  ajoute bien +1 samedi et +1 dimanche, jamais +1 "bloc".
+- **Aucune ligne pour un membre à zéro garde** : les lignes du tableau sont
+  construites uniquement à partir des affectations réelles — jamais à
+  partir de la liste des membres de l'équipe. Un membre sans aucune garde
+  dans le périmètre n'apparaît simplement pas (§42/§43 : jamais un zéro
+  fabriqué au nom d'une "opportunité" qu'il aurait eue).
+- **Rejeté** : fabriquer un faux mécanisme de périodes séquentielles pour
+  satisfaire l'exemple illustratif du cahier des charges (contredit
+  explicitement l'instruction "ne branche pas artificiellement") ; stocker
+  un compteur historique de statistiques (fragile, se désynchronise dès la
+  première réaffectation, D131) ; afficher un jugement d'équilibre
+  automatique (hors périmètre explicite, §45).
+
+## D133 — Publication : préflight sur le calendrier courant, `VALIDATED` jamais exposé séparément, `PUBLISHED` reste éditable
+
+- **Audit préalable** : `PlanningPeriodStatus` a 5 valeurs réelles
+  (`DRAFT`/`GENERATED`/`VALIDATED`/`PUBLISHED`/`ARCHIVED`) ; le graphe de
+  transitions déjà en place (`PlanningPeriodLifecycleService`,
+  `canTransitionTo()`) n'autorise `PUBLISHED` qu'**à partir de**
+  `VALIDATED` — jamais directement depuis `GENERATED`. Seul appel réel de
+  `PlanningPeriodLifecycleService::create()`/`transition()` avant ce lot :
+  aucun endpoint n'atteignait encore `PUBLISHED` (§9/§18 de
+  `docs/planning-generation.md`).
+- **`VALIDATED` n'a aucune utilité métier distincte aujourd'hui** :
+  recherche exhaustive de tout usage réel de `PlanningPeriodStatus::VALIDATED`
+  dans le code — un seul, dans `PlanningGenerationLauncher::preflight()`,
+  qui se contente d'émettre un **avertissement** ("régénérer invalidera la
+  validation") si le statut est déjà `VALIDATED`. Aucune vérification,
+  aucun comportement, aucun droit ne dépend spécifiquement de `VALIDATED`
+  par ailleurs. Décision (option B du §12 du cahier des charges) :
+  `PlanningPublicationService::publish()` traverse silencieusement
+  `GENERATED → VALIDATED → PUBLISHED` (deux appels réels à
+  `PlanningPeriodLifecycleService::transition()`, jamais un bypass), mais
+  **aucune action "Valider" séparée n'est exposée en UI** — un seul bouton
+  "Publier". L'enum n'est pas supprimée (elle reste la source de vérité du
+  graphe de transitions).
+- **Source de vérité du préflight : le calendrier courant, jamais
+  l'historique** : `PlanningPublicationPreflightService` lit uniquement
+  les `DutyAssignment` `current = true` (D131) — jamais `OptimizationResult`,
+  le `coverageStatus` figé de la génération, ni les diagnostics initiaux
+  du solveur. Ceux-ci restent consultables (`/result`, D130) mais ne
+  décident jamais de la publiabilité, conformément à l'instruction
+  explicite du cahier des charges.
+- **Aucune nouvelle logique de contrainte** : la cohérence des blocs et la
+  validité live des affectations réutilisent entièrement
+  `ReassignmentCandidateService` (`blockDuties()`, `firstBlockingReason()`)
+  — la même façon exacte dont une réaffectation manuelle est déjà validée.
+  Testé explicitement en construisant, à bas niveau, un état incohérent
+  qu'aucun chemin normal de l'application (solveur, réaffectation) ne peut
+  produire — le préflight le détecte quand même, comme défense
+  indépendante (§4/§6 du cahier des charges).
+- **Publication = façade Planning sur un lifecycle par ligne** : comme la
+  génération (D129), `PlanningPeriodStatus` vit sur `PlanningPeriod`, un
+  par `PlanningLine` — jamais sur `Planning` lui-même (qui n'a pas de
+  statut propre). `PlanningPublicationService::publish()` transitionne
+  chaque ligne active, dans une transaction, protégée par un verrou
+  consultatif Postgres par Planning (même patron que
+  `PlanningGenerationLauncher`, espace de noms distinct — jamais un
+  nouveau mécanisme de concurrence).
+- **Idempotence** : si toutes les lignes actives sont déjà `PUBLISHED`,
+  un nouveau `POST /publish` répond 409 `already_published` avant même de
+  relancer le préflight — jamais une re-transition silencieuse. Une
+  planification hétérogène (une ligne déjà publiée, une autre ajoutée
+  depuis et encore à publier) republie les lignes qui en ont réellement
+  besoin.
+- **`PUBLISHED` n'est jamais un verrou** : aucune modification du lot
+  précédent (réaffectation, D131) n'est désactivée après publication —
+  testé explicitement (réaffectation après publication → succès, statut
+  reste `PUBLISHED`, statistiques mises à jour, D132 non régressée).
+- **Régénération après publication déjà bloquée, sans rien construire de
+  nouveau** : `PlanningGenerationLauncher::preflight()` marquait déjà
+  `PERIOD_LOCKED` pour toute ligne `PUBLISHED`/`ARCHIVED`, et
+  `canGenerate()` refuse dès qu'un seul bloqueur existe sur n'importe
+  quelle ligne active — vérifié, pas reconstruit.
+- **Rejeté** : exposer `VALIDATED` comme une étape utilisateur séparée
+  (aucune utilité métier réelle aujourd'hui, cf. audit) ; faire confiance à
+  un préflight chargé côté client au moment du `POST /publish` (revalidation
+  systématique côté serveur) ; un compteur de version Doctrine générique
+  sur `PlanningPeriod` pour la concurrence (le verrou consultatif existant
+  suffit et évite une migration) ; bloquer ou désactiver la réaffectation
+  une fois publié.
+
 ## D134 — Semaine type : composant `WeekStructureEditor` intégré tel quel, boutons de l'app (pas de MUI), pas encore branché
 
 - **Contexte** : le package de design `docs/Design/react_semaine_type/`
@@ -3505,3 +3760,612 @@ l'ancienne (voir légende).
 - **Limites héritées du kit** : pas de mode hors ligne réel (page d'attente
   seulement), pas de notifications push. Incrémenter `VERSION` dans `sw.js`
   à chaque déploiement modifiant un fichier précaché.
+
+## D136 — Structure hebdomadaire configurable par ligne, familles d'équité génériques (`ALLOCATION_FAMILY` remplace `WEEKEND_GROUPS`)
+
+- **Audit préalable, écart majeur constaté** : aucun pipeline de production
+  ne matérialisait jamais de `Duty` avant ce lot —
+  `DutyMaterializationService::materializeGroup()`/`createStandaloneDuty()`
+  n'étaient appelés que par des tests ; toutes les gardes vues jusqu'ici en
+  démo/smoke test avaient été créées à la main (commande jetable). Ce lot
+  construit donc, pour la première fois, le pipeline réel « structure
+  hebdomadaire → calendrier de `Duty` matérialisé ».
+- **`PlanningLine ↔ PlanningTeam` est un 1:1 permanent** (D074, contrainte
+  unique en base) : scoper `DutyPattern` par `team_id` (comme déjà avant ce
+  lot) est donc structurellement identique à scoper par `PlanningLine` —
+  aucune FK `planning_line_id` redondante ajoutée à `DutyPattern`.
+- **`DutyPatternComponent.dayOffset` n'a pas eu besoin de changer** :
+  déjà un entier non négatif arbitraire, sans exigence de contiguïté. Pour
+  une structure hebdomadaire récurrente, `dayOffset` est simplement
+  réinterprété comme jour ISO (0=Lundi..6=Dimanche), ancré sur le lundi de
+  chaque semaine matérialisée (`WeeklyDutyCalendarService`) — un pattern
+  "Dec24+Dec25" existant garde son sens (ancre = 24 décembre) sans aucune
+  ambiguïté, les deux usages de `dayOffset` ne se recoupent jamais dans le
+  même pattern.
+- **Nouvelle entité `AllocationFamily`**, calquée exactement sur
+  `DutyType` (catalogue par équipe, `stableId`/`code`/`name`/`active`,
+  `code` immuable) : `DutyPattern.family` (nullable, immuable une fois
+  posé) y référence. Nécessaire parce que plusieurs `DutyPattern`
+  distincts doivent pouvoir partager la **même** famille (ex. quatre
+  patterns solo "L", "Ma", "Me", "Je" pointant tous vers la famille
+  `WEEKDAY`) — une simple colonne texte sur `DutyPattern` n'aurait pas
+  permis ce partage d'identité stable.
+- **`ALLOCATION_FAMILY` remplace `WEEKEND_GROUPS` dans le vocabulaire du
+  moteur, jamais à côté** : `docs/fairness.md` §3 documentait
+  `WEEKEND_GROUPS` comme délibérément non implémenté faute de source de
+  donnée réelle. Ce lot ferme ce gap en généralisant : plutôt qu'une
+  dimension binaire "ce `DutyGroupInstance` est-il un week-end", chaque
+  ligne classe elle-même ses patterns (blocs *et* gardes isolées) dans des
+  familles arbitraires (`Week-end`, `Semaine`, `Samedi seul`,
+  `WEEKEND_BLOCK`...). `WEEKEND_GROUPS` ne devient donc jamais un
+  `FairnessDimensionType` propre — `ALLOCATION_FAMILY` couvre exactement
+  ce rôle, génériquement.
+- **Comptage par unité, jamais par Duty (Scénario F de l'audit)** :
+  `DimensionMembershipCalculator::forDutyUnit()` est le seul endroit où
+  `ALLOCATION_FAMILY` est crédité — une fois par `DutyUnit`, jamais une
+  fois par `Duty` constituante (un bloc V/S/D crédite
+  `ALLOCATION_FAMILY:WEEKEND += 1`, jamais `+= 3`) — alors que
+  `TOTAL_DUTIES`/`FRIDAY`/`SATURDAY`/`SUNDAY`/`WEIGHTED_WORKLOAD` restent
+  calculés par `forDuty()`, inchangé, sommé par Duty comme avant.
+  `RequiredDemandBuilder` a dû être restructuré pour construire des
+  `DutyUnit` (nouveau `DutyUnitFactory`, extrait de la logique de
+  regroupement déjà présente dans `EligibilityMatrixBuilder`, réutilisée
+  par les deux plutôt que dupliquée) au lieu de sommer `forDuty()` sur les
+  `Duty` brutes — sinon un bloc de 3 jours aurait compté pour 3 unités de
+  famille. `EffectiveExposureService` ajoute de même une contribution
+  `ALLOCATION_FAMILY` calculée une fois par unité (date/participationFactor
+  pris sur la première Duty constituante), en plus, jamais à la place, de
+  sa boucle par-Duty existante pour les dimensions calendaires.
+- **`DefaultFairnessDimensionClassifier` ferme enfin le gap documenté
+  dans son propre docblock depuis D086** : `ALLOCATION_FAMILY` devient
+  réellement `PRIMARY` (l'équivalent générique de ce que `weekendGroups`
+  était censé être par défaut dans `docs/allocation-algorithm.md` §6) —
+  un vrai changement de comportement du solveur pour toute génération
+  future d'une ligne dont la structure hebdomadaire est configurée, posé
+  explicitement ici plutôt que glissé silencieusement.
+- **Solveur Python inchangé** : `cp_sat_solver.py` est déjà entièrement
+  générique sur les clés de dimension (aucun `FRIDAY`/`WEEKEND` en dur) —
+  seul `CpSatScale::smallestUnit()` (PHP) a eu besoin d'un nouveau cas
+  (`1.0`, comme les autres dimensions comptées en gardes entières).
+- **Matérialisation toujours en jour calendaire plein** (00:00 → 00:00 le
+  lendemain) : aucune heure de garde n'est demandée nulle part dans le
+  cahier des charges de ce lot, et `DutyType` ne porte aucune heure de
+  service — l'inventer aurait été deviner une donnée qui n'existe pas.
+  Restera à ajouter sur `DutyType` si un besoin réel apparaît (dette,
+  §"reste à faire" ci-dessous).
+- **Remplacement atomique complet à chaque `PUT`, jamais une mutation en
+  place** : `WeekStructureService::replace()` désactive tous les patterns
+  actifs de l'équipe (jamais supprimés — `docs/planning-domain.md` §14,
+  `RESTRICT` empêche déjà leur suppression une fois référencés) et crée
+  des patterns entièrement neufs pour la structure soumise. C'est ce choix
+  seul, sans aucun mécanisme de snapshot supplémentaire, qui rend
+  l'historique automatiquement immunisé contre une édition ultérieure
+  (§12 du cahier des charges) : une `Duty` déjà matérialisée continue de
+  pointer vers son (désormais inactif, jamais muté) `DutyPattern`/
+  `AllocationFamily` pour toujours ; seules les semaines matérialisées
+  *après* une édition voient la nouvelle structure
+  (`docs/week-structure.md` §4, déjà énoncé, maintenant réellement vrai).
+- **`SnapshotHasher` étendu** : `allocationFamilyStableId` entre dans le
+  hash canonique d'une `Duty`, suivant la même règle déjà documentée
+  (« seule la donnée réellement consommée entre dans le hash ») — cohérent
+  avec `dutyTypeStableId`/`groupInstanceStableId` déjà présents.
+- **Matérialisation à la demande, déclenchée par le préflight de
+  génération** : `PlanningGenerationLauncher::preflight()` appelle
+  désormais `WeeklyDutyCalendarService::ensureMaterialized()` pour chaque
+  ligne active *avant* de compter ses `Duty` — un effet de bord assumé sur
+  une lecture (GET), documenté explicitement comme tel dans le docblock de
+  la classe : sans lui, un préflight resterait bloqué sur `NO_DUTIES` même
+  après qu'une vraie structure a été configurée, jusqu'à ce que le
+  gestionnaire clique quand même sur « Générer ». Idempotent (jamais de
+  semaine dupliquée), sans effet si aucune structure n'est configurée
+  (aucune structure devinée par défaut). Point d'accroche choisi après
+  audit : `PlanningGenerationService::create()` était trop tard (le
+  blocage `NO_DUTIES` du préflight se produit avant tout appel à
+  `create()`) et son docblock affirme explicitement ne jamais avoir changé
+  depuis le Lot 3 — un hook plus profond aurait rompu cette garantie
+  documentée sans bénéfice.
+- **Bug réel trouvé et corrigé pendant les tests — `DutyPattern.active`
+  ne suffisait pas à identifier « appartient à la structure hebdomadaire »** :
+  la première version de ce hook lisait
+  `DutyPatternRepository::findActiveByTeam()`, qui remonte **tout**
+  pattern `active = true` d'une équipe — y compris les patterns ad hoc que
+  de nombreux tests pré-existants construisent directement
+  (`createTwoDutyGroup()`, etc.), jamais destinés à recevoir un traitement
+  hebdomadaire récurrent. Conséquence observée : `ensureMaterialized()`
+  ré-ancrait ces patterns sur *tous* les lundis de la période, dupliquant
+  massivement gardes et affectations (deux tests pré-existants,
+  `DutyReassignmentControllerTest::testBlockIsDetectedAndReassignedAtomically`
+  et `PlanningStatisticsControllerTest::testABlocksTwoDaysCountOnTheirOwnRealWeekday`,
+  ont détecté la régression). **Corrigé** en ajoutant un nouveau champ
+  `DutyPattern.recurring` (immuable, `false` par défaut — migration
+  `Version20260924100000`), volontairement distinct d'`active` : seul
+  `WeekStructureService::replace()` en pose jamais à `true`, et
+  `DutyPatternRepository::findActiveRecurringByTeam()` (jamais
+  `findActiveByTeam()`) est la seule requête que
+  `WeekStructureService`/`WeeklyDutyCalendarService` utilisent désormais.
+  Rend l'ambiguïté structurellement impossible plutôt que simplement
+  évitée par convention — testé explicitement
+  (`WeeklyDutyCalendarServiceTest::testAnAdHocOneOffPatternIsNeverTouchedByEnsureMaterialized`).
+- **Premier bug réel trouvé et corrigé pendant l'UAT navigateur — un bloc
+  ne survivait pas à un rechargement de page** : `WeekStructureBlockView`/
+  `WeekStructureController::blockToArray()` ne renvoyaient jamais de champ
+  `id` — `WeekStructureEditor`'s `WeekStructurePayload.blocks[].id: BlockId`
+  (contrat déjà figé par D134, jamais modifié par ce lot) l'exige pour que
+  `fromPayload()` reconstruise un bloc ; sans lui, `fromPayload()` ignore
+  silencieusement **chaque** bloc (aucune erreur visible), qui retombe à
+  l'état "jours isolés" par défaut de `allSolo()`. Repéré uniquement en
+  rouvrant réellement l'éditeur après enregistrement — jamais par les
+  tests automatisés, qui comparaient chacun le payload envoyé, jamais un
+  aller-retour GET après un vrai `PUT`. **Corrigé** en assignant les
+  lettres A-D côté contrôleur, par ordre du tableau — une pure question de
+  forme de réponse, sans aucun sens côté domaine (`WeekStructureService`
+  ne stocke ni ne lit jamais de lettre). Un contrôle explicite « plus de 4
+  blocs » a été envisagé puis abandonné : mathématiquement inatteignable
+  (4 blocs demanderaient 8 jours distincts sur une semaine de 7, alors que
+  chaque bloc exige déjà ≥ 2 jours — la vérification d'unicité des jours
+  le rend déjà impossible), l'ajouter aurait été du code mort, jamais une
+  vraie protection. Testé explicitement
+  (`WeekStructureControllerTest::testTheCreatorCanReplaceTheStructureAndReadItBack`
+  vérifie désormais `id`, `testSeveralBlocksGetDistinctLetterIds` pour
+  plusieurs blocs).
+- **Deuxième bug réel trouvé et corrigé pendant l'UAT navigateur —
+  l'idempotence de la matérialisation était scopée par pattern, jamais par
+  jour calendaire** : `ensureMaterialized()` vérifiait à l'origine « cette
+  *pattern* a-t-elle déjà produit une occurrence pour cette date »
+  (`DutyRepository::findOneByPeriodPatternAndLocalDate()`,
+  `DutyGroupInstanceRepository::findOneByPeriodPatternAndAnchor()`).
+  Conséquence observée en navigateur réel (Scénario UAT : structure V/S/D
+  bloc + L/Ma/Me/Je solo matérialisée sur 4 semaines = 28 gardes, puis
+  changement vers 6 jours isolés sans Dimanche *avant tout vrai
+  lancement de génération* → 52 gardes au lieu de 28 attendu) : chaque jour
+  déjà couvert par l'ancienne structure (désormais désactivée mais jamais
+  supprimée) recevait une **deuxième** `Duty` de la nouvelle structure pour
+  la même date calendaire — deux décisions concurrentes sur un même jour.
+  **Corrigé** en remplaçant l'idempotence par
+  `DutyRepository::existsForPeriodAndLocalDate()` — « existe-t-il *une*
+  `Duty` pour cette période et cette date, peu importe quelle pattern
+  l'a produite » — appliquée aussi bien à une garde isolée qu'à
+  *chacun* des jours d'un bloc (un seul jour déjà couvert annule
+  l'occurrence entière du bloc pour cette semaine, jamais un bloc
+  partiel). Les anciennes méthodes pattern-scopées, devenues du code mort,
+  ont été supprimées plutôt que laissées à côté de la bonne implémentation.
+  Testé explicitement
+  (`WeeklyDutyCalendarServiceTest::testChangingTheStructureBeforeAnyGenerationNeverDoubleMaterializesAnAlreadyCoveredDay`).
+  Confirme, avec le bug précédent, la valeur réelle de l'UAT navigateur
+  au-delà des tests automatisés : les deux n'ont été détectés qu'en
+  manipulant l'application réellement.
+- **Famille par bloc, une seule famille commune pour tous les jours isolés
+  d'une ligne — jamais une famille par jour isolé individuellement** :
+  chaque exemple du cahier des charges regroupe déjà ses jours isolés en
+  un seul ensemble équilibré ensemble (« L/Ma/Me/Je = WEEKDAY ») ; une
+  famille par jour isolé serait une généralisation non démontrée (YAGNI).
+  `WeekStructure.soloFamily` (frontend) / `WeekStructureUpdateRequest.soloFamily`
+  (backend) portent ce choix explicitement.
+- **Aucun système d'exceptions calendaires construit** (§13 du cahier des
+  charges) : le point d'extension reste documenté (`docs/week-structure.md`),
+  rien de plus — pas de sur-implémentation.
+- **Rejeté** : dupliquer `DutyPattern`/`DutyGroupInstance` dans une
+  nouvelle abstraction de "bloc" concurrente ; une dimension `WEEKEND_GROUPS`
+  booléenne à côté d'`ALLOCATION_FAMILY` ; deviner une heure de garde par
+  défaut sur `DutyType` ; matérialiser la structure entière du `PlanningPeriod`
+  (potentiellement plusieurs années) dès la création de la ligne — impossible
+  de toute façon puisque la structure n'existe pas encore à cet instant ;
+  une famille par jour isolé individuel sans besoin démontré ; muter un
+  `DutyPattern` existant plutôt que d'en créer un nouveau à chaque
+  remplacement (aurait cassé l'immuabilité historique sans mécanisme de
+  snapshot compensatoire).
+- **Dette assumée, honnêtement listée** :
+  1. Heure de garde configurable par `DutyType` (créneaux autres que jour
+     calendaire plein) — non demandée par ce lot, non construite.
+  2. Exceptions calendaires datées (ex. "dimanche 25 décembre = garde
+     exceptionnelle") — point d'extension documenté, rien d'implémenté.
+  3. L'intégration frontend n'expose la modification de structure que
+     pour la ligne **principale** d'un Planning (bouton « Semaine type »
+     dans `PilotHeaderActions`) — l'API backend accepte n'importe quelle
+     `PlanningLine` par son `stableId`, mais aucune UI ne permet encore de
+     choisir une ligne secondaire ; aucun scénario testé aujourd'hui n'a de
+     ligne secondaire configurée différemment, donc pas construit par
+     anticipation (YAGNI), à étendre le jour où un vrai besoin apparaît.
+  4. Pas de test de contention/concurrence dédié sur un double `PUT`
+     simultané de la même structure (la transaction Doctrine protège la
+     cohérence, mais aucun scénario de course n'est explicitement testé).
+
+## D137 — Page d'accueil publique : maquette `react_homepage` découpée en composants, classes `hp-`, `/` selon la session
+
+> Renumérotée depuis un D136 initial (collision avec « Structure
+> hebdomadaire configurable par ligne » ci-dessus, qui a de nombreuses
+> références croisées dans le code et gardait donc son numéro) — même
+> schéma que la collision D135/D136 déjà rencontrée dans ce journal.
+
+- **Contexte** : `docs/Design/react_homepage/` fournit une page d'accueil
+  React validée (un fichier `HomePage.tsx`, `content.ts`, `homepage.css`),
+  écrite comme projet autonome (React 18, liens Symfony `/connexion`…).
+- **Choix** : `frontend/src/features/home/` — une section = un composant
+  (`sections/*.tsx`), textes et données d'exemple dans `content.ts`
+  (inchangé hormis les liens), page assemblée dans `HomePage.tsx`.
+  `/` affiche la page d'accueil à un visiteur anonyme et le tableau de bord
+  à un utilisateur connecté (`GuestHomeGate` enveloppe `ProtectedRoute`) ;
+  toute autre route protégée redirige toujours vers `/login`. Conséquence :
+  une déconnexion depuis le tableau de bord mène à la page d'accueil.
+- **Écarts assumés par rapport à la maquette** : toutes les classes
+  préfixées `hp-` (`.btn`, `.card`, `.callout`, `.progress`, `.avatar`,
+  `.eyebrow` existent déjà dans `styles/ui.css`/`pages.css` avec d'autres
+  valeurs et fuiraient dans la page) ; règles globales de la maquette
+  (`a`, `strong`, `img`, `scroll-behavior`) limitées à la page via
+  `:where(.hp)` / `html:has(.hp)` ; `tokens.css` et la police Google non
+  repris (déjà fournis par l'app) ; `<title>`/meta description rendus par
+  React 19 ; liens vers `/login`/`/register`. Contact, mentions légales et
+  confidentialité n'existent pas : `null` dans `content.ts`, liens et
+  bouton « Nous contacter » non affichés.
+- **Invariants testés** (`HomePage.test.tsx`) : un seul H1, liens vers les
+  vraies routes, aucune ancre morte, onglets statistiques et FAQ
+  accessibles, espaces fines insécables, chaque classe utilisée définie
+  dans `home.css`, aucun sélecteur hors de la portée `hp`.
+- **Règle de contenu** (reprise du `CLAUDE.md` de la maquette) : la page ne
+  montre que des comportements livrés. Réaffectation manuelle et onglets
+  statistiques (D131/D132) doivent donc être en production avant cette page.
+
+## D138 — Configuration opérationnelle de la génération : de bout en bout, sans nouveau moteur
+
+- **Contexte** : lot qui suit immédiatement D136 (structure hebdomadaire
+  + familles d'équité génériques). Objectif explicite du cahier des
+  charges de ce lot : rendre utilisable, en conditions réelles et sans
+  appel manuel à la base de données, le parcours complet « structure
+  hebdomadaire → règles de génération → préflight → générer (OR-Tools
+  réel) → examiner le résultat » — **jamais** reconstruire ce qui existe
+  déjà, jamais ajouter d'abstraction algorithmique non nécessaire.
+- **Audit préalable (§0 du cahier des charges de ce lot), résultat
+  déterminant pour tout le reste** : `PlanningRuleSetConfiguration`
+  (`maxDutiesPerFairnessPeriod`, `maxWeekendsPerFairnessPeriod`,
+  `teamMinRestHours`, `maxConsecutiveNights`, `holidayDecayFactor`) est
+  **entièrement inerte** — aucun de ses champs n'est lu par
+  `OptimizationProblemBuilder`/CP-SAT aujourd'hui (`teamMinRestHours` en
+  a même été retiré explicitement par D105 au profit de
+  `RestPolicyOptions` par génération). Construire un écran « Paramètres
+  de génération » exposant ces champs aurait été exactement le
+  « panneau d'une douzaine de réglages experts » que le cahier des
+  charges interdit explicitement. La vraie règle de génération
+  réellement consommée aujourd'hui est la politique de repos
+  (`RestPolicyOptions`/D105), déjà exposée par
+  `PlanningGenerationController` (par période) mais jamais threadée
+  jusqu'au lanceur planning-level (`PlanningGenerationLauncher`, D129) —
+  c'est ce vrai manque, et lui seul, que ce lot comble.
+- **`PlanningRuleSetController`** (nouveau, `GET`/`POST
+  /api/planning-lines/{id}/rule-set(/activate)`) : une pure porte
+  d'activation, jamais un formulaire — `activate()` envoie
+  systématiquement une `PlanningRuleSetConfiguration` vide.
+  DRAFT/ACTIVE/RETIRED, version et stableId ne sont jamais exposés côté
+  HTTP ; le contrat métier déjà garanti par `PlanningRuleSetService`
+  (versionnement, activation atomique, jamais de mutation d'une version
+  ACTIVE, historique complet, exactement une ACTIVE à la fois) est repris
+  tel quel, sans aucune nouvelle logique de domaine.
+- **Bug réel trouvé et corrigé pendant ce lot — mauvais voter
+  d'autorisation** : la première version de `PlanningRuleSetController`
+  utilisait `PlanningTeamRoleVoter::MANAGE_PLANNING` (population :
+  OWNER/ADMIN d'équipe **uniquement** — son propre docblock exclut
+  explicitement le créateur du Planning, « stays the sole responsibility
+  of Planning::creator, per PlanningVoter »), au lieu du motif utilisé
+  par tous les endpoints de gestion de ligne/planning ajoutés depuis D129
+  (`PlanningVoter`, créateur OU OWNER/ADMIN d'une équipe d'une ligne du
+  Planning). Détecté par 3 échecs (403) de
+  `PlanningRuleSetControllerTest` sur le créateur de `pilotScenario()`.
+  **Corrigé** en ajoutant `PlanningVoter::MANAGE_RULE_SET` (même
+  population, même règle, que `MANAGE_LINE_STRUCTURE`/`GENERATE`/
+  `MANAGE_CALENDAR`/`PUBLISH` — jamais une nouvelle politique
+  d'autorisation) et en faisant vérifier au contrôleur
+  `PlanningVoter::MANAGE_RULE_SET` contre le `Planning` de la ligne
+  plutôt que `PlanningTeamRoleVoter::MANAGE_PLANNING` contre son
+  `PlanningTeam`.
+- **`RestPolicyRequestParser`** (nouveau, extrait de
+  `PlanningGenerationController`) : parse/valide un choix
+  `RestPolicyOptions` à partir d'un corps de requête — partagé entre
+  `PlanningGenerationController` (par période, inchangé) et
+  `PlanningLaunchController` (planning-level, nouveau), pour que les deux
+  endpoints appliquent exactement la même règle plutôt que deux copies
+  qui auraient pu diverger silencieusement. `PlanningGenerationLauncher::launch()`
+  accepte désormais un `?RestPolicyOptions` optionnel, appliqué
+  identiquement à chaque ligne active du Planning (`runLine()` ne
+  hardcode plus `RestPolicyOptions::none()`) ; omis, le comportement
+  reste strictement identique à avant ce lot.
+- **`familyUnitCounts`** (nouveau sur `LaunchLineReadiness`) : nombre
+  d'unités REQUIRED par nom d'`AllocationFamily`, calculé une seule fois
+  via `DutyUnitFactory` (jamais un comptage de `Duty` bruts — cohérent
+  avec D136 Scénario F : un bloc week-end compte pour 1 unité, jamais 1
+  par jour constitutif), exposé par le préflight planning-level et
+  affiché dans `GenerationModal` — noms de famille toujours dynamiques,
+  jamais « Week-end »/« Semaine » câblés en dur, la clé chaîne vide
+  regroupant les unités sans famille (« Sans famille » côté frontend).
+- **Frontend — `RuleSetModal.tsx`** (nouveau) : statut actif/inactif en
+  langage clair, un seul bouton « Activer » quand inactif, jamais de
+  vocabulaire DRAFT/ACTIVE/RETIRED/version/stableId. **`GenerationModal.tsx`**
+  étendu : section « Règles de repos » (deux cases à cocher — repos
+  légal minimum, repos minimum d'équipe — désactivées par défaut, jamais
+  de valeur légale devinée ; le texte distingue explicitement la règle
+  d'équipe d'une obligation légale) ; structure affichée depuis
+  `familyUnitCounts` ; distinction explicite OPTIMAL vs FEASIBLE dans le
+  résultat (« Planning complet trouvé et prouvé optimal » vs « … n'a pas
+  pu être démontrée dans le temps de calcul disponible » — jamais l'un
+  pour l'autre) ; un rendu du diagnostic UNSAT qui réutilise
+  `UnsatReportPresenter` tel quel côté données — le `phrasing`/
+  `disclaimer` d'une `DiagnosticRelaxation` sont affichés **verbatim**
+  (jamais une causalité recalculée côté React), les codes de raison bruts
+  (`UNAVAILABLE`, `TEAM_MIN_REST`, `NO_ELIGIBLE_CANDIDATE`…) traduits en
+  français plutôt qu'affichés tels quels, et `dutyUnitStableKey` jamais
+  montré à l'utilisateur (agrégation par raison, pas de détail par garde
+  — voir dette ci-dessous).
+- **`PlanningStatisticsService`/`StatisticsMemberRow`** gagne
+  `countsByFamily` (même principe que `countsByWeekday`, D132 : un
+  compte réel, jamais un jugement) — les colonnes exposées pour un groupe
+  sont exactement les noms de famille que sa génération a réellement
+  utilisés, jamais une liste fixe ; la clé chaîne vide regroupe les
+  gardes sans famille. `StatisticsPanel` (frontend) ajoute les colonnes
+  dynamiquement, avant la colonne Total.
+- **UAT navigateur réelle** (planning jetable `UAT D137`, deux comptes
+  créés pour l'occasion, structure L/Ma/Me/Je solo « Semaine » + V/S/D
+  bloc « Week-end ») :
+  1. Activation réelle de la RuleSet via `RuleSetModal`, préflight
+     affichant `16 gardes à répartir — Semaine` / `4 gardes à répartir —
+     Week-end` et la section Règles de repos.
+  2. Génération réelle OR-Tools (`legalMinRestEnabled`/`teamMinRestEnabled`
+     laissés désactivés) : couverture complète, 20 gardes affectées
+     (unités), **« Planning complet trouvé et prouvé optimal »**
+     (`strictSolverStatus = OPTIMAL` réellement obtenu) ; bloc V/S/D
+     confirmé au même titulaire trois semaines de suite ; persistance
+     confirmée après rechargement complet de la page.
+  3. Statistiques par famille réellement équilibrées entre les deux
+     candidats : 8 Semaine / 6 Week-end / 14 total chacun — vérifie en
+     conditions réelles que l'équité multidimensionnelle (principe
+     structurant du projet, voir `CLAUDE.md`) est bien optimisée par
+     famille et non par un score global unique.
+  4. Génération réelle provoquée INCOMPLETE (`teamMinRestEnabled` avec
+     `teamMinRestHours = 500`, mathématiquement infaisable à 2
+     candidats) : couverture incomplète affichée honnêtement (4/20
+     unités, 22 gardes non couvertes), avec la relaxation **réellement
+     recalculée** par le moteur après un vrai re-solve : « La suppression
+     de TEAM_MIN_REST permettrait de retrouver une couverture complète.
+     Une relaxation possible parmi d'autres — pas nécessairement la
+     cause unique. » — texte backend affiché verbatim, jamais réinventé
+     côté React.
+  5. Nettoyage complet vérifié : suppression transactionnelle en base
+     (ordre de dépendances des FK) du planning, de l'équipe, des lignes,
+     période, `fairness_period`, membres, patterns/types/familles,
+     rule set, collecte de disponibilités, gardes/affectations/groupes,
+     générations/snapshots, et des deux comptes créés pour l'occasion —
+     zéro résidu vérifié sur 17 tables après coup.
+- **Bug d'environnement réel trouvé et corrigé pendant l'UAT (jamais une
+  régression de ce lot)** : le serveur de développement Vite servait une
+  version périmée de `PilotHeaderActions.tsx` (le bouton « Règles de
+  génération » absent du DOM alors que le code source le contenait déjà)
+  — même symptôme déjà rencontré et documenté lors du lot D136 (cache
+  Vite + bind mount Docker/Windows). Corrigé par la même procédure :
+  `docker compose exec frontend rm -rf node_modules/.vite && docker
+  compose restart frontend`.
+- **Collision de numérotation trouvée et corrigée avant d'écrire cette
+  entrée** : deux décisions « D136 » coexistaient dans ce journal (la
+  structure hebdomadaire de ce lot, et une entrée « Page d'accueil
+  publique » ajoutée ensuite par un autre travail, sans référence croisée
+  dans le code). Renumérotée en D137 (celle sans référence croisée dans
+  `src/`) — même schéma que la collision D135/D136 déjà rencontrée dans
+  ce journal.
+- **Rejeté** : exposer un formulaire pour les champs inertes de
+  `PlanningRuleSetConfiguration` ; deviner une valeur de repos légal ou
+  d'équipe par défaut ; reconstruire côté React la logique
+  `canGenerate`/les raisons de blocage (le préflight reste l'unique
+  source de vérité structurée, `{blockers, warnings, canGenerate}`
+  inchangé) ; une file d'attente/architecture asynchrone pour la
+  génération (le solve reste synchrone, quelques secondes en pratique —
+  aucune limite technique réelle ne le justifie) ; simuler un résultat
+  côté frontend pour la démo — chaque génération de l'UAT est un vrai
+  subprocess OR-Tools.
+- **Dette assumée, honnêtement listée** :
+  1. Le scénario "V+D bloc non contigu + S isolé indépendant" n'a été
+     rejoué qu'au niveau des tests backend automatisés
+     (`WeeklyDutyCalendarServiceTest`/`PlanningStatisticsControllerTest`),
+     pas repris en UAT navigateur séparée dans ce lot par manque de temps
+     — le scénario V/S/D (jours non consécutifs Ven+Dim sans Sam autour
+     d'un Sam isolé n'existant pas ici, mais Ven·Sam·Dim contigus) a bien
+     été vérifié en conditions réelles.
+  2. Le rendu du diagnostic UNSAT reste volontairement agrégé (comptage
+     par raison, jamais `dutyUnitStableKey`/date affichés) — un futur lot
+     qui voudrait pointer une garde non couverte précise depuis le
+     diagnostic devra faire porter au résultat le lien vers sa date/ligne
+     réelle, non construit ici (YAGNI, aucun besoin démontré dans ce
+     lot).
+  3. `MAX_DUTIES`/`MAX_WEEKENDS`/`MAX_CONSECUTIVE_NIGHTS` restent non
+     implémentées (inchangé depuis D105/D106) — toujours pas exposées
+     dans l'UI, conformément à l'audit de ce lot.
+  4. Aucun test de contention dédié sur une activation de RuleSet
+     concurrente à un lancement de génération (la transaction Doctrine
+     protège la cohérence, mais aucun scénario de course explicite n'est
+     testé) — même limite déjà assumée par D136 sur un point voisin.
+
+## D139 — `SPACING_SCORE`/`PREFERENCE_SATISFACTION` : de `NEUTRAL` à un vrai objectif CP-SAT, en `DutyUnit`, familles génériques
+
+- **Contexte** : audit qualitatif d'une génération réelle (5 membres,
+  L/Ma/Me/J isolé `SEMAINE` + V/S/D bloc `WEEK_END`, indisponibilités et
+  `PREFER_DUTY` réels, COMPLETE/OPTIMAL) — fairness optimale confirmée
+  (`SEMAINE` = permutation de 11/10/10/10/10, `WEEK_END` = permutation de
+  3/3/2/2/2) mais espacement manifestement mauvais : 12
+  enchaînements sans jour libre, 6 répétitions consécutives d'une même
+  famille sur la même personne, alors qu'un contrôle indépendant a montré
+  qu'une solution existe avec un espacement bien meilleur, une fairness
+  identique et davantage de préférences honorées.
+- **Cause racine établie avec certitude avant tout code** (audit exigé
+  par ce lot) : `SPACING_SCORE`/`PREFERENCE_SATISFACTION` sont deux des 8
+  phases lexicographiques posées **structurellement** par D087 — jamais
+  alimentées depuis. `CpSatPayloadBuilder::kindFor()` les routait vers
+  `'NEUTRAL'`, ce qui forçait `terms = []` ; côté Python
+  (`cp_sat_solver.py::solve_phase()`), `if not terms:` renvoie
+  directement `{"neutral": true, "optimal": true,
+  "objectiveValueScaled": 0}` **sans jamais construire ni résoudre
+  d'expression**. Comportement **délibéré et testé**
+  (`OrToolsPlanningSolverTest::testNeutralPhasesNeverDegradeAnythingHoldingNoRealDataInThisLot`,
+  assertion explicite « no real data backs it in this lot ») — jamais un
+  bug de calcul, de signe ou de granularité : une donnée absente du
+  payload, point. Fait notable de l'audit : pour `PREFERENCE_SATISFACTION`,
+  la donnée métier existait déjà, correcte, testée, à la bonne
+  granularité — `EligibilityService::evaluate()` calcule déjà
+  `EligibilityResult::$preferred` **par `DutyUnit`** (la boucle sur les
+  `Duty` constitutives pose un seul booléen pour toute l'unité, jamais un
+  par jour) — exposée par `EligibilityMatrix`, donc déjà atteignable
+  depuis `OptimizationProblem::getEligibilityMatrix()`. Rien à changer
+  dans `EligibilityService`/`FairnessContext`/`OptimizationProblem` pour
+  les préférences : uniquement `CpSatPayloadBuilder` + `cp_sat_solver.py`
+  + mapping/tests. Pour `SPACING_SCORE`, aucune donnée n'existait nulle
+  part (le §8 conceptuel d'`allocation-algorithm.md` date d'avant D136/
+  `DutyUnit`/`ALLOCATION_FAMILY` et propose une formule bien plus
+  complexe — `density7/14/30`, `weekendAdjacencyPenalty` codé en dur —
+  que ce lot ne construit pas, YAGNI assumé explicitement).
+- **`DutyUnitSpan`** (nouveau, `App\Fairness`) : la projection
+  espacement-pertinente d'un `DutyUnit` — `startDate`/`endDate`/
+  `allocationFamilyStableId`. Un bloc V/S/D est **un seul span** (la
+  première/dernière date de ses `Duty` constitutives), jamais trois jours
+  à pénaliser entre eux. `freeDaysUntil()` est **l'unique** définition du
+  nombre de jours libres dans tout le code (`next.startDate -
+  this.endDate - 1`, §5 du cahier des charges de ce lot) — dimanche→lundi
+  = 0, jeudi→vendredi = 0, jamais confondu avec la différence brute de
+  dates.
+- **`SpacingPenaltyCalculator`** (nouveau, `App\Service`) : calcule, pour
+  chaque paire de `DutyUnit`, une pénalité **locale à cette seule phase**
+  (jamais mélangée à l'échelle d'une dimension de fairness, D032) si le
+  même candidat les obtient toutes les deux — deux sources additives :
+  1. **Adjacence calendaire**, par palier, strictement décroissant, nul à
+     partir de 3 jours libres (`0→100, 1→60, 2→20, 3+→0`) — couvre aussi
+     la « concentration temporelle » du §8 du cahier des charges sans
+     métrique séparée (deux unités rapprochées dans le temps *sont* une
+     paire à faible `freeDays`, rien de plus à construire, YAGNI assumé).
+  2. **Répétition d'une même `AllocationFamily`**, définie **purement par
+     position dans la séquence chronologique propre à cette famille**
+     (occurrence *i* et *i+1*, aucune autre occurrence de cette famille
+     entre les deux) — jamais une hypothèse de cadence codée en dur (pas
+     de « 7 jours »), jamais le nom `WEEK_END` lu nulle part dans le
+     solveur : le mécanisme fonctionne identiquement pour n'importe quel
+     nom/cadence de famille.
+  Fenêtre bornée pour la performance (§21) : les unités sont triées par
+  date, la boucle d'adjacence s'arrête dès que `freeDays` dépasse le
+  palier maximal (jamais un balayage `O(n²)` complet), la boucle
+  "famille" ne considère que des paires consécutives (bornée par le
+  nombre d'unités de cette famille). Sur le scénario réel de l'audit (63
+  `DutyUnit`) : 147 paires structurelles retenues sur 1953 possibles
+  (~7,5 %) — confirmé mesuré, pas supposé.
+- **`CpSatPayloadBuilder`** : `kindFor()` route désormais `SPACING_SCORE`
+  vers un nouveau kind `SPACING_PENALTY` et `PREFERENCE_SATISFACTION` vers
+  un nouveau kind `LINEAR` (`buildSpacingPhaseEntry()`/
+  `buildPreferencePhaseEntry()`, nouveaux). `SPACING_PENALTY` : un terme
+  par paire pénalisée × candidat réellement éligible aux **deux** unités
+  de la paire. `LINEAR` : un terme par `(DutyUnit, candidat)` où
+  `EligibilityResult::$preferred` est vrai — réutilise tel quel le format
+  `variableCoefficients` déjà existant (coefficient 1, jamais de
+  `CpSatScale`, ce sont des quantités entières exactes, pas de précision
+  fractionnaire à protéger).
+- **`cp_sat_solver.py`** : `SPACING_PENALTY` construit, par paire
+  pénalisée × candidat, une variable booléenne "ET" fraîche
+  (linéarisation standard `y ≤ a, y ≤ b, y ≥ a+b-1` — le même schéma déjà
+  utilisé pour `worst_`/`abs_` dans `MAX_DEVIATION`/`SUM_DEVIATION`) ;
+  l'objectif est la somme **négée** des pénalités déclenchées
+  (`direction` reste `MAXIMIZE`, fixée par `ObjectivePhase::spacingScore()`
+  — maximiser `-Σpénalité` **est** minimiser `Σpénalité`). `LINEAR`
+  réutilise `build_phase_expression()` tel quel (`objective_expr =
+  sum(expressions)`), rien de nouveau à écrire côté parsing.
+- **Bug réel trouvé et corrigé pendant ce lot — mauvaise mise à l'échelle**
+  du résultat : `OrToolsPlanningSolver::mapPhaseResults()` divisait
+  **inconditionnellement** toute valeur d'objectif par `CpSatScale::SCALE`
+  (10 000) sauf pour `PARTIAL_COVERAGE_CRITICAL`/`TOTAL` — mais
+  `CpSatPayloadBuilder` n'a jamais mis à l'échelle les pénalités
+  d'espacement ni le compte de préférences (déjà des entiers exacts,
+  aucune précision fractionnaire à protéger, contrairement à
+  `WEIGHTED_WORKLOAD`). Conséquence observée : `SPACING_SCORE` valait
+  `-0.012` au lieu de `-120` sur un cas de test réel. **Corrigé** en
+  ajoutant les deux nouvelles phases à la liste des identifiants jamais
+  divisés (renommée `$isUnscaledCount`, plus honnête que l'ancien
+  `$isCoverageCount`).
+- **Sémantique des valeurs d'objectif (§19/§20 du cahier des charges),
+  fixée explicitement pour ne jamais rester une boîte noire** :
+  `SPACING_SCORE` = `-Σ pénalité` (MAXIMIZE) — **0 = aucune paire
+  pénalisée déclenchée (optimum), une valeur plus négative = pénalité
+  accumulée** ; `OPTIMAL` signifie : aucune affectation respectant toutes
+  les phases lexicographiquement précédentes n'obtient une somme de
+  pénalités plus faible. `PREFERENCE_SATISFACTION` = `Σ préférences
+  honorées` (MAXIMIZE) — **0 = aucune préférence honorée, N = N
+  préférences honorées** (jamais une fraction, jamais négatif) ;
+  `OPTIMAL` signifie : aucune affectation respectant toutes les phases
+  précédentes n'honore davantage de préférences.
+- **Tests unitaires purs** (`SpacingPenaltyCalculatorTest`, aucun
+  kernel/DB, même convention que `DimensionMembershipCalculatorTest`) :
+  paliers 0/1/2/3+ jours libres, bloc traité comme un seul span (jamais
+  pénalisé contre ses propres jours constitutifs), répétition de famille
+  consécutive vs non consécutive (une occurrence sautée n'est jamais
+  pénalisée), familles différentes jamais croisées, cumul additif quand
+  les deux sources s'appliquent à la fois, aucune famille ⇒ jamais de
+  pénalité de répétition.
+- **Tests bout en bout réels** (`OrToolsPlanningSolverTest`, vrai
+  subprocess OR-Tools, aucun mock) — le cahier des charges en demandait
+  10 nommés (A-J) ; livrés directement et complètement : adjacence
+  évitable réellement évitée à fairness rigoureusement égale (A/B
+  combinés), l'espacement ne bloque jamais la couverture par nécessité
+  (C), la fairness verrouillée n'est jamais rouverte pour améliorer
+  l'espacement (F), une préférence départage des candidats par ailleurs
+  strictement à égalité (G), la fairness n'est jamais sacrifiée pour une
+  préférence (H), l'espacement n'est jamais sacrifié pour une préférence
+  (I), une préférence sur un seul jour d'un bloc récompense l'unité une
+  seule fois, jamais trois (J). D/E (répétition de blocs sur semaines
+  successives, absence de pénalité interne à un bloc) sont couverts en
+  profondeur au niveau paiement/payload par `SpacingPenaltyCalculatorTest`
+  et empiriquement à pleine échelle par la ré-génération réelle
+  ci-dessous, plutôt que dupliqués en scénarios `OrToolsPlanningSolverTest`
+  supplémentaires — dette explicitement assumée, jamais un test
+  simplement omis sans le dire.
+- **Régression sur le scénario d'audit réel, reproduit à l'identique**
+  (mêmes 5 comptes de test, mêmes dates, mêmes indisponibilités, mêmes
+  préférences, même structure, même politique de repos désactivée) —
+  seed non rejouable à dessein (voir ci-dessous), **une seule
+  génération** :
+  | Métrique | Avant | Après |
+  |---|---|---|
+  | Coverage | COMPLETE | COMPLETE |
+  | Solver | OPTIMAL | OPTIMAL |
+  | SEMAINE par membre | 10/10/10/10/11 | 10/10/10/10/11 (même multi-ensemble) |
+  | WEEK_END par membre | 3/3/2/2/2 | 3/3/2/2/2 (même multi-ensemble) |
+  | Violations d'indisponibilité | 0 | 0 |
+  | Blocs divisés | 0 | 0 |
+  | `zeroFreeDayTransitions` | **12** | **0** |
+  | `consecutiveSameFamilyOccurrences` | **6** | **0** |
+  | `minFreeDays` par membre | 0 (chaque membre) | **3 (chaque membre)** |
+  | `objectiveValues.SPACING_SCORE` | 0 (neutre, non significatif) | **0 (optimum réel prouvé)** |
+  | `objectiveValues.PREFERENCE_SATISFACTION` | 0 (neutre, non significatif) | **2 (les deux `PREFER_DUTY` honorées)** |
+  | Durée de solve | 627 ms | 803 ms |
+  Cible du cahier des charges (« zeroFreeDayTransitions = 0, consecutive
+  WEEK_END = 0, à fairness identique ») **atteinte exactement**, avec un
+  vrai solveur, sans aucun maquillage.
+- **`explicitSeed` — pourquoi une seule génération, pas cinq** : confirmé
+  dans le code avant tout autre travail (`SeedMaterialBuilder`,
+  `CpSatPayloadBuilder::buildSolvePayload()`) : `randomSeed` est câblé en
+  dur à `0` et aucun mécanisme d'override `explicitSeed` n'existe en mode
+  GENERATE (docblock de `SeedMaterialBuilder` : « no override mechanism
+  exists »). Cinq relances sur le même snapshot auraient donc été
+  byte-identiques — les fabriquer aurait été mentir sur le comportement
+  réel du moteur, exactement ce que ce lot interdit explicitement.
+- **Rejeté** : une fonction d'espacement sophistiquée (densité 7/14/30
+  jours, décroissance continue) — le cahier des charges de ce lot
+  demandait explicitement un modèle par paliers simple, déterministe,
+  testable ; une contrainte HARD sur l'espacement (jamais — resterait
+  SOFT, `LEGAL_MIN_REST`/`TEAM_MIN_REST` restent les seules contraintes
+  de repos réelles) ; fusionner fairness + spacing + préférences en un
+  score pondéré unique (D032, jamais) ; un nom de famille câblé en dur
+  dans le solveur ; un post-traitement qui échangerait des gardes après
+  OR-Tools (la meilleure solution sort directement de CP-SAT) ; changer
+  le tie-break déterministe ou ajouter un seed aléatoire pour "avoir de
+  la chance" sur une meilleure solution.
+- **Dette assumée, honnêtement listée** :
+  1. Tests D/I/J du cahier des charges partiellement redistribués comme
+     expliqué ci-dessus (D/E vers les tests unitaires + la régression
+     réelle plutôt que dupliqués en scénarios solveur séparés).
+  2. Aucune mesure directe du nombre de variables/contraintes CP-SAT
+     ajoutées par `cp_sat_solver.py` (l'API Python de OR-Tools ne
+     l'expose pas simplement) — approximé indirectement via le nombre de
+     paires structurelles réellement produites par
+     `SpacingPenaltyCalculator` sur le scénario réel (147 sur 1953
+     possibles), qui borne directement le nombre de variables "ET"
+     ajoutées.
+  3. `NAMED_HOLIDAY_REPETITION_PENALTY`/`DETERMINISTIC_TIE_BREAK`
+     restent `NEUTRAL` (inchangé, hors périmètre explicite de ce lot).

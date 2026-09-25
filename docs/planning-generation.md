@@ -421,3 +421,285 @@ cible `PUBLISHED`, qu'une `PlanningGeneration` `COMPLETED` avec
 `coverageStatus = COMPLETE` existe pour la période ; sinon
 `PlanningPeriodNotReadyToPublishException` (409). Aucun endpoint de
 publication n'est créé dans ce lot — le point d'intégration est prêt.
+
+## 17. Consultation du planning généré (docs/decisions.md D130)
+
+**Audit préalable** (explicitement demandé avant toute implémentation) :
+avant ce lot, `UnsatReport` n'existait que le temps de la réponse HTTP de
+`POST .../solve` (§9) — jamais écrit en base. Une garde `REQUIRED` non
+couverte, consultée après coup (rafraîchissement, autre session), n'avait
+donc aucune raison disponible, y compris juste après un solve réel qui les
+avait pourtant calculées.
+
+**Persistance réelle** : `PlanningGeneration.diagnostics` (colonne `JSON`
+nullable, migration `Version20260923090000`). `recordSolverRun()` le peuple
+à partir du même `UnsatReport` que celui déjà retourné par `/solve`,
+uniquement quand `coverageStatus = INCOMPLETE` (jamais pour `COMPLETE`,
+jamais pour un snapshot périmé rejeté, §16 — `null` explicite dans ce cas).
+`UnsatReportPresenter` est le seul point de sérialisation, partagé par le
+contrôleur `/solve` existant et par le nouveau lot — jamais deux mappings
+divergents du même `UnsatReport`.
+
+**Nouvel endpoint** (jamais un enrichissement de `POST
+.../{id}/assignments`, dont le contrat — fenêtré par mois, filtrable par
+personne, uniquement les affectations existantes — est incompatible avec
+une vue de couverture pleine période incluant les gardes sans affectation) :
+
+```
+GET /api/plannings/{planningStableId}/result?from=...&to=...
+```
+
+Autorisation : `PlanningVoter::VIEW` (identique à `/assignments`). Pour
+chaque `PlanningLine` active, `PlanningResultService` réutilise
+`findMostRecentCompletedByPlanningPeriod` (D125, appliqué indépendamment par
+ligne — pas d'historique multi-génération) et construit un DTO de lecture
+dédié (`PlanningResultView`/`PlanningResultLine`/`PlanningResultDuty`/
+`PlanningResultCandidateReason`, aucune entité Doctrine exposée) :
+
+- **Toute garde `REQUIRED` de la période est listée**, couverte ou non —
+  contrairement à `/assignments`, qui ne montre que ce qui existe déjà et
+  laisse silencieusement disparaître une garde non couverte.
+- Les compteurs de couverture (`requiredDutyCount`/
+  `coveredRequiredDutyCount`) portent toujours sur la période complète de la
+  ligne, indépendamment d'un filtre `from`/`to` — seule la liste `duties[]`
+  retournée est filtrée (même règle que `PlanningAssignmentViewService::
+  summarize()`, §11/D125).
+- Les raisons d'une garde non couverte viennent uniquement de
+  `PlanningGeneration.diagnostics`, indexées par `dutyUnitStableKey`
+  (clé du `DutyGroupInstance` pour un groupe, jamais celle d'une `Duty`
+  constituante isolée). **Jamais recalculées** : une génération antérieure à
+  ce lot (`diagnostics = null`) ou une garde absente de l'`UnsatReport`
+  affiche une liste de raisons vide, jamais une exclusion fabriquée (D095).
+- Aucune ligne sans génération `COMPLETED` n'est ignorée : elle apparaît
+  avec `generationStableId = null`, jamais un faux `0/0`.
+
+**Frontend** : `PersonalPlanningView.tsx` (évolué, pas remplacé) affiche,
+en vue équipe, un bandeau de couverture (`CoverageHeader`) et signale
+chaque garde non couverte (`UncoveredDuty`, disclosure "Pourquoi ?" avec les
+vraies raisons ou un message neutre si aucune n'est disponible) ; la vue par
+personne (`/assignments`) est inchangée. `INCOMPLETE` est un état métier
+normal, jamais rendu comme une erreur ; aucune donnée solveur/Python brute
+n'est exposée.
+
+**Hors périmètre** : validation/publication, `REPAIR`, échanges de garde,
+historique de plusieurs générations par ligne, statistiques d'équité.
+
+## 18. Calendrier dynamique : réaffectation manuelle (docs/decisions.md D131)
+
+Le calendrier généré n'est plus figé : une garde (ou tout son bloc atomique
+si elle appartient à un `DutyGroupInstance`) peut être réaffectée
+manuellement, y compris après publication, sans jamais perdre l'historique.
+
+**Modèle** : `DutyAssignment` gagne un booléen `current` — une ligne n'est
+plus jamais mutée, elle est marquée `markSuperseded()` puis remplacée par
+une nouvelle ligne `MANUAL`. Un index unique **partiel**
+`(generation_id, duty_id) WHERE current` remplace l'ancienne contrainte
+stricte. Toute lecture de "l'affectation actuelle" (`/result`,
+`/assignments`) filtre désormais `current = true`
+(`DutyAssignmentRepository::findForGenerations()`).
+
+**Éligibilité live** : `ReassignmentCandidateService` — jamais
+`EligibilityService`/`AssignmentConflictAnalyzer`, tous deux figés sur le
+snapshot — relit l'état réel au moment de l'ouverture du modal
+(indisponibilités, non-participation, autres gardes courantes du
+candidat) et au moment de l'enregistrement (`DutyReassignmentService`,
+revalidation complète, jamais une confiance dans la liste affichée).
+
+**Endpoints** :
+
+```
+GET  /api/plannings/{planningStableId}/duties/{dutyStableId}/reassignment-candidates
+POST /api/plannings/{planningStableId}/duties/{dutyStableId}/reassign
+```
+
+Le premier détecte automatiquement le bloc (le `DutyGroupInstance` entier,
+ou la garde seule) et renvoie tous les candidats réels de l'équipe, y
+compris les non-sélectionnables avec leur vraie raison (jamais masqués).
+Le second réaffecte — sauvegarde explicite uniquement : choisir un candidat
+dans le modal n'écrit rien tant que "Enregistrer la modification" n'a pas
+réussi côté serveur. Payload : `{teamMemberStableId,
+expectedCurrentTeamMemberStableId}` — ce dernier est l'identité réellement
+revue à l'enregistrement (409 `stale_reassignment` si le calendrier a
+changé entre-temps, jamais un écrasement silencieux entre deux
+gestionnaires) ; 409 `invalid_candidate` si le candidat choisi n'est plus
+valide au moment de sauvegarder. Autorisation : nouvel attribut
+`PlanningVoter::MANAGE_CALENDAR`, même population que
+`GENERATE`/`MANAGE_AVAILABILITY` (créateur ou OWNER/ADMIN d'équipe).
+
+**Atomicité du bloc** : toutes les Duty constituantes changent ensemble,
+dans une même transaction — jamais un split partiel, même en cas d'échec
+(rollback intégral). L'écriture utilise deux `flush()` explicites (superseder
+puis insérer) à cause de l'index partiel, dérogation documentée à la
+convention "un seul flush" (D131).
+
+**Historique** : `DutyAssignmentEvent`, append-only (même patron que
+`PlanningAvailabilityReminder`), une ligne par Duty constituante — ancien
+assignee (nullable, `null` = garde qui était non couverte), nouvel
+assignee, auteur, date, `wasPublished` figé au moment du changement.
+
+**Frontend** : `ReassignmentModal.tsx` (`features/planning/result/`),
+ouvert depuis `PersonalPlanningView.tsx` via un bouton "Réattribuer" /
+"Attribuer" visible uniquement quand `planning.canManageCalendar` est vrai
+(nouveau champ, même calcul serveur que `canGenerate`/
+`canManageAvailability`). Aucune écriture optimiste : le calendrier
+principal ne change qu'après un 2xx confirmé, puis un rafraîchissement
+explicite de `/result`.
+
+**Hors périmètre de ce lot** : statistiques de répartition, préflight +
+publication (`PlanningPeriodLifecycleService::transition()` existe déjà
+mais reste sans appelant), emails de publication et de modification
+post-publication, `REPAIR`, override manuel d'une contrainte HARD/POLICY_HARD.
+
+## 19. Publication : préflight + publication du calendrier courant (docs/decisions.md D133)
+
+`PlanningPeriodLifecycleService::transition()` — jusqu'ici sans appelant
+(§9/§18 plus haut) — est enfin invoqué : la publication ne signifie jamais
+« le planning devient immuable », seulement « cet état courant du
+calendrier est officiellement communiqué ». Le planning publié reste
+entièrement modifiable (réaffectation, D131 ; statistiques toujours à
+jour, D132).
+
+**Préflight, jamais sur l'historique** : `PlanningPublicationPreflightService`
+lit exclusivement l'état courant (`DutyAssignment` `current = true`,
+D131) — jamais `OptimizationResult`, le `coverageStatus` figé de la
+génération, ni les diagnostics initiaux (ceux-ci restent consultables pour
+audit via `/result`, mais ne décident jamais de la publiabilité). Vérifie,
+en réutilisant entièrement `ReassignmentCandidateService` (aucune nouvelle
+logique de contrainte) :
+
+- gardes `REQUIRED` non couvertes ;
+- cohérence des blocs (`DutyGroupInstance`, défense indépendante de
+  l'atomicité déjà garantie par le lot précédent) ;
+- validité structurelle de chaque affectation courante (membership,
+  non-participation, indisponibilité déclarée, compte actif) ;
+- conflits (overlap, `LEGAL_MIN_REST`/`TEAM_MIN_REST` si actifs).
+
+**Endpoints** :
+
+```
+GET  /api/plannings/{planningStableId}/publication-preflight
+POST /api/plannings/{planningStableId}/publish
+```
+
+Le premier ne modifie jamais rien. Le second **revalide systématiquement**
+côté serveur — jamais confiance dans un préflight chargé côté client
+quelques secondes plus tôt. Autorisation : `PlanningVoter::PUBLISH`, même
+population que `MANAGE_CALENDAR`.
+
+**Façade Planning sur un lifecycle par ligne** : comme la génération (D129),
+`PlanningPeriodStatus` vit sur `PlanningPeriod`, une par `PlanningLine` —
+publier "le planning" transitionne chaque ligne active. Concurrence :
+verrou consultatif Postgres par Planning, même patron que
+`PlanningGenerationLauncher` (D129), espace de noms distinct. Idempotence :
+un second `POST /publish` alors que toutes les lignes actives sont déjà
+`PUBLISHED` → 409 `already_published`.
+
+**Régénération après publication** : déjà bloquée sans aucun changement —
+`PlanningGenerationLauncher::preflight()` marque `PERIOD_LOCKED` dès qu'une
+ligne active est `PUBLISHED`/`ARCHIVED`, et `canGenerate()` refuse dès
+qu'un seul bloqueur existe, quelle que soit la ligne concernée. Vérifié,
+pas reconstruit.
+
+**Frontend** : `PublishModal.tsx` (même patron que `GenerationModal`/
+`ReassignmentModal` — sauvegarde explicite, aucune écriture avant la
+confirmation serveur), bouton « Publier le planning » dans
+`PersonalPlanningView.tsx` visible uniquement si `planning.canPublish`.
+Statut affiché (« Publié » / « Non publié ») dérivé du statut réel par
+ligne renvoyé par `/publish`, jamais réécrit côté client autrement.
+
+## 20. Matérialisation à la demande depuis la structure hebdomadaire (docs/decisions.md D136)
+
+Avant ce lot, **aucun** contrôleur/service de production n'appelait jamais
+`DutyMaterializationService` — chaque `Duty` vue jusqu'ici (démos, smoke
+tests) avait été créée à la main. `PlanningGenerationLauncher::preflight()`
+appelle désormais `WeeklyDutyCalendarService::ensureMaterialized()` pour
+chaque ligne active, *avant* de compter ses `Duty` et de décider
+`NO_DUTIES` — sans quoi une ligne dont la structure hebdomadaire vient
+d'être configurée resterait bloquée jusqu'à ce qu'un gestionnaire clique
+quand même sur « Générer ».
+
+Effet de bord assumé sur une lecture (GET), documenté explicitement dans
+le docblock de `PlanningGenerationLauncher` : idempotent (une semaine déjà
+matérialisée n'est jamais dupliquée — `DutyGroupInstanceRepository::findOneByPeriodPatternAndAnchor()`/
+`DutyRepository::findOneByPeriodPatternAndLocalDate()`), sans effet tant
+qu'aucune structure `recurring` n'est configurée pour la ligne (aucune
+structure devinée par défaut).
+
+**Piège trouvé et corrigé pendant ce lot** : la première version de ce
+hook lisait *tout* `DutyPattern` `active = true` d'une équipe, y compris
+des patterns ad hoc construits directement par des tests pré-existants
+(`createTwoDutyGroup()`) — jamais destinés à un traitement hebdomadaire
+récurrent. Corrigé par un champ dédié `DutyPattern.recurring`
+(`DutyPatternRepository::findActiveRecurringByTeam()`, jamais
+`findActiveByTeam()`) — détail complet et scénarios de régression :
+`docs/decisions.md` D136.
+
+Point d'accroche choisi après audit des alternatives :
+`PlanningGenerationService::create()` (Lot 3) était trop tard — le blocage
+`NO_DUTIES` du préflight intervient avant tout appel à `create()` — et son
+docblock affirme explicitement n'avoir jamais changé depuis le Lot 3 ; un
+hook plus profond aurait rompu cette garantie documentée sans bénéfice
+réel.
+
+## 21. Configuration opérationnelle de bout en bout (docs/decisions.md D138)
+
+Lot qui rend réellement utilisable, de bout en bout, ce que les lots
+précédents avaient construit — **aucun nouveau moteur, aucune nouvelle
+abstraction algorithmique**. Audit préalable exhaustif (voir D138) :
+`PlanningRuleSetConfiguration` reste entièrement inerte (aucun champ lu
+par le solveur réel) ; la seule vraie règle de génération consommée
+aujourd'hui est la politique de repos (`RestPolicyOptions`, D105), déjà
+exposée par `PlanningGenerationController` (par période) mais jamais
+threadée jusqu'au lanceur planning-level.
+
+**`PlanningRuleSetController` (`GET`/`POST .../rule-set(/activate)`)** —
+nouveau, mais volontairement mince : jamais un formulaire de paramètres,
+seulement une porte d'activation. `activate()` envoie systématiquement une
+configuration vide ; DRAFT/ACTIVE/RETIRED, version et stableId ne
+transpirent jamais côté HTTP — voir le docblock du contrôleur pour l'audit
+complet champ par champ. Autorisation : `PlanningVoter::MANAGE_RULE_SET`
+(créateur du Planning ou OWNER/ADMIN d'une équipe qui en possède une
+ligne) — **jamais** `PlanningTeamRoleVoter::MANAGE_PLANNING`, qui exclut
+explicitement le créateur par son propre docblock ; un bug réel de ce
+type a été trouvé et corrigé pendant ce lot (voir D138 pour le détail).
+
+**`RestPolicyRequestParser`** — extrait de `PlanningGenerationController`
+pour être partagé avec `PlanningLaunchController`, qui accepte désormais
+un `?RestPolicyOptions` optionnel sur `launch()` (`runLine()` ne
+hardcode plus `RestPolicyOptions::none()`) : un manager choisit, au
+moment de générer, les mêmes règles de repos pour toutes les lignes
+actives du Planning — jamais une par ligne à ce niveau (le endpoint par
+période reste disponible pour ce cas).
+
+**`familyUnitCounts`** — `LaunchLineReadiness` porte désormais le nombre
+d'unités REQUIRED par nom d'`AllocationFamily` (calculé une fois via
+`DutyUnitFactory`, jamais par comptage de `Duty` bruts — D136 Scénario
+F), exposé par le préflight planning-level et rendu dans
+`GenerationModal` — noms toujours dynamiques, jamais « Week-end »/
+« Semaine » câblés en dur.
+
+**Frontend** — `RuleSetModal.tsx` (nouveau), `GenerationModal.tsx`
+étendu : section « Règles de repos » (deux cases à cocher, désactivées
+par défaut, jamais de valeur légale devinée), structure de la ligne
+rendue depuis `familyUnitCounts`, distinction explicite OPTIMAL/FEASIBLE
+dans le résultat (jamais « planning optimal » pour un résultat COMPLETE
+non prouvé optimal), et un rendu du diagnostic UNSAT qui réutilise
+`UnsatReportPresenter` tel quel — `phrasing`/`disclaimer` d'une
+`DiagnosticRelaxation` affichés verbatim, jamais une causalité recalculée
+en React ; les codes de raison bruts (`UNAVAILABLE`, `TEAM_MIN_REST`…)
+sont traduits en français plutôt qu'affichés tels quels.
+
+**`PlanningStatisticsService`/`StatisticsMemberRow`** — gagne
+`countsByFamily` (même principe que `countsByWeekday` : un membre, un
+total réel par famille — jamais un jugement) ; les colonnes affichées
+sont celles réellement utilisées par la génération concernée d'un
+groupe, jamais une liste fixe. `StatisticsPanel` (frontend) ajoute les
+colonnes dynamiquement, la clé chaîne vide affichée « Sans famille ».
+
+**UAT navigateur réelle** (voir D138 pour le compte-rendu complet) : un
+planning jetable, une vraie activation de règle, une vraie génération
+OR-Tools COMPLETE + OPTIMAL avec bloc V/S/D au même titulaire et
+statistiques par famille équilibrées, puis une vraie génération
+INCOMPLETE provoquée par un `TEAM_MIN_REST` volontairement excessif —
+diagnostic et relaxation réels affichés, jamais simulés. Nettoyage
+complet vérifié (zéro résidu, 17 tables).

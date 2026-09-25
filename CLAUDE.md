@@ -53,17 +53,19 @@ détaillé (encore conceptuel, rien d'implémenté) :
 | Planning multi-lignes : `Planning`/`PlanningLine` (agrégat visible, moteurs de ligne mono-équipe) | ✅ Livré (2026-09-16) | `docs/planning.md` |
 | Fairness : `FairnessContext`/`OptimizationProblem` abstrait (targets, structurally forced, pas de solveur) | ✅ Livré (2026-09-18) | `docs/fairness.md` |
 | Frontière `PlanningSolver` + 8 phases d'objectif GENERATE (contrat abstrait, pas de solveur concret) | ✅ Livré (2026-09-18) | `docs/planning-solver.md` |
-| `OrToolsPlanningSolver` : OR-Tools CP-SAT réel, STRICT GENERATE, lexicographique | ✅ Livré (2026-09-18) | `docs/planning-solver.md` |
+| `OrToolsPlanningSolver` : OR-Tools CP-SAT réel, STRICT GENERATE, lexicographique | ✅ Livré (2026-09-18). Phases 6/7 (`spacingScore`/`preferenceSatisfaction`) réellement résolues depuis D139 (2026-09-24) — jusque-là `NEUTRAL`, trouvé par audit qualitatif réel (`SpacingPenaltyCalculator`, `DutyUnitSpan`, kinds CP-SAT `SPACING_PENALTY`/`LINEAR`) | `docs/planning-solver.md` §5, `docs/decisions.md` D139 |
 | STRICT → PARTIAL, priorité CRITICAL, diagnostic UNSAT structuré (`UnsatReport`) | ✅ Livré (2026-09-18) | `docs/planning-solver.md` |
 | Contraintes globales `CONFLICT`/`TEAM_MIN_REST` (`AssignmentConflict`) — priorité CRITICAL réellement observable | ✅ Livré (2026-09-19) | `docs/planning-solver.md` |
 | Politiques de repos par génération : `LEGAL_MIN_REST`/`TEAM_MIN_REST` deviennent des options `RestPolicyOptions` figées par `PlanningGeneration`, jamais un défaut d'équipe | ✅ Livré (2026-09-19) | `docs/planning-solver.md` §36, `docs/decisions.md` D105 |
 | Orchestration réelle `PlanningGeneration → solve → DutyAssignment AUTO` : `SolverParameterSet`, seed/snapshotHash, timeout CP-SAT réel, concurrence par verrou optimiste, atomicité, `PUBLISHED` ⇒ coverage COMPLETE | ✅ Livré (2026-09-19) | `docs/planning-generation.md` §13-16, `docs/planning-solver.md` §37, `docs/decisions.md` D106 |
-| Moteur de génération avancé (`fixedAssignments` réels, REPAIR, SIMULATE, MAX_DUTIES/MAX_WEEKENDS, UI, validation/publication avancée) | ⏳ Design conceptuel écrit, pas implémenté | `docs/allocation-algorithm.md` |
+| Moteur de génération avancé (`fixedAssignments` réels, REPAIR, SIMULATE, MAX_DUTIES/MAX_WEEKENDS, validation/publication avancée) | ⏳ Design conceptuel écrit, pas implémenté (MAX_DUTIES/MAX_WEEKENDS/MAX_CONSECUTIVE_NIGHTS confirmées inertes, D138) | `docs/allocation-algorithm.md` |
 | Inscription enrichie (téléphone E.164, **sans hôpital** : l'établissement n'est pas une propriété du `User`) + invitations d'équipe (`TeamInvitation`, emails Mailer/Twig, inscription par lien, multi-invitations) | ✅ Livré (2026-09-20), UAT navigateur OK. Affiliation hospitalière : à modéliser plus tard dans un contexte daté (D115), pas d'import ni de référentiel | `docs/authentication.md` §15, `docs/decisions.md` D111-D116 |
 | Refonte de l'interface (charte, tokens, mobile d'abord) : cadre, connexion/inscription/invitations, tableau de bord, plannings, calendrier d'indisponibilités en **jour entier** (sélection multiple, tactile) | ✅ Livré (2026-09-21) — tests Vitest, vérifié dans un navigateur | `docs/decisions.md` D117-D119, `docs/availability.md` §8 |
 | Collecte des disponibilités par fenêtre (`AvailabilityCollection`/`Response`), prolongation d'un planning, participation du créateur, planning par personne, calendrier optimiste sans « Enregistrer » | ✅ Livré (2026-09-21) — tests backend/frontend + UAT navigateur complète (deux comptes, deux onglets) | `docs/availability-collection.md`, `docs/decisions.md` D120-D126 |
 | Vue de pilotage OWNER/ADMIN d'un planning : statut de collecte par membre (drawer, indisponibilités de la période), rappels email individuels/groupés (audit append-only), paramètre `availabilityDeadline` informatif, préflight + génération au niveau du planning (façade sur le pipeline existant, snapshot pris au lancement) | ✅ Livré (2026-09-23) — tests backend/frontend + UAT navigateur complète (génération réelle OR-Tools bout en bout, email réel via Mailpit, immutabilité du snapshot vérifiée) ; vérification mobile non complétée (limite de l'environnement de test, cf. rapport) | `docs/availability-collection.md` §11/§13/§14, `docs/planning-generation.md` §11, `docs/decisions.md` D127-D129 |
-| Semaine type : composant `WeekStructureEditor` (garde isolée / bloc atomique / pas de garde, payload prêt pour `DutyPattern`) | 🟡 Composant frontend livré et testé (2026-09-23), **pas encore branché** (ni page, ni endpoint, ni persistance) | `docs/week-structure.md`, `docs/decisions.md` D134 |
+| Semaine type : composant `WeekStructureEditor` (garde isolée / bloc atomique / pas de garde) | ✅ Composant livré (2026-09-23, D134), **branché** depuis D136 ci-dessous | `docs/week-structure.md`, `docs/decisions.md` D134 |
+| Structure hebdomadaire configurable par `PlanningLine`, familles d'équité génériques `ALLOCATION_FAMILY` (remplace `WEEKEND_GROUPS`) : `AllocationFamily`, `DutyPattern.family`/`.recurring`, `Duty.pattern`, pipeline réel de matérialisation (`WeekStructureService`/`WeeklyDutyCalendarService`, jusque-là inexistant en production), endpoint `GET/PUT .../week-structure`, matérialisation à la demande au préflight de génération | ✅ Livré (2026-09-24) — tests backend/frontend ; UI limitée à la ligne principale (dette) ; pas d'heure de garde configurable, pas d'exceptions calendaires datées (dette) | `docs/week-structure.md`, `docs/planning-domain.md` §9-§11, `docs/fairness.md` §2-§4, `docs/allocation-algorithm.md` §5/§6/§9, `docs/planning-generation.md` §20, `docs/decisions.md` D136 |
+| Configuration opérationnelle de la génération, de bout en bout : activation des règles de planning (`PlanningRuleSetController`, porte d'activation sans formulaire de paramètres inertes), règles de repos choisies au lancement planning-level (`RestPolicyOptions` threadée jusqu'à `PlanningGenerationLauncher`, jusque-là hardcodée à `none()`), structure de ligne dynamique (`familyUnitCounts`) et distinction OPTIMAL/FEASIBLE dans le préflight/résultat, statistiques par famille (`countsByFamily`) | ✅ Livré (2026-09-24) — tests backend/frontend + UAT navigateur complète (génération réelle OR-Tools COMPLETE+OPTIMAL et INCOMPLETE+diagnostic réel provoqués tous deux en conditions réelles, statistiques par famille équilibrées vérifiées, nettoyage zéro résidu) | `docs/planning-generation.md` §21, `docs/decisions.md` D138 |
 | Échanges de garde, notifications (in-app), export calendrier | ⏳ Pas commencé | — |
 
 ## Où trouver quoi
@@ -89,7 +91,12 @@ détaillé (encore conceptuel, rien d'implémenté) :
   `PlanningGenerationService::generate()` orchestre un vrai solve
   (`SolverParameterSet`, seed/snapshotHash, `DutyAssignment` AUTO,
   atomicité, concurrence par verrou optimiste, `PUBLISHED` ⇒ coverage
-  COMPLETE) — voir §13-16, `docs/decisions.md` D106.
+  COMPLETE) — voir §13-16, `docs/decisions.md` D106. Depuis D138,
+  `PlanningGenerationLauncher::launch()` accepte une `RestPolicyOptions`
+  choisie au lancement (jusque-là hardcodée `none()`), le préflight
+  expose `familyUnitCounts` par ligne, et `PlanningRuleSetController`
+  (porte d'activation, jamais un formulaire) débloque `NO_ACTIVE_RULE_SET`
+  — voir §21.
 - **`docs/eligibility.md`** — modèle métier d'éligibilité
   (`ExclusionReason`/`ConstraintTier`/`DutyUnit`), raisons réellement
   calculables vs seulement déclarées, sémantique de
@@ -108,12 +115,14 @@ détaillé (encore conceptuel, rien d'implémenté) :
   `UserAvailabilityPeriod` (D120), extension d'un planning (D122), participation
   du créateur (D123), autorisations (D124), lecture des affectations par
   personne (D125), calendrier optimiste (D126).
-- **`docs/week-structure.md`** — composant réutilisable `WeekStructureEditor`
+- **`docs/week-structure.md`** — composant `WeekStructureEditor`
   (`frontend/src/features/week-structure/`) : structure hebdomadaire d'une
   ligne (garde isolée, bloc attribué d'un seul tenant, jour sans garde =
-  absent de la demande), props, règles métier, payload
-  `blocks`/`solo`/`excluded` et correspondance prévue avec `DutyPattern`,
-  paliers responsive sur la largeur du composant. Pas encore branché.
+  absent de la demande), familles d'équité par bloc/jours isolés (D136),
+  props, règles métier, payload `blocks`/`solo`/`soloFamily`/`excluded`.
+  **Branché** depuis D136 : endpoint réel, persistance (`AllocationFamily`,
+  `DutyPattern.family`/`.recurring`), matérialisation réelle du calendrier
+  (`WeeklyDutyCalendarService`, à la demande au préflight de génération).
 - **`docs/fairness.md`** — `FairnessContext` (dimensions supportées/non
   supportées, `RequiredDemand`, `EffectiveExposure`, targets bruts et
   discrétionnaires, `STRUCTURALLY_FORCED`) et l'`OptimizationProblem`

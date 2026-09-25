@@ -7,3 +7,11 @@
 .idea/
 .DS_Store
 Thumbs.db
+
+# Deployment before/after snapshots (local working notes, never product code)
+/.deploy-snapshots/
+
+# Throwaway audit tooling (docs/decisions.md D139/D140) — read-only, never a
+# shipped feature; regenerate from a real PlanningGeneration when needed.
+/backend/src/Command/PlanningAuditExportCommand.php
+/backend/artifacts/

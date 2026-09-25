@@ -171,11 +171,26 @@ Aucune technologie de solveur n'apparaît nulle part dans ces types.
 2. sumDeviationPrimary       MINIMIZE  dimensions PRIMARY
 3. maxDeviationSecondary     MINIMIZE  dimensions SECONDARY
 4. sumDeviationSecondary     MINIMIZE  dimensions SECONDARY
-5. namedHolidayRepetitionPenalty  MINIMIZE  (aucune dimension — métrique par holidayCode, hors périmètre fairness)
+5. namedHolidayRepetitionPenalty  MINIMIZE  (aucune dimension — métrique par holidayCode, hors périmètre fairness — reste NEUTRAL)
 6. spacingScore              MAXIMIZE  (aucune dimension)
 7. preferenceSatisfaction    MAXIMIZE  (aucune dimension)
-8. deterministicTieBreak     MINIMIZE  (aucune dimension — convention, D088)
+8. deterministicTieBreak     MINIMIZE  (aucune dimension — convention, D088 — reste NEUTRAL)
 ```
+
+> **Statut d'implémentation (docs/decisions.md D139)** : les phases 6
+> (`spacingScore`) et 7 (`preferenceSatisfaction`) sont désormais
+> réellement résolues par CP-SAT — jusque-là `NEUTRAL` (aucune donnée,
+> `objectiveValueScaled` toujours 0, `optimal` toujours vrai
+> trivialement) depuis leur introduction structurelle par D087. Deux
+> nouveaux kinds de payload : `SPACING_PENALTY` (une variable booléenne
+> "ET" par paire de `DutyUnit` pénalisée × candidat, objectif = somme
+> négée des pénalités — direction `MAXIMIZE` inchangée, donc
+> `objectiveValueScaled = 0` reste le meilleur score possible) et
+> `LINEAR` (somme simple de coefficients 1, réutilise
+> `build_phase_expression()` tel quel, aucune valeur absolue). Les
+> phases 5 et 8 restent `NEUTRAL` (hors périmètre explicite de D139).
+> Détail complet du modèle, tests et résultats avant/après sur un cas
+> réel : D139.
 
 8 phases distinctes, jamais fusionnées (D087) — testé explicitement
 (`ObjectivePhaseFactoryTest::testExactOrderOfPhases`,
