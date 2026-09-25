@@ -41,7 +41,8 @@ final class CpSatScale
             FairnessDimensionType::FRIDAY,
             FairnessDimensionType::SATURDAY,
             FairnessDimensionType::SUNDAY,
-            FairnessDimensionType::DUTY_TYPE => 1.0,
+            FairnessDimensionType::DUTY_TYPE,
+            FairnessDimensionType::ALLOCATION_FAMILY => 1.0,
         };
     }
 }

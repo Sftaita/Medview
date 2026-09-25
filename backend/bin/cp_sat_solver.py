@@ -159,7 +159,11 @@ def solve_phase(model, solver, variables, unassigned_vars, phase):
         # data backs this phase in this lot, or the dimension set it would
         # apply to is empty. Never solved, never fabricated — recorded as
         # trivially satisfied and the lexicographic chain continues
-        # unconstrained by it.
+        # unconstrained by it. Also the correct outcome for a real,
+        # implemented phase (SPACING_PENALTY/LINEAR, docs/decisions.md
+        # D139) whose own term list is genuinely empty for this snapshot —
+        # e.g. no PREFER_DUTY at all: 0 preferences to satisfy is not a
+        # missing implementation, it is the true, trivially-optimal answer.
         return {
             "id": phase["id"],
             "attempted": True,
@@ -168,25 +172,65 @@ def solve_phase(model, solver, variables, unassigned_vars, phase):
             "objectiveValueScaled": 0,
         }, None
 
-    expressions = [build_phase_expression(model, variables, t) for t in terms]
     direction = phase["direction"]
 
-    if kind == "MAX_DEVIATION":
-        worst = model.NewIntVar(-(10**15), 10**15, f"worst_{phase['id']}")
-        for e in expressions:
-            model.Add(worst >= e)
-            model.Add(worst >= -e)
-        objective_expr = worst
-    elif kind == "SUM_DEVIATION":
-        abs_vars = []
-        for i, e in enumerate(expressions):
-            a = model.NewIntVar(0, 10**15, f"abs_{phase['id']}_{i}")
-            model.Add(a >= e)
-            model.Add(a >= -e)
-            abs_vars.append(a)
-        objective_expr = sum(abs_vars)
+    if kind == "SPACING_PENALTY":
+        # docs/decisions.md D139: one AND-boolean per (unitA, unitB,
+        # candidate) term — y = 1 iff this candidate got *both* units of a
+        # penalized pair. The standard linearization of a boolean AND
+        # (y <= a, y <= b, y >= a + b - 1) — the same "product of two
+        # binaries" pattern CP-SAT has no native operator for, built fresh
+        # per phase exactly like the existing worst_/abs_ auxiliary
+        # variables below. Objective is the *negated* penalty sum: with
+        # direction always MAXIMIZE for this phase (fixed by
+        # ObjectivePhase::spacingScore()), maximizing -Σpenalty*y is
+        # exactly minimizing Σpenalty*y — 0 is the best possible value
+        # (no penalized pair ever triggered), more negative is worse.
+        and_vars = {}
+        objective_expr = 0
+        for i, t in enumerate(terms):
+            key_a = (t["unitAKey"], t["candidateId"])
+            key_b = (t["unitBKey"], t["candidateId"])
+            if key_a not in variables or key_b not in variables:
+                raise ValueError(
+                    f"SPACING_PENALTY term references ({key_a}, {key_b}) "
+                    "but one of them is not an eligible variable in this model — "
+                    "the PHP payload builder must never emit a penalty for a "
+                    "candidate ineligible for either unit of the pair."
+                )
+            cache_key = (t["unitAKey"], t["unitBKey"], t["candidateId"])
+            if cache_key not in and_vars:
+                y = model.NewBoolVar(f"spacing_and_{phase['id']}_{i}")
+                model.Add(y <= variables[key_a])
+                model.Add(y <= variables[key_b])
+                model.Add(y >= variables[key_a] + variables[key_b] - 1)
+                and_vars[cache_key] = y
+            objective_expr += -t["penalty"] * and_vars[cache_key]
     else:
-        raise ValueError(f"unsupported phase kind for a non-neutral phase: {kind}")
+        expressions = [build_phase_expression(model, variables, t) for t in terms]
+
+        if kind == "MAX_DEVIATION":
+            worst = model.NewIntVar(-(10**15), 10**15, f"worst_{phase['id']}")
+            for e in expressions:
+                model.Add(worst >= e)
+                model.Add(worst >= -e)
+            objective_expr = worst
+        elif kind == "SUM_DEVIATION":
+            abs_vars = []
+            for i, e in enumerate(expressions):
+                a = model.NewIntVar(0, 10**15, f"abs_{phase['id']}_{i}")
+                model.Add(a >= e)
+                model.Add(a >= -e)
+                abs_vars.append(a)
+            objective_expr = sum(abs_vars)
+        elif kind == "LINEAR":
+            # docs/decisions.md D139 (PREFERENCE_SATISFACTION): a plain sum
+            # of already-scaled/coefficiented terms, no absolute value, no
+            # worst-case variable — reuses build_phase_expression exactly
+            # as it already exists, nothing new needed here.
+            objective_expr = sum(expressions)
+        else:
+            raise ValueError(f"unsupported phase kind for a non-neutral phase: {kind}")
 
     if direction == "MINIMIZE":
         model.Minimize(objective_expr)

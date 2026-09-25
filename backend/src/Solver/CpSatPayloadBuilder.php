@@ -13,6 +13,8 @@ use App\Fairness\FairnessDimensionKey;
 use App\Fairness\ObjectivePhase;
 use App\Fairness\ObjectivePhaseId;
 use App\Fairness\OptimizationProblem;
+use App\Fairness\SpacingPairPenalty;
+use App\Service\SpacingPenaltyCalculator;
 
 /**
  * Pure translation from `OptimizationProblem` to the JSON contract
@@ -27,9 +29,22 @@ use App\Fairness\OptimizationProblem;
  * (stint), matching `EligibilityMatrix` and a real future
  * `DutyAssignment.teamMember` (docs/decisions.md D082). A person's term
  * therefore sums the variables of *all* of that person's stints.
+ *
+ * `SPACING_SCORE`/`PREFERENCE_SATISFACTION` (docs/decisions.md D139) are
+ * the two exceptions to "never derives a new business quantity" above:
+ * `SpacingPenaltyCalculator` genuinely computes new data (this lot closes
+ * a real gap, the two phases were `NEUTRAL` — no data backed them at all).
+ * Preference data itself is not new: `EligibilityResult::$preferred` is
+ * reused exactly as `EligibilityService` already computes it, never
+ * recomputed here.
  */
 final class CpSatPayloadBuilder
 {
+    public function __construct(
+        private readonly SpacingPenaltyCalculator $spacingPenaltyCalculator,
+    ) {
+    }
+
     /**
      * @param bool $excludePolicyHardConflicts docs/decisions.md D103: used
      *                                         only to build the diagnostic
@@ -259,20 +274,120 @@ final class CpSatPayloadBuilder
         $section = [];
 
         foreach ($problem->getObjectivePhases() as $phase) {
-            $kind = $this->kindFor($phase->id);
-            $terms = [] === $phase->dimensions || 'NEUTRAL' === $kind
-                ? []
-                : $this->buildDeviationTerms($problem, $phase, $stintsByPerson, $unitsByStint);
-
-            $section[] = [
-                'id' => $phase->id->value,
-                'kind' => $kind,
-                'direction' => $phase->direction->value,
-                'terms' => $terms,
-            ];
+            $section[] = match ($phase->id) {
+                ObjectivePhaseId::SPACING_SCORE => $this->buildSpacingPhaseEntry($phase, $problem),
+                ObjectivePhaseId::PREFERENCE_SATISFACTION => $this->buildPreferencePhaseEntry($phase, $problem),
+                default => $this->buildDeviationPhaseEntry($phase, $problem, $stintsByPerson, $unitsByStint),
+            };
         }
 
         return $section;
+    }
+
+    /**
+     * @param array<string, list<string>> $stintsByPerson
+     * @param array<string, list<string>> $unitsByStint
+     *
+     * @return array{id: string, kind: string, direction: string, terms: list<array{constantOffset: int, variableCoefficients: list<array{dutyUnitKey: string, candidateId: string, coefficient: int}>}>}
+     */
+    private function buildDeviationPhaseEntry(ObjectivePhase $phase, OptimizationProblem $problem, array $stintsByPerson, array $unitsByStint): array
+    {
+        $kind = $this->kindFor($phase->id);
+
+        return [
+            'id' => $phase->id->value,
+            'kind' => $kind,
+            'direction' => $phase->direction->value,
+            'terms' => [] === $phase->dimensions || 'NEUTRAL' === $kind
+                ? []
+                : $this->buildDeviationTerms($problem, $phase, $stintsByPerson, $unitsByStint),
+        ];
+    }
+
+    /**
+     * `SPACING_SCORE` (docs/decisions.md D139) — `SpacingPenaltyCalculator`
+     * finds which pairs of `DutyUnit`s should cost something if the same
+     * candidate ends up with both; here, each structural pair is turned
+     * into one payload term per candidate genuinely eligible for *both*
+     * units (never a candidate ineligible for one of them — the Python
+     * side would have no variable to build the AND-term against). The
+     * objective is the **negated** penalty sum, so that `direction =
+     * MAXIMIZE` (fixed by `ObjectivePhase::spacingScore()`) correctly
+     * means "minimize total penalty": 0 = no penalized pair triggered
+     * (best possible), a more negative value = more accumulated penalty.
+     *
+     * @return array{id: string, kind: string, direction: string, terms: list<array{unitAKey: string, unitBKey: string, candidateId: string, penalty: int}>}
+     */
+    private function buildSpacingPhaseEntry(ObjectivePhase $phase, OptimizationProblem $problem): array
+    {
+        $matrix = $problem->getEligibilityMatrix();
+        $allUnits = [...$problem->getRequiredDutyUnits(), ...$problem->getOptionalDutyUnits()];
+        $unitsByKey = [];
+        foreach ($allUnits as $unit) {
+            $unitsByKey[$unit->getStableKey()] = $unit;
+        }
+
+        $terms = [];
+        foreach ($this->spacingPenaltyCalculator->buildPairPenalties($allUnits) as $pairPenalty) {
+            \assert($pairPenalty instanceof SpacingPairPenalty);
+            $unitA = $unitsByKey[$pairPenalty->unitAKey];
+            $unitB = $unitsByKey[$pairPenalty->unitBKey];
+            $eligibleForA = array_keys(array_filter($matrix->getForDutyUnit($unitA), static fn ($r) => $r->eligible));
+            $eligibleForB = array_keys(array_filter($matrix->getForDutyUnit($unitB), static fn ($r) => $r->eligible));
+
+            foreach (array_intersect($eligibleForA, $eligibleForB) as $candidateId) {
+                $terms[] = [
+                    'unitAKey' => $pairPenalty->unitAKey,
+                    'unitBKey' => $pairPenalty->unitBKey,
+                    'candidateId' => $candidateId,
+                    'penalty' => $pairPenalty->penalty,
+                ];
+            }
+        }
+
+        return [
+            'id' => $phase->id->value,
+            'kind' => 'SPACING_PENALTY',
+            'direction' => $phase->direction->value,
+            'terms' => $terms,
+        ];
+    }
+
+    /**
+     * `PREFERENCE_SATISFACTION` (docs/decisions.md D139) — reuses
+     * `EligibilityResult::$preferred` exactly as `EligibilityService`
+     * already computes it: one boolean per (DutyUnit, candidate) pair,
+     * never per constituent Duty (a 3-day block preferred via one
+     * PREFER_DUTY day is rewarded once, never three times — see
+     * `EligibilityService::evaluate()`, unchanged by this lot). Plain
+     * linear sum, coefficient 1 per satisfied preference, no scaling
+     * needed (an integer count, never a fractional quantity).
+     *
+     * @return array{id: string, kind: string, direction: string, terms: list<array{constantOffset: int, variableCoefficients: list<array{dutyUnitKey: string, candidateId: string, coefficient: int}>}>}
+     */
+    private function buildPreferencePhaseEntry(ObjectivePhase $phase, OptimizationProblem $problem): array
+    {
+        $matrix = $problem->getEligibilityMatrix();
+        $variableCoefficients = [];
+
+        foreach ([...$problem->getRequiredDutyUnits(), ...$problem->getOptionalDutyUnits()] as $unit) {
+            foreach ($matrix->getForDutyUnit($unit) as $candidateId => $result) {
+                if ($result->eligible && $result->preferred) {
+                    $variableCoefficients[] = [
+                        'dutyUnitKey' => $unit->getStableKey(),
+                        'candidateId' => $candidateId,
+                        'coefficient' => 1,
+                    ];
+                }
+            }
+        }
+
+        return [
+            'id' => $phase->id->value,
+            'kind' => 'LINEAR',
+            'direction' => $phase->direction->value,
+            'terms' => [] === $variableCoefficients ? [] : [['constantOffset' => 0, 'variableCoefficients' => $variableCoefficients]],
+        ];
     }
 
     private function kindFor(ObjectivePhaseId $id): string
@@ -281,9 +396,9 @@ final class CpSatPayloadBuilder
             ObjectivePhaseId::MAX_DEVIATION_PRIMARY, ObjectivePhaseId::MAX_DEVIATION_SECONDARY => 'MAX_DEVIATION',
             ObjectivePhaseId::SUM_DEVIATION_PRIMARY, ObjectivePhaseId::SUM_DEVIATION_SECONDARY => 'SUM_DEVIATION',
             ObjectivePhaseId::NAMED_HOLIDAY_REPETITION_PENALTY,
-            ObjectivePhaseId::SPACING_SCORE,
-            ObjectivePhaseId::PREFERENCE_SATISFACTION,
             ObjectivePhaseId::DETERMINISTIC_TIE_BREAK => 'NEUTRAL',
+            ObjectivePhaseId::SPACING_SCORE => 'SPACING_PENALTY',
+            ObjectivePhaseId::PREFERENCE_SATISFACTION => 'LINEAR',
         };
     }
 

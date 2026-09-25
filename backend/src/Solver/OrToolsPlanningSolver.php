@@ -280,18 +280,25 @@ final class OrToolsPlanningSolver implements PlanningSolver
             $id = $phase['id'];
             $raw = (float) ($phase['objectiveValueScaled'] ?? 0);
             // PARTIAL_COVERAGE_CRITICAL/TOTAL (Lot 6C) are plain counts of
-            // unassigned DutyUnits — CpSatPayloadBuilder never scales them
-            // by CpSatScale::SCALE (only deviation terms are), so they must
+            // unassigned DutyUnits, and SPACING_SCORE/PREFERENCE_SATISFACTION
+            // (docs/decisions.md D139) are a plain penalty sum / preference
+            // count — CpSatPayloadBuilder never scales any of the three by
+            // CpSatScale::SCALE (only deviation terms are: real fairness
+            // quantities with fractional precision to preserve, e.g.
+            // WEIGHTED_WORKLOAD's 0.01 step — these three are already exact
+            // integers with no such precision to protect), so they must
             // never be divided by it here either.
-            $isCoverageCount = \in_array($id, [
+            $isUnscaledCount = \in_array($id, [
                 ObjectivePhaseId::PARTIAL_COVERAGE_CRITICAL->value,
                 ObjectivePhaseId::PARTIAL_COVERAGE_TOTAL->value,
+                ObjectivePhaseId::SPACING_SCORE->value,
+                ObjectivePhaseId::PREFERENCE_SATISFACTION->value,
             ], true);
             // (float) cast first: PHP's `/` returns int when both operands
             // are int and divide evenly (e.g. 0 / SCALE), which would make
             // this a mixed int|float map instead of the float map the
             // OptimizationResult contract promises.
-            $objectiveValues[$id] = $isCoverageCount ? $raw : $raw / CpSatScale::SCALE;
+            $objectiveValues[$id] = $isUnscaledCount ? $raw : $raw / CpSatScale::SCALE;
             $optimality[$id] = (bool) ($phase['optimal'] ?? false);
         }
 
