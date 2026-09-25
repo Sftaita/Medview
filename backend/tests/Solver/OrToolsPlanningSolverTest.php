@@ -402,9 +402,9 @@ final class OrToolsPlanningSolverTest extends KernelTestCase
      * PREFERENCE_SATISFACTION can tell otherwise-tied solutions apart
      * (docs/decisions.md D139).
      *
-     * @param list<string>       $dates              "YYYY-MM-DD"
-     * @param array<string, int> $preferDutyByDate   date => 0 (candidate A) | 1 (candidate B)
-     * @param array<string, int> $unavailableByDate  date => 0 (candidate A) | 1 (candidate B)
+     * @param list<string>       $dates             "YYYY-MM-DD"
+     * @param array<string, int> $preferDutyByDate  date => 0 (candidate A) | 1 (candidate B)
+     * @param array<string, int> $unavailableByDate date => 0 (candidate A) | 1 (candidate B)
      *
      * @return array{0: OrToolsPlanningSolver, 1: OptimizationProblem, 2: array<string, string>, 3: string, 4: string} solver, problem, dutyUnitStableKey by date, memberA stableId, memberB stableId
      */

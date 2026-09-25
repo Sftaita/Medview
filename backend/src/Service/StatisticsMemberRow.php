@@ -14,10 +14,10 @@ final readonly class StatisticsMemberRow
 {
     /**
      * @param array<string, int> $countsByWeekday keyed 'MON'..'SUN', always all seven keys present
-     * @param array<string, int> $countsByFamily   keyed by AllocationFamily name (docs/decisions.md D137);
-     *                                              the empty-string key groups duties with no family. Names,
-     *                                              never hardcoded — the same set for every row of a group,
-     *                                              built from what that group's generation actually used.
+     * @param array<string, int> $countsByFamily  keyed by AllocationFamily name (docs/decisions.md D137);
+     *                                            the empty-string key groups duties with no family. Names,
+     *                                            never hardcoded — the same set for every row of a group,
+     *                                            built from what that group's generation actually used.
      */
     public function __construct(
         public string $teamMemberStableId,

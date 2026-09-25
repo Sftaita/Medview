@@ -79,7 +79,7 @@ final class SpacingPenaltyCalculator
     }
 
     /**
-     * @param list<DutyUnitSpan> $spans sorted by startDate
+     * @param list<DutyUnitSpan> $spans            sorted by startDate
      * @param array<string, int> $penaltyByPairKey
      */
     private function addFreeDaysPenalties(array $spans, array &$penaltyByPairKey): void
@@ -107,7 +107,7 @@ final class SpacingPenaltyCalculator
     }
 
     /**
-     * @param list<DutyUnitSpan> $spans sorted by startDate
+     * @param list<DutyUnitSpan> $spans            sorted by startDate
      * @param array<string, int> $penaltyByPairKey
      */
     private function addSameFamilyRepetitionPenalties(array $spans, array &$penaltyByPairKey): void
