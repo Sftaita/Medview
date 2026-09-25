@@ -141,6 +141,12 @@ final class SnapshotHasher
             'demandType' => $duty->getDemandType()->value,
             'criticality' => $duty->getCriticality()->value,
             'groupInstanceStableId' => null !== $duty->getGroupInstance() ? (string) $duty->getGroupInstance()->getStableId() : null,
+            // docs/decisions.md D136: now consumed by DimensionMembershipCalculator/
+            // RequiredDemandBuilder/EffectiveExposureService via
+            // Duty::getAllocationFamily() — must enter the hash under the same rule
+            // as every other field on this list ("only data actually consumed
+            // enters the hash").
+            'allocationFamilyStableId' => null !== $duty->getAllocationFamily() ? (string) $duty->getAllocationFamily()->getStableId() : null,
         ];
     }
 }
