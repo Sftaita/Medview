@@ -9,6 +9,7 @@ use App\Eligibility\EligibilityMatrix;
 use App\Entity\Duty;
 use App\Entity\PlanningSnapshotMember;
 use App\Fairness\FairnessCandidate;
+use App\Fairness\FairnessDimensionKey;
 use App\Fairness\FairnessDimensionValues;
 
 /**
@@ -36,6 +37,20 @@ use App\Fairness\FairnessDimensionValues;
  * `participationFactor` is read from the frozen snapshot alone
  * (PlanningSnapshotParticipationPeriod::covers()) — never live state
  * (docs/planning-generation.md).
+ *
+ * ALLOCATION_FAMILY exposure (docs/decisions.md D136) is computed
+ * separately, once per *unit* rather than folded into the per-Duty loop
+ * above: `dimensionWeight(duty, ALLOCATION_FAMILY)` is not really a
+ * per-Duty weight, it is "does this unit belong to this family", so a
+ * candidate exposed to a 3-day WEEKEND block gets
+ * `effectiveExposure(WEEKEND) += structuralOpportunity × participationFactor`
+ * once, never three times (the same Scenario F guarantee
+ * `RequiredDemandBuilder` upholds on the demand side). The unit's anchor
+ * Duty (its first constituent, by construction always the earliest
+ * dayOffset — DutyMaterializationService::materializeGroup() persists
+ * components in pattern order) supplies the one participationFactor
+ * evaluation date; a mid-block participation change is the same rare edge
+ * case the calendar dimensions already accept evaluating per-Duty instead.
  */
 final class EffectiveExposureService
 {
@@ -55,7 +70,7 @@ final class EffectiveExposureService
 
         $result = [];
         foreach ($candidates as $candidate) {
-            $result[$candidate->sourceUserStableId] = $this->buildForCandidate($matrix, $unitByDutyStableId, $candidate);
+            $result[$candidate->sourceUserStableId] = $this->buildForCandidate($matrix, $unitByDutyStableId, $dutyUnits, $candidate);
         }
 
         return $result;
@@ -63,8 +78,9 @@ final class EffectiveExposureService
 
     /**
      * @param array<string, DutyUnit> $unitByDutyStableId
+     * @param list<DutyUnit>          $dutyUnits
      */
-    private function buildForCandidate(EligibilityMatrix $matrix, array $unitByDutyStableId, FairnessCandidate $candidate): FairnessDimensionValues
+    private function buildForCandidate(EligibilityMatrix $matrix, array $unitByDutyStableId, array $dutyUnits, FairnessCandidate $candidate): FairnessDimensionValues
     {
         $total = FairnessDimensionValues::empty();
 
@@ -88,6 +104,27 @@ final class EffectiveExposureService
 
             $factor = $this->participationFactorAt($stint, $duty->getLocalDate());
             $total = $total->plus($this->dimensionMembershipCalculator->forDuty($duty)->scaledBy($factor));
+        }
+
+        foreach ($dutyUnits as $unit) {
+            $family = $unit->getDuties()[0]->getAllocationFamily();
+            if (null === $family) {
+                continue;
+            }
+
+            $anchorDuty = $unit->getDuties()[0];
+            $stint = $candidate->stintCovering($anchorDuty->getLocalDate());
+            if (null === $stint) {
+                continue;
+            }
+
+            $result = $matrix->get($unit, $stint);
+            if (null === $result || !$result->structuralOpportunity) {
+                continue;
+            }
+
+            $factor = $this->participationFactorAt($stint, $anchorDuty->getLocalDate());
+            $total = $total->withAdded(FairnessDimensionKey::allocationFamily((string) $family->getStableId()), $factor);
         }
 
         return $total;

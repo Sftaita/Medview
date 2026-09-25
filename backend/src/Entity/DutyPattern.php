@@ -19,6 +19,31 @@ use Symfony\Component\Uid\Uuid;
  * potentially more) is naturally a one-to-many relation
  * (DutyPatternComponent) rather than a fixed set of columns or an
  * unqueryable JSON blob — see docs/planning-domain.md for the rationale.
+ *
+ * $family (docs/decisions.md D136) classifies this pattern into an equity
+ * bucket ("Week-end", "Semaine", ...) — nullable and immutable once set:
+ * nullable because every pre-D136 pattern (and every test fixture that
+ * never cared about equity families) has none, and a pattern with no
+ * family simply never contributes to the ALLOCATION_FAMILY fairness
+ * dimension, exactly like a Duty's DutyType only ever contributes a
+ * DUTY_TYPE dimension actually encountered; immutable because a week
+ * structure edit always replaces patterns wholesale (never mutates one in
+ * place, see WeekStructureService) — a family is fixed at the moment a
+ * pattern is created and never drifts out from under Duty rows already
+ * materialized from it.
+ *
+ * $recurring (docs/decisions.md D136) marks a pattern as belonging to a
+ * PlanningLine's *weekly recurring structure* (WeekStructureService),
+ * distinct from `$active` on purpose: many patterns predating this lot (and
+ * plenty of test fixtures) are one-off/manually-built groups
+ * (`DutyMaterializationServiceTest`, `createTwoDutyGroup()`, ...) that are
+ * `active = true` but were never meant to recur weekly. `WeeklyDutyCalendarService`
+ * only ever reads `$recurring = true` patterns
+ * (`DutyPatternRepository::findActiveRecurringByTeam()`) — conflating the
+ * two would make it silently re-anchor and re-materialize an unrelated
+ * one-off pattern onto every Monday of a period, which is exactly the bug
+ * this field exists to make structurally impossible rather than merely
+ * avoided by convention.
  */
 #[ORM\Entity(repositoryClass: DutyPatternRepository::class)]
 #[ORM\Table(name: 'duty_patterns')]
@@ -45,8 +70,15 @@ class DutyPattern
     #[ORM\Column(length: 150)]
     private string $name;
 
+    #[ORM\ManyToOne(targetEntity: AllocationFamily::class)]
+    #[ORM\JoinColumn(nullable: true, onDelete: 'RESTRICT')]
+    private ?AllocationFamily $family;
+
     #[ORM\Column]
     private bool $active = true;
+
+    #[ORM\Column]
+    private bool $recurring;
 
     /**
      * @var Collection<int, DutyPatternComponent>
@@ -61,12 +93,18 @@ class DutyPattern
     #[ORM\Column]
     private \DateTimeImmutable $updatedAt;
 
-    public function __construct(PlanningTeam $team, string $code, string $name)
+    public function __construct(PlanningTeam $team, string $code, string $name, ?AllocationFamily $family = null, bool $recurring = false)
     {
+        if (null !== $family && $family->getTeam() !== $team) {
+            throw new \InvalidArgumentException('A DutyPattern must use an AllocationFamily from the same PlanningTeam.');
+        }
+
         $this->stableId = Uuid::v7();
         $this->team = $team;
         $this->code = $code;
         $this->name = $name;
+        $this->family = $family;
+        $this->recurring = $recurring;
         $this->components = new ArrayCollection();
         $this->createdAt = new \DateTimeImmutable();
         $this->updatedAt = new \DateTimeImmutable();
@@ -97,6 +135,11 @@ class DutyPattern
         return $this->name;
     }
 
+    public function getFamily(): ?AllocationFamily
+    {
+        return $this->family;
+    }
+
     public function isActive(): bool
     {
         return $this->active;
@@ -106,6 +149,11 @@ class DutyPattern
     {
         $this->active = $active;
         $this->touch();
+    }
+
+    public function isRecurring(): bool
+    {
+        return $this->recurring;
     }
 
     /**

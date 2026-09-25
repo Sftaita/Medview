@@ -36,6 +36,11 @@ final class DutyMaterializationService
      * @param \DateTimeImmutable $localStartsAt wall-clock time, interpreted
      *                                          in the PlanningPeriod's Team timezone
      * @param \DateTimeImmutable $localEndsAt   wall-clock time, same timezone
+     * @param ?DutyPattern       $pattern       the one-component DutyPattern this solo duty was
+     *                                          materialized from (docs/decisions.md D136), so it can carry
+     *                                          an ALLOCATION_FAMILY — optional and defaulting to null so
+     *                                          every pre-D136 caller (and every test with no notion of a
+     *                                          weekly structure) keeps working unchanged
      */
     public function createStandaloneDuty(
         PlanningPeriod $planningPeriod,
@@ -44,6 +49,7 @@ final class DutyMaterializationService
         \DateTimeImmutable $localEndsAt,
         DutyDemandType $demandType = DutyDemandType::REQUIRED,
         DutyCriticality $criticality = DutyCriticality::STANDARD,
+        ?DutyPattern $pattern = null,
     ): Duty {
         $timezone = $planningPeriod->getTeam()->getTimezone();
 
@@ -55,6 +61,8 @@ final class DutyMaterializationService
             $timezone,
             $demandType,
             $criticality,
+            null,
+            $pattern,
         );
 
         $this->entityManager->persist($duty);

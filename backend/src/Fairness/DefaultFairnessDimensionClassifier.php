@@ -10,22 +10,13 @@ namespace App\Fairness;
  * `sundays`, `holidays`, `nights`, `dutyTypeSpecific`, `weightedWorkload`,
  * `totalDuties`.
  *
- * `primaryDimensions()` deliberately returns an empty list today —
- * confirmed with the user and recorded in docs/decisions.md D086. The
- * spec's default is real and not forgotten, but `WEEKEND_GROUPS`/
- * `NAMED_HOLIDAY` do not exist as `FairnessDimensionType` cases: no
- * `HolidayDefinition`, no weekend-group classification, so neither
- * dimension has a `requiredDemand`, `effectiveExposure`, or
- * `dimensionMembership` anywhere in the fairness pipeline. Adding them
- * only to this classifier — an identity with no data behind it — would be
- * exactly the "guess ahead of the data" this codebase has refused since
- * Lot 4/5 (docs/fairness.md §3). Applying the real default is a future
- * lot's job, and touches more than this file: `FairnessDimensionType`,
- * `FairnessDimensionKey`, `RequiredDemandBuilder`, `EffectiveExposureService`
- * (if applicable), `DimensionMembershipCalculator`, and
- * `FairnessContextBuilder::deriveSupportedDimensions()` all need the real
- * dimension before this classifier is the last, not the first, thing to
- * update.
+ * **Closed at D136**: `ALLOCATION_FAMILY` (docs/decisions.md D136) is now
+ * the real, generic successor to `weekendGroups` this classifier's own
+ * docblock used to say was missing — a team's own equity buckets
+ * ("Week-end", "Semaine", ...) are what actually gets classified PRIMARY,
+ * never a hardcoded Friday/Saturday/Sunday notion of "weekend".
+ * `NAMED_HOLIDAY` remains unimplemented (no `HolidayDefinition` exists) —
+ * still correctly absent from both lists.
  *
  * `weightedWorkload`/`totalDuties` are therefore always classified
  * SECONDARY here, never PRIMARY by accident — the concern
@@ -35,7 +26,10 @@ final class DefaultFairnessDimensionClassifier implements FairnessDimensionClass
 {
     public function primaryDimensions(array $dimensions): array
     {
-        return [];
+        return array_values(array_filter(
+            $dimensions,
+            static fn (FairnessDimensionKey $key): bool => FairnessDimensionType::ALLOCATION_FAMILY === $key->type,
+        ));
     }
 
     public function secondaryDimensions(array $dimensions): array
@@ -49,6 +43,7 @@ final class DefaultFairnessDimensionClassifier implements FairnessDimensionClass
                 FairnessDimensionType::WEIGHTED_WORKLOAD,
                 FairnessDimensionType::TOTAL_DUTIES,
                 FairnessDimensionType::DUTY_TYPE => true,
+                FairnessDimensionType::ALLOCATION_FAMILY => false,
             },
         ));
     }

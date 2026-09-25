@@ -7,7 +7,6 @@ namespace App\Service;
 use App\Eligibility\DutyUnit;
 use App\Eligibility\EligibilityMatrix;
 use App\Eligibility\ExclusionReason;
-use App\Entity\Duty;
 use App\Entity\PlanningSnapshot;
 use App\Entity\RestPolicyOptions;
 use App\Fairness\AssignmentConflict;
@@ -34,6 +33,11 @@ use App\Fairness\AssignmentConflict;
  */
 final class AssignmentConflictAnalyzer
 {
+    public function __construct(
+        private readonly RestGapCalculator $restGapCalculator,
+    ) {
+    }
+
     /**
      * @return list<AssignmentConflict>
      */
@@ -89,7 +93,7 @@ final class AssignmentConflictAnalyzer
                     return ExclusionReason::CONFLICT;
                 }
 
-                $gap = $this->gapHours($leftDuty, $rightDuty);
+                $gap = $this->restGapCalculator->gapHours($leftDuty, $rightDuty);
                 if (null === $minGapHours || $gap < $minGapHours) {
                     $minGapHours = $gap;
                 }
@@ -109,24 +113,6 @@ final class AssignmentConflictAnalyzer
         }
 
         return null;
-    }
-
-    /**
-     * The rest gap in hours between two non-overlapping Duties, in
-     * whichever chronological order they actually fall — always exact
-     * instant arithmetic (Unix timestamps), never local wall-clock, so a
-     * DST transition between the two never skews the result
-     * (docs/allocation-algorithm.md, same guarantee as `Duty::overlapsWith()`).
-     */
-    private function gapHours(Duty $a, Duty $b): float
-    {
-        if ($a->getEndsAt() <= $b->getStartsAt()) {
-            $seconds = $b->getStartsAt()->getTimestamp() - $a->getEndsAt()->getTimestamp();
-        } else {
-            $seconds = $a->getStartsAt()->getTimestamp() - $b->getEndsAt()->getTimestamp();
-        }
-
-        return $seconds / 3600;
     }
 
     /**

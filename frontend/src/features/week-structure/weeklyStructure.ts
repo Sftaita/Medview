@@ -7,6 +7,15 @@
      - 'none'  : pas de garde — le jour n'existe pas dans la demande
    Un bloc réunit au moins 2 jours, consécutifs ou non. 4 blocs maximum (A–D).
    Toutes les fonctions sont immuables : elles renvoient une nouvelle structure.
+
+   Familles d'équité (docs/decisions.md D136) : chaque bloc porte sa propre
+   famille (`Block.family`, ex. « Week-end ») ; tous les jours isolés d'une
+   ligne partagent une seule famille commune (`WeekStructure.soloFamily`,
+   ex. « Semaine ») plutôt qu'une famille par jour isolé individuellement —
+   chaque exemple du cahier des charges regroupe déjà les jours isolés en un
+   seul ensemble équilibré ensemble ; une famille par jour isolé serait une
+   généralisation non demandée (YAGNI). Une famille vide ('') signifie
+   « pas de famille » — jamais devinée par le composant.
    ================================================================== */
 
 export type DayIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6
@@ -18,17 +27,22 @@ export type DayRole = { mode: 'solo' } | { mode: 'block'; block: BlockId } | { m
 export interface Block {
   id: BlockId
   name: string
+  /** Famille d'équité de ce bloc — vide si non classé. */
+  family: string
 }
 
 export interface WeekStructure {
   days: [DayRole, DayRole, DayRole, DayRole, DayRole, DayRole, DayRole]
   blocks: Block[]
+  /** Famille d'équité commune à tous les jours isolés — vide si non classée. */
+  soloFamily: string
 }
 
 /** Forme envoyée au back / au solveur. */
 export interface WeekStructurePayload {
-  blocks: { id: BlockId; name: string; days: DayCode[] }[]
+  blocks: { id: BlockId; name: string; days: DayCode[]; family: string }[]
   solo: DayCode[]
+  soloFamily: string
   excluded: DayCode[]
 }
 
@@ -44,7 +58,11 @@ const ALL: DayIndex[] = [0, 1, 2, 3, 4, 5, 6]
 /* ---------- construction ---------- */
 
 export function allSolo(): WeekStructure {
-  return { days: ALL.map(() => ({ mode: 'solo' as const })) as WeekStructure['days'], blocks: [] }
+  return {
+    days: ALL.map(() => ({ mode: 'solo' as const })) as WeekStructure['days'],
+    blocks: [],
+    soloFamily: '',
+  }
 }
 
 export type PresetId = 'vsd' | 'vd' | 'nosun' | 'two' | 'solo'
@@ -59,10 +77,12 @@ export const PRESETS: { id: PresetId; label: string }[] = [
 
 export function preset(id: PresetId): WeekStructure {
   let s = allSolo()
-  if (id === 'vsd') s = createBlock(s, [4, 5, 6], 'Week-end')
-  if (id === 'vd') s = createBlock(s, [4, 6], 'Vendredi + dimanche')
-  if (id === 'nosun') s = setNone(s, [6])
-  if (id === 'two') s = createBlock(createBlock(s, [0, 1, 2, 3], 'Semaine'), [4, 5, 6], 'Week-end')
+  if (id === 'vsd') s = setSoloFamily(createBlock(s, [4, 5, 6], 'Week-end', 'Week-end'), 'Semaine')
+  if (id === 'vd') s = setSoloFamily(createBlock(s, [4, 6], 'Vendredi + dimanche', 'Week-end'), 'Semaine')
+  if (id === 'nosun') s = setSoloFamily(setNone(s, [6]), 'Semaine')
+  if (id === 'two')
+    s = createBlock(createBlock(s, [0, 1, 2, 3], 'Semaine', 'Semaine'), [4, 5, 6], 'Week-end', 'Week-end')
+  if (id === 'solo') s = setSoloFamily(s, 'Semaine')
   return s
 }
 
@@ -116,7 +136,7 @@ function normalize(s: WeekStructure): WeekStructure {
     })
     return false
   })
-  return { days, blocks }
+  return { days, blocks, soloFamily: s.soloFamily }
 }
 
 function assign(s: WeekStructure, idx: DayIndex[], role: DayRole): WeekStructure {
@@ -124,7 +144,7 @@ function assign(s: WeekStructure, idx: DayIndex[], role: DayRole): WeekStructure
   idx.forEach((i) => {
     days[i] = role
   })
-  return normalize({ days, blocks: s.blocks })
+  return normalize({ days, blocks: s.blocks, soloFamily: s.soloFamily })
 }
 
 export function setSolo(s: WeekStructure, idx: DayIndex[]): WeekStructure {
@@ -135,14 +155,23 @@ export function setNone(s: WeekStructure, idx: DayIndex[]): WeekStructure {
 }
 
 /** Crée un bloc avec la première lettre libre. Sans effet si la sélection est trop courte ou si A–D sont pris. */
-export function createBlock(s: WeekStructure, idx: DayIndex[], name?: string): WeekStructure {
+export function createBlock(
+  s: WeekStructure,
+  idx: DayIndex[],
+  name?: string,
+  family?: string,
+): WeekStructure {
   const sorted = [...new Set(idx)].sort((a, b) => a - b) as DayIndex[]
   if (!canCreateBlock(s, sorted)) return s
   const id = freeBlockIds(s)[0]
   const next = assign(s, sorted, { mode: 'block', block: id })
   return {
     days: next.days,
-    blocks: [...next.blocks, { id, name: name ?? sorted.map((i) => DAY_SHORT[i]).join(' · ') }],
+    blocks: [
+      ...next.blocks,
+      { id, name: name ?? sorted.map((i) => DAY_SHORT[i]).join(' · '), family: family ?? '' },
+    ],
+    soloFamily: next.soloFamily,
   }
 }
 
@@ -151,7 +180,25 @@ export function dissolveBlock(s: WeekStructure, id: BlockId): WeekStructure {
 }
 
 export function renameBlock(s: WeekStructure, id: BlockId, name: string): WeekStructure {
-  return { days: s.days, blocks: s.blocks.map((b) => (b.id === id ? { ...b, name } : b)) }
+  return {
+    days: s.days,
+    blocks: s.blocks.map((b) => (b.id === id ? { ...b, name } : b)),
+    soloFamily: s.soloFamily,
+  }
+}
+
+/** Change la famille d'équité d'un bloc — chaîne vide pour « pas de famille ». */
+export function setBlockFamily(s: WeekStructure, id: BlockId, family: string): WeekStructure {
+  return {
+    days: s.days,
+    blocks: s.blocks.map((b) => (b.id === id ? { ...b, family } : b)),
+    soloFamily: s.soloFamily,
+  }
+}
+
+/** Change la famille d'équité commune à tous les jours isolés — chaîne vide pour « pas de famille ». */
+export function setSoloFamily(s: WeekStructure, family: string): WeekStructure {
+  return { days: s.days, blocks: s.blocks, soloFamily: family }
 }
 
 /* ---------- avertissements ---------- */
@@ -190,9 +237,11 @@ export function toPayload(s: WeekStructure): WeekStructurePayload {
     blocks: s.blocks.map((b) => ({
       id: b.id,
       name: b.name,
+      family: b.family,
       days: members(s, b.id).map((i) => DAY_CODES[i]),
     })),
     solo: soloDays(s).map((i) => DAY_CODES[i]),
+    soloFamily: s.soloFamily,
     excluded: excludedDays(s).map((i) => DAY_CODES[i]),
   }
 }
@@ -209,7 +258,7 @@ export function fromPayload(p: WeekStructurePayload): WeekStructure {
     idx(b.days).forEach((i) => {
       days[i] = { mode: 'block', block: b.id }
     })
-    blocks.push({ id: b.id, name: b.name })
+    blocks.push({ id: b.id, name: b.name, family: b.family ?? '' })
   })
-  return normalize({ days, blocks })
+  return normalize({ days, blocks, soloFamily: p.soloFamily ?? '' })
 }

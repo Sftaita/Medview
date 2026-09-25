@@ -32,6 +32,16 @@ use Symfony\Component\Uid\Uuid;
  * (see migrations) that guarantees $dutyType belongs to the same
  * PlanningTeam as $planningPeriod, and that $groupInstance (when set) belongs to this
  * exact $planningPeriod — never another one.
+ *
+ * $pattern (docs/decisions.md D136) is the DutyPattern this Duty was
+ * materialized from, when it was materialized through the week-structure
+ * pipeline — nullable for backward compatibility with every Duty created
+ * before D136 (and every test fixture using createStandaloneDuty() without
+ * one). For a grouped Duty it is always exactly $groupInstance->getPattern()
+ * (enforced below); for a solo (ungrouped) Duty produced from a one-component
+ * pattern, it is the only place that pattern reference lives. This is the
+ * single lookup `getAllocationFamily()` uses regardless of grouped/solo —
+ * never two different code paths for the same question.
  */
 #[ORM\Entity(repositoryClass: DutyRepository::class)]
 #[ORM\Table(name: 'duties')]
@@ -39,6 +49,7 @@ use Symfony\Component\Uid\Uuid;
 #[ORM\Index(columns: ['planning_period_id'], name: 'idx_duties_planning_period_id')]
 #[ORM\Index(columns: ['local_date'], name: 'idx_duties_local_date')]
 #[ORM\Index(columns: ['group_instance_id'], name: 'idx_duties_group_instance_id')]
+#[ORM\Index(columns: ['pattern_id'], name: 'idx_duties_pattern_id')]
 class Duty
 {
     #[ORM\Id]
@@ -64,6 +75,10 @@ class Duty
     #[ORM\ManyToOne(targetEntity: DutyGroupInstance::class, inversedBy: 'duties')]
     #[ORM\JoinColumn(nullable: true, onDelete: 'RESTRICT')]
     private ?DutyGroupInstance $groupInstance = null;
+
+    #[ORM\ManyToOne(targetEntity: DutyPattern::class)]
+    #[ORM\JoinColumn(nullable: true, onDelete: 'RESTRICT')]
+    private ?DutyPattern $pattern;
 
     #[ORM\Column(type: 'date_immutable')]
     private \DateTimeImmutable $localDate;
@@ -103,6 +118,7 @@ class Duty
         DutyDemandType $demandType = DutyDemandType::REQUIRED,
         DutyCriticality $criticality = DutyCriticality::STANDARD,
         ?DutyGroupInstance $groupInstance = null,
+        ?DutyPattern $pattern = null,
     ) {
         if ($endsAt <= $startsAt) {
             throw new \InvalidArgumentException('endsAt must be strictly after startsAt.');
@@ -114,6 +130,14 @@ class Duty
 
         if (null !== $groupInstance && $groupInstance->getPlanningPeriod() !== $planningPeriod) {
             throw new \InvalidArgumentException('A Duty must belong to the same PlanningPeriod as its DutyGroupInstance.');
+        }
+
+        if (null !== $groupInstance && null !== $pattern && $pattern !== $groupInstance->getPattern()) {
+            throw new \InvalidArgumentException('A grouped Duty\'s $pattern, when given explicitly, must be its DutyGroupInstance\'s own pattern — never a different one.');
+        }
+
+        if (null !== $pattern && $pattern->getTeam() !== $planningPeriod->getTeam()) {
+            throw new \InvalidArgumentException('A Duty must use a DutyPattern from the same PlanningTeam as its PlanningPeriod.');
         }
 
         // A DutyGroupInstance is one atomic DutyUnit for eligibility AND for
@@ -136,6 +160,11 @@ class Duty
         $this->planningPeriod = $planningPeriod;
         $this->dutyType = $dutyType;
         $this->groupInstance = $groupInstance;
+        // A grouped Duty's pattern is always derived from its group, never
+        // trusted as a possibly-divergent explicit value (the check above
+        // only rejects an inconsistent one, it never picks between them) —
+        // for a solo Duty, $pattern is the only source.
+        $this->pattern = $groupInstance?->getPattern() ?? $pattern;
         $this->startsAt = $startsAt;
         $this->endsAt = $endsAt;
         $this->timezone = $timezone;
@@ -184,6 +213,21 @@ class Duty
     public function getGroupInstance(): ?DutyGroupInstance
     {
         return $this->groupInstance;
+    }
+
+    public function getPattern(): ?DutyPattern
+    {
+        return $this->pattern;
+    }
+
+    /**
+     * The equity bucket this Duty belongs to (docs/decisions.md D136) —
+     * null whenever it was never materialized from a family-classified
+     * pattern (pre-D136 duties, or a pattern its team never classified).
+     */
+    public function getAllocationFamily(): ?AllocationFamily
+    {
+        return $this->pattern?->getFamily();
     }
 
     public function getLocalDate(): \DateTimeImmutable

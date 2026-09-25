@@ -7,9 +7,10 @@ namespace App\Fairness;
 /**
  * A single fairness dimension identity — the typed replacement for a bare
  * string/array key (docs/fairness.md §Dimensions). `DUTY_TYPE` is always
- * paired with a `$dutyTypeStableId` (never a runtime auto-increment id,
+ * paired with a `$dutyTypeStableId`, `ALLOCATION_FAMILY` with a
+ * `$allocationFamilyStableId` (never a runtime auto-increment id,
  * consistent with every other stable-identity rule in this domain); every
- * other type never carries one — the constructor makes the invalid
+ * other type never carries either — the constructor makes the invalid
  * combination unrepresentable rather than merely undocumented.
  */
 final readonly class FairnessDimensionKey
@@ -17,6 +18,7 @@ final readonly class FairnessDimensionKey
     private function __construct(
         public FairnessDimensionType $type,
         public ?string $dutyTypeStableId = null,
+        public ?string $allocationFamilyStableId = null,
     ) {
         if (FairnessDimensionType::DUTY_TYPE === $type && null === $dutyTypeStableId) {
             throw new \InvalidArgumentException('A DUTY_TYPE dimension key requires a dutyTypeStableId.');
@@ -24,6 +26,14 @@ final readonly class FairnessDimensionKey
 
         if (FairnessDimensionType::DUTY_TYPE !== $type && null !== $dutyTypeStableId) {
             throw new \InvalidArgumentException(sprintf('Only a DUTY_TYPE dimension key may carry a dutyTypeStableId, not %s.', $type->value));
+        }
+
+        if (FairnessDimensionType::ALLOCATION_FAMILY === $type && null === $allocationFamilyStableId) {
+            throw new \InvalidArgumentException('An ALLOCATION_FAMILY dimension key requires an allocationFamilyStableId.');
+        }
+
+        if (FairnessDimensionType::ALLOCATION_FAMILY !== $type && null !== $allocationFamilyStableId) {
+            throw new \InvalidArgumentException(sprintf('Only an ALLOCATION_FAMILY dimension key may carry an allocationFamilyStableId, not %s.', $type->value));
         }
     }
 
@@ -57,6 +67,11 @@ final readonly class FairnessDimensionKey
         return new self(FairnessDimensionType::DUTY_TYPE, $dutyTypeStableId);
     }
 
+    public static function allocationFamily(string $allocationFamilyStableId): self
+    {
+        return new self(FairnessDimensionType::ALLOCATION_FAMILY, null, $allocationFamilyStableId);
+    }
+
     /**
      * The stable string form used as an array key wherever a
      * FairnessDimensionKey itself cannot be one (PHP arrays only accept
@@ -64,13 +79,21 @@ final readonly class FairnessDimensionKey
      */
     public function toStringKey(): string
     {
-        return null !== $this->dutyTypeStableId
-            ? sprintf('%s:%s', $this->type->value, $this->dutyTypeStableId)
-            : $this->type->value;
+        if (null !== $this->dutyTypeStableId) {
+            return sprintf('%s:%s', $this->type->value, $this->dutyTypeStableId);
+        }
+
+        if (null !== $this->allocationFamilyStableId) {
+            return sprintf('%s:%s', $this->type->value, $this->allocationFamilyStableId);
+        }
+
+        return $this->type->value;
     }
 
     public function equals(self $other): bool
     {
-        return $this->type === $other->type && $this->dutyTypeStableId === $other->dutyTypeStableId;
+        return $this->type === $other->type
+            && $this->dutyTypeStableId === $other->dutyTypeStableId
+            && $this->allocationFamilyStableId === $other->allocationFamilyStableId;
     }
 }

@@ -10,8 +10,11 @@ import {
   isContiguous,
   members,
   renameBlock,
+  setBlockFamily,
   setNone,
   setSolo,
+  setSoloFamily,
+  soloDays,
   toPayload,
   unitsPerWeek,
   warnings,
@@ -200,6 +203,20 @@ export function WeekStructureEditor({
                 <span className="wse__members">
                   {list(m)} · {m.length} jours{isContiguous(m) ? '' : ' · non consécutifs'}
                 </span>
+                <label className="wse__family">
+                  <span className="wse__family-label">Équilibrer avec</span>
+                  <input
+                    className="wse__input"
+                    value={b.family}
+                    placeholder="Ex. Week-ends"
+                    aria-label={`Famille d'équité du bloc ${b.id}`}
+                    disabled={readOnly}
+                    onChange={(e) => {
+                      const next = setBlockFamily(value, b.id as BlockId, e.target.value)
+                      onChange(next, toPayload(next))
+                    }}
+                  />
+                </label>
                 {!readOnly && (
                   <button
                     type="button"
@@ -212,6 +229,33 @@ export function WeekStructureEditor({
               </div>
             )
           })}
+        </div>
+      )}
+
+      {soloDays(value).length > 0 && (
+        <div className="wse__blocks">
+          <div className="wse__block" data-block="solo">
+            <span className="wse__chip" aria-hidden>
+              G
+            </span>
+            <span className="wse__members">
+              {list(soloDays(value))} · {plural(soloDays(value).length, 'garde isolée', 'gardes isolées')}
+            </span>
+            <label className="wse__family">
+              <span className="wse__family-label">Équilibrer avec</span>
+              <input
+                className="wse__input"
+                value={value.soloFamily}
+                placeholder="Ex. Jours de semaine"
+                aria-label="Famille d'équité des gardes isolées"
+                disabled={readOnly}
+                onChange={(e) => {
+                  const next = setSoloFamily(value, e.target.value)
+                  onChange(next, toPayload(next))
+                }}
+              />
+            </label>
+          </div>
         </div>
       )}
 

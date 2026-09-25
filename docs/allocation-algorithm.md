@@ -263,10 +263,17 @@ signal d'équité du solve en cours.
 > **Statut d'implémentation (Lot 5, `docs/fairness.md`)** : implémenté
 > pour les dimensions `TOTAL_DUTIES`, `WEIGHTED_WORKLOAD`, `FRIDAY`,
 > `SATURDAY`, `SUNDAY`, `DUTY_TYPE:<stableId>` (`RequiredDemandBuilder`,
-> `EffectiveExposureService`, `FairnessTargetService`). `WEEKEND_GROUPS`,
-> `HOLIDAY`, `NAMED_HOLIDAY[code]`, `NIGHT` restent **délibérément** non
-> implémentés — aucune source de donnée réelle n'existe encore pour eux
+> `EffectiveExposureService`, `FairnessTargetService`). `HOLIDAY`,
+> `NAMED_HOLIDAY[code]`, `NIGHT` restent **délibérément** non implémentés —
+> aucune source de donnée réelle n'existe encore pour eux
 > (`docs/fairness.md` §3) ; ni devinés, ni approximés.
+>
+> **Statut d'implémentation (Lot Semaine type, docs/decisions.md D136)** :
+> `WEEKEND_GROUPS` est **fermé par généralisation** — `ALLOCATION_FAMILY:<stableId>`
+> (`AllocationFamily`, catalogue par équipe) le remplace : chaque
+> `PlanningLine` classe elle-même ses `DutyPattern`s en familles d'équité
+> arbitraires (jamais un universel "week-end" en dur), comptées une fois
+> par unité (`DutyUnit`), jamais une fois par `Duty` constituante.
 
 ```
 structuralOpportunity(user, duty) ∈ {0,1}
@@ -370,6 +377,13 @@ seulement l'absence de surcharge.
 `sundays`, `holidays`, `nights`, `dutyTypeSpecific`, `weightedWorkload`,
 `totalDuties`.
 
+> **Statut d'implémentation (Lot Semaine type, docs/decisions.md D136)** :
+> `DefaultFairnessDimensionClassifier` classe désormais réellement
+> `ALLOCATION_FAMILY` (le successeur générique de `weekendGroups`, §5)
+> en `PRIMARY` — fermant le gap que cette classe documentait explicitement
+> depuis D086 (`primaryDimensions()` renvoyait `[]` faute de dimension
+> réelle à y mettre). `namedHolidays` reste non implémenté (§5).
+
 ## 7. Historique des fériés nommés
 
 ```
@@ -400,7 +414,35 @@ en jours). Jamais réinitialisé au 1er janvier, ni au début d'une
 `FairnessPeriod`/`PlanningPeriod` — propriété physique continue du
 calendrier du membre.
 
+> **Statut d'implémentation (docs/decisions.md D139)** : la formule
+> ci-dessus date d'avant `DutyUnit`/`ALLOCATION_FAMILY` (D136) et reste
+> **non implémentée telle quelle** — `density7/14/30`,
+> `weekendAdjacencyPenalty` codé en dur n'existent pas dans le code.
+> `SPACING_SCORE` (phase 6 GENERATE, §11) est réellement implémentée
+> depuis D139, mais avec un modèle **plus simple, en `DutyUnit`, par
+> paliers**, jamais celui ci-dessus : `App\Fairness\DutyUnitSpan`
+> (`startDate`/`endDate`/famille d'un `DutyUnit`, un bloc = un seul span)
+> + `App\Service\SpacingPenaltyCalculator`, deux pénalités additives par
+> paire de `DutyUnit` du même candidat — (1) `freeDays` par palier
+> strictement décroissant, nul à partir de 3 jours libres, qui couvre
+> aussi la « concentration temporelle » sans métrique de densité séparée
+> (YAGNI assumé) ; (2) répétition consécutive d'une même
+> `AllocationFamily`, définie purement par position dans la séquence
+> chronologique propre à cette famille — jamais un nom de famille ni une
+> cadence codés en dur. Voir D139 pour le modèle complet, les résultats
+> avant/après sur un cas réel, et la dette assumée.
+
 ## 9. DutyPattern / DutyGroupInstance
+
+> **Statut d'implémentation (Lot Semaine type, docs/decisions.md D136)** :
+> le pipeline « structure hebdomadaire d'une `PlanningLine` → calendrier de
+> `Duty` matérialisé » existe désormais réellement (`WeekStructureService`,
+> `WeeklyDutyCalendarService`) — avant ce lot, aucun contrôleur/service de
+> production n'appelait jamais `DutyMaterializationService`. `dayOffset`
+> est réinterprété comme jour ISO (0=Lundi..6=Dimanche), ancré sur le lundi
+> de chaque semaine ; `DutyPattern.recurring` distingue ces patterns
+> récurrents des patterns ponctuels (ex. un futur "24+25 décembre") sans
+> lien avec une semaine type.
 
 `DutyGroupInstance` = instance concrète d'un `DutyPattern`, traitée comme
 **un seul nœud du problème d'optimisation** — éligibilité et atomicité
@@ -590,6 +632,26 @@ abstrait :
    configurable par équipe uniquement sur les phases "qualité globale"
    (lissage secondaire, espacement), jamais sur un score composite
    abstrait (`maxWeekendDeviationTolerance: 1`, jamais `epsilon: 0.05`).
+
+> **Statut d'implémentation (docs/decisions.md D139)** :
+> `PREFERENCE_SATISFACTION` (phase 7 GENERATE) est réellement implémentée
+> depuis D139. Le mécanisme n°1 ci-dessus (préservation exacte des phases
+> antérieures) était déjà garanti par construction (verrouillage
+> lexicographique générique d'`OrToolsPlanningSolver::run()`) — D139 ne
+> l'a pas changé, seulement rempli l'objectif de cette phase, resté
+> `NEUTRAL` (aucune donnée, `objectiveValueScaled` toujours 0) depuis
+> D087. Le mécanisme n°2 (tolérance explicite par équipe) reste **non
+> implémenté** — aucune configuration de tolérance n'existe. Sémantique
+> retenue pour un `DutyUnit` groupé (jamais devinée, tracée dans le code
+> réel) : `App\Service\EligibilityService::evaluate()` pose un seul
+> booléen `preferred` pour toute l'unité dès qu'*au moins une* de ses
+> `Duty` constitutives chevauche une période `PREFER_DUTY` — la
+> récompense porte sur l'affectation de l'unité (une seule variable de
+> décision existe de toute façon), jamais comptée plusieurs fois par jour
+> constitutif. Terme CP-SAT : `App\Solver\CpSatPayloadBuilder::buildPreferencePhaseEntry()`,
+> un coefficient 1 par paire `(DutyUnit, candidat)` où `preferred` est
+> vrai, réutilisant `EligibilityResult` tel quel — aucune nouvelle donnée
+> de domaine.
 
 ## 13. Tie-break déterministe
 

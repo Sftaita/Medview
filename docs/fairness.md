@@ -68,33 +68,32 @@ source de donnée réellement existante :
 | `WEIGHTED_WORKLOAD` | `DutyType.workloadValue` |
 | `FRIDAY` / `SATURDAY` / `SUNDAY` | `Duty.localDate` (jour de semaine ISO) |
 | `DUTY_TYPE:<stableId>` | `Duty.dutyType.stableId` — une dimension par `DutyType` réellement rencontré dans la période |
+| `ALLOCATION_FAMILY:<stableId>` | `Duty.pattern.family.stableId` (docs/decisions.md D136) — une dimension par `AllocationFamily` réellement référencée par un `DutyUnit` de la période ; comptée **une fois par unité**, jamais par `Duty` constituante (voir §4) |
 
 ## 3. Dimensions délibérément non supportées
 
 `docs/allocation-algorithm.md` §6 énumère aussi `weekendGroups`,
-`holidays`, `namedHolidays[perHolidayCode]`, `nights` — aucune de ces
-quatre n'est implémentée dans ce lot, et aucune ne doit être devinée ou
-approximée :
+`holidays`, `namedHolidays[perHolidayCode]`, `nights`.
 
 - **`NIGHT`** — aucune notion d'heure de nuit n'est modélisée sur `Duty`
   ou `DutyType` aujourd'hui ; la déduire d'une heure de début/fin serait
   une heuristique inventée, jamais une vraie donnée.
 - **`HOLIDAY`** — aucun `HolidayDefinition` n'existe dans le domaine.
 - **`NAMED_HOLIDAY`** — dépend de `HOLIDAY`, même raison.
-- **`WEEKEND_GROUPS`** — détecter "quels jours un `DutyGroupInstance`
-  couvre" pour décider s'il est un "groupe week-end" serait une
-  heuristique arbitraire sur le contenu d'un groupe, jamais une donnée
-  déclarée. `DutyPattern` n'encode aujourd'hui aucun concept de
-  "week-end" — son `name`/`code` est une étiquette libre, jamais une
-  source de vérité structurelle.
+- **`WEEKEND_GROUPS`** — **fermé par généralisation, jamais implémenté
+  littéralement** (docs/decisions.md D136) : plutôt qu'une dimension
+  binaire "ce groupe est-il un week-end", chaque `PlanningLine` classe
+  elle-même ses `DutyPattern`s (blocs *et* gardes isolées) dans des
+  familles arbitraires, team-defined (`AllocationFamily`). `ALLOCATION_FAMILY`
+  ci-dessus est le vrai successeur générique de `weekendGroups` — jamais
+  une seconde dimension binaire ajoutée à côté.
 
-Ces quatre dimensions restent dans le vocabulaire conceptuel de
-`docs/allocation-algorithm.md` §6 (design vivant, pas encore entièrement
-implémenté) mais n'apparaissent dans aucun code de ce lot — ni
+`NIGHT`/`HOLIDAY`/`NAMED_HOLIDAY` restent dans le vocabulaire conceptuel
+de `docs/allocation-algorithm.md` §6 (design vivant, pas encore
+entièrement implémenté) mais n'apparaissent dans aucun code — ni
 `FairnessDimensionType`, ni `DimensionMembershipCalculator`, ni aucun
 test. À réévaluer quand une vraie source de donnée existera pour chacune
-(`DutyType.isNightShift`, un `HolidayDefinition`, une classification
-explicite de groupe).
+(`DutyType.isNightShift`, un `HolidayDefinition`).
 
 ## 4. `DimensionMembershipCalculator` — contribution analytique par Duty
 
@@ -117,10 +116,21 @@ traverse tout le reste du lot (`RequiredDemandBuilder`,
 `StructurallyForcedLoad`) : *atomique pour l'affectation, distinct pour
 l'analyse*.
 
+> **Statut d'implémentation (Lot Semaine type, docs/decisions.md D136)** :
+> `ALLOCATION_FAMILY` est la seule exception délibérée à la règle
+> ci-dessus — comptée **une fois par unité**, jamais une fois par Duty
+> constituante (un bloc de 3 jours crédite `ALLOCATION_FAMILY:WEEKEND += 1`,
+> jamais `+= 3`). `forDutyUnit()` l'ajoute donc directement, en plus de sa
+> somme habituelle par Duty, jamais en la remplaçant. `RequiredDemandBuilder`
+> a dû être restructuré pour construire des `DutyUnit` (`DutyUnitFactory`,
+> partagé avec `EligibilityMatrixBuilder`) au lieu de sommer `forDuty()` sur
+> des `Duty` brutes — sinon un bloc de 3 jours REQUIRED aurait compté pour 3
+> unités de famille au lieu d'une.
+
 ## 5. `RequiredDemandBuilder`
 
 ```
-requiredDemand(d) = Σ_{Duty REQUIRED de la PlanningPeriod} dimensionMembership(duty)[d]
+requiredDemand(d) = Σ_{DutyUnit REQUIRED de la PlanningPeriod} dimensionMembership(unit)[d]
 ```
 
 Ne lit **que** les `Duty` dont `demandType = REQUIRED` — les `OPTIONAL`

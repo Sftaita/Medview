@@ -135,7 +135,14 @@ final class FairnessContextBuilder
      * The 5 fixed dimensions always apply; one DUTY_TYPE dimension is added
      * per distinct DutyType actually present among this period's Duties —
      * never a DutyType from another PlanningTeam (dutyUnits are already
-     * scoped to this PlanningPeriod alone).
+     * scoped to this PlanningPeriod alone). One ALLOCATION_FAMILY dimension
+     * (docs/decisions.md D136) is likewise added per distinct
+     * AllocationFamily actually referenced by a unit's pattern — read once
+     * per *unit* (never per constituent Duty, though every Duty of one unit
+     * necessarily shares the same family, see DimensionMembershipCalculator)
+     * — a unit whose pattern has no family (or no pattern at all,
+     * pre-D136) contributes nothing here, exactly like a Duty whose
+     * DutyType is never guessed.
      *
      * @param list<DutyUnit> $dutyUnits
      *
@@ -152,12 +159,22 @@ final class FairnessContextBuilder
         ];
 
         $seenDutyTypeIds = [];
+        $seenFamilyIds = [];
         foreach ($dutyUnits as $unit) {
             foreach ($unit->getDuties() as $duty) {
                 $stableId = (string) $duty->getDutyType()->getStableId();
                 if (!isset($seenDutyTypeIds[$stableId])) {
                     $seenDutyTypeIds[$stableId] = true;
                     $dimensions[] = FairnessDimensionKey::dutyType($stableId);
+                }
+            }
+
+            $family = $unit->getDuties()[0]->getAllocationFamily();
+            if (null !== $family) {
+                $familyStableId = (string) $family->getStableId();
+                if (!isset($seenFamilyIds[$familyStableId])) {
+                    $seenFamilyIds[$familyStableId] = true;
+                    $dimensions[] = FairnessDimensionKey::allocationFamily($familyStableId);
                 }
             }
         }

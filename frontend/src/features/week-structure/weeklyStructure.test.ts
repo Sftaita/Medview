@@ -8,6 +8,8 @@ import {
   preset,
   setNone,
   setSolo,
+  setBlockFamily,
+  setSoloFamily,
   toPayload,
   unitsPerWeek,
   dutyDaysPerWeek,
@@ -99,9 +101,36 @@ describe('semaine type', () => {
 
   it('payload lisible par le back', () => {
     expect(toPayload(preset('vd'))).toEqual({
-      blocks: [{ id: 'A', name: 'Vendredi + dimanche', days: ['VEN', 'DIM'] }],
+      blocks: [{ id: 'A', name: 'Vendredi + dimanche', family: 'Week-end', days: ['VEN', 'DIM'] }],
       solo: ['LUN', 'MAR', 'MER', 'JEU', 'SAM'],
+      soloFamily: 'Semaine',
       excluded: [],
     })
+  })
+
+  it('classe un bloc et les jours isolés dans une famille d’équité', () => {
+    let s = createBlock(allSolo(), [4, 5, 6])
+    s = setBlockFamily(s, 'A', 'Week-end')
+    s = setSoloFamily(s, 'Semaine')
+    expect(s.blocks[0].family).toBe('Week-end')
+    expect(s.soloFamily).toBe('Semaine')
+    expect(toPayload(s).blocks[0].family).toBe('Week-end')
+    expect(toPayload(s).soloFamily).toBe('Semaine')
+  })
+
+  it('une famille vide veut dire « pas de famille », jamais devinée', () => {
+    const s = createBlock(allSolo(), [4, 5, 6])
+    expect(s.blocks[0].family).toBe('')
+    expect(s.soloFamily).toBe('')
+  })
+
+  it('relit une famille absente du payload comme vide, jamais une erreur', () => {
+    const s = fromPayload({
+      blocks: [{ id: 'A', name: 'Week-end', days: ['VEN', 'SAM', 'DIM'] } as never],
+      solo: ['LUN', 'MAR', 'MER', 'JEU'],
+      excluded: [],
+    } as never)
+    expect(s.blocks[0].family).toBe('')
+    expect(s.soloFamily).toBe('')
   })
 })

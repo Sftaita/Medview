@@ -18,6 +18,19 @@ use App\Fairness\FairnessDimensionValues;
  * (docs/allocation-algorithm.md §9), but each Duty inside it stays a
  * distinct analytical unit — a Friday+Saturday+Sunday group contributes
  * TOTAL_DUTIES=3, FRIDAY=1, SATURDAY=1, SUNDAY=1, never TOTAL_DUTIES=1.
+ *
+ * ALLOCATION_FAMILY (docs/decisions.md D136) is the one dimension that
+ * deliberately breaks this "per constituent Duty" rule: it counts *units*,
+ * never Duties — a Friday+Saturday+Sunday block assigned to the same
+ * person credits `ALLOCATION_FAMILY:WEEKEND += 1`, never `+= 3` (Scenario F
+ * of D136's audit). It is therefore computed once in `forDutyUnit()`
+ * itself, never inside `forDuty()` (which stays a pure per-Duty
+ * calculation reused unchanged by every calendar/analytic dimension above)
+ * — every constituent Duty of one DutyGroupInstance shares the exact same
+ * $pattern (DutyMaterializationService::materializeGroup() only ever
+ * builds Duty rows from one pattern's own components), so reading the
+ * family off the unit's first Duty is never a guess between disagreeing
+ * values.
  */
 final class DimensionMembershipCalculator
 {
@@ -43,6 +56,11 @@ final class DimensionMembershipCalculator
         $total = FairnessDimensionValues::empty();
         foreach ($dutyUnit->getDuties() as $duty) {
             $total = $total->plus($this->forDuty($duty));
+        }
+
+        $family = $dutyUnit->getDuties()[0]->getAllocationFamily();
+        if (null !== $family) {
+            $total = $total->withAdded(FairnessDimensionKey::allocationFamily((string) $family->getStableId()), 1.0);
         }
 
         return $total;

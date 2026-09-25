@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { WeekStructureEditor } from './WeekStructureEditor'
-import { allSolo, preset } from './weeklyStructure'
+import { allSolo, createBlock, preset } from './weeklyStructure'
 import type { WeekStructure, WeekStructurePayload } from './weeklyStructure'
 
 function Harness({
@@ -46,8 +46,9 @@ describe('WeekStructureEditor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Créer un bloc' }))
 
     expect(onPayload).toHaveBeenLastCalledWith({
-      blocks: [{ id: 'A', name: 'Ven · Dim', days: ['VEN', 'DIM'] }],
+      blocks: [{ id: 'A', name: 'Ven · Dim', family: '', days: ['VEN', 'DIM'] }],
       solo: ['LUN', 'MAR', 'MER', 'JEU', 'SAM'],
+      soloFamily: '',
       excluded: [],
     })
     expect(screen.getByText('Ven · Dim · 2 jours · non consécutifs')).toBeInTheDocument()
@@ -88,6 +89,29 @@ describe('WeekStructureEditor', () => {
     expect(day('Lundi')).toBeDisabled()
     expect(screen.queryByRole('button', { name: 'Dissoudre' })).not.toBeInTheDocument()
     expect(screen.getByLabelText('Nom du bloc A')).toBeDisabled()
+  })
+
+  it('classe un bloc et les jours isolés dans une famille d’équité', () => {
+    const onPayload = vi.fn()
+    // allSolo() starts every family empty ('') — a real, detectable change,
+    // unlike preset('vsd') whose block/soloFamily already hold a value.
+    render(<Harness initial={createBlock(allSolo(), [4, 5, 6])} onPayload={onPayload} />)
+
+    fireEvent.change(screen.getByLabelText("Famille d'équité du bloc A"), {
+      target: { value: 'Week-end' },
+    })
+    expect(onPayload.mock.calls.at(-1)?.[0].blocks[0].family).toBe('Week-end')
+
+    fireEvent.change(screen.getByLabelText("Famille d'équité des gardes isolées"), {
+      target: { value: 'Semaine' },
+    })
+    expect(onPayload.mock.calls.at(-1)?.[0].soloFamily).toBe('Semaine')
+  })
+
+  it('en lecture seule, les champs de famille sont aussi désactivés', () => {
+    render(<WeekStructureEditor value={preset('vsd')} onChange={() => {}} readOnly />)
+    expect(screen.getByLabelText("Famille d'équité du bloc A")).toBeDisabled()
+    expect(screen.getByLabelText("Famille d'équité des gardes isolées")).toBeDisabled()
   })
 
   it('signale une semaine sans garde', () => {

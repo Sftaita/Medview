@@ -422,6 +422,20 @@
 .wse__dissolve {
   flex: none;
 }
+.wse__family {
+  flex: 1 1 200px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.wse__family-label {
+  flex: none;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
 .wse[data-tier='s'] .wse__input {
   height: 48px;
   font-size: 16px;
@@ -430,6 +444,10 @@
   flex: 1 1 100%;
   order: 3;
   white-space: normal;
+}
+.wse[data-tier='s'] .wse__family {
+  flex: 1 1 100%;
+  order: 4;
 }
 .wse[data-tier='s'] .wse__dissolve {
   height: var(--tap-min, 48px);
