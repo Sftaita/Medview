@@ -4369,3 +4369,44 @@ l'ancienne (voir légende).
      ajoutées.
   3. `NAMED_HOLIDAY_REPETITION_PENALTY`/`DETERMINISTIC_TIE_BREAK`
      restent `NEUTRAL` (inchangé, hors périmètre explicite de ce lot).
+
+## D140 — Détail d'un planning : maquette `react_planning_detail` adaptée au modèle réel, composants existants réutilisés
+
+- **Contexte** : `docs/Design/react_planning_detail/` refait `/plannings/:id`
+  (en-tête, carte « Période du planning », étapes Équipe → Indisponibilités →
+  Génération, onglets Lignes / Indisponibilités / Planning). La maquette
+  suppose un modèle simplifié (collecte ouverte à la main avec échéance,
+  jours d'indisponibilité par membre, statut Brouillon/Publié, fin incluse).
+- **Choix** : nouvelle mise en page (`features/planning/detail/`, préfixe
+  CSS `pd-`), aucun changement backend, chaque action garde son composant et
+  son endpoint : `GenerationModal`, `PlanningSettingsModal`,
+  `WeekStructureModal`, `RuleSetModal`, `MemberDrawer`, `TeamInvitePanel`,
+  `ExtendPlanningForm` (mode `onCancel` pour un dialogue),
+  `AvailabilityCollectionsPanel`, `PersonalPlanningView`. `PilotHeaderActions`
+  devient « Générer le planning » + menu « ⋯ » (Modifier le nom, Paramètres,
+  Semaine type, Règles de génération), dialogue contrôlable par la page ;
+  `CollectionStatusPanel` passe au format liste de la maquette (recherche,
+  tri Nom / Indispos). Le cadre (barre latérale, barre du bas) reste
+  `AppShell`.
+- **Écarts assumés, adaptés au réel** :
+  - `endsAt` est **exclusif** côté API : « Au (inclus) » et la durée
+    utilisent la veille (`lastDayOf`), jamais `endsAt` tel quel ;
+  - « Ouvrir une collecte / Clôturer » n'existe pas : les collectes s'ouvrent
+    à la création et à la prolongation (D122). Le bouton devient « Fixer /
+    Modifier la date souhaitée » (paramètre informatif `availabilityDeadline`),
+    l'historique par fenêtre (échéances, clôture) reste accessible ;
+  - la barre par membre compte des **périodes** d'indisponibilité
+    (`unavailabilityCount`), pas des jours — dit en note sous la liste ;
+  - le badge affiche le vrai statut de la ligne principale (Brouillon,
+    Généré, Validé, Publié, Archivé) ;
+  - « Membres » ouvre un panneau avec toute la gestion existante
+    (invitation, ajout par identifiant, rôle, fin d'adhésion) ;
+    « M'inclure dans ce planning » reste proposé au créateur ;
+  - « Ajouter une ligne » demande un nom (l'API l'exige) ; la ligne
+    principale n'a pas de menu (non supprimable) ;
+  - l'onglet Planning affiche `PersonalPlanningView` dès qu'une ligne n'est
+    plus en brouillon, sinon l'état vide dont « Générer le planning » ouvre
+    le même dialogue que l'en-tête.
+- **Tests** : `PlanningDetailPage.test.tsx` (page, jusqu'ici non testée),
+  `period.test.ts`, tests existants de `PilotHeaderActions`,
+  `CollectionStatusPanel` et `ExtendPlanningForm` adaptés et complétés.

@@ -20,7 +20,7 @@ function renderPanel(overrides = {}, onChanged = vi.fn()) {
 }
 
 /** The row of the members table for a last name. */
-const rowOf = (lastName: string) => screen.getByRole('button', { name: new RegExp(lastName) }).closest('tr')!
+const rowOf = (lastName: string) => screen.getByRole('button', { name: new RegExp(lastName) }).closest('li')!
 
 function detailRoutes(members: PilotMemberRow[], extra: Record<string, () => unknown> = {}) {
   const routes: Record<string, () => unknown> = { ...extra }
@@ -78,6 +78,58 @@ describe('CollectionStatusPanel — summary and list', () => {
     expect(leroy.queryByText('Confirmé')).not.toBeInTheDocument()
     expect(leroy.getByText('0')).toBeInTheDocument()
     expect(leroy.getByText('18/09/2026')).toBeInTheDocument()
+  })
+})
+
+describe('CollectionStatusPanel — search and sort', () => {
+  const names = () => screen.getAllByRole('button', { name: /Camille / }).map((button) => button.textContent)
+
+  it('sorts by last name by default, and by number of unavailabilities on demand', () => {
+    renderPanel()
+
+    expect(names()).toEqual(['Camille Dupont', 'Camille Leroy', 'Camille Martin'])
+    expect(screen.getByRole('button', { name: 'Nom' })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Indispos' }))
+    expect(screen.getByRole('button', { name: 'Indispos' })).toHaveAttribute('aria-pressed', 'true')
+    expect(names()).toEqual(['Camille Dupont', 'Camille Martin', 'Camille Leroy'])
+  })
+
+  it('filters members by name, case-insensitively, and says when nobody matches', () => {
+    renderPanel()
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Rechercher un membre' }), {
+      target: { value: 'mar' },
+    })
+    expect(names()).toEqual(['Camille Martin'])
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Rechercher un membre' }), {
+      target: { value: 'zzz' },
+    })
+    expect(screen.getByText('Aucun membre ne correspond à « zzz ».')).toBeInTheDocument()
+  })
+
+  it('offers to set the informative deadline only when the page can open the settings', () => {
+    const onEditDeadline = vi.fn()
+    const { unmount } = render(
+      <CollectionStatusPanel status={makeStatus()} onChanged={vi.fn()} onEditDeadline={onEditDeadline} />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Fixer une date souhaitée' }))
+    expect(onEditDeadline).toHaveBeenCalledTimes(1)
+    unmount()
+
+    render(
+      <CollectionStatusPanel
+        status={makeStatus({ availabilityDeadline: '2026-09-25' })}
+        onChanged={vi.fn()}
+        onEditDeadline={onEditDeadline}
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Modifier la date souhaitée' })).toBeInTheDocument()
+    cleanup()
+
+    renderPanel()
+    expect(screen.queryByRole('button', { name: /date souhaitée/ })).not.toBeInTheDocument()
   })
 })
 

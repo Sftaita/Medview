@@ -1,57 +1,74 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Field } from '../components/Field'
 import { Icon } from '../components/Icon'
+import { useAuth } from '../features/auth/useAuth'
 import {
   addTeamMember,
   createPlanningLine,
   deletePlanningLine,
-  endTeamMembership,
   fetchPlanning,
-  fetchTeamMembers,
   renamePlanning,
 } from '../features/planning/api'
-import { useAuth } from '../features/auth/useAuth'
 import { AvailabilityCollectionsPanel } from '../features/planning/AvailabilityCollectionsPanel'
+import { ActionMenu } from '../features/planning/detail/ActionMenu'
+import { LinesTab, type Face } from '../features/planning/detail/LinesTab'
+import { MembersSheet } from '../features/planning/detail/MembersSheet'
+import { PeriodCard } from '../features/planning/detail/PeriodCard'
+import { formatShortDate } from '../features/planning/detail/period'
+import { PlanningSteps, type DetailTab, type Step } from '../features/planning/detail/PlanningSteps'
+import { Sheet } from '../features/planning/detail/Sheet'
+import '../features/planning/detail/planningDetail.css'
 import { ExtendPlanningForm } from '../features/planning/ExtendPlanningForm'
 import { PersonalPlanningView } from '../features/planning/PersonalPlanningView'
 import { CollectionStatusPanel } from '../features/planning/pilot/CollectionStatusPanel'
-import { PilotHeaderActions } from '../features/planning/pilot/PilotHeaderActions'
+import { PilotHeaderActions, type PilotDialog } from '../features/planning/pilot/PilotHeaderActions'
+import type { CollectionStatus } from '../features/planning/pilot/types'
 import { usePlanningPilot } from '../features/planning/pilot/usePlanningPilot'
-import { TeamInvitePanel } from '../features/planning/TeamInvitePanel'
-import type { PlanningDetail, PlanningPeriodStatus, PlanningTeamMember } from '../features/planning/types'
+import type { PlanningDetail, PlanningLineSummary, PlanningPeriodStatus } from '../features/planning/types'
 import { ApiError } from '../lib/apiClient'
 
+/** Lifecycle of the primary line's period, shown next to the planning's name. */
+const PERIOD_STATUS: Record<PlanningPeriodStatus, string> = {
+  DRAFT: 'Brouillon',
+  GENERATED: 'Généré',
+  VALIDATED: 'Validé',
+  PUBLISHED: 'Publié',
+  ARCHIVED: 'Archivé',
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n > 1 ? 's' : ''}`
+
+/**
+ * /plannings/:id, laid out as docs/Design/react_planning_detail (docs/decisions.md
+ * D140): header, period, the three steps, and the "Lignes de garde" /
+ * "Indisponibilités" / "Planning" tabs. Every action keeps its existing
+ * component and endpoint; only the layout changed.
+ */
 export function PlanningDetailPage() {
   const { planningId } = useParams<{ planningId: string }>()
   const { user } = useAuth()
   const [planning, setPlanning] = useState<PlanningDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-
-  const [renaming, setRenaming] = useState(false)
-  const [newName, setNewName] = useState('')
-
-  const [showLineForm, setShowLineForm] = useState(false)
-  const [lineName, setLineName] = useState('')
-
-  const [expandedTeamStableId, setExpandedTeamStableId] = useState<string | null>(null)
-  const [members, setMembers] = useState<PlanningTeamMember[]>([])
-  const [membersLoading, setMembersLoading] = useState(false)
-  const [memberUserStableId, setMemberUserStableId] = useState('')
-  const [memberRole, setMemberRole] = useState<'OWNER' | 'ADMIN' | 'MEMBER'>('MEMBER')
-  const [memberStart, setMemberStart] = useState('')
-  const [memberError, setMemberError] = useState<string | null>(null)
-
+  const [tab, setTab] = useState<DetailTab>('lines')
+  const [saving, setSaving] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [extendOpen, setExtendOpen] = useState(false)
+  const [membersLine, setMembersLine] = useState<PlanningLineSummary | null>(null)
+  const [pilotDialog, setPilotDialog] = useState<PilotDialog | null>(null)
+  // The per-collection detail (history, close) is one click away for a manager, not the first thing they see.
+  const [showCollectionHistory, setShowCollectionHistory] = useState(false)
   // Bumped after an extension so the availability follow-up shows the collection it just opened.
   const [collectionsReload, setCollectionsReload] = useState(0)
   // Bumped after a generation so the per-person view (which reads on mount) shows the new assignments.
   const [generationVersion, setGenerationVersion] = useState(0)
-  // The per-collection detail (history, close) is one click away for a manager, not the first thing they see.
-  const [showCollectionHistory, setShowCollectionHistory] = useState(false)
-  const [saving, setSaving] = useState(false)
+
   const pilot = usePlanningPilot(planningId ?? '', planning?.canManageAvailability === true)
+  const tabsId = useId()
 
   function load() {
     if (!planningId) {
@@ -80,6 +97,8 @@ export function PlanningDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planningId])
 
+  const facesByTeam = useMemo(() => facesFrom(pilot.status, user?.stableId), [pilot.status, user?.stableId])
+
   async function handleRename() {
     if (!planningId || !newName) {
       return
@@ -89,7 +108,7 @@ export function PlanningDetailPage() {
     setActionError(null)
     try {
       await renamePlanning(planningId, newName)
-      setRenaming(false)
+      setRenameOpen(false)
       setNewName('')
       load()
     } catch {
@@ -132,24 +151,24 @@ export function PlanningDetailPage() {
     }
   }
 
-  async function handleAddLine() {
-    if (!planningId || !lineName) {
-      return
+  async function handleAddLine(name: string): Promise<boolean> {
+    if (!planningId) {
+      return false
     }
 
     setSaving(true)
     setActionError(null)
     try {
-      await createPlanningLine(planningId, { name: lineName })
-      setLineName('')
-      setShowLineForm(false)
+      await createPlanningLine(planningId, { name })
       load()
+      return true
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         setActionError('Cette équipe a déjà un planning sur cette période.')
       } else {
         setActionError("Impossible d'ajouter cette ligne.")
       }
+      return false
     } finally {
       setSaving(false)
     }
@@ -176,472 +195,378 @@ export function PlanningDetailPage() {
     }
   }
 
-  function loadMembers(teamStableId: string) {
-    if (!planningId) {
-      return
-    }
-
-    setMembersLoading(true)
-    setMemberError(null)
-    fetchTeamMembers(planningId, teamStableId)
-      .then(setMembers)
-      .catch(() => setMemberError('Impossible de charger les membres.'))
-      .finally(() => setMembersLoading(false))
-  }
-
-  function toggleTeam(teamStableId: string) {
-    if (expandedTeamStableId === teamStableId) {
-      setExpandedTeamStableId(null)
-      setMembers([])
-      return
-    }
-
-    setExpandedTeamStableId(teamStableId)
-    setMemberUserStableId('')
-    setMemberStart('')
-    setMemberRole('MEMBER')
-    loadMembers(teamStableId)
-  }
-
-  async function handleAddMember(teamStableId: string) {
-    if (!planningId || !memberUserStableId || !memberStart) {
-      return
-    }
-
-    setSaving(true)
-    setMemberError(null)
-    try {
-      await addTeamMember(planningId, teamStableId, {
-        userStableId: memberUserStableId,
-        role: memberRole,
-        membershipStart: memberStart,
-      })
-      setMemberUserStableId('')
-      setMemberStart('')
-      setMemberRole('MEMBER')
-      loadMembers(teamStableId)
-      void pilot.reload()
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) {
-        setMemberError('Utilisateur introuvable — vérifiez son identifiant.')
-      } else if (err instanceof ApiError && err.status === 409) {
-        setMemberError('Cet utilisateur a déjà une adhésion ouverte dans ce planning.')
-      } else {
-        setMemberError("Impossible d'ajouter ce membre.")
-      }
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function handleEndMembership(teamStableId: string, memberStableId: string) {
-    if (!planningId) {
-      return
-    }
-
-    setSaving(true)
-    setMemberError(null)
-    try {
-      await endTeamMembership(planningId, teamStableId, memberStableId)
-      loadMembers(teamStableId)
-      void pilot.reload()
-    } catch {
-      setMemberError('Impossible de mettre fin à cette adhésion.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
   if (!planningId) {
     return <p role="alert">Planning introuvable.</p>
   }
 
-  const primaryLine = planning?.lines.find((line) => line.type === 'PRIMARY')
+  if (loading || error || !planning) {
+    return (
+      <div className="pd-page">
+        <Link to="/plannings" className="pd-back">
+          <Icon name="left" size={16} strokeWidth={2.2} />
+          Plannings
+        </Link>
+        {loading && (
+          <p role="status" className="muted">
+            Chargement…
+          </p>
+        )}
+        {error && (
+          <p role="alert" className="alert alert--error">
+            <Icon name="alert" size={18} strokeWidth={2} />
+            <span>{error}</span>
+          </p>
+        )}
+      </div>
+    )
+  }
+
+  const primaryLine = planning.lines.find((line) => line.type === 'PRIMARY')
+  const status = primaryLine?.periodStatus ?? 'DRAFT'
+  const generated = planning.lines.some((line) => line.periodStatus && line.periodStatus !== 'DRAFT')
+  const steps = buildSteps(planning, pilot.status, generated, status)
+  const onRename = planning.canManage
+    ? () => {
+        setNewName(planning.name)
+        setRenameOpen(true)
+      }
+    : undefined
+  const tabs: { id: DetailTab; long: string; short: string; count?: number }[] = [
+    { id: 'lines', long: 'Lignes de garde', short: 'Lignes', count: planning.lines.length },
+    {
+      id: 'availability',
+      long: 'Indisponibilités',
+      short: 'Indispos',
+      count: pilot.status?.summary.expectedCount,
+    },
+    { id: 'planning', long: 'Planning', short: 'Planning' },
+  ]
 
   return (
-    <section className="page">
-      <nav aria-label="Fil d'Ariane" className="breadcrumb">
-        <Link to="/plannings">Plannings</Link>
-        <Icon name="right" size={14} />
-        <span aria-current="page">{planning?.name ?? '…'}</span>
-      </nav>
-
-      {loading && (
-        <p role="status" className="muted">
-          Chargement…
-        </p>
-      )}
-      {error && (
-        <p role="alert" className="alert alert--error">
-          <Icon name="alert" size={18} strokeWidth={2} />
-          <span>{error}</span>
-        </p>
-      )}
-
-      {!loading && !error && planning && (
-        <>
-          <header className="page__header">
-            <div>
+    <div className="pd-page">
+      <section className="pd-head">
+        <Link to="/plannings" className="pd-back">
+          <Icon name="left" size={16} strokeWidth={2.2} />
+          Plannings
+        </Link>
+        <div className="pd-head-row">
+          <div className="pd-head-title">
+            <div className="pd-title-line">
               <h1>{planning.name}</h1>
-              <p className="page__lead tnum">
-                {planning.startsAt} → {planning.endsAt} ({planning.timezone})
-              </p>
-              <p className="page__participation">
-                {primaryLine?.periodStatus && (
-                  <span className={`tag ${PERIOD_STATUS[primaryLine.periodStatus].tone}`}>
-                    {PERIOD_STATUS[primaryLine.periodStatus].label}
-                  </span>
-                )}
-                {planning.participating ? (
-                  <span className="tag tag--green">Vous participez à ce planning</span>
-                ) : (
-                  <span className="muted">Vous ne figurez pas parmi les candidats de ce planning.</span>
-                )}
-                {planning.canManage && !planning.participating && (
-                  <button
-                    type="button"
-                    className="btn btn--secondary btn--sm"
-                    onClick={handleIncludeMe}
-                    disabled={saving}
-                  >
+              <span className="pd-badge" data-status={status}>
+                <span className="pd-dot" />
+                {PERIOD_STATUS[status]}
+              </span>
+            </div>
+            {planning.participating ? (
+              <span className="pd-me">
+                <span className="pd-dot pd-dot-brand" />
+                Vous en faites partie
+              </span>
+            ) : (
+              <span className="pd-me pd-me--out">
+                Vous ne figurez pas parmi les candidats de ce planning.
+                {planning.canManage && (
+                  <button type="button" className="pd-link" onClick={handleIncludeMe} disabled={saving}>
                     M&apos;inclure dans ce planning
                   </button>
                 )}
-              </p>
-            </div>
-            <div className="page__actions">
-              {planning.canManage && !renaming && (
-                <button type="button" className="btn btn--secondary" onClick={() => setRenaming(true)}>
-                  <Icon name="pencil" size={18} strokeWidth={2} />
-                  Modifier le nom
-                </button>
-              )}
-              {planning.canGenerate && (
-                <PilotHeaderActions
-                  planningStableId={planning.stableId}
-                  timezone={planning.timezone}
-                  status={pilot.status}
-                  primaryLineStableId={primaryLine?.stableId}
-                  primaryLineName={primaryLine?.name}
-                  onChanged={() => void pilot.reload()}
-                  onGenerated={() => {
-                    setGenerationVersion((count) => count + 1)
-                    load()
-                  }}
+              </span>
+            )}
+          </div>
+          {planning.canGenerate ? (
+            <PilotHeaderActions
+              planningStableId={planning.stableId}
+              timezone={planning.timezone}
+              status={pilot.status}
+              primaryLineStableId={primaryLine?.stableId}
+              primaryLineName={primaryLine?.name}
+              onRename={onRename}
+              onChanged={() => void pilot.reload()}
+              onGenerated={() => {
+                setGenerationVersion((count) => count + 1)
+                setTab('planning')
+                load()
+              }}
+              dialog={pilotDialog}
+              onDialogChange={setPilotDialog}
+            />
+          ) : (
+            onRename && (
+              <div className="pd-head-actions">
+                <ActionMenu
+                  label="Plus d’actions"
+                  large
+                  items={[{ label: 'Modifier le nom', icon: 'pencil', onSelect: onRename }]}
                 />
-              )}
-            </div>
-          </header>
-
-          {planning.canManage && renaming && (
-            <div className="card form planning-rename">
-              <Field
-                label="Nouveau nom"
-                type="text"
-                value={newName}
-                placeholder={planning.name}
-                onChange={(event) => setNewName(event.target.value)}
-              />
-              <div className="form-actions">
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  onClick={handleRename}
-                  disabled={saving || !newName}
-                >
-                  Enregistrer
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--secondary"
-                  onClick={() => setRenaming(false)}
-                  disabled={saving}
-                >
-                  Annuler
-                </button>
               </div>
-            </div>
+            )
+          )}
+        </div>
+      </section>
+
+      {actionError && (
+        <p role="alert" className="alert alert--error">
+          <Icon name="alert" size={18} strokeWidth={2} />
+          <span>{actionError}</span>
+        </p>
+      )}
+
+      <PeriodCard
+        startsAt={planning.startsAt}
+        endsAt={planning.endsAt}
+        timezone={planning.timezone}
+        onExtend={planning.canManage ? () => setExtendOpen(true) : undefined}
+      />
+
+      <PlanningSteps steps={steps} tab={tab} onSelect={setTab} />
+
+      <section className="pd-tabs-section">
+        <div className="pd-tabs" role="tablist" aria-label="Sections du planning">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              id={`${tabsId}-${t.id}`}
+              aria-selected={tab === t.id}
+              aria-controls={`${tabsId}-panel`}
+              // One accessible name at every width: CSS swaps the visible long/short label.
+              aria-label={t.count !== undefined ? `${t.long} (${t.count})` : t.long}
+              className="pd-tab"
+              onClick={() => setTab(t.id)}
+            >
+              <span className="pd-lg" aria-hidden>
+                {t.long}
+              </span>
+              <span className="pd-sm" aria-hidden>
+                {t.short}
+              </span>
+              {t.count !== undefined && (
+                <span className="pd-tab-count" aria-hidden>
+                  {t.count}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        <div role="tabpanel" id={`${tabsId}-panel`} aria-labelledby={`${tabsId}-${tab}`}>
+          {tab === 'lines' && (
+            <LinesTab
+              lines={planning.lines}
+              facesByTeam={facesByTeam}
+              canManage={planning.canManage}
+              saving={saving}
+              onManageMembers={setMembersLine}
+              onDeleteLine={handleDeleteLine}
+              onAddLine={handleAddLine}
+            />
           )}
 
-          <div className="planning-detail">
-            <div className="planning-detail__lines">
-              <div className="section-title">
-                <h2>Lignes de garde</h2>
-                {planning.canManage && !showLineForm && (
+          {tab === 'availability' &&
+            (planning.canManageAvailability ? (
+              <div className="pd-stack">
+                {pilot.error && (
+                  <p role="alert" className="alert alert--error">
+                    <Icon name="alert" size={18} strokeWidth={2} />
+                    <span>{pilot.error}</span>
+                  </p>
+                )}
+                {!pilot.status && !pilot.error && (
+                  <p role="status" className="muted">
+                    Chargement du suivi de la collecte…
+                  </p>
+                )}
+                {pilot.status && (
+                  <CollectionStatusPanel
+                    status={pilot.status}
+                    onChanged={() => void pilot.reload()}
+                    onEditDeadline={planning.canGenerate ? () => setPilotDialog('settings') : undefined}
+                  />
+                )}
+                <div>
                   <button
                     type="button"
-                    className="btn btn--secondary btn--sm"
-                    onClick={() => setShowLineForm(true)}
+                    className="pd-link"
+                    aria-expanded={showCollectionHistory}
+                    onClick={() => setShowCollectionHistory((value) => !value)}
                   >
-                    <Icon name="plus" size={16} strokeWidth={2} />
-                    Ajouter une ligne
+                    <Icon name={showCollectionHistory ? 'down' : 'right'} size={16} strokeWidth={2} />
+                    Collectes par fenêtre (échéances, clôture)
+                  </button>
+                </div>
+                {showCollectionHistory && (
+                  <AvailabilityCollectionsPanel
+                    planningStableId={planning.stableId}
+                    reloadToken={collectionsReload}
+                  />
+                )}
+              </div>
+            ) : (
+              <AvailabilityCollectionsPanel
+                planningStableId={planning.stableId}
+                reloadToken={collectionsReload}
+              />
+            ))}
+
+          {tab === 'planning' &&
+            (generated ? (
+              <PersonalPlanningView key={generationVersion} planning={planning} />
+            ) : (
+              <div className="pd-card pd-empty">
+                <span className="pd-empty-icon" aria-hidden>
+                  <Icon name="calendar" size={24} strokeWidth={1.9} />
+                </span>
+                <strong>Pas encore de planning</strong>
+                <span>
+                  {planning.canGenerate
+                    ? 'Lancez la génération : les gardes de chaque membre s’afficheront ici, mois par mois.'
+                    : 'Les gardes s’afficheront ici dès que le planning aura été généré.'}
+                </span>
+                {planning.canGenerate && (
+                  <button
+                    type="button"
+                    className="pd-btn pd-btn-primary"
+                    onClick={() => setPilotDialog('generate')}
+                  >
+                    Générer le planning
                   </button>
                 )}
               </div>
+            ))}
+        </div>
+      </section>
 
-              {actionError && (
-                <p role="alert" className="alert alert--error">
-                  <Icon name="alert" size={18} strokeWidth={2} />
-                  <span>{actionError}</span>
-                </p>
-              )}
-
-              {planning.canManage && showLineForm && (
-                <div className="card form">
-                  <Field
-                    label="Nom de la ligne"
-                    type="text"
-                    value={lineName}
-                    onChange={(event) => setLineName(event.target.value)}
-                  />
-                  <div className="form-actions">
-                    <button
-                      type="button"
-                      className="btn btn--primary"
-                      onClick={handleAddLine}
-                      disabled={saving || !lineName}
-                    >
-                      Ajouter
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn--secondary"
-                      onClick={() => setShowLineForm(false)}
-                      disabled={saving}
-                    >
-                      Annuler
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              <ul className="list planning-lines">
-                {planning.lines.map((line) => {
-                  const open = expandedTeamStableId === line.team.stableId
-                  return (
-                    <li
-                      key={line.stableId}
-                      className={`card planning-line${open ? ' planning-line--open' : ''}`}
-                    >
-                      <div className="planning-line__head">
-                        <div className="planning-line__main">
-                          <h3>{line.name}</h3>
-                          <p className="muted">
-                            {line.team.name} · {line.memberCount ?? '—'} membre
-                            {(line.memberCount ?? 0) > 1 ? 's' : ''}
-                          </p>
-                        </div>
-                        <span className={`tag ${line.type === 'PRIMARY' ? 'tag--green' : 'tag--blue'}`}>
-                          {line.type === 'PRIMARY' ? 'Principale' : 'Secondaire'}
-                        </span>
-                      </div>
-                      <div className="planning-line__actions">
-                        <button
-                          type="button"
-                          className="btn btn--secondary btn--sm"
-                          aria-expanded={open}
-                          onClick={() => toggleTeam(line.team.stableId)}
-                        >
-                          <Icon name={open ? 'down' : 'users'} size={16} strokeWidth={2} />
-                          {open ? 'Masquer les membres' : 'Gérer les membres'}
-                        </button>
-                        {planning.canManage && line.type === 'SECONDARY' && (
-                          <button
-                            type="button"
-                            className="btn btn--danger btn--sm"
-                            onClick={() => handleDeleteLine(line.stableId)}
-                            disabled={saving}
-                          >
-                            Supprimer
-                          </button>
-                        )}
-                      </div>
-                    </li>
-                  )
-                })}
-              </ul>
-            </div>
-
-            {expandedTeamStableId && (
-              <div className="planning-detail__members card card--flush">
-                <div className="card__header">
-                  <h2>Membres de l'équipe</h2>
-                </div>
-                {membersLoading && <p className="muted planning-members__note">Chargement des membres…</p>}
-                {!membersLoading && (
-                  <ul className="list">
-                    {members.map((member) => (
-                      <li key={member.stableId} className="list-row">
-                        <span className="avatar">
-                          {`${member.firstName.charAt(0)}${member.lastName.charAt(0)}`.toUpperCase()}
-                        </span>
-                        <div className="list-row__main">
-                          <div className="list-row__title">
-                            {member.firstName} {member.lastName}
-                          </div>
-                          <div className="list-row__meta">
-                            <span className={`tag ${ROLE_TAG[member.role].tone}`}>
-                              {ROLE_TAG[member.role].label}
-                            </span>
-                            {member.membershipEnd ? ` Adhésion terminée le ${member.membershipEnd}` : ''}
-                          </div>
-                        </div>
-                        {planning.canManage && !member.membershipEnd && (
-                          <button
-                            type="button"
-                            className="btn btn--ghost btn--sm"
-                            onClick={() => handleEndMembership(expandedTeamStableId, member.stableId)}
-                            disabled={saving}
-                          >
-                            Terminer l'adhésion
-                          </button>
-                        )}
-                      </li>
-                    ))}
-                    {members.length === 0 && <li className="list-row muted">Aucun membre pour le moment.</li>}
-                  </ul>
-                )}
-
-                {memberError && (
-                  <p role="alert" className="alert alert--error planning-members__note">
-                    <Icon name="alert" size={18} strokeWidth={2} />
-                    <span>{memberError}</span>
-                  </p>
-                )}
-
-                {planning.lines.find((line) => line.team.stableId === expandedTeamStableId)?.team
-                  .canInvite && (
-                  <TeamInvitePanel
-                    key={expandedTeamStableId}
-                    planningStableId={planningId}
-                    teamStableId={expandedTeamStableId}
-                    onMembersChanged={() => {
-                      loadMembers(expandedTeamStableId)
-                      void pilot.reload()
-                    }}
-                  />
-                )}
-
-                {planning.canManage && (
-                  <div className="planning-members__existing form">
-                    <p className="muted">
-                      Utilisateur existant (identifiant connu) — permet aussi de choisir le rôle et la date
-                      d'entrée.
-                    </p>
-                    <Field
-                      label="Identifiant de l'utilisateur"
-                      type="text"
-                      value={memberUserStableId}
-                      onChange={(event) => setMemberUserStableId(event.target.value)}
-                      placeholder="stableId de l'utilisateur"
-                    />
-                    <div className="field">
-                      <label htmlFor="member-role" className="field__label">
-                        Rôle
-                      </label>
-                      <select
-                        id="member-role"
-                        className="field__input"
-                        value={memberRole}
-                        onChange={(event) =>
-                          setMemberRole(event.target.value as 'OWNER' | 'ADMIN' | 'MEMBER')
-                        }
-                      >
-                        <option value="MEMBER">Membre</option>
-                        <option value="ADMIN">Admin</option>
-                        <option value="OWNER">Propriétaire</option>
-                      </select>
-                    </div>
-                    <Field
-                      label="Date d'entrée"
-                      type="date"
-                      value={memberStart}
-                      onChange={(event) => setMemberStart(event.target.value)}
-                    />
-                    <button
-                      type="button"
-                      className="btn btn--primary"
-                      onClick={() => handleAddMember(expandedTeamStableId)}
-                      disabled={saving || !memberUserStableId || !memberStart}
-                    >
-                      Ajouter
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {planning.canManageAvailability ? (
-            <>
-              {pilot.error && (
-                <p role="alert" className="alert alert--error">
-                  <Icon name="alert" size={18} strokeWidth={2} />
-                  <span>{pilot.error}</span>
-                </p>
-              )}
-              {!pilot.status && !pilot.error && (
-                <p role="status" className="muted">
-                  Chargement du suivi de la collecte…
-                </p>
-              )}
-              {pilot.status && (
-                <CollectionStatusPanel status={pilot.status} onChanged={() => void pilot.reload()} />
-              )}
-              <div>
-                <button
-                  type="button"
-                  className="btn btn--ghost btn--sm"
-                  aria-expanded={showCollectionHistory}
-                  onClick={() => setShowCollectionHistory((value) => !value)}
-                >
-                  <Icon name={showCollectionHistory ? 'down' : 'right'} size={16} strokeWidth={2} />
-                  Collectes par fenêtre (échéances, clôture)
-                </button>
-              </div>
-              {showCollectionHistory && (
-                <AvailabilityCollectionsPanel
-                  planningStableId={planning.stableId}
-                  reloadToken={collectionsReload}
-                />
-              )}
-            </>
-          ) : (
-            <AvailabilityCollectionsPanel
-              planningStableId={planning.stableId}
-              reloadToken={collectionsReload}
+      {renameOpen && (
+        <Sheet title="Modifier le nom" onClose={() => setRenameOpen(false)}>
+          <form
+            className="form"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void handleRename()
+            }}
+          >
+            <Field
+              label="Nouveau nom"
+              type="text"
+              value={newName}
+              autoFocus
+              onChange={(event) => setNewName(event.target.value)}
             />
-          )}
-
-          {planning.canManage && (
-            <ExtendPlanningForm
-              planning={planning}
-              onExtended={() => {
-                setCollectionsReload((count) => count + 1)
-                void pilot.reload()
-                load()
-              }}
-            />
-          )}
-
-          <PersonalPlanningView key={generationVersion} planning={planning} />
-        </>
+            <button
+              type="submit"
+              className="pd-btn pd-btn-primary pd-btn-lg pd-full"
+              disabled={saving || !newName}
+            >
+              Enregistrer
+            </button>
+          </form>
+        </Sheet>
       )}
-    </section>
+
+      {extendOpen && (
+        <Sheet title="Prolonger la période" onClose={() => setExtendOpen(false)}>
+          <ExtendPlanningForm
+            planning={planning}
+            onCancel={() => setExtendOpen(false)}
+            onExtended={() => {
+              setCollectionsReload((count) => count + 1)
+              void pilot.reload()
+              load()
+            }}
+          />
+        </Sheet>
+      )}
+
+      {membersLine && (
+        <MembersSheet
+          planningStableId={planning.stableId}
+          line={membersLine}
+          canManage={planning.canManage}
+          onClose={() => setMembersLine(null)}
+          onChanged={() => {
+            load()
+            void pilot.reload()
+          }}
+        />
+      )}
+    </div>
   )
 }
 
-/** Lifecycle of a line's period, as shown next to the planning's title. */
-const PERIOD_STATUS: Record<PlanningPeriodStatus, { label: string; tone: string }> = {
-  DRAFT: { label: 'Brouillon', tone: '' },
-  GENERATED: { label: 'Généré', tone: 'tag--blue' },
-  VALIDATED: { label: 'Validé', tone: 'tag--blue' },
-  PUBLISHED: { label: 'Publié', tone: 'tag--green' },
-  ARCHIVED: { label: 'Archivé', tone: '' },
+/** Équipe → Indisponibilités → Génération, from what the page already loaded. */
+function buildSteps(
+  planning: PlanningDetail,
+  pilot: CollectionStatus | null,
+  generated: boolean,
+  status: PlanningPeriodStatus,
+): Step[] {
+  const memberTotal = planning.lines.reduce((sum, line) => sum + (line.memberCount ?? 0), 0)
+  const staffed = planning.lines.every((line) => (line.memberCount ?? 0) > 0)
+  const team: Step = {
+    title: 'Équipe',
+    detail: `${plural(planning.lines.length, 'ligne')} · ${plural(memberTotal, 'membre')}`,
+    state: staffed ? 'done' : 'todo',
+    tag: staffed ? 'Prêt' : 'À compléter',
+    tab: 'lines',
+  }
+
+  let availability: Step
+  if (pilot) {
+    const { confirmedCount, expectedCount, pendingCount } = pilot.summary
+    const deadline = pilot.availabilityDeadline
+      ? ` · fin souhaitée ${formatShortDate(pilot.availabilityDeadline)}`
+      : ''
+    availability =
+      expectedCount > 0 && pendingCount > 0
+        ? {
+            title: 'Indisponibilités',
+            detail: `${confirmedCount}/${expectedCount} confirmés${deadline}`,
+            state: 'current',
+            tag: 'En cours',
+            tab: 'availability',
+          }
+        : {
+            title: 'Indisponibilités',
+            detail:
+              expectedCount > 0 ? `${confirmedCount}/${expectedCount} confirmés` : 'Personne n’est attendu',
+            state: 'done',
+            tag: 'Prêt',
+            tab: 'availability',
+          }
+  } else {
+    availability = {
+      title: 'Indisponibilités',
+      detail: planning.canManageAvailability ? 'Chargement du suivi…' : 'Vos réponses aux collectes',
+      state: 'current',
+      tag: 'Collecte',
+      tab: 'availability',
+    }
+  }
+
+  const generation: Step = generated
+    ? {
+        title: 'Génération',
+        detail: status === 'PUBLISHED' ? 'Planning publié' : 'Planning généré',
+        state: 'done',
+        tag: PERIOD_STATUS[status],
+        tab: 'planning',
+      }
+    : { title: 'Génération', detail: 'Pas encore lancée', state: 'todo', tag: 'À faire', tab: 'planning' }
+
+  return [team, availability, generation]
 }
 
-const ROLE_TAG: Record<'OWNER' | 'ADMIN' | 'MEMBER', { label: string; tone: string }> = {
-  OWNER: { label: 'Propriétaire', tone: 'tag--green' },
-  ADMIN: { label: 'Admin', tone: 'tag--blue' },
-  MEMBER: { label: 'Membre', tone: '' },
+/** Initials of each team's participants (pilot data), the current user first-class ("me"). */
+function facesFrom(status: CollectionStatus | null, myStableId: string | undefined): Record<string, Face[]> {
+  const byTeam: Record<string, Face[]> = {}
+  for (const row of status?.members ?? []) {
+    ;(byTeam[row.team.stableId] ??= []).push({
+      key: row.memberStableId,
+      initials: `${row.firstName.charAt(0)}${row.lastName.charAt(0)}`.toUpperCase(),
+      me: row.userStableId === myStableId,
+    })
+  }
+  return byTeam
 }

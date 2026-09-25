@@ -110,4 +110,36 @@ describe('ExtendPlanningForm', () => {
 
     expect(screen.getByText(/la date de fin est exclue/)).toBeInTheDocument()
   })
+
+  describe('embedded in a dialog', () => {
+    it('is open at once, without its own title, and Annuler asks the dialog to close', () => {
+      const onCancel = vi.fn()
+      render(<ExtendPlanningForm planning={PLANNING} onExtended={vi.fn()} onCancel={onCancel} />)
+
+      expect(screen.queryByRole('heading', { name: 'Prolonger le planning' })).not.toBeInTheDocument()
+      expect(screen.getByLabelText('Nouvelle fin')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Annuler' }))
+      expect(onCancel).toHaveBeenCalledTimes(1)
+    })
+
+    it('shows what was opened, then Fermer closes the dialog', async () => {
+      stubApi({
+        'POST /api/plannings/plan-1/extensions': () => ({
+          planning: { stableId: 'plan-1', startsAt: '2026-09-01', endsAt: '2027-04-01' },
+          collections: [{ stableId: 'c2', startsAt: '2027-01-01', endsAt: '2027-04-01', deadline: null }],
+        }),
+      })
+      const onCancel = vi.fn()
+      const onExtended = vi.fn()
+      render(<ExtendPlanningForm planning={PLANNING} onExtended={onExtended} onCancel={onCancel} />)
+
+      fireEvent.change(screen.getByLabelText('Nouvelle fin'), { target: { value: '2027-04-01' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Prolonger et ouvrir la collecte' }))
+
+      expect(await screen.findByRole('status')).toHaveTextContent('Planning prolongé.')
+      expect(onExtended).toHaveBeenCalledTimes(1)
+      fireEvent.click(screen.getByRole('button', { name: 'Fermer' }))
+      expect(onCancel).toHaveBeenCalledTimes(1)
+    })
+  })
 })

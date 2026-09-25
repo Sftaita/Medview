@@ -30,35 +30,91 @@ function renderActions(
   return handlers
 }
 
-describe('PilotHeaderActions — deadline and buttons', () => {
-  it('shows the informative deadline, and Paramètres and Générer le planning', () => {
+/** Opens the header's "⋯" menu and picks an entry. */
+function chooseMenu(name: string) {
+  fireEvent.click(screen.getByRole('button', { name: 'Plus d’actions' }))
+  fireEvent.click(screen.getByRole('menuitem', { name }))
+}
+
+describe('PilotHeaderActions — buttons and menu', () => {
+  it('offers Générer le planning, and Paramètres in the menu', () => {
     renderActions(makeStatus({ availabilityDeadline: '2026-09-25' }))
 
-    expect(screen.getByText(/Fin souhaitée d’encodage :/)).toHaveTextContent('25 septembre 2026')
-    expect(screen.getByRole('button', { name: 'Paramètres' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Générer le planning' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Plus d’actions' }))
+    expect(screen.getByRole('menuitem', { name: 'Paramètres' })).toBeEnabled()
+    // The deadline is shown by the availability follow-up, not by the header.
+    expect(screen.queryByText(/Fin souhaitée/)).not.toBeInTheDocument()
   })
 
-  it('keeps everything enabled once the deadline is passed — it only tags it', () => {
+  it('keeps everything enabled once the deadline is passed', () => {
     renderActions(makeStatus({ availabilityDeadline: '2026-09-25', deadlineOverdueDays: 3 }))
 
-    expect(screen.getByText('Dépassée')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Paramètres' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Générer le planning' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Plus d’actions' }))
+    expect(screen.getByRole('menuitem', { name: 'Paramètres' })).toBeEnabled()
+  })
+
+  it('offers the generation even before the pilot data has loaded', () => {
+    renderActions(null)
+
     expect(screen.getByRole('button', { name: 'Générer le planning' })).toBeEnabled()
   })
 
-  it('offers the generation even before the pilot data has loaded, and shows no deadline', () => {
-    renderActions(null)
+  it('lists Modifier le nom only when the page allows renaming, and closes the menu on Escape', () => {
+    const onRename = vi.fn()
+    render(
+      <PilotHeaderActions
+        planningStableId="plan-1"
+        timezone="Europe/Brussels"
+        status={makeStatus()}
+        onRename={onRename}
+        onChanged={vi.fn()}
+        onGenerated={vi.fn()}
+      />,
+    )
 
-    expect(screen.queryByText(/Fin souhaitée/)).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Générer le planning' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Plus d’actions' }))
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+
+    chooseMenu('Modifier le nom')
+    expect(onRename).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+  })
+
+  it('has no Modifier le nom entry without onRename', () => {
+    renderActions()
+    fireEvent.click(screen.getByRole('button', { name: 'Plus d’actions' }))
+    expect(screen.queryByRole('menuitem', { name: 'Modifier le nom' })).not.toBeInTheDocument()
+  })
+
+  it('opens the generation dialog when the page asks for it (controlled)', async () => {
+    stubApi({ 'GET /api/plannings/plan-1/generation-preflight': () => makePreflight() })
+    const onDialogChange = vi.fn()
+    render(
+      <PilotHeaderActions
+        planningStableId="plan-1"
+        timezone="Europe/Brussels"
+        status={makeStatus()}
+        onChanged={vi.fn()}
+        onGenerated={vi.fn()}
+        dialog="generate"
+        onDialogChange={onDialogChange}
+      />,
+    )
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Annuler' }))
+    expect(onDialogChange).toHaveBeenCalledWith(null)
   })
 })
 
 describe('Semaine type (docs/decisions.md D136)', () => {
   it('is not offered before the primary line is known', () => {
     renderActions()
-    expect(screen.queryByRole('button', { name: 'Semaine type' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Plus d’actions' }))
+    expect(screen.queryByRole('menuitem', { name: 'Semaine type' })).not.toBeInTheDocument()
   })
 
   it('opens, loads the current structure and saves it', async () => {
@@ -81,7 +137,7 @@ describe('Semaine type (docs/decisions.md D136)', () => {
       primaryLineName: 'Ligne principale',
     })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Semaine type' }))
+    chooseMenu('Semaine type')
     const dialog = await screen.findByRole('dialog', { name: 'Semaine type — Ligne principale' })
     expect(await within(dialog).findByText('Ven · Sam · Dim · 3 jours')).toBeInTheDocument()
 
@@ -98,7 +154,7 @@ describe('PlanningSettingsModal', () => {
   it('says the deadline is indicative and blocks nothing', () => {
     renderActions()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Paramètres' }))
+    chooseMenu('Paramètres')
 
     const dialog = screen.getByRole('dialog', { name: 'Paramètres du planning' })
     expect(within(dialog).getByLabelText('Fin souhaitée d’encodage des indisponibilités')).toBeInTheDocument()
@@ -119,7 +175,7 @@ describe('PlanningSettingsModal', () => {
     })
     const { onChanged } = renderActions(makeStatus({ availabilityDeadline: '2026-09-25' }))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Paramètres' }))
+    chooseMenu('Paramètres')
     const dialog = screen.getByRole('dialog')
     const input = within(dialog).getByLabelText('Fin souhaitée d’encodage des indisponibilités')
     expect(input).toHaveValue('2026-09-25')
@@ -146,7 +202,7 @@ describe('PlanningSettingsModal', () => {
     })
     renderActions(makeStatus({ availabilityDeadline: '2026-09-25' }))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Paramètres' }))
+    chooseMenu('Paramètres')
     fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Effacer la date' }))
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
@@ -159,7 +215,7 @@ describe('PlanningSettingsModal', () => {
     stubApi({ 'PATCH /api/plannings/plan-1/settings': () => httpStatus(422, { error: 'validation_failed' }) })
     renderActions(makeStatus())
 
-    fireEvent.click(screen.getByRole('button', { name: 'Paramètres' }))
+    chooseMenu('Paramètres')
     const dialog = screen.getByRole('dialog')
     fireEvent.change(within(dialog).getByLabelText('Fin souhaitée d’encodage des indisponibilités'), {
       target: { value: '2020-01-01' },
@@ -516,7 +572,8 @@ describe('GenerationModal', () => {
 describe('Règles de génération (docs/decisions.md D137)', () => {
   it('is not offered before the primary line is known', () => {
     renderActions()
-    expect(screen.queryByRole('button', { name: 'Règles de génération' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Plus d’actions' }))
+    expect(screen.queryByRole('menuitem', { name: 'Règles de génération' })).not.toBeInTheDocument()
   })
 
   it('shows the inactive state and lets a manager activate it', async () => {
@@ -533,7 +590,7 @@ describe('Règles de génération (docs/decisions.md D137)', () => {
       primaryLineName: 'Seniors',
     })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Règles de génération' }))
+    chooseMenu('Règles de génération')
     const dialog = await screen.findByRole('dialog', { name: 'Règles de génération — Seniors' })
     expect(await within(dialog).findByText(/Aucune règle de génération n’est active/)).toBeInTheDocument()
 
@@ -556,7 +613,7 @@ describe('Règles de génération (docs/decisions.md D137)', () => {
     })
     renderActions(makeStatus(), undefined, { primaryLineStableId: 'line-1', primaryLineName: 'Seniors' })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Règles de génération' }))
+    chooseMenu('Règles de génération')
     const dialog = await screen.findByRole('dialog')
     expect(
       await within(dialog).findByText(/Des règles de génération sont actives pour cette ligne/),
@@ -571,7 +628,7 @@ describe('Règles de génération (docs/decisions.md D137)', () => {
     })
     renderActions(makeStatus(), undefined, { primaryLineStableId: 'line-1', primaryLineName: 'Seniors' })
 
-    fireEvent.click(screen.getByRole('button', { name: 'Règles de génération' }))
+    chooseMenu('Règles de génération')
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(await within(dialog).findByRole('button', { name: 'Activer' }))
 

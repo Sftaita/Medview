@@ -11,6 +11,9 @@ type Props = {
   planning: PlanningDetail
   /** Called once the extension went through, with what it opened. */
   onExtended: (result: ExtendPlanningResult) => void
+  /** Embedded in a dialog: the form is open from the start, has no card or title
+   * of its own, and "Annuler" / "Fermer" call this instead of folding it. */
+  onCancel?: () => void
 }
 
 /** "YYYY-MM-DD" the day before, for the "last day" wording of an exclusive end. */
@@ -41,8 +44,9 @@ function errorMessage(err: unknown): string {
  * dates only (docs/availability-collection.md §5). The end date is exclusive,
  * like everywhere else in the planning: the hint says so in plain words.
  */
-export function ExtendPlanningForm({ planning, onExtended }: Props) {
-  const [open, setOpen] = useState(false)
+export function ExtendPlanningForm({ planning, onExtended, onCancel }: Props) {
+  const embedded = onCancel !== undefined
+  const [open, setOpen] = useState(embedded)
   const [startsAt, setStartsAt] = useState('')
   const [endsAt, setEndsAt] = useState('')
   const [deadline, setDeadline] = useState('')
@@ -83,24 +87,22 @@ export function ExtendPlanningForm({ planning, onExtended }: Props) {
     }
   }
 
-  return (
-    <section className="card extend" aria-label="Prolonger le planning">
-      <div className="section-title">
-        <h2>Prolonger le planning</h2>
-        {!open && (
-          <button type="button" className="btn btn--secondary btn--sm" onClick={() => setOpen(true)}>
-            <Icon name="plus" size={16} strokeWidth={2} />
-            Prolonger
-          </button>
-        )}
-      </div>
+  const body = (
+    <>
       {notice && (
         <p role="status" className="alert alert--success">
           <Icon name="check" size={18} strokeWidth={2} />
           <span>{notice}</span>
         </p>
       )}
-      {!open && !notice && (
+      {embedded && notice && (
+        <div className="form-actions">
+          <button type="button" className="btn btn--primary" onClick={onCancel}>
+            Fermer
+          </button>
+        </div>
+      )}
+      {!embedded && !open && !notice && (
         <p className="muted">
           Ajoutez de nouvelles dates : seules celles-ci seront demandées aux membres, jamais celles déjà
           confirmées.
@@ -152,7 +154,7 @@ export function ExtendPlanningForm({ planning, onExtended }: Props) {
             <button
               type="button"
               className="btn btn--secondary"
-              onClick={() => setOpen(false)}
+              onClick={() => (embedded ? onCancel() : setOpen(false))}
               disabled={busy}
             >
               Annuler
@@ -160,6 +162,25 @@ export function ExtendPlanningForm({ planning, onExtended }: Props) {
           </div>
         </form>
       )}
+    </>
+  )
+
+  if (embedded) {
+    return <div className="extend extend--embedded">{body}</div>
+  }
+
+  return (
+    <section className="card extend" aria-label="Prolonger le planning">
+      <div className="section-title">
+        <h2>Prolonger le planning</h2>
+        {!open && (
+          <button type="button" className="btn btn--secondary btn--sm" onClick={() => setOpen(true)}>
+            <Icon name="plus" size={16} strokeWidth={2} />
+            Prolonger
+          </button>
+        )}
+      </div>
+      {body}
     </section>
   )
 }
