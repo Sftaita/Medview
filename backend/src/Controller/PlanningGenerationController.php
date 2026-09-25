@@ -4,13 +4,10 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
-use App\Dto\CreatePlanningGenerationRequest;
-use App\Eligibility\EligibilityExclusion;
 use App\Entity\PlanningGeneration;
 use App\Entity\PlanningPeriod;
 use App\Entity\PlanningSnapshot;
 use App\Entity\PlanningTeam;
-use App\Entity\RestPolicyOptions;
 use App\Entity\User;
 use App\Entity\UserAvailabilityType;
 use App\Exception\NoActivePlanningRuleSetException;
@@ -18,14 +15,8 @@ use App\Exception\NoSolverParameterSetException;
 use App\Exception\PlanningGenerationAlreadySnapshottedException;
 use App\Exception\PlanningGenerationConcurrentSolveException;
 use App\Exception\StalePlanningGenerationDataException;
-use App\Fairness\CandidateExclusionDiagnostic;
 use App\Fairness\CoverageStatus;
-use App\Fairness\DiagnosticRelaxation;
 use App\Fairness\OptimizationResult;
-use App\Fairness\StructuralDiagnostic;
-use App\Fairness\UnassignedDutyDiagnostic;
-use App\Fairness\UnsatDiagnostics;
-use App\Fairness\UnsatReport;
 use App\Repository\PlanningGenerationRepository;
 use App\Repository\PlanningPeriodRepository;
 use App\Repository\PlanningSnapshotRepository;
@@ -33,6 +24,8 @@ use App\Repository\PlanningSnapshotRuleSetRepository;
 use App\Security\Voter\PlanningTeamRoleVoter;
 use App\Service\PlanningGenerationService;
 use App\Service\PlanningSnapshotService;
+use App\Service\RestPolicyRequestParser;
+use App\Service\UnsatReportPresenter;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -40,7 +33,6 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 use Symfony\Component\Security\Http\Attribute\CurrentUser;
-use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 /**
  * PlanningGeneration + its PlanningSnapshot (docs/planning-generation.md).
@@ -58,8 +50,9 @@ final class PlanningGenerationController
         private readonly PlanningSnapshotRuleSetRepository $snapshotRuleSetRepository,
         private readonly PlanningGenerationService $generationService,
         private readonly PlanningSnapshotService $snapshotService,
+        private readonly UnsatReportPresenter $unsatReportPresenter,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
-        private readonly ValidatorInterface $validator,
+        private readonly RestPolicyRequestParser $restPolicyParser,
     ) {
     }
 
@@ -69,7 +62,7 @@ final class PlanningGenerationController
         $planningPeriod = $this->resolvePlanningPeriod($planningPeriodStableId);
         $this->denyUnlessCanManage($planningPeriod->getTeam());
 
-        [$restPolicy, $errorResponse] = $this->resolveRestPolicy($request);
+        [$restPolicy, $errorResponse] = $this->restPolicyParser->parse($request);
         if (null !== $errorResponse) {
             return $errorResponse;
         }
@@ -77,45 +70,6 @@ final class PlanningGenerationController
         $generation = $this->generationService->create($planningPeriod, $user, $restPolicy);
 
         return new JsonResponse($this->generationToArray($generation), 201);
-    }
-
-    /**
-     * docs/decisions.md D105 — an empty/absent body means both rest
-     * policies stay disabled (`RestPolicyOptions::none()`), identical to
-     * the pre-Lot-6D.1 behavior.
-     *
-     * @return array{0: ?RestPolicyOptions, 1: ?JsonResponse}
-     */
-    private function resolveRestPolicy(Request $request): array
-    {
-        $content = $request->getContent();
-        if ('' === trim($content)) {
-            return [RestPolicyOptions::none(), null];
-        }
-
-        try {
-            $raw = json_decode($content, true, flags: \JSON_THROW_ON_ERROR);
-        } catch (\JsonException) {
-            return [null, new JsonResponse(['error' => 'invalid_json', 'message' => 'The request body is not valid JSON.'], 400)];
-        }
-
-        $dto = new CreatePlanningGenerationRequest();
-        $dto->legalMinRestEnabled = (bool) ($raw['legalMinRestEnabled'] ?? false);
-        $dto->legalMinRestHours = isset($raw['legalMinRestHours']) ? (int) $raw['legalMinRestHours'] : null;
-        $dto->teamMinRestEnabled = (bool) ($raw['teamMinRestEnabled'] ?? false);
-        $dto->teamMinRestHours = isset($raw['teamMinRestHours']) ? (int) $raw['teamMinRestHours'] : null;
-
-        $violations = $this->validator->validate($dto);
-        if (\count($violations) > 0) {
-            $errors = [];
-            foreach ($violations as $violation) {
-                $errors[$violation->getPropertyPath()] = $violation->getMessage();
-            }
-
-            return [null, new JsonResponse(['error' => 'validation_failed', 'violations' => $errors], 422)];
-        }
-
-        return [new RestPolicyOptions($dto->legalMinRestEnabled, $dto->legalMinRestHours, $dto->teamMinRestEnabled, $dto->teamMinRestHours), null];
     }
 
     #[Route('/api/planning-periods/{planningPeriodStableId}/generations', name: 'api_planning_generation_list', methods: ['GET'])]
@@ -298,55 +252,8 @@ final class PlanningGenerationController
             // UnsatReport model (docs/planning-solver.md §27), and only
             // when there is actually something to explain.
             'diagnostics' => CoverageStatus::INCOMPLETE === $result->coverageStatus
-                ? $this->diagnosticsToArray($result->diagnostics)
+                ? $this->unsatReportPresenter->toArray($result->diagnostics)
                 : null,
-        ];
-    }
-
-    /**
-     * @return array<string, mixed>|null
-     */
-    private function diagnosticsToArray(?UnsatDiagnostics $diagnostics): ?array
-    {
-        if (!$diagnostics instanceof UnsatReport) {
-            return null;
-        }
-
-        return [
-            'strictSolverStatus' => $diagnostics->strictSolverStatus->value,
-            'partialSolverStatus' => $diagnostics->partialSolverStatus?->value,
-            'requiredDutyCount' => $diagnostics->requiredDutyCount,
-            'assignedDutyCount' => $diagnostics->assignedDutyCount,
-            'unassignedDuties' => array_map(
-                static fn (UnassignedDutyDiagnostic $d): array => [
-                    'dutyUnitStableKey' => $d->dutyUnitStableKey,
-                    'critical' => $d->critical,
-                    'candidateExclusions' => array_map(
-                        static fn (CandidateExclusionDiagnostic $c): array => [
-                            'candidateId' => $c->candidateId,
-                            'exclusions' => array_map(
-                                static fn (EligibilityExclusion $e): array => ['reason' => $e->reason->value, 'context' => $e->context],
-                                $c->exclusions,
-                            ),
-                        ],
-                        $d->candidateExclusions,
-                    ),
-                ],
-                $diagnostics->unassignedDuties,
-            ),
-            'structuralDiagnostics' => array_map(
-                static fn (StructuralDiagnostic $d): array => ['code' => $d->code->value, 'dutyUnitStableKey' => $d->dutyUnitStableKey],
-                $diagnostics->structuralDiagnostics,
-            ),
-            'solverAnalysis' => ['available' => $diagnostics->solverAnalysis->available],
-            'diagnosticRelaxations' => array_map(
-                static fn (DiagnosticRelaxation $r): array => ['ruleCode' => $r->ruleCode->value, 'tier' => $r->tier->value, 'phrasing' => $r->phrasing, 'disclaimer' => $r->disclaimer],
-                $diagnostics->diagnosticRelaxations,
-            ),
-            'existingDataConflict' => null === $diagnostics->existingDataConflict ? null : [
-                'type' => $diagnostics->existingDataConflict->type->value,
-                'message' => $diagnostics->existingDataConflict->message,
-            ],
         ];
     }
 

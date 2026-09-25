@@ -228,6 +228,8 @@ final class PlanningController
             'participating' => null !== $currentUser && null !== $this->teamMemberRepository->findOpenMembershipForUserInPlanning($planning, $currentUser),
             'canManageAvailability' => $this->authorizationChecker->isGranted(PlanningVoter::MANAGE_AVAILABILITY, $planning),
             'canGenerate' => $this->authorizationChecker->isGranted(PlanningVoter::GENERATE, $planning),
+            'canManageCalendar' => $this->authorizationChecker->isGranted(PlanningVoter::MANAGE_CALENDAR, $planning),
+            'canPublish' => $this->authorizationChecker->isGranted(PlanningVoter::PUBLISH, $planning),
             'startsAt' => $planning->getStartsAt()->format('Y-m-d'),
             'endsAt' => $planning->getEndsAt()->format('Y-m-d'),
             'timezone' => $planning->getTimezone(),

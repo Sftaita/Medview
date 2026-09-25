@@ -143,6 +143,19 @@ class PlanningGeneration
     #[ORM\Column(nullable: true)]
     private ?string $failureReason = null;
 
+    /**
+     * The solve's UNSAT diagnostic, persisted exactly as computed at solve
+     * time (docs/decisions.md D130) — never recomputed afterwards, never
+     * present for a COMPLETE/successful coverage. Same shape as the
+     * transient `diagnostics` field `POST .../solve` already returned
+     * (`App\Service\UnsatReportPresenter`), so a planning-result read view
+     * can rely on it without re-deriving any causality from current data.
+     *
+     * @var array<string, mixed>|null
+     */
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $diagnostics = null;
+
     #[ORM\Column(nullable: true)]
     private ?\DateTimeImmutable $generatedAt = null;
 
@@ -214,6 +227,7 @@ class PlanningGeneration
         $this->solveDurationMs = $metadata->solveDurationMs;
         $this->timeoutHit = $metadata->timeoutHit;
         $this->failureReason = $metadata->failureReason;
+        $this->diagnostics = $metadata->diagnostics;
         $this->generatedAt = new \DateTimeImmutable();
         $this->touch();
     }
@@ -292,6 +306,14 @@ class PlanningGeneration
     public function getFailureReason(): ?string
     {
         return $this->failureReason;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function getDiagnostics(): ?array
+    {
+        return $this->diagnostics;
     }
 
     public function getGeneratedAt(): ?\DateTimeImmutable

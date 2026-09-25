@@ -25,8 +25,11 @@ use App\Fairness\SolverStatus;
 final readonly class SolverRunMetadata
 {
     /**
-     * @param array<string, float> $objectiveValues keyed by ObjectivePhaseId::value
-     * @param array<string, bool>  $optimality      keyed by ObjectivePhaseId::value
+     * @param array<string, float>      $objectiveValues keyed by ObjectivePhaseId::value
+     * @param array<string, bool>       $optimality      keyed by ObjectivePhaseId::value
+     * @param array<string, mixed>|null $diagnostics     the solve's UnsatReport, already shaped by
+     *                                                   `App\Service\UnsatReportPresenter` — null whenever
+     *                                                   there is none (docs/decisions.md D130)
      */
     public function __construct(
         public string $algorithmVersion,
@@ -43,6 +46,7 @@ final readonly class SolverRunMetadata
         public int $solveDurationMs,
         public bool $timeoutHit,
         public ?string $failureReason,
+        public ?array $diagnostics = null,
     ) {
     }
 }

@@ -23,11 +23,21 @@ use Symfony\Component\Uid\Uuid;
  * Duty's own constructor) — DutyAssignmentService is expected to validate
  * these first and produce a clean typed exception; these guards exist only
  * to catch a service bug, not as the user-facing validation path.
+ *
+ * $current (docs/decisions.md D131): a row is never deleted nor mutated
+ * into a different assignee — a manual reassignment marks the old row
+ * `current = false` via markSuperseded() (the one controlled mutation this
+ * class allows, the same "named transition, never a free setter" pattern
+ * as PlanningPeriod::transitionTo()) and a brand new row is created. The
+ * database enforces at most one current row per (generation, duty) via a
+ * partial unique index — never the plain unique constraint this table
+ * started with, which would have made a second row impossible even after
+ * the first became historical. Every reader that means "the assignment of
+ * this duty right now" must filter `current = true`.
  */
 #[ORM\Entity(repositoryClass: DutyAssignmentRepository::class)]
 #[ORM\Table(name: 'duty_assignments')]
 #[ORM\UniqueConstraint(name: 'uniq_duty_assignments_stable_id', columns: ['stable_id'])]
-#[ORM\UniqueConstraint(name: 'uniq_duty_assignments_generation_duty', columns: ['generation_id', 'duty_id'])]
 #[ORM\Index(columns: ['team_member_id'], name: 'idx_duty_assignments_team_member_id')]
 class DutyAssignment
 {
@@ -62,6 +72,9 @@ class DutyAssignment
     private bool $locked;
 
     #[ORM\Column]
+    private bool $current;
+
+    #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
     #[ORM\Column]
@@ -94,6 +107,7 @@ class DutyAssignment
         $this->snapshotMember = $snapshotMember;
         $this->source = $source;
         $this->locked = $locked;
+        $this->current = true;
         $this->createdAt = new \DateTimeImmutable();
         $this->updatedAt = new \DateTimeImmutable();
     }
@@ -136,6 +150,28 @@ class DutyAssignment
     public function isLocked(): bool
     {
         return $this->locked;
+    }
+
+    public function isCurrent(): bool
+    {
+        return $this->current;
+    }
+
+    /**
+     * The one controlled mutation this class allows (see class docblock) —
+     * called exactly once, when a reassignment replaces this row with a new
+     * one. Never reversible: a superseded row stays superseded forever,
+     * even if the same assignee is chosen again later (that produces its
+     * own new row and its own event, D131).
+     */
+    public function markSuperseded(): void
+    {
+        if (!$this->current) {
+            throw new \LogicException('This DutyAssignment is already superseded.');
+        }
+
+        $this->current = false;
+        $this->updatedAt = new \DateTimeImmutable();
     }
 
     public function getCreatedAt(): \DateTimeImmutable

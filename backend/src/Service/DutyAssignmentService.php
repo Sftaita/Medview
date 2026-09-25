@@ -94,6 +94,24 @@ final class DutyAssignmentService
     }
 
     /**
+     * A manual reassignment's replacement row (docs/decisions.md D131) —
+     * same shape as createAuto() (never flushes itself, accepts an
+     * already-resolved snapshot), but forces MANUAL: an AUTO row replaced
+     * by a person must never keep reading as AUTO. Used exclusively by
+     * DutyReassignmentService, which controls the exact statement order a
+     * partial-unique `current` index requires.
+     *
+     * @throws InvalidDutyAssignmentException
+     */
+    public function createManualBatchItem(PlanningGeneration $generation, PlanningSnapshot $snapshot, Duty $duty, PlanningTeamMember $teamMember, bool $locked = false): DutyAssignment
+    {
+        $assignment = $this->buildAssignment($generation, $snapshot, $duty, $teamMember, DutyAssignmentSource::MANUAL, $locked);
+        $this->entityManager->persist($assignment);
+
+        return $assignment;
+    }
+
+    /**
      * @throws InvalidDutyAssignmentException
      */
     private function buildAssignment(PlanningGeneration $generation, PlanningSnapshot $snapshot, Duty $duty, PlanningTeamMember $teamMember, DutyAssignmentSource $source, bool $locked): DutyAssignment
