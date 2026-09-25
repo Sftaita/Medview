@@ -4,7 +4,22 @@ import { Overlay } from '../../../components/Overlay'
 import { ApiError } from '../../../lib/apiClient'
 import { fetchGenerationPreflight, launchGeneration } from './api'
 import { formatDateTime, formatLongDate, formatRange, overdueMessage, plural } from './format'
-import type { GenerationPreflight, LaunchLineResult, LaunchResult, PreflightIssue } from './types'
+import type {
+  GenerationPreflight,
+  LaunchLineResult,
+  LaunchResult,
+  PreflightIssue,
+  RestPolicyChoice,
+  StructuralDiagnosticEntry,
+  UnsatDiagnosticsPayload,
+} from './types'
+
+const NO_REST_POLICY: RestPolicyChoice = {
+  legalMinRestEnabled: false,
+  legalMinRestHours: null,
+  teamMinRestEnabled: false,
+  teamMinRestHours: null,
+}
 
 type Props = {
   planningStableId: string
@@ -28,6 +43,7 @@ export function GenerationModal({ planningStableId, timezone, onClose, onGenerat
   const [launching, setLaunching] = useState(false)
   const [launchError, setLaunchError] = useState<string | null>(null)
   const [result, setResult] = useState<LaunchResult | null>(null)
+  const [restPolicy, setRestPolicy] = useState<RestPolicyChoice>(NO_REST_POLICY)
   // A ref, not state: two clicks in the same tick both read the state as "idle".
   const inFlight = useRef(false)
 
@@ -53,7 +69,7 @@ export function GenerationModal({ planningStableId, timezone, onClose, onGenerat
     setLaunching(true)
     setLaunchError(null)
     try {
-      setResult(await launchGeneration(planningStableId))
+      setResult(await launchGeneration(planningStableId, restPolicy))
       onGenerated()
     } catch (err) {
       setLaunchError(launchErrorMessage(err))
@@ -107,7 +123,14 @@ export function GenerationModal({ planningStableId, timezone, onClose, onGenerat
         </p>
       )}
 
-      {preflight && !result && <PreflightBody preflight={preflight} />}
+      {preflight && !result && (
+        <PreflightBody
+          preflight={preflight}
+          restPolicy={restPolicy}
+          onRestPolicyChange={setRestPolicy}
+          disabled={launching}
+        />
+      )}
       {launching && (
         <p role="status" className="muted">
           La génération peut durer quelques secondes…
@@ -124,7 +147,19 @@ export function GenerationModal({ planningStableId, timezone, onClose, onGenerat
   )
 }
 
-function PreflightBody({ preflight }: { preflight: GenerationPreflight }) {
+function PreflightBody({
+  preflight,
+  restPolicy,
+  onRestPolicyChange,
+  disabled,
+}: {
+  preflight: GenerationPreflight
+  restPolicy: RestPolicyChoice
+  onRestPolicyChange: (next: RestPolicyChoice) => void
+  disabled: boolean
+}) {
+  const familyCounts = mergedFamilyUnitCounts(preflight)
+
   return (
     <>
       <ul className="preflight-facts">
@@ -155,6 +190,12 @@ function PreflightBody({ preflight }: { preflight: GenerationPreflight }) {
         {preflight.availabilityDeadline && (
           <li>Fin souhaitée d’encodage : {formatLongDate(preflight.availabilityDeadline)}</li>
         )}
+        {familyCounts.length > 0 &&
+          familyCounts.map(([name, count]) => (
+            <li key={name || '__no_family'}>
+              {plural(count, 'garde à répartir', 'gardes à répartir')} — {name || 'Sans famille'}
+            </li>
+          ))}
       </ul>
 
       {preflight.blockers.length > 0 && (
@@ -178,8 +219,102 @@ function PreflightBody({ preflight }: { preflight: GenerationPreflight }) {
         </ul>
       )}
 
+      <RestPolicyFields value={restPolicy} onChange={onRestPolicyChange} disabled={disabled} />
+
       <p className="muted">Cette génération utilisera l’état actuel des données.</p>
     </>
+  )
+}
+
+/** One entry per AllocationFamily name across every active line, summed —
+ * never a hardcoded "Week-end"/"Semaine" (docs/decisions.md D136/D137). */
+function mergedFamilyUnitCounts(preflight: GenerationPreflight): [string, number][] {
+  const merged: Record<string, number> = {}
+  for (const line of preflight.lines) {
+    for (const [name, count] of Object.entries(line.familyUnitCounts)) {
+      merged[name] = (merged[name] ?? 0) + count
+    }
+  }
+  return Object.entries(merged).sort(([a], [b]) => a.localeCompare(b))
+}
+
+/**
+ * "Règles de repos" — the one generation rule genuinely consumed by the
+ * solver today (docs/decisions.md D105/D137): LEGAL_MIN_REST/TEAM_MIN_REST,
+ * both disabled by default (never a guessed regulatory value). Left
+ * disabled, the launch is identical to before D137.
+ */
+function RestPolicyFields({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: RestPolicyChoice
+  onChange: (next: RestPolicyChoice) => void
+  disabled: boolean
+}) {
+  return (
+    <fieldset className="rest-policy-fields" disabled={disabled}>
+      <legend>Règles de repos</legend>
+      <label className="rest-policy-fields__row">
+        <input
+          type="checkbox"
+          checked={value.legalMinRestEnabled}
+          onChange={(e) =>
+            onChange({
+              ...value,
+              legalMinRestEnabled: e.target.checked,
+              legalMinRestHours: e.target.checked ? (value.legalMinRestHours ?? 11) : null,
+            })
+          }
+        />
+        Repos légal minimum
+        {value.legalMinRestEnabled && (
+          <>
+            {' '}
+            <input
+              type="number"
+              min={1}
+              aria-label="Repos légal minimum, en heures"
+              value={value.legalMinRestHours ?? ''}
+              onChange={(e) => onChange({ ...value, legalMinRestHours: Number(e.target.value) || null })}
+            />{' '}
+            heures
+          </>
+        )}
+      </label>
+      <label className="rest-policy-fields__row">
+        <input
+          type="checkbox"
+          checked={value.teamMinRestEnabled}
+          onChange={(e) =>
+            onChange({
+              ...value,
+              teamMinRestEnabled: e.target.checked,
+              teamMinRestHours: e.target.checked ? (value.teamMinRestHours ?? 24) : null,
+            })
+          }
+        />
+        Repos minimum d’équipe
+        {value.teamMinRestEnabled && (
+          <>
+            {' '}
+            <input
+              type="number"
+              min={1}
+              aria-label="Repos minimum d’équipe, en heures"
+              value={value.teamMinRestHours ?? ''}
+              onChange={(e) => onChange({ ...value, teamMinRestHours: Number(e.target.value) || null })}
+            />{' '}
+            heures
+          </>
+        )}
+      </label>
+      <p className="muted">
+        Une règle désactivée n’est jamais appliquée. Le repos minimum d’équipe est une règle propre à cette
+        équipe — jamais une obligation légale.
+      </p>
+    </fieldset>
   )
 }
 
@@ -199,11 +334,126 @@ function ResultBody({ result, timezone }: { result: LaunchResult; timezone: stri
                 {plural(line.snapshot.unavailableCount, 'indisponibilité')}).
               </span>
             )}
+            {line.status === 'COMPLETED' && line.coverageStatus === 'COMPLETE' && (
+              <span className="muted"> {optimalityText(line.strictSolverStatus)}</span>
+            )}
           </span>
+          {line.diagnostics && <DiagnosticsBody diagnostics={line.diagnostics} />}
         </li>
       ))}
     </ul>
   )
+}
+
+/** OPTIMAL vs FEASIBLE must never be conflated (docs/decisions.md D137,
+ * §20 of the spec): a complete-but-not-proven-optimal result says so
+ * explicitly, never "optimal planning". */
+function optimalityText(strictSolverStatus: string | null): string {
+  return strictSolverStatus === 'OPTIMAL'
+    ? 'Planning complet trouvé et prouvé optimal.'
+    : 'Planning complet trouvé. L’optimalité mathématique n’a pas pu être démontrée dans le temps de calcul disponible.'
+}
+
+/**
+ * Reuses `UnsatReportPresenter`'s real diagnostic (docs/decisions.md D137)
+ * — never a causality invented in React. A HARD reason (no eligible
+ * candidate) is shown as-is, with no relaxation; a POLICY_HARD relaxation
+ * is shown only when the backend itself produced one, using its own
+ * `phrasing`/`disclaimer` verbatim.
+ */
+function DiagnosticsBody({ diagnostics }: { diagnostics: UnsatDiagnosticsPayload }) {
+  const reasonCounts = new Map<string, number>()
+  let criticalCount = 0
+  for (const duty of diagnostics.unassignedDuties) {
+    if (duty.critical) criticalCount++
+    for (const candidate of duty.candidateExclusions) {
+      for (const exclusion of candidate.exclusions) {
+        reasonCounts.set(exclusion.reason, (reasonCounts.get(exclusion.reason) ?? 0) + 1)
+      }
+    }
+  }
+
+  return (
+    <div className="diagnostics-body">
+      <p>
+        {plural(diagnostics.assignedDutyCount, 'garde affectée')} sur{' '}
+        {plural(diagnostics.requiredDutyCount, 'requise')}.{' '}
+        {criticalCount > 0 &&
+          plural(criticalCount, 'garde non pourvue est bloquante', 'gardes non pourvues sont bloquantes')}
+      </p>
+      {reasonCounts.size > 0 && (
+        <ul>
+          {[...reasonCounts.entries()].map(([reason, count]) => (
+            <li key={reason}>
+              {reasonText(reason)} ({count})
+            </li>
+          ))}
+        </ul>
+      )}
+      {diagnostics.structuralDiagnostics.length > 0 && (
+        <ul>
+          {dedupeStructural(diagnostics.structuralDiagnostics).map((code) => (
+            <li key={code}>{structuralDiagnosticText(code)}</li>
+          ))}
+        </ul>
+      )}
+      {diagnostics.diagnosticRelaxations.length > 0 && (
+        <ul aria-label="Relaxations possibles">
+          {diagnostics.diagnosticRelaxations.map((relaxation, index) => (
+            <li key={`${relaxation.ruleCode}-${index}`} className="alert alert--warning">
+              <span>
+                {relaxation.phrasing} <span className="muted">{relaxation.disclaimer}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function dedupeStructural(entries: StructuralDiagnosticEntry[]): string[] {
+  return [...new Set(entries.map((entry) => entry.code))]
+}
+
+function structuralDiagnosticText(code: string): string {
+  switch (code) {
+    case 'NO_ELIGIBLE_CANDIDATE':
+      return 'Au moins une garde n’a aucun candidat éligible.'
+    case 'INSUFFICIENT_ELIGIBLE_CAPACITY':
+      return 'Deux gardes liées ne peuvent pas être couvertes ensemble : un seul candidat est éligible pour les deux.'
+    default:
+      return code
+  }
+}
+
+function reasonText(reason: string): string {
+  switch (reason) {
+    case 'USER_INACTIVE':
+      return 'Compte désactivé'
+    case 'NOT_TEAM_MEMBER':
+      return 'N’appartient pas à l’équipe'
+    case 'MEMBERSHIP_OUT_OF_RANGE':
+      return 'Hors de la période d’appartenance à l’équipe'
+    case 'UNAVAILABLE':
+      return 'Indisponibilité déclarée'
+    case 'NON_PARTICIPATION':
+      return 'Non-participation administrative'
+    case 'CONFLICT':
+      return 'Conflit avec une autre garde déjà affectée'
+    case 'LEGAL_MIN_REST':
+      return 'Repos légal minimum'
+    case 'TEAM_MIN_REST':
+      return 'Repos minimum d’équipe'
+    case 'MAX_DUTIES':
+      return 'Nombre maximum de gardes atteint'
+    case 'MAX_WEEKENDS':
+      return 'Nombre maximum de week-ends atteint'
+    case 'MAX_CONSECUTIVE_NIGHTS':
+      return 'Nombre maximum de nuits consécutives atteint'
+    default:
+      return reason
+  }
 }
 
 function lineTone(line: LaunchLineResult): string {

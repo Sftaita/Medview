@@ -155,10 +155,61 @@ export type GenerationPreflight = {
     dutyCount: number
     periodStatus: string
     hasActiveRuleSet: boolean
+    /** REQUIRED unit count per AllocationFamily name (docs/decisions.md D137);
+     * the empty-string key groups units with no family. Never hardcoded names —
+     * always rendered from what this line's structure actually configured. */
+    familyUnitCounts: Record<string, number>
   }[]
   blockers: PreflightIssue[]
   warnings: PreflightIssue[]
   canGenerate: boolean
+}
+
+/** What the "Règles de repos" section of the generation dialog sends
+ * (docs/decisions.md D105/D137, App\Service\RestPolicyRequestParser). Omitted
+ * fields mean both policies stay disabled — never a guessed default. */
+export type RestPolicyChoice = {
+  legalMinRestEnabled: boolean
+  legalMinRestHours: number | null
+  teamMinRestEnabled: boolean
+  teamMinRestHours: number | null
+}
+
+export type CandidateExclusion = {
+  candidateId: string
+  exclusions: { reason: string; context: Record<string, unknown> }[]
+}
+
+export type UnassignedDutyDiagnostic = {
+  dutyUnitStableKey: string
+  critical: boolean
+  candidateExclusions: CandidateExclusion[]
+}
+
+export type StructuralDiagnosticEntry = {
+  code: string
+  dutyUnitStableKey: string
+}
+
+export type DiagnosticRelaxationEntry = {
+  ruleCode: string
+  tier: string
+  phrasing: string
+  disclaimer: string
+}
+
+/** `App\Service\UnsatReportPresenter::toArray()` — reused verbatim, never a
+ * second shape reconstructed in React (docs/decisions.md D137). */
+export type UnsatDiagnosticsPayload = {
+  strictSolverStatus: string
+  partialSolverStatus: string | null
+  requiredDutyCount: number
+  assignedDutyCount: number
+  unassignedDuties: UnassignedDutyDiagnostic[]
+  structuralDiagnostics: StructuralDiagnosticEntry[]
+  solverAnalysis: { available: boolean }
+  diagnosticRelaxations: DiagnosticRelaxationEntry[]
+  existingDataConflict: { type: string; message: string } | null
 }
 
 export type LaunchLineResult = {
@@ -172,6 +223,10 @@ export type LaunchLineResult = {
   partialSolverStatus: string | null
   assignmentCount: number | null
   unassignedDutyCount: number | null
+  /** Keyed by ObjectivePhaseId — true only once genuinely proven optimal for
+   * that phase; a FEASIBLE result must never be presented as "optimal". */
+  optimality: Record<string, boolean> | null
+  diagnostics: UnsatDiagnosticsPayload | null
   snapshot: { capturedAt: string; memberCount: number; unavailableCount: number } | null
 }
 
@@ -179,4 +234,12 @@ export type LaunchLineResult = {
 export type LaunchResult = {
   planningStableId: string
   lines: LaunchLineResult[]
+}
+
+/** GET/POST .../rule-set(/activate) — never DRAFT/ACTIVE/RETIRED, version or
+ * stableId: a manager only ever sees whether generation rules are active. */
+export type RuleSetStatus = {
+  active: boolean
+  activatedAt?: string
+  effectiveFrom?: string
 }

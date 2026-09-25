@@ -41,6 +41,38 @@ final class PlanningVoter extends Voter
      */
     public const GENERATE = 'PLANNING_GENERATE';
 
+    /**
+     * Subject: Planning. The dynamic calendar's write actions (docs/decisions.md D131): viewing
+     * reassignment candidates and saving a reassignment. Same population, same rule, as
+     * MANAGE_AVAILABILITY/GENERATE — never a new authorization policy for this lot, only a new
+     * named attribute over the identical creator-or-team-OWNER/ADMIN population. Never a plain MEMBER
+     * (§48 of the spec: members stay read-only).
+     */
+    public const MANAGE_CALENDAR = 'PLANNING_MANAGE_CALENDAR';
+
+    /**
+     * Subject: Planning. The publication preflight and the publish action itself
+     * (docs/decisions.md D133): same population, same rule, as MANAGE_CALENDAR — never a new
+     * authorization policy for this lot either. Never a plain MEMBER (§23 of the spec).
+     */
+    public const PUBLISH = 'PLANNING_PUBLISH';
+
+    /**
+     * Subject: Planning. Reading/replacing a PlanningLine's weekly structure
+     * (docs/decisions.md D136): same population, same rule, as
+     * MANAGE_CALENDAR/PUBLISH — never a new authorization policy for this
+     * lot either. Never a plain MEMBER.
+     */
+    public const MANAGE_LINE_STRUCTURE = 'PLANNING_MANAGE_LINE_STRUCTURE';
+
+    /**
+     * Subject: Planning. Reading/activating a PlanningLine's generation rules
+     * (docs/decisions.md D137): same population, same rule, as
+     * MANAGE_LINE_STRUCTURE — never a new authorization policy for this lot
+     * either. Never a plain MEMBER.
+     */
+    public const MANAGE_RULE_SET = 'PLANNING_MANAGE_RULE_SET';
+
     public function __construct(
         private readonly PlanningTeamMemberRepository $teamMemberRepository,
     ) {
@@ -48,7 +80,7 @@ final class PlanningVoter extends Voter
 
     protected function supports(string $attribute, mixed $subject): bool
     {
-        return \in_array($attribute, [self::VIEW, self::MANAGE, self::MANAGE_AVAILABILITY, self::GENERATE], true) && $subject instanceof Planning;
+        return \in_array($attribute, [self::VIEW, self::MANAGE, self::MANAGE_AVAILABILITY, self::GENERATE, self::MANAGE_CALENDAR, self::PUBLISH, self::MANAGE_LINE_STRUCTURE, self::MANAGE_RULE_SET], true) && $subject instanceof Planning;
     }
 
     protected function voteOnAttribute(string $attribute, mixed $subject, TokenInterface $token): bool
@@ -63,7 +95,7 @@ final class PlanningVoter extends Voter
             return $subject->getCreator() === $user;
         }
 
-        if (self::MANAGE_AVAILABILITY === $attribute || self::GENERATE === $attribute) {
+        if (self::MANAGE_AVAILABILITY === $attribute || self::GENERATE === $attribute || self::MANAGE_CALENDAR === $attribute || self::PUBLISH === $attribute || self::MANAGE_LINE_STRUCTURE === $attribute || self::MANAGE_RULE_SET === $attribute) {
             if ($subject->getCreator() === $user) {
                 return true;
             }

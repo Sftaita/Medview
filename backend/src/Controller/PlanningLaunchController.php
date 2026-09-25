@@ -16,7 +16,11 @@ use App\Service\LaunchLineResult;
 use App\Service\PlanningGenerationLauncher;
 use App\Service\PlanningGenerationPreflight;
 use App\Service\PreflightIssue;
+use App\Service\RestPolicyRequestParser;
+use App\Service\UnsatReportPresenter;
+use App\Fairness\CoverageStatus;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Attribute\Route;
@@ -41,6 +45,8 @@ final class PlanningLaunchController
         private readonly PlanningRepository $planningRepository,
         private readonly PlanningGenerationLauncher $launcher,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
+        private readonly RestPolicyRequestParser $restPolicyParser,
+        private readonly UnsatReportPresenter $unsatReportPresenter,
     ) {
     }
 
@@ -54,13 +60,18 @@ final class PlanningLaunchController
     }
 
     #[Route('/api/plannings/{planningStableId}/generations', name: 'api_planning_launch', methods: ['POST'])]
-    public function launch(string $planningStableId, #[CurrentUser] User $user): JsonResponse
+    public function launch(string $planningStableId, Request $request, #[CurrentUser] User $user): JsonResponse
     {
         $planning = $this->resolvePlanning($planningStableId);
         $this->denyUnlessCanGenerate($planning);
 
+        [$restPolicy, $errorResponse] = $this->restPolicyParser->parse($request);
+        if (null !== $errorResponse) {
+            return $errorResponse;
+        }
+
         try {
-            $results = $this->launcher->launch($planning, $user);
+            $results = $this->launcher->launch($planning, $user, $restPolicy);
         } catch (PlanningNotLaunchableException $exception) {
             return new JsonResponse([
                 'error' => 'not_launchable',
@@ -125,6 +136,12 @@ final class PlanningLaunchController
                 'dutyCount' => $line->dutyCount,
                 'periodStatus' => $line->periodStatus->value,
                 'hasActiveRuleSet' => $line->hasActiveRuleSet,
+                // docs/decisions.md D137 (§10 of the spec) — one entry per
+                // AllocationFamily actually referenced by this line's
+                // REQUIRED units, never a hardcoded "Week-end"/"Semaine".
+                // The empty-string key (units with no family) is rendered
+                // by the frontend as "Sans famille".
+                'familyUnitCounts' => $line->familyUnitCounts,
             ], $preflight->lines),
             'blockers' => array_map($this->issueToArray(...), $preflight->blockers),
             'warnings' => array_map($this->issueToArray(...), $preflight->warnings),
@@ -180,6 +197,15 @@ final class PlanningLaunchController
             'partialSolverStatus' => $result?->partialSolverStatus?->value,
             'assignmentCount' => null !== $result ? \count($result->assignments) : null,
             'unassignedDutyCount' => null !== $result ? \count($result->unassignedDuties) : null,
+            // docs/decisions.md D137: OPTIMAL vs FEASIBLE must never be
+            // conflated in the UI (§20 of the spec) — the planning-level
+            // façade previously dropped this, forcing a caller to the
+            // per-period endpoint just to know whether optimality was
+            // actually proven.
+            'optimality' => $result?->optimality,
+            'diagnostics' => null !== $result && CoverageStatus::INCOMPLETE === $result->coverageStatus
+                ? $this->unsatReportPresenter->toArray($result->diagnostics)
+                : null,
             'snapshot' => $snapshot,
         ];
     }

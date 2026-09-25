@@ -145,6 +145,7 @@ export function makePreflight(overrides: Partial<GenerationPreflight> = {}): Gen
         dutyCount: 30,
         periodStatus: 'DRAFT',
         hasActiveRuleSet: true,
+        familyUnitCounts: { '': 20, 'Week-end': 10 },
       },
     ],
     blockers: [],

@@ -7,6 +7,8 @@ import type {
   PendingRemindersResult,
   PlanningSettingsResult,
   ReminderSent,
+  RestPolicyChoice,
+  RuleSetStatus,
 } from './types'
 
 export function fetchCollectionStatus(planningStableId: string): Promise<CollectionStatus> {
@@ -51,8 +53,28 @@ export function fetchGenerationPreflight(planningStableId: string): Promise<Gene
   return apiFetch<GenerationPreflight>(`/api/plannings/${planningStableId}/generation-preflight`)
 }
 
-export function launchGeneration(planningStableId: string): Promise<LaunchResult> {
+/** `restPolicy` omitted (or every field left at its disabled default) means
+ * both rest policies stay off, identical to the pre-D137 behavior — never a
+ * value guessed by the frontend (docs/decisions.md D137). */
+export function launchGeneration(
+  planningStableId: string,
+  restPolicy?: RestPolicyChoice,
+): Promise<LaunchResult> {
   return apiFetch<LaunchResult>(`/api/plannings/${planningStableId}/generations`, {
+    method: 'POST',
+    body: restPolicy ?? {},
+  })
+}
+
+export function fetchRuleSetStatus(lineStableId: string): Promise<RuleSetStatus> {
+  return apiFetch<RuleSetStatus>(`/api/planning-lines/${lineStableId}/rule-set`)
+}
+
+/** Always sends an empty configuration body: every `PlanningRuleSetConfiguration`
+ * field is unread by the real solver today (see `PlanningRuleSetController`'s
+ * docblock) — this is a pure activation gate, never a settings form. */
+export function activateRuleSet(lineStableId: string): Promise<RuleSetStatus> {
+  return apiFetch<RuleSetStatus>(`/api/planning-lines/${lineStableId}/rule-set/activate`, {
     method: 'POST',
     body: {},
   })

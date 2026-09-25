@@ -15,6 +15,7 @@ afterEach(() => {
 function renderActions(
   status: CollectionStatus | null = makeStatus(),
   handlers = { onChanged: vi.fn(), onGenerated: vi.fn() },
+  lineProps: { primaryLineStableId?: string; primaryLineName?: string } = {},
 ) {
   render(
     <PilotHeaderActions
@@ -23,6 +24,7 @@ function renderActions(
       status={status}
       onChanged={handlers.onChanged}
       onGenerated={handlers.onGenerated}
+      {...lineProps}
     />,
   )
   return handlers
@@ -50,6 +52,45 @@ describe('PilotHeaderActions — deadline and buttons', () => {
 
     expect(screen.queryByText(/Fin souhaitée/)).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Générer le planning' })).toBeEnabled()
+  })
+})
+
+describe('Semaine type (docs/decisions.md D136)', () => {
+  it('is not offered before the primary line is known', () => {
+    renderActions()
+    expect(screen.queryByRole('button', { name: 'Semaine type' })).not.toBeInTheDocument()
+  })
+
+  it('opens, loads the current structure and saves it', async () => {
+    const api = stubApi({
+      'GET /api/planning-lines/line-1/week-structure': () => ({
+        blocks: [{ id: 'A', name: 'Week-end', family: 'Week-end', days: ['VEN', 'SAM', 'DIM'] }],
+        solo: ['LUN', 'MAR', 'MER', 'JEU'],
+        soloFamily: 'Semaine',
+        excluded: [],
+      }),
+      'PUT /api/planning-lines/line-1/week-structure': () => ({
+        blocks: [],
+        solo: ['LUN', 'MAR', 'MER', 'JEU', 'VEN', 'SAM', 'DIM'],
+        soloFamily: 'Semaine',
+        excluded: [],
+      }),
+    })
+    const { onChanged } = renderActions(makeStatus(), undefined, {
+      primaryLineStableId: 'line-1',
+      primaryLineName: 'Ligne principale',
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Semaine type' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Semaine type — Ligne principale' })
+    expect(await within(dialog).findByText('Ven · Sam · Dim · 3 jours')).toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Dissoudre' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Enregistrer' }))
+
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1))
+    expect(api.requests('PUT', '/api/planning-lines/line-1/week-structure')).toHaveLength(1)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })
 
@@ -144,6 +185,8 @@ const SUCCESS: LaunchResult = {
       partialSolverStatus: null,
       assignmentCount: 28,
       unassignedDutyCount: 0,
+      optimality: { GENERATE: true },
+      diagnostics: null,
       snapshot: { capturedAt: '2026-09-21T08:14:00+00:00', memberCount: 16, unavailableCount: 42 },
     },
   ],
@@ -332,5 +375,207 @@ describe('GenerationModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/Impossible de contrôler/)
+  })
+
+  it('shows real family unit counts, never hardcoded names (docs/decisions.md D137)', async () => {
+    stubApi({ [preflightUrl]: () => makePreflight() })
+    renderActions()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(await within(dialog).findByText('20 gardes à répartir — Sans famille')).toBeInTheDocument()
+    expect(within(dialog).getByText('10 gardes à répartir — Week-end')).toBeInTheDocument()
+  })
+
+  it('sends the chosen rest policy with the launch, disabled by default', async () => {
+    const api = stubApi({
+      [preflightUrl]: () => makePreflight(),
+      [launchUrl]: () => SUCCESS,
+    })
+    renderActions()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Générer quand même' }))
+
+    await waitFor(() => expect(api.requests('POST', '/api/plannings/plan-1/generations')).toHaveLength(1))
+    expect(api.requests('POST', '/api/plannings/plan-1/generations')[0].body).toEqual({
+      legalMinRestEnabled: false,
+      legalMinRestHours: null,
+      teamMinRestEnabled: false,
+      teamMinRestHours: null,
+    })
+  })
+
+  it('enables team min rest with a chosen number of hours', async () => {
+    const api = stubApi({
+      [preflightUrl]: () => makePreflight(),
+      [launchUrl]: () => SUCCESS,
+    })
+    renderActions()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(await within(dialog).findByRole('checkbox', { name: /Repos minimum d’équipe/ }))
+    fireEvent.change(within(dialog).getByLabelText('Repos minimum d’équipe, en heures'), {
+      target: { value: '36' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Générer quand même' }))
+
+    await waitFor(() => expect(api.requests('POST', '/api/plannings/plan-1/generations')).toHaveLength(1))
+    expect(api.requests('POST', '/api/plannings/plan-1/generations')[0].body).toEqual({
+      legalMinRestEnabled: false,
+      legalMinRestHours: null,
+      teamMinRestEnabled: true,
+      teamMinRestHours: 36,
+    })
+  })
+
+  it('never calls a FEASIBLE-but-complete result "optimal"', async () => {
+    stubApi({
+      [preflightUrl]: () => makePreflight(),
+      [launchUrl]: () => ({
+        ...SUCCESS,
+        lines: [{ ...SUCCESS.lines[0], strictSolverStatus: 'FEASIBLE' }],
+      }),
+    })
+    renderActions()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Générer quand même' }))
+
+    expect(await screen.findByText(/L’optimalité mathématique n’a pas pu être démontrée/)).toBeInTheDocument()
+    expect(screen.queryByText(/prouvé optimal/)).not.toBeInTheDocument()
+  })
+
+  it('says a truly OPTIMAL result was proven optimal', async () => {
+    stubApi({ [preflightUrl]: () => makePreflight(), [launchUrl]: () => SUCCESS })
+    renderActions()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Générer quand même' }))
+
+    expect(await screen.findByText(/prouvé optimal/)).toBeInTheDocument()
+  })
+
+  it('reuses the real UNSAT diagnostic instead of inventing a cause in React', async () => {
+    stubApi({
+      [preflightUrl]: () => makePreflight(),
+      [launchUrl]: () => ({
+        ...SUCCESS,
+        lines: [
+          {
+            ...SUCCESS.lines[0],
+            coverageStatus: 'INCOMPLETE',
+            assignmentCount: 25,
+            unassignedDutyCount: 3,
+            diagnostics: {
+              strictSolverStatus: 'UNSATISFIABLE',
+              partialSolverStatus: 'OPTIMAL',
+              requiredDutyCount: 28,
+              assignedDutyCount: 25,
+              unassignedDuties: [
+                {
+                  dutyUnitStableKey: 'duty-1',
+                  critical: true,
+                  candidateExclusions: [
+                    { candidateId: 'user-1', exclusions: [{ reason: 'UNAVAILABLE', context: {} }] },
+                  ],
+                },
+              ],
+              structuralDiagnostics: [{ code: 'NO_ELIGIBLE_CANDIDATE', dutyUnitStableKey: 'duty-1' }],
+              solverAnalysis: { available: true },
+              diagnosticRelaxations: [
+                {
+                  ruleCode: 'TEAM_MIN_REST',
+                  tier: 'POLICY_HARD',
+                  phrasing: 'Relâcher le repos minimum d’équipe permettrait de couvrir 1 garde de plus.',
+                  disclaimer: 'Une relaxation possible parmi d’autres — pas nécessairement la cause unique.',
+                },
+              ],
+              existingDataConflict: null,
+            },
+          },
+        ],
+      }),
+    })
+    renderActions()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Générer quand même' }))
+
+    expect(await screen.findByText('Indisponibilité déclarée (1)')).toBeInTheDocument()
+    expect(screen.getByText('Au moins une garde n’a aucun candidat éligible.')).toBeInTheDocument()
+    expect(
+      screen.getByText(/Relâcher le repos minimum d’équipe permettrait de couvrir 1 garde de plus\./),
+    ).toBeInTheDocument()
+  })
+})
+
+describe('Règles de génération (docs/decisions.md D137)', () => {
+  it('is not offered before the primary line is known', () => {
+    renderActions()
+    expect(screen.queryByRole('button', { name: 'Règles de génération' })).not.toBeInTheDocument()
+  })
+
+  it('shows the inactive state and lets a manager activate it', async () => {
+    const api = stubApi({
+      'GET /api/planning-lines/line-1/rule-set': () => ({ active: false }),
+      'POST /api/planning-lines/line-1/rule-set/activate': () => ({
+        active: true,
+        activatedAt: '2026-09-24T09:00:00+00:00',
+        effectiveFrom: '2026-09-24',
+      }),
+    })
+    const { onChanged } = renderActions(makeStatus(), undefined, {
+      primaryLineStableId: 'line-1',
+      primaryLineName: 'Seniors',
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Règles de génération' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Règles de génération — Seniors' })
+    expect(await within(dialog).findByText(/Aucune règle de génération n’est active/)).toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Activer' }))
+
+    expect(
+      await within(dialog).findByText(/Des règles de génération sont actives pour cette ligne/),
+    ).toBeInTheDocument()
+    expect(api.requests('POST', '/api/planning-lines/line-1/rule-set/activate')).toHaveLength(1)
+    expect(onChanged).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows the active state directly, with no Activer button', async () => {
+    stubApi({
+      'GET /api/planning-lines/line-1/rule-set': () => ({
+        active: true,
+        activatedAt: '2026-09-20T08:00:00+00:00',
+        effectiveFrom: '2026-09-20',
+      }),
+    })
+    renderActions(makeStatus(), undefined, { primaryLineStableId: 'line-1', primaryLineName: 'Seniors' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Règles de génération' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(
+      await within(dialog).findByText(/Des règles de génération sont actives pour cette ligne/),
+    ).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: 'Activer' })).not.toBeInTheDocument()
+  })
+
+  it('reports an activation failure and stays open', async () => {
+    stubApi({
+      'GET /api/planning-lines/line-1/rule-set': () => ({ active: false }),
+      'POST /api/planning-lines/line-1/rule-set/activate': () => httpStatus(500, {}),
+    })
+    renderActions(makeStatus(), undefined, { primaryLineStableId: 'line-1', primaryLineName: 'Seniors' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Règles de génération' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Activer' }))
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(/Impossible d’activer/)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 })

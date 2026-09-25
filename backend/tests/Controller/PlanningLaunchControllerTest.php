@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Tests\Controller;
 
 use App\Entity\PlanningPeriodStatus;
+use App\Repository\DutyRepository;
 use App\Repository\PlanningLineRepository;
 use App\Repository\PlanningRepository;
 use App\Service\PlanningPeriodLifecycleService;
+use App\Service\PlanningRuleSetService;
 use App\Tests\PlanningPilotTestHelpers;
 use Doctrine\DBAL\DriverManager;
 use Doctrine\ORM\EntityManagerInterface;
@@ -276,6 +278,112 @@ final class PlanningLaunchControllerTest extends WebTestCase
         $detail = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}", token: $s['creator']);
         $generations = $this->api($client, 'GET', "/api/planning-periods/{$detail['lines'][0]['planningPeriodStableId']}/generations", token: $s['admin']);
         self::assertSame([], $generations, 'A refusal never leaves an orphan DRAFT generation.');
+    }
+
+    /**
+     * docs/decisions.md D136 end-to-end: a line's weekly structure,
+     * configured through the real WeekStructureController API, is the only
+     * thing feeding a real launch — no duty is ever seeded by hand. The
+     * preflight materializes the calendar on demand before reporting
+     * `canGenerate`, and the launch that follows solves over exactly those
+     * duties.
+     */
+    public function testAWeeklyStructureIsMaterializedOnDemandByThePreflightAndFeedsARealLaunch(): void
+    {
+        $client = static::createClient();
+        $s = $this->pilotScenario($client);
+        $planning = static::getContainer()->get(PlanningRepository::class)->findOneByStableId($s['planningId']);
+        $line = static::getContainer()->get(PlanningLineRepository::class)->findByPlanning($planning)[0];
+        $this->activateRuleSet(static::getContainer()->get(PlanningRuleSetService::class), $line->getPlanningTeam());
+
+        // No duty exists anywhere yet.
+        self::assertSame([], static::getContainer()->get(DutyRepository::class)->findByPlanningPeriod($line->getPlanningPeriod()));
+
+        $structure = $this->api($client, 'PUT', "/api/planning-lines/{$line->getStableId()}/week-structure", [
+            'blocks' => [['name' => 'Week-end', 'days' => ['VEN', 'SAM', 'DIM'], 'family' => 'Week-end']],
+            'solo' => ['LUN', 'MAR', 'MER', 'JEU'],
+            'soloFamily' => 'Semaine',
+            'excluded' => [],
+        ], token: $s['creator']);
+        self::assertResponseIsSuccessful();
+        self::assertCount(1, $structure['blocks']);
+
+        // The preflight alone (a GET) must already have materialized real duties.
+        $preflight = $this->preflight($client, $s);
+        self::assertTrue($preflight['canGenerate']);
+        self::assertSame([], $preflight['blockers']);
+        self::assertGreaterThan(0, $preflight['lines'][0]['dutyCount']);
+
+        $result = $this->launch($client, $s);
+        self::assertResponseStatusCodeSame(201);
+        self::assertSame('COMPLETED', $result['lines'][0]['status']);
+        self::assertGreaterThan(0, $result['lines'][0]['assignmentCount']);
+
+        // Calling preflight again never re-materializes or duplicates anything.
+        $dutiesAfterFirstPreflight = static::getContainer()->get(DutyRepository::class)->findByPlanningPeriod($line->getPlanningPeriod());
+        $this->preflight($client, $s);
+        $dutiesAfterSecondPreflight = static::getContainer()->get(DutyRepository::class)->findByPlanningPeriod($line->getPlanningPeriod());
+        self::assertCount(\count($dutiesAfterFirstPreflight), $dutiesAfterSecondPreflight);
+    }
+
+    /**
+     * docs/decisions.md D137: `PlanningGenerationLauncher::launch()` used to
+     * hardcode `RestPolicyOptions::none()` for every line — this proves the
+     * planning-level launch now applies the caller's real choice, the same
+     * contract `PlanningGenerationController`'s per-period endpoint already
+     * exposed (`RestPolicyRequestParser`, shared, never two copies).
+     */
+    public function testTheChosenRestPolicyIsAppliedToEveryActiveLineOfTheLaunch(): void
+    {
+        $client = static::createClient();
+        $s = $this->pilotScenario($client);
+        $this->prepareGeneration($s['planningId']);
+
+        $result = $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [
+            'legalMinRestEnabled' => true,
+            'legalMinRestHours' => 11,
+            'teamMinRestEnabled' => true,
+            'teamMinRestHours' => 14,
+        ], token: $s['creator']);
+        self::assertResponseStatusCodeSame(201);
+
+        $generation = $this->api($client, 'GET', "/api/planning-generations/{$result['lines'][0]['generationStableId']}", token: $s['admin']);
+        self::assertResponseIsSuccessful();
+        self::assertTrue($generation['restPolicy']['legalMinRest']['enabled']);
+        self::assertSame(11, $generation['restPolicy']['legalMinRest']['hours']);
+        self::assertTrue($generation['restPolicy']['teamMinRest']['enabled']);
+        self::assertSame(14, $generation['restPolicy']['teamMinRest']['hours']);
+    }
+
+    /** Omitting the body keeps both policies disabled, unchanged from before D137. */
+    public function testOmittingARestPolicyKeepsBothDisabledAsBefore(): void
+    {
+        $client = static::createClient();
+        $s = $this->pilotScenario($client);
+        $this->prepareGeneration($s['planningId']);
+
+        $result = $this->launch($client, $s);
+        self::assertResponseStatusCodeSame(201);
+
+        $generation = $this->api($client, 'GET', "/api/planning-generations/{$result['lines'][0]['generationStableId']}", token: $s['admin']);
+        self::assertFalse($generation['restPolicy']['legalMinRest']['enabled']);
+        self::assertNull($generation['restPolicy']['legalMinRest']['hours']);
+        self::assertFalse($generation['restPolicy']['teamMinRest']['enabled']);
+        self::assertNull($generation['restPolicy']['teamMinRest']['hours']);
+    }
+
+    /** The same `RestPolicyRequestParser` validation as the per-period endpoint — never a second, looser copy. */
+    public function testAnInvalidRestPolicyBodyIsRejectedBeforeAnythingIsCreated(): void
+    {
+        $client = static::createClient();
+        $s = $this->pilotScenario($client);
+        $this->prepareGeneration($s['planningId']);
+
+        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [
+            'legalMinRestEnabled' => true,
+            // legalMinRestHours deliberately omitted.
+        ], token: $s['creator']);
+        self::assertResponseStatusCodeSame(422);
     }
 
     public function testAPublishedPeriodBlocksANewGeneration(): void
