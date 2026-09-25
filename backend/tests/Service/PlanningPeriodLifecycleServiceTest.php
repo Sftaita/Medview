@@ -14,15 +14,18 @@ use App\Exception\InvalidPlanningPeriodTransitionException;
 use App\Exception\PlanningPeriodNotReadyToPublishException;
 use App\Fairness\CoverageStatus;
 use App\Fairness\SolverStatus;
+use App\Service\DutyMaterializationService;
 use App\Service\FairnessPeriodService;
 use App\Service\PlanningPeriodLifecycleService;
 use App\Tests\PlanningDomainTestHelpers;
+use App\Tests\PlanningGenerationTestHelpers;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 final class PlanningPeriodLifecycleServiceTest extends KernelTestCase
 {
     use PlanningDomainTestHelpers;
+    use PlanningGenerationTestHelpers;
 
     public function testCreatingAPeriodOutsideItsFairnessPeriodIsRejected(): void
     {
@@ -127,6 +130,11 @@ final class PlanningPeriodLifecycleServiceTest extends KernelTestCase
         $fairnessPeriod = $fairnessService->create($team, '2027', $this->date('2027-01-01'), $this->date('2028-01-01'));
         $period = $lifecycleService->create($team, $fairnessPeriod, 'Jan-Apr', $this->date('2027-01-01'), $this->date('2027-05-01'));
         $this->completeGeneration($em, $period, CoverageStatus::INCOMPLETE);
+        // D133: the guard now reads the *live* calendar, never the generation's frozen
+        // coverageStatus — a real, currently-unassigned REQUIRED Duty is what actually
+        // makes this period not publishable.
+        $dutyType = $this->createDutyType($em, $team);
+        $this->createDuty(self::getContainer()->get(DutyMaterializationService::class), $period, $dutyType, '2027-01-05', '2027-01-06');
 
         $lifecycleService->transition($period, PlanningPeriodStatus::GENERATED);
         $lifecycleService->transition($period, PlanningPeriodStatus::VALIDATED);
@@ -138,8 +146,11 @@ final class PlanningPeriodLifecycleServiceTest extends KernelTestCase
     /**
      * Directly walks a fresh PlanningGeneration through its own status
      * graph to COMPLETED with a chosen coverageStatus — never a real
-     * snapshot/solve, PlanningPeriodLifecycleService's PUBLISHED guard only
-     * ever reads PlanningGeneration's own persisted status/coverageStatus.
+     * snapshot/solve. Since D133, PlanningPeriodLifecycleService's
+     * PUBLISHED guard reads the *live* Duty/DutyAssignment state, not this
+     * historical coverageStatus — callers that need a real INCOMPLETE
+     * outcome must also create a real, unassigned REQUIRED Duty (see
+     * testPublishRejectsAnIncompleteCoverageGeneration).
      */
     private function completeGeneration(EntityManagerInterface $em, PlanningPeriod $period, CoverageStatus $coverageStatus): void
     {

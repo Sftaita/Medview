@@ -133,11 +133,11 @@ trait PlanningPilotTestHelpers
      *
      * @param list<array{0: string, 1: string}> $dutyRanges [localStartsAt, localEndsAt] of standalone duties
      */
-    private function prepareGeneration(string $planningStableId, array $dutyRanges = [['2027-01-05', '2027-01-06'], ['2027-01-06', '2027-01-07']]): void
+    private function prepareGeneration(string $planningStableId, array $dutyRanges = [['2027-01-05', '2027-01-06'], ['2027-01-06', '2027-01-07']], int $lineIndex = 0): void
     {
         $container = static::getContainer();
         $planning = $container->get(PlanningRepository::class)->findOneByStableId($planningStableId);
-        $line = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0];
+        $line = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[$lineIndex];
         $em = $container->get(EntityManagerInterface::class);
 
         $this->activateRuleSet($container->get(PlanningRuleSetService::class), $line->getPlanningTeam());
@@ -145,6 +145,35 @@ trait PlanningPilotTestHelpers
         foreach ($dutyRanges as [$from, $to]) {
             $this->createDuty($container->get(DutyMaterializationService::class), $line->getPlanningPeriod(), $dutyType, $from, $to);
         }
+    }
+
+    /**
+     * Same as prepareGeneration(), but the demand is one atomic two-day
+     * DutyGroupInstance (a "WE") instead of standalone duties — used by the
+     * dynamic-calendar block tests (docs/decisions.md D131).
+     *
+     * @return array{0: \App\Entity\DutyGroupInstance, 1: \App\Entity\Duty, 2: \App\Entity\Duty}
+     */
+    private function prepareBlockGeneration(string $planningStableId, string $anchorDate, string $day0StartsAt, string $day0EndsAt, string $day1StartsAt, string $day1EndsAt, int $lineIndex = 0): array
+    {
+        $container = static::getContainer();
+        $planning = $container->get(PlanningRepository::class)->findOneByStableId($planningStableId);
+        $line = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[$lineIndex];
+        $em = $container->get(EntityManagerInterface::class);
+
+        $this->activateRuleSet($container->get(PlanningRuleSetService::class), $line->getPlanningTeam());
+
+        return $this->createTwoDutyGroup(
+            $em,
+            $container->get(DutyMaterializationService::class),
+            $line->getPlanningTeam(),
+            $line->getPlanningPeriod(),
+            $anchorDate,
+            $day0StartsAt,
+            $day0EndsAt,
+            $day1StartsAt,
+            $day1EndsAt,
+        );
     }
 
     private function periodStatusOf(string $planningStableId): PlanningPeriodStatus

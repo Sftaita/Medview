@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests;
 
 use App\Dto\PlanningRuleSetConfiguration;
+use App\Entity\AllocationFamily;
 use App\Entity\Duty;
 use App\Entity\DutyGroupInstance;
 use App\Entity\DutyPattern;
@@ -67,8 +68,22 @@ trait PlanningGenerationTestHelpers
         DutyType $dutyType,
         string $localStartsAt,
         string $localEndsAt,
+        ?DutyPattern $pattern = null,
     ): Duty {
-        return $service->createStandaloneDuty($planningPeriod, $dutyType, $this->date($localStartsAt), $this->date($localEndsAt));
+        return $service->createStandaloneDuty($planningPeriod, $dutyType, $this->date($localStartsAt), $this->date($localEndsAt), pattern: $pattern);
+    }
+
+    /**
+     * A persisted AllocationFamily (docs/decisions.md D136/D137), for tests
+     * that need a Duty to genuinely belong to a family rather than none.
+     */
+    private function createAllocationFamily(EntityManagerInterface $em, PlanningTeam $team, string $code, string $name): AllocationFamily
+    {
+        $family = new AllocationFamily($team, $code, $name);
+        $em->persist($family);
+        $em->flush();
+
+        return $family;
     }
 
     /**

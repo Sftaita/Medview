@@ -16,6 +16,7 @@ use App\Entity\User;
 use App\Exception\NoSolverParameterSetException;
 use App\Exception\PlanningGenerationConcurrentSolveException;
 use App\Exception\StalePlanningGenerationDataException;
+use App\Fairness\CoverageStatus;
 use App\Fairness\OptimizationProblem;
 use App\Fairness\OptimizationResult;
 use App\Fairness\PlanningSolver;
@@ -52,6 +53,7 @@ final class PlanningGenerationService
         private readonly SnapshotHasher $snapshotHasher,
         private readonly SeedMaterialBuilder $seedMaterialBuilder,
         private readonly DutyAssignmentService $assignmentService,
+        private readonly UnsatReportPresenter $unsatReportPresenter,
     ) {
     }
 
@@ -132,6 +134,11 @@ final class PlanningGenerationService
             $result->solverMetadata?->solveDurationMs ?? 0,
             $result->solverMetadata?->timeoutHit ?? false,
             $this->describeOutcome($result),
+            // Persisted exactly as computed here, never recomputed later (docs/decisions.md D130) —
+            // same condition and same shape `POST .../solve` already returned transiently.
+            CoverageStatus::INCOMPLETE === $result->coverageStatus
+                ? $this->unsatReportPresenter->toArray($result->diagnostics)
+                : null,
         );
 
         if ($this->isUsableOutcome($result)) {
@@ -238,6 +245,8 @@ final class PlanningGenerationService
                 $metadata->solveDurationMs,
                 $metadata->timeoutHit,
                 'A Duty was added to this PlanningPeriod while the solve was in progress — the computed result was discarded, nothing was persisted.',
+                // The whole outcome was discarded — never expose a diagnostic for a result that never really happened.
+                null,
             );
             $generation->recordSolverRun($staleMetadata, $parameterSet);
             $generation->transitionTo(PlanningGenerationStatus::FAILED);

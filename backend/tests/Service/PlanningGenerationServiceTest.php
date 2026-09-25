@@ -37,6 +37,7 @@ use App\Service\PlanningSnapshotService;
 use App\Service\PlanningTeamMembershipService;
 use App\Service\SeedMaterialBuilder;
 use App\Service\SnapshotHasher;
+use App\Service\UnsatReportPresenter;
 use App\Tests\Fairness\FakePlanningSolver;
 use App\Tests\PlanningDomainTestHelpers;
 use App\Tests\PlanningGenerationTestHelpers;
@@ -542,6 +543,7 @@ final class PlanningGenerationServiceTest extends KernelTestCase
             $c->get(SnapshotHasher::class),
             $c->get(SeedMaterialBuilder::class),
             $c->get(DutyAssignmentService::class),
+            $c->get(UnsatReportPresenter::class),
         );
 
         return [$service, $generation, $em, $dutyAssignmentRepository];
