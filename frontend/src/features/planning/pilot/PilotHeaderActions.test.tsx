@@ -30,6 +30,17 @@ function renderActions(
   return handlers
 }
 
+/**
+ * The confirm button is rendered — disabled — while the preflight loads: find it,
+ * then wait until it is enabled. Clicking it at once raced the preflight and was
+ * silently ignored on slower runners (the CI), leaving the test waiting forever.
+ */
+async function enabledConfirm(scope: Pick<typeof screen, 'findByRole'> = screen) {
+  const button = await scope.findByRole('button', { name: 'Générer quand même' })
+  await waitFor(() => expect(button).toBeEnabled())
+  return button
+}
+
 /** Opens the header's "⋯" menu and picks an entry. */
 function chooseMenu(name: string) {
   fireEvent.click(screen.getByRole('button', { name: 'Plus d’actions' }))
@@ -336,7 +347,7 @@ describe('GenerationModal', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
     const dialog = await screen.findByRole('dialog')
-    const confirm = await within(dialog).findByRole('button', { name: 'Générer quand même' })
+    const confirm = await enabledConfirm(within(dialog))
     fireEvent.click(confirm)
     fireEvent.click(confirm)
 
@@ -372,7 +383,7 @@ describe('GenerationModal', () => {
     renderActions()
 
     fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Générer quand même' }))
+    fireEvent.click(await enabledConfirm())
 
     expect(
       await screen.findByText(/couverture incomplète, 25 gardes affectées, 3 gardes non pourvues/),
@@ -418,7 +429,7 @@ describe('GenerationModal', () => {
     renderActions()
 
     fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Générer quand même' }))
+    fireEvent.click(await enabledConfirm())
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/déjà en cours/)
     expect(screen.getByRole('button', { name: 'Générer quand même' })).toBeEnabled()
@@ -453,7 +464,7 @@ describe('GenerationModal', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
     const dialog = await screen.findByRole('dialog')
-    fireEvent.click(await within(dialog).findByRole('button', { name: 'Générer quand même' }))
+    fireEvent.click(await enabledConfirm(within(dialog)))
 
     await waitFor(() => expect(api.requests('POST', '/api/plannings/plan-1/generations')).toHaveLength(1))
     expect(api.requests('POST', '/api/plannings/plan-1/generations')[0].body).toEqual({
@@ -499,7 +510,7 @@ describe('GenerationModal', () => {
     renderActions()
 
     fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Générer quand même' }))
+    fireEvent.click(await enabledConfirm())
 
     expect(await screen.findByText(/L’optimalité mathématique n’a pas pu être démontrée/)).toBeInTheDocument()
     expect(screen.queryByText(/prouvé optimal/)).not.toBeInTheDocument()
@@ -510,7 +521,7 @@ describe('GenerationModal', () => {
     renderActions()
 
     fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Générer quand même' }))
+    fireEvent.click(await enabledConfirm())
 
     expect(await screen.findByText(/prouvé optimal/)).toBeInTheDocument()
   })
@@ -559,7 +570,7 @@ describe('GenerationModal', () => {
     renderActions()
 
     fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Générer quand même' }))
+    fireEvent.click(await enabledConfirm())
 
     expect(await screen.findByText('Indisponibilité déclarée (1)')).toBeInTheDocument()
     expect(screen.getByText('Au moins une garde n’a aucun candidat éligible.')).toBeInTheDocument()
