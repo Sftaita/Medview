@@ -71,7 +71,10 @@
 {# ---- Valeurs par défaut ---- #}
 {% set accent          = accent|default(brand) %}
 {% set eyebrowColor    = eyebrowColor|default(accent == blue ? blueDark : brandDark) %}
-{% set panel           = panel|default(true) %}
+{# Deliberately NOT panel|default(true): Twig's default filter treats false
+   as "empty" too, which would silently force the panel back on for any
+   child template that explicitly sets panel = false. #}
+{% set panel           = panel is defined ? panel : true %}
 {% set panelStyle      = panelStyle|default('soft') %}
 {% set showFallbackUrl = showFallbackUrl|default(true) %}
 {% set ctaLabel        = ctaLabel|default(false) %}

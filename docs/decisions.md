@@ -321,8 +321,10 @@ l'ancienne (voir légende).
   sur `User` — l'extension prévue est une entité séparée
   `PasswordResetToken` (token à usage unique, expirant), pas des colonnes
   supplémentaires sur l'utilisateur.
-- **Statut** : 🟡 hook minimal posé, fonctionnalités non construites.
-  Détail : `docs/authentication.md` §7.
+- **Statut** : 🟢 **Mot de passe oublié implémenté, voir
+  [D141](#d141--mot-de-passe-oublié--réinitialisation-passwordresettoken)**
+  (2026-09-26). Vérification d'email toujours non construite (`emailVerifiedAt`
+  reste un hook posé, sans endpoint). Détail : `docs/authentication.md` §16.
 
 ## D014 — JWT RS256 via `json_login` + Lexik, sans refresh token
 
@@ -4410,3 +4412,113 @@ l'ancienne (voir légende).
 - **Tests** : `PlanningDetailPage.test.tsx` (page, jusqu'ici non testée),
   `period.test.ts`, tests existants de `PilotHeaderActions`,
   `CollectionStatusPanel` et `ExtendPlanningForm` adaptés et complétés.
+
+## D141 — Mot de passe oublié / réinitialisation : `PasswordResetToken`
+
+- **Contexte** : hook posé par D013 (« champs réservés pour vérification
+  d'email et mot de passe oublié »), jamais implémenté jusqu'ici.
+- **Décision** : entité séparée `PasswordResetToken`, jamais de colonne sur
+  `User` — même principe que `RefreshToken`/`TeamInvitation` : token brut
+  généré par `bin2hex(random_bytes(32))`, seul son hash SHA-256 est
+  persisté. Deux façons distinctes et jamais confondues de devenir
+  inutilisable (`consumedAt` : un reset a réellement eu lieu ;
+  `revokedAt` : supplanté par une demande plus récente avant d'avoir
+  servi), imposées par une CHECK DB (jamais les deux à la fois sur une
+  même ligne). Rien n'est supprimé — historique conservé.
+- **TTL** : `PASSWORD_RESET_TOKEN_TTL` (secondes, défaut 1800 = 30 min),
+  configurable par variable d'environnement, jamais codé en dur.
+- **Concurrence** : verrou pessimiste (`SELECT … FOR UPDATE`, même motif
+  que `TeamInvitationRepository`) à la fois sur la demande (un seul token
+  utilisable par utilisateur à tout instant — toute demande plus récente
+  supplante les précédentes) et sur la confirmation (usage unique garanti
+  par le verrou de ligne PostgreSQL, pas par une simple vérification
+  applicative). Formulation précise (à ne pas confondre) : **garanti par
+  PostgreSQL** (propriété du moteur) ; **testé automatiquement** par
+  `PasswordResetServiceTest`, mais uniquement l'invariant fonctionnel via
+  des appels **séquentiels** — une vraie course à deux connexions n'est
+  pas reproductible de façon fiable sous PHPUnit
+  (`dama/doctrine-test-bundle` exécute un test sur une seule connexion,
+  limite déjà documentée pour `UserRegistrationServiceTest`, D026) ;
+  **réellement reproduite en concurrence** par
+  `scripts/dev/verify-password-reset-concurrency.sh` (deux vraies requêtes
+  HTTP `curl` backgroundées, donc deux connexions PostgreSQL distinctes,
+  contre la pile Docker locale) — exécuté trois fois pendant ce lot,
+  exactement une des deux requêtes réussit à chaque fois, confirmé aussi
+  par UAT navigateur (lien déjà utilisé effectivement rejeté). Ce script
+  reste hors suite CI (a besoin d'une pile démarrée, timing non
+  déterministe par nature), documenté comme vérification manuelle
+  reproductible plutôt que comme test automatisé.
+- **Rate limiting** : `POST /api/password-reset/request` — IP (5/h, aligné
+  sur `register`) **et** clé dérivée par `hash('sha256', email normalisé)`
+  (3/h, jamais l'email en clair dans le cache/les logs), les deux
+  consommés **sans condition**, existant ou non — jamais un oracle
+  d'existence de compte, même via un `429`. Pas de limiteur dédié sur
+  `/confirm` : le token (256 bits) n'est pas brute-forçable et l'endpoint
+  est déjà protégé par l'usage unique + l'expiration.
+- **Réponse publique de `/request`** : strictement identique (même code,
+  même corps) que le compte existe, soit désactivé, ou n'existe pas.
+  Un compte désactivé **ne reçoit aucun token/email** (même politique que
+  le blocage complet des comptes désactivés ailleurs dans
+  l'authentification).
+- **Politique de mot de passe** : factorisée dans `App\Validator\PasswordPolicy`,
+  utilisée à l'identique par `RegisterUserRequest` et
+  `PasswordResetConfirmRequest` — une seule règle (longueur minimale),
+  jamais dupliquée. Un mot de passe invalide est rejeté par la validation
+  du DTO **avant** que le contrôleur touche le service : le token n'est
+  jamais résolu ni consommé par une requête dont le mot de passe était de
+  toute façon invalide.
+- **Emails** : deux templates distincts (`password_reset_request`,
+  `password_changed_alert`), infrastructure `Symfony Mailer`/Twig
+  existante réutilisée telle quelle (`PasswordResetMailer`, même patron
+  que `InvitationMailer`). Le lien de reset met le token dans le
+  **fragment** de l'URL (`#token=...`), jamais une query string — jamais
+  envoyé au serveur HTTP, absent des access logs/proxy/analytics/`Referer`.
+- **Effet de bord découvert en écrivant ce lot** : `email/_base.html.twig`
+  avait un bug latent — `panel|default(true)` réactivait silencieusement
+  le panneau qu'un enfant voulait masquer via `panel: false`, parce que le
+  filtre Twig `default` traite `false` comme « vide ». Personne ne l'avait
+  jamais déclenché (aucun email précédent n'utilisait `panel: false`).
+  Corrigé (`panel is defined ? panel : true`) ; suite de tests email
+  existante repassée au vert pour confirmer l'absence de régression.
+- **Rejeté** : rate limiting sur `/confirm` (inutile, voir plus haut) ;
+  colonnes de reset sur `User` (contredit D013) ; un second mécanisme
+  d'envoi d'email distinct d'`InvitationMailer`/`Symfony Mailer`.
+
+## D142 — `credentialsVersion` : invalidation immédiate d'un JWT déjà émis
+
+- **Contexte** : un access token JWT est stateless et vit jusqu'à 15
+  minutes (`JWT_TOKEN_TTL`). Révoquer les refresh tokens (D141) ne suffit
+  pas à couper immédiatement un JWT déjà en circulation après un
+  changement sensible de mot de passe.
+- **Décision** : `User::$credentialsVersion` (int, défaut `1`), embarqué
+  dans le payload de chaque JWT à sa création
+  (`lexik_jwt_authentication.on_jwt_created`) et vérifié contre la valeur
+  courante de l'utilisateur à chaque requête authentifiée
+  (`lexik_jwt_authentication.on_jwt_authenticated`, dispatché par
+  `JWTAuthenticator::createToken()` après chargement du `User` — une
+  différence lève une `AuthenticationException` **à l'intérieur** du bloc
+  `try` d'`AuthenticatorManager::executeAuthenticator()`, donc convertie
+  proprement en `401` par le mécanisme d'échec existant, sans code ajouté
+  dans un seul contrôleur). Un seul listener
+  (`App\EventListener\JwtCredentialsVersionListener`), systémique.
+- **`credentialsVersion` n'est délibérément PAS un champ de reset** : une
+  version de sécurité des credentials en général. Bumpé aujourd'hui
+  uniquement par un reset de mot de passe réussi ; réservé pour servir
+  plus tard à un changement de mot de passe volontaire ou un
+  « déconnecter tous les appareils ».
+- **Conséquence assumée** : un JWT émis avant le déploiement de cette
+  fonctionnalité n'a pas ce claim et est rejeté comme n'importe quel autre
+  décalage de version — au pire 15 minutes de perturbation, la même
+  fenêtre que toute autre limite déjà documentée du mécanisme de
+  révocation (§13 `docs/authentication.md`).
+- **`RefreshTokenService::revokeAllForUser()`** (nouveau) : distinct de
+  `revokeFamily()` (une seule lignée/appareil) — révoque toutes les
+  familles de refresh tokens d'un utilisateur, tous appareils confondus.
+  Utilisé uniquement par un reset réussi ; un logout normal ne connaît
+  qu'un seul raw token.
+- **Rejeté** : vérification manuelle ajoutée dans chaque contrôleur
+  sensible (non systémique, oubliable) ; invalider le JWT via une
+  liste noire de tokens révoqués (réintroduit un état côté serveur que le
+  JWT stateless évite précisément, D019) ; réutiliser `active` comme proxy
+  d'invalidation (sémantique différente : un compte peut rester actif
+  alors que ses credentials ont changé).

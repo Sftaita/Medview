@@ -8,8 +8,8 @@ fonctionnalités.
 
 Portée : inscription, connexion, `GET /api/me`, désactivation d'un compte,
 **rate limiting**, **access token court + refresh token rotatif en cookie
-HttpOnly**, logout. **Pas encore** : vérification d'email, mot de passe
-oublié, rôles d'équipe.
+HttpOnly**, logout, **mot de passe oublié / réinitialisation** (§16). **Pas
+encore** : vérification d'email, rôles d'équipe.
 
 ---
 
@@ -710,3 +710,284 @@ que d'être ignoré en silence (D116). Où portera
 l'affiliation plus tard — `PlanningTeamMember` (déjà daté par
 `membershipStart`/`membershipEnd`) ou une entité `Institution`/`Site`/`Affiliation` —
 reste à décider quand le besoin sera confirmé ; rien n'est préconstruit.
+
+---
+
+## 16. Mot de passe oublié / réinitialisation, `credentialsVersion` (2026-09-26)
+
+Décisions : `docs/decisions.md` D141 (`PasswordResetToken`, rate limiting,
+concurrence), D142 (`credentialsVersion`, invalidation JWT). Complète le
+hook posé par D013 (« champs réservés pour vérification d'email et mot de
+passe oublié ») — **implémenté**, pas seulement documenté.
+
+### 16.1 Modèle de données
+
+`PasswordResetToken` (`backend/src/Entity/PasswordResetToken.php`), entité
+séparée — **jamais** de colonne sur `User` — même raisonnement que
+`RefreshToken`/`TeamInvitation` : le token brut n'existe que dans le lien de
+l'email, seul son hash SHA-256 est stocké (`bin2hex(random_bytes(32))` puis
+`hash('sha256', ...)`, 256 bits d'entropie — un hash lent/salé n'apporte
+rien ici, voir §4 pour le raisonnement complet appliqué au refresh token).
+
+| Champ | Notes |
+|---|---|
+| `user` | `ManyToOne User`, `ON DELETE CASCADE` |
+| `tokenHash` | unique, indexé, CHECK hex SHA-256 |
+| `createdAt` / `expiresAt` | CHECK `expires_at > created_at` |
+| `consumedAt` | non-null = un reset a réellement eu lieu via ce token (terminal) |
+| `revokedAt` | non-null = supplanté par une demande plus récente, jamais utilisé |
+| `requestedByIp` | contexte, non exploité activement |
+
+CHECK supplémentaire : `consumedAt` et `revokedAt` ne peuvent **jamais**
+être renseignés tous les deux sur la même ligne — deux façons distinctes de
+devenir inutilisable, jamais confondues. Rien n'est supprimé : l'historique
+des tentatives de reset reste disponible, comme pour `RefreshToken`.
+
+`User.credentialsVersion` (int, défaut `1`) : voir §16.5.
+
+Migration `Version20260925090000`.
+
+### 16.2 `POST /api/password-reset/request`
+
+```
+POST /api/password-reset/request
+{ "email": "user@example.com" }
+→ 200 { "success": true, "message": "Si un compte correspond à cette adresse, un email de réinitialisation a été envoyé." }
+```
+
+**La réponse publique est strictement identique** que l'email corresponde à
+un compte actif, un compte désactivé ou n'existe pas — impossible d'énumérer
+les comptes depuis cet endpoint. Seules les erreurs structurelles (JSON
+invalide, email mal formé, champ inconnu, rate limit) renvoient une réponse
+différente : elles ne révèlent rien sur un compte particulier.
+
+`PasswordResetService::requestReset()` (`src/Service/`) fait le travail réel,
+dans une transaction :
+- compte inconnu ou désactivé → **aucun token créé, aucun email envoyé**,
+  la méthode retourne silencieusement (le contrôleur renvoie de toute façon
+  la réponse générique) ;
+- compte actif → tout token encore utilisable pour ce `User` est verrouillé
+  (`PasswordResetTokenRepository::findUsableByUserForUpdate()`, `SELECT …
+  FOR UPDATE`) puis révoqué, un nouveau token est émis. **Un seul token
+  utilisable par utilisateur à tout instant** — deux demandes rapprochées
+  (y compris concurrentes sur deux transactions réelles) se sérialisent sur
+  ce verrou : celle qui commit en second retrouve et supplante ce que la
+  première a laissé.
+- l'email (lien de reset) est envoyé **après** le commit, en best-effort
+  (`PasswordResetMailer`, jamais d'exception qui remonterait au client).
+
+Durée de vie : `PASSWORD_RESET_TOKEN_TTL` (secondes, défaut `1800` = 30 min),
+configurable, jamais codée en dur (`#[Autowire(env: 'int:PASSWORD_RESET_TOKEN_TTL')]`,
+même motif que `INVITATION_TTL_HOURS`).
+
+### 16.3 Rate limiting — double protection, consommée sans condition
+
+| Limiteur | Clé | Limite |
+|---|---|---|
+| `password_reset_request_ip` | IP cliente | 5 / heure |
+| `password_reset_request_email` | `hash('sha256', email normalisé)` — jamais l'email en clair | 3 / heure |
+
+Les deux sont consommés **avant même de savoir si le compte existe** —
+existant ou non, le comportement (y compris un éventuel `429 +
+Retry-After`) est rigoureusement identique, donc jamais un oracle
+d'existence de compte. Le limiteur par email protège en plus une boîte
+mail cible contre le spam de liens de reset, quelle que soit la ou les IP
+d'origine. Mêmes valeurs de référence que `register` pour l'IP (§6).
+
+### 16.4 `POST /api/password-reset/confirm`
+
+```
+POST /api/password-reset/confirm
+{ "token": "<raw>", "newPassword": "..." }
+→ 200 { "success": true, "message": "Votre mot de passe a été modifié." }
+→ 400 { "error": "invalid_or_expired_token", "message": "Ce lien est invalide ou a expiré." }
+```
+
+**Une seule réponse d'échec**, quelle que soit la raison interne réelle —
+token inconnu, expiré, déjà consommé, révoqué (supplanté), ou compte
+devenu inéligible entre la demande et la confirmation
+(`App\Security\PasswordResetFailureReason`, jamais exposé au client, utile
+en interne pour les tests/logs uniquement).
+
+Un mot de passe qui ne respecte pas la politique (`App\Validator\PasswordPolicy`,
+**exactement** la même règle qu'à l'inscription — une seule source, pas de
+duplication) est rejeté par la validation du DTO **avant** que le contrôleur
+touche `PasswordResetService` : le token n'est jamais résolu, donc jamais
+consommé, par une requête dont le mot de passe était de toute façon invalide.
+
+`PasswordResetService::confirmReset()`, dans une transaction, avec un verrou
+de ligne sur le token (`findOneByTokenHashForUpdate()`, `SELECT … FOR
+UPDATE` — même motif que `TeamInvitationRepository`) :
+
+1. vérifie existence, non-consommé, non-révoqué, non-expiré, compte actif ;
+2. hash le nouveau mot de passe (`UserPasswordHasherInterface`), l'affecte à
+   `User` ;
+3. incrémente `User::$credentialsVersion` (§16.5) ;
+4. consomme **ce** token, révoque tout **autre** token encore utilisable du
+   même utilisateur (l'exclusion explicite du token qu'on vient de
+   consommer évite de le marquer aussi révoqué — deux marquages sur la même
+   ligne violeraient le CHECK du §16.1) ;
+5. révoque **toutes** les familles de refresh tokens de l'utilisateur
+   (`RefreshTokenService::revokeAllForUser()`, nouveau — §16.6) ;
+6. commit atomique de tout ce qui précède.
+
+L'email d'alerte (§16.7) est envoyé **après** le commit, hors du verrou.
+
+**Usage unique garanti par le verrou de ligne PostgreSQL, pas par une
+simple vérification applicative.** Formulation précise de ce qui est
+garanti par quoi, pour ne jamais confondre les deux :
+
+- **Garanti par PostgreSQL** : `SELECT … FOR UPDATE` sérialise réellement
+  deux transactions concurrentes sur la même ligne — celle qui obtient le
+  verrou en second bloque jusqu'à ce que la première commit, puis trouve
+  le token déjà `consumedAt` non-null et échoue. C'est une propriété du
+  moteur, pas du code applicatif au-dessus.
+- **Testé automatiquement (PHPUnit)** : `PasswordResetServiceTest` prouve
+  l'invariant fonctionnel (deux appels **séquentiels** sur le même token,
+  le second rejeté) mais **pas** une vraie course à deux connexions —
+  `dama/doctrine-test-bundle` exécute un test dans une seule transaction
+  sur une seule connexion (limite déjà documentée pour
+  `UserRegistrationServiceTest`, D026), ce qui rend une vraie
+  simultanéité multi-connexion irreproductible de façon fiable dans la
+  suite PHPUnit elle-même.
+- **Reproduit réellement en concurrence** : `scripts/dev/verify-password-reset-concurrency.sh`
+  — script autonome (hors suite PHPUnit) qui exécute deux vraies requêtes
+  HTTP `POST /api/password-reset/confirm` en parallèle (deux processus
+  `curl` backgroundés, donc deux connexions PostgreSQL distinctes réelles)
+  contre la pile Docker locale réellement démarrée, avec le même token et
+  deux nouveaux mots de passe différents. Exécuté trois fois pendant ce
+  lot : **exactement une des deux requêtes réussit à chaque fois** (`200`
+  puis `400 invalid_or_expired_token`), et une vérification de connexion
+  ultérieure confirme que seul le mot de passe de la requête gagnante a
+  été retenu — jamais les deux, jamais aucun. Ce script n'est pas un test
+  CI (il a besoin d'une pile réellement démarrée et d'un vrai
+  ordonnancement mémoire/réseau, pas reproductible de façon déterministe
+  dans un environnement de test), mais c'est une preuve empirique réelle,
+  au-delà de l'invariant séquentiel prouvé par PHPUnit — refaite par UAT
+  navigateur (§16.9, réutilisation du même lien après un premier succès).
+
+### 16.5 `credentialsVersion` — invalider un JWT déjà émis
+
+Un JWT d'accès est stateless et vit jusqu'à 15 minutes
+(`JWT_TOKEN_TTL`) : révoquer les refresh tokens ne suffit pas à couper
+immédiatement un access token déjà en circulation. `User::$credentialsVersion`
+(int, défaut `1`, jamais un proxy de `$active`) résout ce problème
+spécifiquement pour les changements sensibles de credentials.
+
+Mécanisme entièrement systémique, `App\EventListener\JwtCredentialsVersionListener` :
+
+- `lexik_jwt_authentication.on_jwt_created` : embarque
+  `credentialsVersion` dans le payload de **chaque** JWT créé (login,
+  refresh — les deux passent par `JWTTokenManagerInterface::create()`) ;
+- `lexik_jwt_authentication.on_jwt_authenticated` : dispatché par
+  `JWTAuthenticator::createToken()`, **après** le chargement du `User`
+  depuis l'identité réclamée, sur chaque requête authentifiée. Compare le
+  claim du payload à la valeur courante de l'utilisateur ; une différence
+  lève une `AuthenticationException` — exception levée **à l'intérieur**
+  du bloc `try` de `AuthenticatorManager::executeAuthenticator()` (vérifié
+  dans le code de Symfony Security avant implémentation), donc convertie
+  proprement en `401` par le mécanisme d'échec d'authentification existant
+  (`JWTAuthenticator::onAuthenticationFailure()`), **sans code ajouté dans
+  un seul contrôleur**.
+
+Bumpé aujourd'hui uniquement par un reset de mot de passe réussi ; le champ
+est délibérément générique (« version des credentials », pas « version du
+reset ») pour servir plus tard à un changement de mot de passe volontaire ou
+un « déconnecter tous les appareils » — voir D142.
+
+**Un JWT émis avant le déploiement de cette fonctionnalité n'a pas ce
+claim** et est rejeté comme n'importe quel autre décalage de version : au
+pire 15 minutes de perturbation (durée de `JWT_TOKEN_TTL`), la même fenêtre
+que toute autre limite déjà documentée de ce mécanisme de révocation.
+
+### 16.6 Révocation de toutes les sessions
+
+`RefreshTokenService::revokeAllForUser(User $user)` (nouveau, §4) — distinct
+de `revokeFamily()` (une seule lignée) : révoque **toutes** les familles de
+refresh tokens actives de l'utilisateur, tous appareils/navigateurs
+confondus. Utilisé uniquement par un reset réussi ; un logout normal ne
+connaît qu'un seul raw token (`revokeByRawToken()`, inchangé).
+
+### 16.7 Emails
+
+Deux emails distincts, jamais combinés, réutilisant l'infrastructure
+existante (`Symfony Mailer`, templates Twig `templates/email/`,
+`PasswordResetMailer` suit exactement le patron de `InvitationMailer`) :
+
+1. **Lien de reset** (`password_reset_request.*.twig`) — le lien pointe vers
+   `APP_FRONTEND_URL/reset-password#token=<raw>`, **le token dans le
+   fragment de l'URL, jamais une query string** : un fragment n'est jamais
+   envoyé au serveur HTTP lors du chargement initial de la page, donc
+   absent des access logs, d'un reverse proxy, d'un outil d'analytics ou
+   d'un en-tête `Referer`. Précise la durée de validité (30 min) et
+   invite à ignorer l'email si la demande n'était pas volontaire.
+2. **Alerte de changement** (`password_changed_alert.*.twig`) — envoyée
+   après un reset réussi, **aucun token dedans**, invite à contacter le
+   support si le changement n'était pas volontaire.
+
+Effet de bord découvert en écrivant ce lot : `email/_base.html.twig` avait
+un bug latent sur `panel = false` (`{{ panel|default(true) }}` — le filtre
+Twig `default` traite `false` comme « vide » au même titre que `null`/`''`,
+donc réactivait silencieusement le panneau qu'un enfant voulait masquer).
+Personne ne l'avait jamais déclenché : tous les emails précédents affichent
+un panneau. Corrigé (`panel is defined ? panel : true`), les deux nouveaux
+templates sont les premiers à utiliser `panel: false`. Suite de tests email
+existante (`InvitationMailerTest`, `AvailabilityReminderControllerTest`)
+repassée au vert après coup pour confirmer l'absence de régression.
+
+### 16.8 Frontend
+
+- `/forgot-password` (`ForgotPasswordPage.tsx`) — dans `PublicOnlyRoute`
+  (comme `/login`/`/register`) : formulaire email, message générique après
+  soumission (jamais de branchement UI sur l'existence du compte), garde
+  anti-double-soumission (même motif `useRef` synchrone que
+  `LoginPage`/`RegisterPage`), gestion `429` dédiée.
+- `/reset-password` (`ResetPasswordPage.tsx`) — **délibérément pas** dans
+  `PublicOnlyRoute` (même exception que `/invitations/:token`) : quelqu'un
+  peut ouvrir ce lien avec une session existante encore active dans ce
+  navigateur, le lien doit rester utilisable. Lit le token depuis
+  `window.location.hash` (lu de façon synchrone à l'état initial, jamais
+  dans un effect — seul le nettoyage réel de l'URL, `history.replaceState`,
+  est un effet), l'efface immédiatement. Après succès : `clearStoredToken()`
+  + l'event `UNAUTHORIZED_EVENT` déjà écouté par `AuthProvider` (réutilise
+  tel quel le mécanisme de déconnexion existant, y compris la
+  synchronisation multi-onglets via `storage` — aucune nouvelle plomberie).
+  **Jamais de connexion automatique** : uniquement un lien vers `/login`.
+- `LoginPage` : lien « Mot de passe oublié ? » vers `/forgot-password`.
+
+### 16.9 UAT réelle (2026-09-26)
+
+Scénario complet exécuté en navigateur (Chrome piloté), compte de test créé
+pour l'occasion, e-mails réellement capturés par Mailpit :
+
+```
+Inscription (uat.reset.flow@example.com) → déconnexion
+→ Mot de passe oublié → email reçu (lien, 30 min, pas de panneau cassé)
+→ ouverture du lien → fragment nettoyé (vérifié : window.location.hash === '')
+→ nouveau mot de passe → « Mot de passe modifié », pas de connexion automatique
+→ email d'alerte reçu (sujet distinct, aucun token dedans)
+→ ancien mot de passe refusé (401 réel)
+→ nouveau mot de passe accepté (200 réel) → tableau de bord
+→ réutilisation du même lien → rejeté (400, message générique)
+→ email inconnu → réponse strictement identique, aucun email envoyé
+```
+
+`/forgot-password` et `/reset-password` confirmés protégés/accessibles
+comme prévu par `PublicOnlyRoute` (une tentative d'ouvrir
+`/forgot-password` en étant connecté redirige bien vers `/`, comme
+`/login`).
+
+### 16.10 Dette / hors périmètre
+
+- Pas de rate limiting dédié sur `/api/password-reset/confirm` : le token
+  (256 bits) n'est pas brute-forçable, et l'endpoint est déjà protégé par
+  l'usage unique + l'expiration — un limiteur supplémentaire n'apporterait
+  rien ici, contrairement à `/request` (oracle d'existence potentiel).
+- Pas d'UI listant les sessions actives ni de bouton « déconnecter tous
+  les appareils » côté utilisateur — `credentialsVersion` et
+  `revokeAllForUser()` posent la brique nécessaire, rien n'est exposé côté
+  API/frontend pour l'instant (même dette que §13 pour les refresh tokens).
+- Course à deux connexions réelles simultanées sur `/confirm` : invariant
+  prouvé par le verrou de ligne + tests séquentiels + UAT (lien déjà
+  utilisé rejeté), jamais par un vrai test à deux connexions PHPUnit
+  (limite connue et déjà documentée du harnais de test, §16.4).

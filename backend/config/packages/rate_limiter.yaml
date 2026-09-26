@@ -28,3 +28,21 @@ framework:
             policy: 'sliding_window'
             limit: 100
             interval: '1 hour'
+        # POST /api/password-reset/request — public, unauthenticated, and its
+        # response never reveals whether the email exists (docs/authentication.md).
+        # Double protection, both consumed unconditionally on every request so
+        # the 429 boundary itself never becomes an account-existence oracle:
+        #  - IP: aligned on `register`'s ceiling, same reasoning (one visitor
+        #    should rarely need more than a handful of reset attempts/hour).
+        #  - email (keyed by a SHA-256 of the normalized address, never the
+        #    address itself, see PasswordResetRequestController): tighter,
+        #    protects one target mailbox from being mail-bombed with reset
+        #    links regardless of which IP(s) the requests come from.
+        password_reset_request_ip:
+            policy: 'sliding_window'
+            limit: 5
+            interval: '1 hour'
+        password_reset_request_email:
+            policy: 'sliding_window'
+            limit: 3
+            interval: '1 hour'

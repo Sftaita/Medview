@@ -67,6 +67,7 @@ détaillé (encore conceptuel, rien d'implémenté) :
 | Structure hebdomadaire configurable par `PlanningLine`, familles d'équité génériques `ALLOCATION_FAMILY` (remplace `WEEKEND_GROUPS`) : `AllocationFamily`, `DutyPattern.family`/`.recurring`, `Duty.pattern`, pipeline réel de matérialisation (`WeekStructureService`/`WeeklyDutyCalendarService`, jusque-là inexistant en production), endpoint `GET/PUT .../week-structure`, matérialisation à la demande au préflight de génération | ✅ Livré (2026-09-24) — tests backend/frontend ; UI limitée à la ligne principale (dette) ; pas d'heure de garde configurable, pas d'exceptions calendaires datées (dette) | `docs/week-structure.md`, `docs/planning-domain.md` §9-§11, `docs/fairness.md` §2-§4, `docs/allocation-algorithm.md` §5/§6/§9, `docs/planning-generation.md` §20, `docs/decisions.md` D136 |
 | Configuration opérationnelle de la génération, de bout en bout : activation des règles de planning (`PlanningRuleSetController`, porte d'activation sans formulaire de paramètres inertes), règles de repos choisies au lancement planning-level (`RestPolicyOptions` threadée jusqu'à `PlanningGenerationLauncher`, jusque-là hardcodée à `none()`), structure de ligne dynamique (`familyUnitCounts`) et distinction OPTIMAL/FEASIBLE dans le préflight/résultat, statistiques par famille (`countsByFamily`) | ✅ Livré (2026-09-24) — tests backend/frontend + UAT navigateur complète (génération réelle OR-Tools COMPLETE+OPTIMAL et INCOMPLETE+diagnostic réel provoqués tous deux en conditions réelles, statistiques par famille équilibrées vérifiées, nettoyage zéro résidu) | `docs/planning-generation.md` §21, `docs/decisions.md` D138 |
 | Refonte du détail d'un planning (`/plannings/:id`, maquette `react_planning_detail`) : en-tête + menu « ⋯ », période (fin inclusive), étapes, onglets Lignes / Indisponibilités / Planning, panneaux Membres / Prolonger / Renommer — composants et endpoints existants réutilisés, aucun changement backend | ✅ Livré (2026-09-25) — tests Vitest + validation navigateur desktop/mobile (Playwright, compte de dev) | `docs/decisions.md` D140 |
+| Mot de passe oublié / réinitialisation (`PasswordResetToken`, lien à usage unique dans le fragment d'URL, rate limiting IP+email, invalidation de toutes les sessions + des JWT déjà émis via `credentialsVersion`) | ✅ Livré (2026-09-26) — tests backend (55 nouveaux + 859 suite complète) + frontend (351) + UAT navigateur complète (Mailpit réel, ancien mot de passe refusé, nouveau accepté, lien réutilisé rejeté, email inconnu indistinguable) | `docs/authentication.md` §16, `docs/decisions.md` D141-D142 |
 | Échanges de garde, notifications (in-app), export calendrier | ⏳ Pas commencé | — |
 
 ## Où trouver quoi
@@ -165,6 +166,13 @@ détaillé (encore conceptuel, rien d'implémenté) :
   atomique (multi-invitations → un `User`, N memberships, un email), compte créé
   entre-temps, emails (`backend/templates/email/`, maquette
   `docs/Design/emails_medvue`), variables d'env requises en production.
+- **`docs/authentication.md` §16** — mot de passe oublié / réinitialisation :
+  `PasswordResetToken` (token haché à usage unique, jamais de colonne sur
+  `User`, D141), rate limiting IP+email consommé sans condition (jamais un
+  oracle d'existence de compte), verrou de ligne pour la concurrence,
+  `credentialsVersion` invalidant immédiatement tout JWT déjà émis (D142),
+  révocation de toutes les familles de refresh tokens, token dans le
+  fragment d'URL côté frontend.
 - **`docs/allocation-algorithm.md`** — design du moteur de répartition des
   gardes (équité multidimensionnelle, contraintes, pipeline de
   génération). **Document vivant** : encore conceptuel, à corriger et

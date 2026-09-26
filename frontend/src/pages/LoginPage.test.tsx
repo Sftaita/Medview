@@ -146,4 +146,30 @@ describe('LoginPage', () => {
     await waitFor(() => expect(screen.getByText('Tableau de bord')).toBeInTheDocument())
     expect(loginCalls).toBe(1)
   })
+
+  it('links to the forgot-password page', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.endsWith('/api/token/refresh')) return jsonResponse({ error: 'invalid_refresh_token' }, 401)
+        return Promise.reject(new Error(`Unexpected fetch to ${url}`))
+      }),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/login']}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/forgot-password" element={<div>Mot de passe oublié</div>} />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(await screen.findByRole('link', { name: 'Mot de passe oublié ?' }))
+
+    expect(await screen.findByText('Mot de passe oublié')).toBeInTheDocument()
+  })
 })

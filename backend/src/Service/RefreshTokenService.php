@@ -87,6 +87,19 @@ final class RefreshTokenService
     }
 
     /**
+     * Revokes every active refresh token family belonging to $user — every
+     * device/browser session, not just one lineage. Used after a sensitive
+     * credentials change (App\Service\PasswordResetService), never from a
+     * plain logout (which only ever knows one raw token, see
+     * revokeByRawToken()).
+     */
+    public function revokeAllForUser(User $user): void
+    {
+        $this->repository->revokeAllForUser($user);
+        $this->entityManager->flush();
+    }
+
+    /**
      * Revokes the whole family behind a raw token, if it still exists.
      * Idempotent and silent on an unknown/already-invalid token — logout
      * always succeeds from the client's point of view.

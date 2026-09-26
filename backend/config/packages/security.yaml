@@ -59,6 +59,11 @@ security:
         - { path: ^/api/login, roles: PUBLIC_ACCESS }
         - { path: ^/api/token/refresh, roles: PUBLIC_ACCESS }
         - { path: ^/api/token/logout, roles: PUBLIC_ACCESS }
+        # The reset token itself is the credential (checked manually in
+        # PasswordResetService), never a Bearer JWT — same reasoning as the
+        # invitation lookup above.
+        - { path: ^/api/password-reset/request, roles: PUBLIC_ACCESS }
+        - { path: ^/api/password-reset/confirm, roles: PUBLIC_ACCESS }
         - { path: ^/api, roles: IS_AUTHENTICATED_FULLY }
 
 when@test:

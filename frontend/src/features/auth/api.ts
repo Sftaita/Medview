@@ -29,3 +29,33 @@ export function fetchMe(): Promise<CurrentUser> {
 export function logout(): Promise<void> {
   return apiFetch<void>('/api/token/logout', { method: 'POST', skipAuth: true })
 }
+
+export type PasswordResetPublicResponse = { success: true; message: string }
+
+/**
+ * The response is deliberately identical whether or not the email belongs
+ * to an account — never branch the UI on its content beyond "it worked",
+ * see docs/authentication.md §16.
+ */
+export function requestPasswordReset(email: string): Promise<PasswordResetPublicResponse> {
+  return apiFetch<PasswordResetPublicResponse>('/api/password-reset/request', {
+    method: 'POST',
+    body: { email },
+    skipAuth: true,
+  })
+}
+
+/**
+ * $token is the raw value read from the email link's URL fragment
+ * (#token=...), never a query string — see ResetPasswordPage.
+ */
+export function confirmPasswordReset(
+  token: string,
+  newPassword: string,
+): Promise<PasswordResetPublicResponse> {
+  return apiFetch<PasswordResetPublicResponse>('/api/password-reset/confirm', {
+    method: 'POST',
+    body: { token, newPassword },
+    skipAuth: true,
+  })
+}

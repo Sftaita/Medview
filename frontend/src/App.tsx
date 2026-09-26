@@ -9,6 +9,7 @@ import { MyAvailabilityProvider } from './features/availability/MyAvailabilityPr
 import { AccountPage } from './pages/AccountPage'
 import { AvailabilityCampaignPage } from './pages/AvailabilityCampaignPage'
 import { DashboardPage } from './pages/DashboardPage'
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
 import { InvitationPage } from './pages/InvitationPage'
 import { LoginPage } from './pages/LoginPage'
 import { MyAvailabilityPage } from './pages/MyAvailabilityPage'
@@ -17,6 +18,7 @@ import { PlanningDetailPage } from './pages/PlanningDetailPage'
 import { PlanningPeriodPage } from './pages/PlanningPeriodPage'
 import { PlanningsPage } from './pages/PlanningsPage'
 import { RegisterPage } from './pages/RegisterPage'
+import { ResetPasswordPage } from './pages/ResetPasswordPage'
 
 function App() {
   return (
@@ -39,9 +41,21 @@ function App() {
             </PublicOnlyRoute>
           }
         />
+        <Route
+          path="/forgot-password"
+          element={
+            <PublicOnlyRoute>
+              <ForgotPasswordPage />
+            </PublicOnlyRoute>
+          }
+        />
 
-        {/* Public and not PublicOnly: an invitee with an existing account may already be logged in. */}
+        {/* Public and not PublicOnly: an invitee with an existing account may
+            already be logged in, and someone opening a reset-password email
+            may still have an old session in this browser — the link must
+            keep working either way (docs/authentication.md §16-17). */}
         <Route path="/invitations/:token" element={<InvitationPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
       </Route>
 
       {/* Authenticated pages: sidebar (desktop) / bottom navigation (phone).

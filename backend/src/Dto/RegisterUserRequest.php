@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Dto;
 
+use App\Validator\PasswordPolicy;
 use App\Validator\ValidPhoneNumber;
 use Symfony\Component\Validator\Constraints as Assert;
 
@@ -15,7 +16,7 @@ final class RegisterUserRequest
     public string $email = '';
 
     #[Assert\NotBlank]
-    #[Assert\Length(min: 8, minMessage: 'Your password must be at least {{ limit }} characters long.')]
+    #[Assert\Length(min: PasswordPolicy::MIN_LENGTH, minMessage: PasswordPolicy::MIN_LENGTH_MESSAGE)]
     public string $plainPassword = '';
 
     #[Assert\NotBlank]

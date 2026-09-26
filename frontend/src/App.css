@@ -310,6 +310,17 @@
   font-weight: var(--weight-bold);
 }
 
+.auth__forgot-password {
+  display: flex;
+  align-items: center;
+  align-self: flex-end;
+  min-height: var(--tap-min);
+  margin-top: -8px;
+  color: var(--gray-700);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-bold);
+}
+
 .auth__names {
   display: grid;
   gap: 16px;

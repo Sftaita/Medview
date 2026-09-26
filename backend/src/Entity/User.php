@@ -74,6 +74,20 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     private bool $active = true;
 
     /**
+     * Security version of the credentials, not of the account. Embedded in
+     * every JWT at creation and compared against this column on every
+     * authenticated request (App\EventListener\JwtCredentialsVersionListener);
+     * a mismatch means the JWT was issued before the last sensitive
+     * credentials change and is rejected outright — the only way to
+     * invalidate an already-issued, stateless access token before its
+     * natural 15-minute expiry. Bumped by a password reset today; reserved
+     * for a future voluntary password change or a "log out all devices"
+     * action (docs/decisions.md D142) — never a proxy for $active.
+     */
+    #[ORM\Column(options: ['default' => 1])]
+    private int $credentialsVersion = 1;
+
+    /**
      * Null until the user confirms their address. Reserved for the future
      * email-verification flow (no endpoint sets this yet).
      */
@@ -159,6 +173,22 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     public function setActive(bool $active): void
     {
         $this->active = $active;
+        $this->touch();
+    }
+
+    public function getCredentialsVersion(): int
+    {
+        return $this->credentialsVersion;
+    }
+
+    /**
+     * Immediately invalidates every JWT issued before this call, once its
+     * new value has propagated: called after a successful password reset
+     * (App\Service\PasswordResetService).
+     */
+    public function bumpCredentialsVersion(): void
+    {
+        ++$this->credentialsVersion;
         $this->touch();
     }
 
