@@ -155,6 +155,22 @@ Paliers calculés sur la **largeur du composant** (`useElementWidth` +
 | `m` | 480–819 px | « Lun », étiquette d'une lettre (G, lettre du bloc, —), double contour |
 | `s` | < 480 px | initiale, boutons 48 px (`--tap-min`) en 2 × 2, champs 48 px |
 
+La largeur mesurée est toujours la **boîte de bordure** (au montage comme
+dans le `ResizeObserver`) : mesurer la boîte de contenu ferait dépendre le
+palier du padding, lui-même fixé par le palier.
+
+**Stabilité de la mise en page** (correctif du 2026-09-26) : la zone
+d'actions a la même structure avec ou sans sélection — l'aide et le résumé
+« N jours sélectionnés » occupent la même cellule de grille (l'invisible
+garde sa place, `visibility: hidden`), et les quatre boutons restent
+affichés, désactivés sans sélection. Sélectionner/désélectionner un jour ne
+change donc jamais la hauteur. `WeekStructureModal` ouvre l'`Overlay` avec
+`stableLayout` : panneau ancré en haut (il grandit vers le bas au lieu
+d'être recentré, ce qui déplaçait la rangée des jours) et `scrollbar-gutter:
+stable` (l'apparition de la barre de défilement ne rétrécit plus le contenu
+— elle faisait basculer le palier `m` → `s` sous Windows). Aucun `title`
+sur les tuiles (infobulle native indésirable) : l'`aria-label` suffit.
+
 Teintes par bloc : A vert (brand), B bleu, C gris, D ambre — variables
 locales `--tone-*` dérivées des tokens globaux, aucune couleur en dur.
 

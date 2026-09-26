@@ -10,6 +10,12 @@ type Props = {
   variant?: 'modal' | 'drawer'
   /** When false, Escape and a click on the backdrop do nothing (an operation is in progress). */
   dismissible?: boolean
+  /**
+   * The content changes size while being edited (e.g. the week structure):
+   * anchor the panel to the top instead of re-centring it on every change,
+   * and reserve the scrollbar's gutter so its appearance never narrows the body.
+   */
+  stableLayout?: boolean
   children: ReactNode
   footer?: ReactNode
 }
@@ -22,7 +28,15 @@ const FOCUSABLE =
  * and comes back to where it was, Tab stays inside, and the page behind does
  * not scroll. Used for the settings and generation modals and the member drawer.
  */
-export function Overlay({ title, onClose, variant = 'modal', dismissible = true, children, footer }: Props) {
+export function Overlay({
+  title,
+  onClose,
+  variant = 'modal',
+  dismissible = true,
+  stableLayout = false,
+  children,
+  footer,
+}: Props) {
   const titleId = useId()
   const panelRef = useRef<HTMLDivElement>(null)
   // Read through refs so the effect below runs once per mount, not on every render.
@@ -76,7 +90,7 @@ export function Overlay({ title, onClose, variant = 'modal', dismissible = true,
 
   return createPortal(
     <div
-      className={`overlay overlay--${variant}`}
+      className={`overlay overlay--${variant}${stableLayout ? ' overlay--stable' : ''}`}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && dismissible) {
           onClose()

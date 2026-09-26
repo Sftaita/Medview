@@ -1059,6 +1059,18 @@
   overflow-y: auto;
 }
 
+/* Contenu qui change de taille pendant l'édition : le panneau grandit vers le
+   bas depuis un haut fixe, et la place de la barre de défilement est réservée
+   (sa seule apparition ne rétrécit plus le contenu). */
+.overlay--stable.overlay--modal {
+  align-items: flex-start;
+  padding-top: clamp(16px, 6vh, 64px);
+}
+
+.overlay--stable .overlay__body {
+  scrollbar-gutter: stable;
+}
+
 /* Téléphone : le panneau latéral devient une feuille qui monte du bas. */
 @media (max-width: 640px) {
   .overlay--drawer {

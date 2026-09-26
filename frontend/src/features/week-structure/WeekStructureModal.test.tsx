@@ -58,10 +58,22 @@ describe('WeekStructureModal', () => {
     const onClose = vi.fn()
     render(<WeekStructureModal lineStableId="line-1" lineName="Ligne principale" onClose={onClose} />)
 
-    await screen.findByRole('dialog')
-    fireEvent.click(screen.getByRole('button', { name: 'Annuler' }))
+    const dialog = await screen.findByRole('dialog')
+    await within(dialog).findByRole('group', { name: 'Jours de la semaine' })
+    // The editor has its own (selection) "Annuler": close through the dialog's footer.
+    fireEvent.click(
+      within(dialog.querySelector<HTMLElement>('.overlay__footer')!).getByRole('button', { name: 'Annuler' }),
+    )
 
     expect(onClose).toHaveBeenCalledTimes(1)
     expect(api.requests('PUT', '/api/planning-lines/line-1/week-structure')).toHaveLength(0)
+  })
+
+  it('keeps a stable layout: anchored to the top, scrollbar gutter reserved', async () => {
+    stubApi({ 'GET /api/planning-lines/line-1/week-structure': () => EMPTY_STRUCTURE })
+    render(<WeekStructureModal lineStableId="line-1" lineName="Ligne principale" onClose={vi.fn()} />)
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog.parentElement).toHaveClass('overlay', 'overlay--modal', 'overlay--stable')
   })
 })

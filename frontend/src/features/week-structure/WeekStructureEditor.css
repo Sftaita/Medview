@@ -332,6 +332,15 @@
 .wse__sel {
   flex: 1 1 200px;
   min-width: 0;
+  display: grid;
+}
+/* l'aide et le résumé occupent la même cellule : seul l'un est visible,
+   l'autre garde sa place pour que la hauteur ne varie pas */
+.wse__sel > * {
+  grid-area: 1 / 1;
+}
+.wse__sel > [data-shown='false'] {
+  visibility: hidden;
 }
 .wse__sel-title {
   font-size: 13.5px;
