@@ -6,23 +6,33 @@ namespace App\Controller;
 
 use App\Entity\Duty;
 use App\Entity\Planning;
+use App\Entity\PlanningPublication;
 use App\Entity\PlanningTeamMember;
 use App\Entity\User;
+use App\Exception\NoUnpublishedChangesException;
 use App\Exception\PlanningAlreadyPublishedException;
 use App\Exception\PlanningNotPublishableException;
+use App\Exception\PlanningNotYetPublishedException;
 use App\Exception\PlanningPublicationInProgressException;
+use App\Repository\PlanningPublicationDeliveryRepository;
+use App\Repository\PlanningPublicationRepository;
 use App\Repository\PlanningRepository;
 use App\Security\Voter\PlanningVoter;
 use App\Service\InconsistentPublicationGroup;
 use App\Service\InvalidPublicationAssignment;
+use App\Service\PlanningPdfRenderer;
 use App\Service\PlanningPublicationPreflightService;
 use App\Service\PlanningPublicationService;
+use App\Service\PublicationChange;
 use App\Service\PublicationConflict;
 use App\Service\PublicationLineReadiness;
 use App\Service\PublicationLineResult;
+use App\Service\PublicationOutcome;
 use App\Service\PublicationPreflight;
 use App\Service\UncoveredPublicationDuty;
+use Symfony\Component\HttpFoundation\HeaderUtils;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Attribute\Route;
@@ -42,6 +52,9 @@ final class PlanningPublicationController
         private readonly PlanningRepository $planningRepository,
         private readonly PlanningPublicationPreflightService $preflightService,
         private readonly PlanningPublicationService $publicationService,
+        private readonly PlanningPublicationRepository $publicationRepository,
+        private readonly PlanningPublicationDeliveryRepository $deliveryRepository,
+        private readonly PlanningPdfRenderer $pdfRenderer,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
     ) {
     }
@@ -62,7 +75,7 @@ final class PlanningPublicationController
         $this->assertCanPublish($planning);
 
         try {
-            $results = $this->publicationService->publish($planning, $user);
+            $outcome = $this->publicationService->publish($planning, $user);
         } catch (PlanningPublicationInProgressException $exception) {
             return new JsonResponse(['error' => 'publication_in_progress', 'message' => $exception->getMessage()], 409);
         } catch (PlanningAlreadyPublishedException $exception) {
@@ -75,9 +88,129 @@ final class PlanningPublicationController
             ], 409);
         }
 
-        return new JsonResponse([
-            'lines' => array_map($this->lineResultToArray(...), $results),
+        return new JsonResponse($this->outcomeToArray($outcome));
+    }
+
+    /**
+     * "Republier les modifications" (docs/decisions.md D143): only when the
+     * current calendar differs from the last diffusion; emails only the
+     * people concerned by an impacted date.
+     */
+    #[Route('/api/plannings/{planningStableId}/republish', name: 'api_planning_republish', methods: ['POST'])]
+    public function republish(string $planningStableId, #[CurrentUser] User $user): JsonResponse
+    {
+        $planning = $this->resolvePlanning($planningStableId);
+        $this->assertCanPublish($planning);
+
+        try {
+            $outcome = $this->publicationService->republish($planning, $user);
+        } catch (PlanningPublicationInProgressException $exception) {
+            return new JsonResponse(['error' => 'publication_in_progress', 'message' => $exception->getMessage()], 409);
+        } catch (PlanningNotYetPublishedException $exception) {
+            return new JsonResponse(['error' => 'not_yet_published', 'message' => $exception->getMessage()], 409);
+        } catch (NoUnpublishedChangesException $exception) {
+            return new JsonResponse(['error' => 'no_changes', 'message' => $exception->getMessage()], 409);
+        } catch (PlanningNotPublishableException $exception) {
+            return new JsonResponse([
+                'error' => 'not_publishable',
+                'message' => $exception->getMessage(),
+                'preflight' => $this->preflightToArray($exception->preflight),
+            ], 409);
+        }
+
+        return new JsonResponse($this->outcomeToArray($outcome));
+    }
+
+    /**
+     * Published or not, since when, and — for someone who can publish — what
+     * changed since the last diffusion ("Modifications non publiées") and the
+     * diffusion history. Any viewer of the planning can read the first part.
+     */
+    #[Route('/api/plannings/{planningStableId}/publication-state', name: 'api_planning_publication_state', methods: ['GET'])]
+    public function state(string $planningStableId): JsonResponse
+    {
+        $planning = $this->resolvePlanning($planningStableId);
+        if (!$this->authorizationChecker->isGranted(PlanningVoter::VIEW, $planning)) {
+            throw new AccessDeniedHttpException('You cannot view this planning.');
+        }
+
+        $state = $this->publicationService->state($planning);
+        $body = [
+            'published' => $state->isPublished(),
+            'firstPublishedAt' => $state->first?->getPublishedAt()->format(\DATE_ATOM),
+            'lastPublishedAt' => $state->latest?->getPublishedAt()->format(\DATE_ATOM),
+            'lastPublishedBy' => null === $state->latest ? null : [
+                'firstName' => $state->latest->getPublishedBy()->getFirstName(),
+                'lastName' => $state->latest->getPublishedBy()->getLastName(),
+            ],
+        ];
+
+        if ($this->authorizationChecker->isGranted(PlanningVoter::PUBLISH, $planning)) {
+            $body['hasUnpublishedChanges'] = $state->hasUnpublishedChanges();
+            $body['changes'] = array_map(static fn (PublicationChange $change): array => [
+                'dutyStableId' => (string) $change->duty->getStableId(),
+                'date' => $change->duty->getLocalDate()->format('Y-m-d'),
+                'lineStableId' => (string) $change->line->getStableId(),
+                'lineName' => $change->line->getName(),
+                'groupInstanceStableId' => null !== $change->duty->getGroupInstance() ? (string) $change->duty->getGroupInstance()->getStableId() : null,
+                'before' => null === $change->before ? null : ['firstName' => $change->before->getUser()->getFirstName(), 'lastName' => $change->before->getUser()->getLastName()],
+                'after' => null === $change->after ? null : ['firstName' => $change->after->getUser()->getFirstName(), 'lastName' => $change->after->getUser()->getLastName()],
+            ], $state->changes);
+            $body['history'] = array_map(fn (PlanningPublication $publication): array => [
+                'stableId' => (string) $publication->getStableId(),
+                'kind' => $publication->getKind()->value,
+                'publishedAt' => $publication->getPublishedAt()->format(\DATE_ATOM),
+                'publishedBy' => ['firstName' => $publication->getPublishedBy()->getFirstName(), 'lastName' => $publication->getPublishedBy()->getLastName()],
+                'changedDutyCount' => $publication->getChangedDutyCount(),
+                'recipientCount' => \count($this->deliveryRepository->findByPublication($publication)),
+                'sentCount' => \count(array_filter($this->deliveryRepository->findByPublication($publication), static fn ($delivery): bool => $delivery->isSent())),
+            ], $state->history);
+        }
+
+        return new JsonResponse($body);
+    }
+
+    /**
+     * "Télécharger le PDF": the last diffusion, exactly as it was published
+     * — never the live calendar with unpublished edits, never an old solver
+     * output. Any viewer of the planning.
+     */
+    #[Route('/api/plannings/{planningStableId}/publication.pdf', name: 'api_planning_publication_pdf', methods: ['GET'])]
+    public function pdf(string $planningStableId): Response
+    {
+        $planning = $this->resolvePlanning($planningStableId);
+        if (!$this->authorizationChecker->isGranted(PlanningVoter::VIEW, $planning)) {
+            throw new AccessDeniedHttpException('You cannot view this planning.');
+        }
+
+        $publication = $this->publicationRepository->findLatestForPlanning($planning);
+        if (null === $publication) {
+            return new JsonResponse(['error' => 'not_yet_published', 'message' => 'This planning has never been published.'], 404);
+        }
+
+        return new Response($this->pdfRenderer->render($publication), 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => HeaderUtils::makeDisposition(HeaderUtils::DISPOSITION_ATTACHMENT, $this->pdfRenderer->filename($publication)),
+            'Cache-Control' => 'private, no-store',
         ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function outcomeToArray(PublicationOutcome $outcome): array
+    {
+        return [
+            'lines' => array_map($this->lineResultToArray(...), $outcome->lines),
+            'publication' => [
+                'stableId' => (string) $outcome->publication->getStableId(),
+                'kind' => $outcome->publication->getKind()->value,
+                'publishedAt' => $outcome->publication->getPublishedAt()->format(\DATE_ATOM),
+                'changedDutyCount' => $outcome->publication->getChangedDutyCount(),
+            ],
+            'recipientCount' => $outcome->recipientCount,
+            'sentCount' => $outcome->sentCount,
+        ];
     }
 
     private function resolvePlanning(string $stableId): Planning
@@ -104,6 +237,7 @@ final class PlanningPublicationController
     {
         return [
             'publishable' => $preflight->publishable,
+            'republishable' => $preflight->republishable,
             'lines' => array_map($this->lineReadinessToArray(...), $preflight->lines),
             'uncoveredDuties' => array_map($this->uncoveredDutyToArray(...), $preflight->uncoveredDuties),
             'inconsistentGroups' => array_map($this->inconsistentGroupToArray(...), $preflight->inconsistentGroups),

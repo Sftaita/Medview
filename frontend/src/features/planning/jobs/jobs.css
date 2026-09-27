@@ -1,0 +1,68 @@
+/* Engine job banner (docs/decisions.md D149). Prefix job-. Tokens: styles/tokens.css. */
+
+.job-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md, 12px);
+  background: var(--surface-card);
+}
+.job-banner__text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 14px;
+  color: var(--text-body);
+}
+.job-banner__text strong {
+  color: var(--text-strong);
+}
+.job-banner--running {
+  border-color: var(--blue-100);
+  background: var(--blue-50);
+}
+.job-banner--failed {
+  border-color: var(--red-100);
+  background: var(--red-50);
+  color: var(--red-700);
+}
+.job-banner--success {
+  border-color: var(--green-100);
+  background: var(--green-50);
+  color: var(--green-800);
+}
+.job-banner--warning {
+  border-color: var(--amber-100);
+  background: var(--amber-50);
+  color: var(--amber-700);
+}
+
+/* Indeterminate: the solver reports no reliable progress, so none is shown. */
+.job-spinner {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: 3px solid var(--blue-100);
+  border-top-color: var(--blue-600);
+  border-radius: 50%;
+  animation: job-spin 0.9s linear infinite;
+}
+@keyframes job-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .job-spinner {
+    animation-duration: 2.5s;
+  }
+}
+
+@media (max-width: 640px) {
+  .job-banner {
+    flex-wrap: wrap;
+  }
+}

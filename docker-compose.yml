@@ -45,6 +45,30 @@ services:
       database:
         condition: service_healthy
 
+  # Planning generation/completion jobs (docs/decisions.md D149): the backend
+  # image running the Messenger worker. Dev reads the bind-mounted code, but a
+  # long-running PHP process keeps the code it started with: after changing
+  # backend code, `docker compose restart worker`.
+  worker:
+    build:
+      context: ./backend
+    command: ["php", "bin/console", "messenger:consume", "planning_jobs", "--time-limit=3600", "--memory-limit=512M", "-vv"]
+    restart: unless-stopped
+    stop_grace_period: 2m
+    healthcheck:
+      test: ["CMD", "php", "bin/console", "messenger:stats", "planning_jobs"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+      start_period: 30s
+    volumes:
+      - ./backend:/app
+      - backend_vendor:/app/vendor
+      - backend_var:/app/var
+    depends_on:
+      database:
+        condition: service_healthy
+
   frontend:
     build:
       context: ./frontend

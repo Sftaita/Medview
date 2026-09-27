@@ -82,6 +82,11 @@ services:
     # removing this would break them for no real benefit.
     App\Solver\OrToolsPlanningSolver:
         public: true
+    # docs/decisions.md D149: the one heartbeat of the engine worker, shared
+    # (same instance) by the solver's subprocess wait loop and the job
+    # handler that starts/stops it. A no-op outside a worker job.
+    App\Service\WorkHeartbeat:
+        alias: App\Service\PlanningJobHeartbeat
     # Lot 6E (docs/decisions.md D106): the domain must depend on the
     # PlanningSolver *interface*, never OrToolsPlanningSolver directly
     # (docs/decisions.md D031) — PlanningGenerationService type-hints the
@@ -95,3 +100,13 @@ services:
     # same documented exception as every other service in this file.
     App\Service\PlanningGenerationService:
         public: true
+
+when@test:
+    services:
+        # docs/decisions.md D149: the real OR-Tools solver, behind a switch a
+        # test can flip to make a job's solve throw — or run a callback in the
+        # middle of it (a manual edit racing a completion). Never in dev/prod.
+        App\Tests\FaultInjectingPlanningSolver:
+            autowire: true
+        App\Fairness\PlanningSolver:
+            alias: App\Tests\FaultInjectingPlanningSolver

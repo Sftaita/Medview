@@ -205,6 +205,11 @@ déjà `8000` et `5173`). Ajustez `BACKEND_PORT` / `FRONTEND_PORT` /
 ### Commandes utiles
 
 ```bash
+# Worker des calculs de planning (génération / complétion, docs/decisions.md D149) :
+# lancé par `docker compose up`, à redémarrer après toute modification du code backend.
+docker compose restart worker
+docker compose logs -f worker
+
 # Backend
 docker compose exec backend php bin/console <commande>
 docker compose exec backend composer require <package>   # Composer est dans l'image

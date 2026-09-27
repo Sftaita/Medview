@@ -8,6 +8,7 @@ import type {
   GenerationPreflight,
   LaunchLineResult,
   LaunchResult,
+  PlanningJob,
   PreflightIssue,
   RestPolicyChoice,
   StructuralDiagnosticEntry,
@@ -23,10 +24,9 @@ const NO_REST_POLICY: RestPolicyChoice = {
 
 type Props = {
   planningStableId: string
-  timezone: string
   onClose: () => void
-  /** A generation was created: the page refreshes what it shows. */
-  onGenerated: () => void
+  /** The generation was accepted (a QUEUED job, docs/decisions.md D149): the page follows it. */
+  onLaunched: (job: PlanningJob) => void
 }
 
 /**
@@ -36,13 +36,17 @@ type Props = {
  * still pending and a passed deadline only ever produce *warnings*; the
  * button stays available ("Générer quand même"). Only a technical
  * impossibility (no rule set…) blocks, and says so.
+ *
+ * Since docs/decisions.md D149 the confirmation only *requests* the
+ * generation: the server answers at once with a queued job, this dialog
+ * closes, and the page follows the job (PlanningJobBanner) — the solve runs
+ * in the worker, however long it takes.
  */
-export function GenerationModal({ planningStableId, timezone, onClose, onGenerated }: Props) {
+export function GenerationModal({ planningStableId, onClose, onLaunched }: Props) {
   const [preflight, setPreflight] = useState<GenerationPreflight | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [launching, setLaunching] = useState(false)
   const [launchError, setLaunchError] = useState<string | null>(null)
-  const [result, setResult] = useState<LaunchResult | null>(null)
   const [restPolicy, setRestPolicy] = useState<RestPolicyChoice>(NO_REST_POLICY)
   // A ref, not state: two clicks in the same tick both read the state as "idle".
   const inFlight = useRef(false)
@@ -69,8 +73,9 @@ export function GenerationModal({ planningStableId, timezone, onClose, onGenerat
     setLaunching(true)
     setLaunchError(null)
     try {
-      setResult(await launchGeneration(planningStableId, restPolicy))
-      onGenerated()
+      const { job } = await launchGeneration(planningStableId, restPolicy)
+      onLaunched(job)
+      onClose()
     } catch (err) {
       setLaunchError(launchErrorMessage(err))
     } finally {
@@ -85,30 +90,24 @@ export function GenerationModal({ planningStableId, timezone, onClose, onGenerat
 
   return (
     <Overlay
-      title={result ? 'Génération terminée' : 'Générer le planning ?'}
+      title="Générer le planning ?"
       onClose={onClose}
       dismissible={!launching}
       footer={
-        result ? (
-          <button type="button" className="btn btn--primary" onClick={onClose} data-autofocus>
-            Fermer
+        <>
+          <button type="button" className="btn btn--secondary" onClick={onClose} disabled={launching}>
+            Annuler
           </button>
-        ) : (
-          <>
-            <button type="button" className="btn btn--secondary" onClick={onClose} disabled={launching}>
-              Annuler
-            </button>
-            <button
-              type="button"
-              className="btn btn--primary"
-              onClick={generate}
-              disabled={!preflight || !preflight.canGenerate || launching}
-              aria-busy={launching}
-            >
-              {launching ? 'Génération en cours…' : confirmLabel}
-            </button>
-          </>
-        )
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={generate}
+            disabled={!preflight || !preflight.canGenerate || launching}
+            aria-busy={launching}
+          >
+            {launching ? 'Envoi…' : confirmLabel}
+          </button>
+        </>
       }
     >
       {!preflight && !loadError && (
@@ -123,7 +122,7 @@ export function GenerationModal({ planningStableId, timezone, onClose, onGenerat
         </p>
       )}
 
-      {preflight && !result && (
+      {preflight && (
         <PreflightBody
           preflight={preflight}
           restPolicy={restPolicy}
@@ -131,18 +130,12 @@ export function GenerationModal({ planningStableId, timezone, onClose, onGenerat
           disabled={launching}
         />
       )}
-      {launching && (
-        <p role="status" className="muted">
-          La génération peut durer quelques secondes…
-        </p>
-      )}
       {launchError && (
         <p role="alert" className="alert alert--error">
           <Icon name="alert" size={18} strokeWidth={2} />
           <span>{launchError}</span>
         </p>
       )}
-      {result && <ResultBody result={result} timezone={timezone} />}
     </Overlay>
   )
 }
@@ -318,7 +311,8 @@ function RestPolicyFields({
   )
 }
 
-function ResultBody({ result, timezone }: { result: LaunchResult; timezone: string }) {
+/** The per-line result of a finished generation — shown from the job banner's "Voir le détail". */
+export function ResultBody({ result, timezone }: { result: LaunchResult; timezone: string }) {
   return (
     <ul className="preflight-issues" aria-label="Résultat de la génération">
       {result.lines.map((line) => (
@@ -510,8 +504,8 @@ function warningText(issue: PreflightIssue, preflight: GenerationPreflight): str
 function launchErrorMessage(err: unknown): string {
   if (err instanceof ApiError && err.status === 409) {
     const code = (err.body as { error?: string } | null)?.error
-    if (code === 'generation_in_progress') {
-      return 'Une génération de ce planning est déjà en cours. Patientez quelques instants.'
+    if (code === 'job_in_progress') {
+      return 'Une génération ou une complétion de ce planning est déjà en cours.'
     }
     if (code === 'not_launchable') {
       return 'La génération est impossible : un prérequis manque.'

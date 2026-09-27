@@ -26,6 +26,10 @@ final readonly class StatisticsMemberRow
         public array $countsByWeekday,
         public array $countsByFamily,
         public int $total,
+        /** @var array<string, int> keyed by DutyType name — only the types this member really holds (docs/decisions.md D147) */
+        public array $countsByDutyType = [],
+        /** Σ DutyType::workloadValue over this member's current duties — the domain's own "charge pondérée", never a new formula. */
+        public float $weightedLoad = 0.0,
     ) {
     }
 }

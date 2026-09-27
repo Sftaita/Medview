@@ -153,6 +153,35 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
   return responseBody as T
 }
 
+/**
+ * A binary GET (e.g. a PDF) with the same auth and one-shot refresh as
+ * apiFetch — the browser cannot attach the JWT to a plain link.
+ */
+export async function apiFetchBlob(path: string, _isRetry = false): Promise<Blob> {
+  const headers = new Headers()
+  const token = getStoredToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, { headers, credentials: 'include' })
+  if (response.status === 401 && !_isRetry) {
+    try {
+      await refreshAccessToken()
+    } catch {
+      clearStoredToken()
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
+      throw new ApiError(401, null, 'Session expired, please log in again.')
+    }
+    return apiFetchBlob(path, true)
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, null, `Request failed with status ${response.status}`)
+  }
+
+  return response.blob()
+}
+
 export type HealthStatus = {
   status: 'ok' | 'error'
   database: 'ok' | 'error'

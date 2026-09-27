@@ -103,6 +103,8 @@ final class PlanningStatisticsController
             'countsByWeekday' => $row->countsByWeekday,
             'countsByFamily' => $row->countsByFamily,
             'total' => $row->total,
+            'countsByDutyType' => $row->countsByDutyType,
+            'weightedLoad' => $row->weightedLoad,
         ];
     }
 }

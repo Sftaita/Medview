@@ -13,6 +13,7 @@ afterEach(() => {
 function preflight(overrides: Partial<PublicationPreflight> = {}): PublicationPreflight {
   return {
     publishable: true,
+    republishable: true,
     lines: [{ lineStableId: 'l1', lineName: 'Seniors', periodStatus: 'GENERATED', hasGeneration: true }],
     uncoveredDuties: [],
     inconsistentGroups: [],
@@ -25,6 +26,14 @@ function preflight(overrides: Partial<PublicationPreflight> = {}): PublicationPr
 function publicationResult(overrides: Partial<PublicationResult> = {}): PublicationResult {
   return {
     lines: [{ lineStableId: 'l1', lineName: 'Seniors', periodStatus: 'PUBLISHED', alreadyPublished: false }],
+    publication: {
+      stableId: 'p1',
+      kind: 'FIRST',
+      publishedAt: '2027-01-02T10:00:00+00:00',
+      changedDutyCount: 0,
+    },
+    recipientCount: 3,
+    sentCount: 3,
     ...overrides,
   }
 }

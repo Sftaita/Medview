@@ -59,6 +59,8 @@ final readonly class OptimizationProblem
      * @param list<AssignmentConflict>               $assignmentConflicts    docs/decisions.md D100
      * @param int|null                               $timeoutSeconds         per-Solve()-call CP-SAT budget (docs/decisions.md D106); `null` only for legacy/direct test construction that does not care — never a real production value
      * @param int                                    $numWorkers             CP-SAT `num_search_workers`; `1` is required for determinism (docs/planning-solver.md §20)
+     * @param array<string, string>                  $fixedAssignments       docs/decisions.md D145 — DutyUnit stableKey → sourceTeamMemberStableId the solve must keep exactly as is ("Compléter automatiquement": every assignment already in the current calendar). A fixed unit is never a decision, whatever the snapshot's eligibility said about that pair.
+     * @param list<DutyAssignmentEdge>               $excludedEdges          docs/decisions.md D145 — pairs forbidden on top of the snapshot's eligibility (a live reason found since the snapshot was taken)
      */
     public function __construct(
         private OptimizationMode $mode,
@@ -74,7 +76,61 @@ final readonly class OptimizationProblem
         private array $assignmentConflicts,
         private ?int $timeoutSeconds = null,
         private int $numWorkers = 1,
+        private array $fixedAssignments = [],
+        private array $excludedEdges = [],
     ) {
+    }
+
+    /**
+     * The same problem, constrained to keep $fixedAssignments and never use
+     * $excludedEdges (docs/decisions.md D145) — everything else (demand,
+     * targets, dimensions, conflicts, phases) is exactly what the
+     * generation's snapshot produced, never recomputed.
+     *
+     * @param array<string, string>    $fixedAssignments
+     * @param list<DutyAssignmentEdge> $excludedEdges
+     */
+    public function withFixedAssignments(array $fixedAssignments, array $excludedEdges): self
+    {
+        return new self(
+            $this->mode,
+            $this->requiredDutyUnits,
+            $this->optionalDutyUnits,
+            $this->requiredDemand,
+            $this->eligibilityMatrix,
+            $this->structurallyForcedLoad,
+            $this->fairnessTargets,
+            $this->dimensionMembership,
+            $this->coveragePolicy,
+            $this->objectivePhases,
+            $this->assignmentConflicts,
+            $this->timeoutSeconds,
+            $this->numWorkers,
+            $fixedAssignments,
+            $excludedEdges,
+        );
+    }
+
+    /** The candidate a unit is fixed to, or null when the unit is a real decision of this solve. */
+    public function getFixedAssignee(string $dutyUnitStableKey): ?string
+    {
+        return $this->fixedAssignments[$dutyUnitStableKey] ?? null;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function getFixedAssignments(): array
+    {
+        return $this->fixedAssignments;
+    }
+
+    /**
+     * @return list<DutyAssignmentEdge>
+     */
+    public function getExcludedEdges(): array
+    {
+        return $this->excludedEdges;
     }
 
     public function getMode(): OptimizationMode

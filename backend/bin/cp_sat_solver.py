@@ -61,6 +61,20 @@ def build_model(payload):
             variables[(unit_key, candidate_id)] = var
             unit_vars.append(var)
 
+        fixed_candidate = unit.get("fixedCandidateId")
+        if fixed_candidate is not None:
+            # docs/decisions.md D145 ("Compléter automatiquement"): an
+            # assignment already in the current calendar is kept exactly as
+            # is — a fact of this solve, never a decision. PHP only ever
+            # emits the fixed candidate as the unit's single eligible one.
+            if (unit_key, fixed_candidate) not in variables:
+                raise ValueError(
+                    f"dutyUnit {unit_key} is fixed to {fixed_candidate}, which is not "
+                    "one of its eligibleCandidates — the PHP payload builder must "
+                    "always emit the fixed candidate as eligible."
+                )
+            model.Add(variables[(unit_key, fixed_candidate)] == 1)
+
         if unit["required"]:
             if partial:
                 # docs/allocation-algorithm.md §10: Σx[d][c] + unassigned[d] = 1

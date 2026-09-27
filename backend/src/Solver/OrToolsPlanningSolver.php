@@ -19,6 +19,7 @@ use App\Fairness\SolverStatus;
 use App\Fairness\UnassignedDutyUnit;
 use App\Fairness\UnsatDiagnostics;
 use App\Service\UnsatDiagnosticsBuilder;
+use App\Service\WorkHeartbeat;
 use Symfony\Component\Process\Exception\ProcessTimedOutException;
 use Symfony\Component\Process\Process;
 
@@ -52,6 +53,7 @@ final class OrToolsPlanningSolver implements PlanningSolver
         private readonly UnsatDiagnosticsBuilder $diagnosticsBuilder,
         private readonly string $pythonBinary = '/opt/ortools-venv/bin/python3',
         private readonly string $scriptPath = __DIR__.'/../../bin/cp_sat_solver.py',
+        private readonly ?WorkHeartbeat $heartbeat = null,
     ) {
     }
 
@@ -343,7 +345,14 @@ final class OrToolsPlanningSolver implements PlanningSolver
         $process->setInput(json_encode($payload, \JSON_THROW_ON_ERROR));
 
         try {
-            $process->run();
+            // start() + a polling wait instead of run(): the worker keeps signalling it is alive while
+            // CP-SAT works, which can legitimately take minutes (docs/decisions.md D149).
+            $process->start();
+            while ($process->isRunning()) {
+                $process->checkTimeout();
+                $this->heartbeat?->beat();
+                usleep(100_000);
+            }
         } catch (ProcessTimedOutException) {
             // The subprocess itself hung well past every CP-SAT call's own
             // max_time_in_seconds — a genuine technical failure, mapped to

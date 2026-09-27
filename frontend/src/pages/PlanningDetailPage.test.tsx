@@ -68,6 +68,7 @@ function renderPage(detail: PlanningDetail = planning(), extra: Record<string, A
     'GET /api/plannings/plan-1': () => detail,
     'GET /api/plannings/plan-1/collection-status': () => makeStatus(),
     'GET /api/plannings/plan-1/availability-collections': () => [],
+    'GET /api/plannings/plan-1/jobs/latest': () => ({ job: null }),
     ...extra,
   })
   render(
@@ -177,10 +178,11 @@ describe('PlanningDetailPage — steps and tabs', () => {
     expect(screen.getByRole('tab', { name: 'Planning' })).toBeInTheDocument()
   })
 
-  it('shows the per-person planning once a line is generated, instead of the empty state', async () => {
+  it('shows the calendar once a line is generated (docs/decisions.md D148), and the per-person view on demand', async () => {
     const failing = () => httpStatus(500)
     renderPage(planning({ lines: [line({ periodStatus: 'GENERATED' })] }), {
       'GET /api/plannings/plan-1/result': failing,
+      'GET /api/plannings/plan-1/publication-state': failing,
       'GET /api/plannings/plan-1/assignments': failing,
       'GET /api/plannings/plan-1/statistics': failing,
       'GET /api/plannings/plan-1/teams/team-1/members': () => [],
@@ -191,8 +193,11 @@ describe('PlanningDetailPage — steps and tabs', () => {
     expect(within(steps).getByText('Planning généré')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: 'Planning' }))
-    expect(await screen.findByRole('region', { name: 'Planning par personne' })).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: 'Calendrier du planning' })).toBeInTheDocument()
     expect(screen.queryByText('Pas encore de planning')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Par personne' }))
+    expect(await screen.findByRole('region', { name: 'Planning par personne' })).toBeInTheDocument()
   })
 
   it('opens the same generation dialog from the empty Planning tab', async () => {
@@ -297,6 +302,64 @@ describe('PlanningDetailPage — lines', () => {
     )
   })
 
+  it('lets the creator grant and withdraw the right to manage the planning (docs/decisions.md D147)', async () => {
+    const api = renderPage(planning(), {
+      'GET /api/plannings/plan-1/teams/team-1/members': () => [
+        {
+          stableId: 'mem-1',
+          firstName: 'Camille',
+          lastName: 'Dupont',
+          role: 'OWNER',
+          membershipStart: '2026-10-01',
+          membershipEnd: null,
+        },
+        {
+          stableId: 'mem-2',
+          firstName: 'Léo',
+          lastName: 'Martin',
+          role: 'MEMBER',
+          membershipStart: '2026-10-01',
+          membershipEnd: null,
+        },
+        {
+          stableId: 'mem-3',
+          firstName: 'Zoé',
+          lastName: 'Petit',
+          role: 'ADMIN',
+          membershipStart: '2026-10-01',
+          membershipEnd: null,
+        },
+      ],
+      'GET /api/plannings/plan-1/teams/team-1/invitations': () => [],
+      'PUT /api/plannings/plan-1/teams/team-1/members/mem-2/role': () => ({}),
+      'PUT /api/plannings/plan-1/teams/team-1/members/mem-3/role': () => ({}),
+    })
+
+    const lines = await screen.findByRole('list', { name: 'Lignes de garde' })
+    fireEvent.click(within(lines).getAllByRole('button', { name: 'Membres' })[0])
+    const dialog = screen.getByRole('dialog', { name: 'Membres · Première ligne' })
+
+    expect(await within(dialog).findByText('Léo Martin')).toBeInTheDocument()
+    expect(within(dialog).getByText('Gestionnaire', { selector: '.tag' })).toBeInTheDocument()
+    expect(within(dialog).queryByRole('button', { name: /Camille Dupont/ })).not.toBeInTheDocument()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Rendre gestionnaire Léo Martin' }))
+    await waitFor(() =>
+      expect(api.requests('PUT', '/api/plannings/plan-1/teams/team-1/members/mem-2/role')[0]?.body).toEqual({
+        role: 'ADMIN',
+      }),
+    )
+
+    const withdraw = within(dialog).getByRole('button', { name: 'Retirer le droit de gestion à Zoé Petit' })
+    await waitFor(() => expect(withdraw).toBeEnabled())
+    fireEvent.click(withdraw)
+    await waitFor(() =>
+      expect(api.requests('PUT', '/api/plannings/plan-1/teams/team-1/members/mem-3/role')[0]?.body).toEqual({
+        role: 'MEMBER',
+      }),
+    )
+  })
+
   it("draws the current user's initials apart among a line's members", async () => {
     renderPage(planning(), {
       'GET /api/plannings/plan-1/collection-status': () =>
@@ -306,6 +369,161 @@ describe('PlanningDetailPage — lines', () => {
     const lines = await screen.findByRole('list', { name: 'Lignes de garde' })
     await waitFor(() => expect(lines.querySelectorAll('.pd-face')).toHaveLength(2))
     expect(lines.querySelector('.pd-face.pd-avatar-me')).toHaveTextContent('CD')
+  })
+})
+
+describe('PlanningDetailPage — engine jobs (docs/decisions.md D149)', () => {
+  function job(overrides: Record<string, unknown> = {}) {
+    return {
+      stableId: 'job-1',
+      kind: 'GENERATE',
+      status: 'RUNNING',
+      requestedBy: { firstName: 'Camille', lastName: 'Dupont' },
+      createdAt: '2026-09-27T10:00:00+00:00',
+      startedAt: '2026-09-27T10:00:01+00:00',
+      finishedAt: null,
+      failureCode: null,
+      outcome: null,
+      ...overrides,
+    }
+  }
+
+  it('finds a generation still running when coming back to the page, and blocks a second launch', async () => {
+    renderPage(planning(), { 'GET /api/plannings/plan-1/jobs/latest': () => ({ job: job() }) })
+
+    expect(await screen.findByRole('status', { name: 'Calcul en cours' })).toHaveTextContent(
+      'Génération du planning en cours…',
+    )
+    expect(screen.getByRole('button', { name: 'Générer le planning' })).toBeDisabled()
+  })
+
+  it('launches a generation: the dialog closes at once and the page shows it running', async () => {
+    const queued = job({ status: 'QUEUED', startedAt: null })
+    let latest: unknown = null
+    const api = renderPage(planning(), {
+      'GET /api/plannings/plan-1/jobs/latest': () => ({ job: latest }),
+      'GET /api/plannings/plan-1/generation-preflight': () => makePreflight(),
+      'POST /api/plannings/plan-1/generations': () => {
+        latest = queued
+        return httpStatus(202, { job: queued })
+      },
+    })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Générer le planning' }))
+    const dialog = await screen.findByRole('dialog')
+    const confirm = await within(dialog).findByRole('button', { name: /Générer/ })
+    await waitFor(() => expect(confirm).toBeEnabled())
+    fireEvent.click(confirm)
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(await screen.findByRole('status', { name: 'Calcul en cours' })).toHaveTextContent(
+      'En attente de démarrage.',
+    )
+    expect(api.requests('POST', '/api/plannings/plan-1/generations')).toHaveLength(1)
+  })
+
+  it('shows a failed generation with "Relancer", which reopens the generation dialog', async () => {
+    renderPage(planning(), {
+      'GET /api/plannings/plan-1/jobs/latest': () => ({
+        job: job({ status: 'FAILED', failureCode: 'unexpected_error' }),
+      }),
+      'GET /api/plannings/plan-1/generation-preflight': () => makePreflight(),
+    })
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('La génération du planning a échoué.')
+    fireEvent.click(within(alert).getByRole('button', { name: 'Relancer' }))
+    expect(await screen.findByRole('dialog', { name: 'Générer le planning ?' })).toBeInTheDocument()
+  })
+
+  it('no longer offers "Générer le planning" once the planning is published', async () => {
+    renderPage(
+      planning({
+        lines: [
+          line({ periodStatus: 'PUBLISHED' }),
+          line({ stableId: 'line-2', type: 'SECONDARY', periodStatus: 'PUBLISHED' }),
+        ],
+      }),
+    )
+
+    expect(await screen.findByText('Publié', { selector: '.pd-badge' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Générer le planning' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Plus d’actions' })).toBeInTheDocument()
+  })
+
+  it('completes a published planning with a hole asynchronously, and keeps "Republier" as it was', async () => {
+    const queued = job({ kind: 'COMPLETE', status: 'QUEUED', startedAt: null })
+    let latest: unknown = null
+    const duty = {
+      dutyStableId: 'd-1',
+      date: '2026-10-05',
+      startsAt: '2026-10-05T08:00:00+02:00',
+      endsAt: '2026-10-05T20:00:00+02:00',
+      timezone: 'Europe/Brussels',
+      dutyType: { stableId: 't', code: 'G', name: 'Garde' },
+      required: true,
+      grouped: false,
+      groupInstanceStableId: null,
+      groupLabel: null,
+      groupDates: null,
+      covered: false,
+      assignment: null,
+      reasons: [],
+    }
+    const api = renderPage(
+      planning({
+        canManageCalendar: true,
+        canPublish: true,
+        lines: [line({ periodStatus: 'PUBLISHED' })],
+      }),
+      {
+        'GET /api/plannings/plan-1/jobs/latest': () => ({ job: latest }),
+        'GET /api/plannings/plan-1/result': () => ({
+          planningStableId: 'plan-1',
+          lines: [
+            {
+              lineStableId: 'line-1',
+              lineName: 'Première ligne',
+              lineType: 'PRIMARY',
+              generationStableId: 'g-1',
+              generatedAt: null,
+              coverageStatus: 'INCOMPLETE',
+              requiredDutyCount: 1,
+              coveredRequiredDutyCount: 0,
+              uncoveredRequiredDutyCount: 1,
+              duties: [duty],
+            },
+          ],
+        }),
+        'GET /api/plannings/plan-1/publication-state': () => ({
+          published: true,
+          firstPublishedAt: '2026-09-27T08:00:00+00:00',
+          lastPublishedAt: '2026-09-27T08:00:00+00:00',
+          lastPublishedBy: null,
+          hasUnpublishedChanges: false,
+          changes: [],
+          history: [],
+        }),
+        'POST /api/plannings/plan-1/complete': () => {
+          latest = queued
+          return httpStatus(202, { job: queued })
+        },
+      },
+    )
+
+    fireEvent.click(await screen.findByRole('tab', { name: 'Planning' }))
+    const complete = await screen.findByRole('button', { name: 'Compléter automatiquement' })
+    expect(screen.getByRole('button', { name: 'Republier les modifications' })).toBeDisabled()
+    await waitFor(() => expect(complete).toBeEnabled())
+    fireEvent.click(complete)
+
+    expect(await screen.findByRole('status', { name: 'Calcul en cours' })).toHaveTextContent(
+      'Complétion du planning en cours…',
+    )
+    expect(api.requests('POST', '/api/plannings/plan-1/complete')).toHaveLength(1)
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Compléter automatiquement' })).toBeDisabled(),
+    )
   })
 })
 

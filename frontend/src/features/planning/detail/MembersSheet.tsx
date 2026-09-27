@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Field } from '../../../components/Field'
 import { Icon } from '../../../components/Icon'
 import { ApiError } from '../../../lib/apiClient'
-import { addTeamMember, endTeamMembership, fetchTeamMembers } from '../api'
+import { addTeamMember, changeTeamMemberRole, endTeamMembership, fetchTeamMembers } from '../api'
 import { TeamInvitePanel } from '../TeamInvitePanel'
 import type { PlanningLineSummary, PlanningTeamMember } from '../types'
 import { Sheet } from './Sheet'
@@ -19,9 +19,11 @@ type Props = {
   onChanged: () => void
 }
 
+// ADMIN is what makes someone a manager of the whole planning (docs/decisions.md D147): calendar,
+// completion, statistics, generation, publication — named for what it does here.
 const ROLE_TAG: Record<Role, { label: string; tone: string }> = {
   OWNER: { label: 'Propriétaire', tone: 'tag--green' },
-  ADMIN: { label: 'Admin', tone: 'tag--blue' },
+  ADMIN: { label: 'Gestionnaire', tone: 'tag--blue' },
   MEMBER: { label: 'Membre', tone: '' },
 }
 
@@ -62,6 +64,19 @@ export function MembersSheet({ planningStableId, line, canManage, onClose, onCha
       changed()
     } catch {
       setError('Impossible de mettre fin à cette adhésion.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleRole(memberStableId: string, next: 'ADMIN' | 'MEMBER') {
+    setSaving(true)
+    setError(null)
+    try {
+      await changeTeamMemberRole(planningStableId, teamStableId, memberStableId, next)
+      changed()
+    } catch {
+      setError('Impossible de modifier le droit de gestion de ce membre.')
     } finally {
       setSaving(false)
     }
@@ -114,6 +129,17 @@ export function MembersSheet({ planningStableId, line, canManage, onClose, onCha
                   {member.membershipEnd ? ` Adhésion terminée le ${member.membershipEnd}` : ''}
                 </span>
               </div>
+              {canManage && !member.membershipEnd && member.role !== 'OWNER' && (
+                <button
+                  type="button"
+                  className="pd-btn pd-btn-ghost"
+                  onClick={() => handleRole(member.stableId, member.role === 'ADMIN' ? 'MEMBER' : 'ADMIN')}
+                  disabled={saving}
+                  aria-label={`${member.role === 'ADMIN' ? 'Retirer le droit de gestion à' : 'Rendre gestionnaire'} ${member.firstName} ${member.lastName}`}
+                >
+                  {member.role === 'ADMIN' ? 'Retirer la gestion' : 'Rendre gestionnaire'}
+                </button>
+              )}
               {canManage && !member.membershipEnd && (
                 <button
                   type="button"
@@ -168,7 +194,7 @@ export function MembersSheet({ planningStableId, line, canManage, onClose, onCha
               onChange={(event) => setRole(event.target.value as Role)}
             >
               <option value="MEMBER">Membre</option>
-              <option value="ADMIN">Admin</option>
+              <option value="ADMIN">Gestionnaire</option>
               <option value="OWNER">Propriétaire</option>
             </select>
           </div>

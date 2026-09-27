@@ -12,11 +12,14 @@ use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
 use Symfony\Component\Security\Core\Authorization\Voter\Voter;
 
 /**
- * Planning ownership (docs/planning.md §Autorisations, D071) — deliberately
- * separate from PlanningTeamRoleVoter: a PlanningTeam's OWNER/ADMIN role
- * grants no right over a Planning they did not create, even if their team
- * powers one of its PlanningLines. No collaborator/co-owner concept exists
- * yet — v1 has exactly one manager per Planning, its creator.
+ * Planning-level authorization (docs/planning.md §Autorisations, D071) —
+ * deliberately separate from PlanningTeamRoleVoter. MANAGE (the Planning's
+ * structure: rename, lines, members, extension) stays the creator's alone.
+ * Every day-to-day management attribute below (availability follow-up,
+ * generation, calendar, publication, line structure, rules) is shared by
+ * the creator and any open OWNER/ADMIN of one of the Planning's teams: ADMIN
+ * *is* the "gestionnaire du planning", a right the creator grants or
+ * withdraws (PUT .../members/{id}/role, docs/decisions.md D147).
  */
 final class PlanningVoter extends Voter
 {

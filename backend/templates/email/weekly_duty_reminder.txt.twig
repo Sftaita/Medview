@@ -1,0 +1,13 @@
+Vos gardes de la semaine prochaine
+
+Bonjour {{ firstName }},
+
+Voici vos gardes de la semaine prochaine ({{ planningName }}, {{ weekLabel|lower }}) :
+{% for item in items %}
+- {{ item.when }} — {{ item.what }}
+{% endfor %}
+
+Ce récapitulatif reflète le planning tel qu'il est au moment de l'envoi :
+{{ planningUrl }}
+
+L'équipe MedVue

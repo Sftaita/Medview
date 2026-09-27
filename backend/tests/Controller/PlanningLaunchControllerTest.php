@@ -52,7 +52,17 @@ final class PlanningLaunchControllerTest extends WebTestCase
      */
     private function launch(\Symfony\Bundle\FrameworkBundle\KernelBrowser $client, array $s, ?string $token = null): array
     {
-        return $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $token ?? $s['creator']);
+        // Asynchronous since docs/decisions.md D149: 202 + a queued job, run here by "the worker";
+        // returns the finished job's outcome (its per-line `lines`, as the synchronous launch used to),
+        // or the refusal body when the request itself was refused.
+        $response = $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $token ?? $s['creator']);
+        if (202 !== $client->getResponse()->getStatusCode()) {
+            return $response;
+        }
+        $this->runQueuedPlanningJobs();
+        $job = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/jobs/latest", token: $token ?? $s['creator'])['job'];
+
+        return ($job['outcome'] ?? []) + ['job' => $job];
     }
 
     /**
@@ -189,7 +199,7 @@ final class PlanningLaunchControllerTest extends WebTestCase
 
         $result = $this->launch($client, $s, $s['admin']);
 
-        self::assertResponseStatusCodeSame(201);
+        self::assertResponseIsSuccessful();
         self::assertCount(1, $result['lines']);
         $line = $result['lines'][0];
         self::assertSame('COMPLETED', $line['status']);
@@ -223,7 +233,7 @@ final class PlanningLaunchControllerTest extends WebTestCase
         $late = $this->declareRange($client, $s['bob'], '2027-02-10', '2027-02-12');
 
         $first = $this->launch($client, $s);
-        self::assertResponseStatusCodeSame(201);
+        self::assertResponseIsSuccessful();
         $firstGeneration = $first['lines'][0]['generationStableId'];
         self::assertSame(1, $first['lines'][0]['snapshot']['unavailableCount'], 'The absence added after the deadline is in the snapshot.');
 
@@ -251,7 +261,7 @@ final class PlanningLaunchControllerTest extends WebTestCase
 
         // A new generation reflects the new state; the old one stays, untouched.
         $second = $this->launch($client, $s);
-        self::assertResponseStatusCodeSame(201);
+        self::assertResponseIsSuccessful();
         self::assertSame(2, $second['lines'][0]['snapshot']['unavailableCount']);
         self::assertNotSame($firstGeneration, $second['lines'][0]['generationStableId']);
         self::assertSame($before['members'], $this->snapshotOf($client, $s, $firstGeneration)['members']);
@@ -315,7 +325,7 @@ final class PlanningLaunchControllerTest extends WebTestCase
         self::assertGreaterThan(0, $preflight['lines'][0]['dutyCount']);
 
         $result = $this->launch($client, $s);
-        self::assertResponseStatusCodeSame(201);
+        self::assertResponseIsSuccessful();
         self::assertSame('COMPLETED', $result['lines'][0]['status']);
         self::assertGreaterThan(0, $result['lines'][0]['assignmentCount']);
 
@@ -339,13 +349,13 @@ final class PlanningLaunchControllerTest extends WebTestCase
         $s = $this->pilotScenario($client);
         $this->prepareGeneration($s['planningId']);
 
-        $result = $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [
+        $result = $this->generateNow($client, $s['planningId'], $s['creator'], [
             'legalMinRestEnabled' => true,
             'legalMinRestHours' => 11,
             'teamMinRestEnabled' => true,
             'teamMinRestHours' => 14,
-        ], token: $s['creator']);
-        self::assertResponseStatusCodeSame(201);
+        ])['outcome'];
+        self::assertResponseIsSuccessful();
 
         $generation = $this->api($client, 'GET', "/api/planning-generations/{$result['lines'][0]['generationStableId']}", token: $s['admin']);
         self::assertResponseIsSuccessful();
@@ -363,7 +373,7 @@ final class PlanningLaunchControllerTest extends WebTestCase
         $this->prepareGeneration($s['planningId']);
 
         $result = $this->launch($client, $s);
-        self::assertResponseStatusCodeSame(201);
+        self::assertResponseIsSuccessful();
 
         $generation = $this->api($client, 'GET', "/api/planning-generations/{$result['lines'][0]['generationStableId']}", token: $s['admin']);
         self::assertFalse($generation['restPolicy']['legalMinRest']['enabled']);
@@ -392,7 +402,7 @@ final class PlanningLaunchControllerTest extends WebTestCase
         $s = $this->pilotScenario($client);
         $this->prepareGeneration($s['planningId']);
         $this->launch($client, $s);
-        self::assertResponseStatusCodeSame(201);
+        self::assertResponseIsSuccessful();
 
         $this->transitionPeriod($s['planningId'], PlanningPeriodStatus::VALIDATED);
         // While VALIDATED, generating again is allowed but warned about.
@@ -420,18 +430,18 @@ final class PlanningLaunchControllerTest extends WebTestCase
             self::assertTrue((bool) $other->fetchOne('SELECT pg_try_advisory_lock(7351, ?)', [$planningId]));
 
             $refused = $this->launch($client, $s);
-            self::assertResponseStatusCodeSame(409);
-            self::assertSame('generation_in_progress', $refused['error']);
+            self::assertSame('FAILED', $refused['job']['status']);
+            self::assertSame('engine_busy', $refused['job']['failureCode']);
         } finally {
             $other->fetchOne('SELECT pg_advisory_unlock(7351, ?)', [$planningId]);
             $other->close();
         }
 
-        // Once it is released, the launch goes through — the lock was released by the refused call's owner only.
+        // Once it is released, a relaunch goes through — the failed job never blocks the planning.
         $this->launch($client, $s);
-        self::assertResponseStatusCodeSame(201);
+        self::assertResponseIsSuccessful();
         // …and is released again after a successful launch: a later launch is not stuck.
         $this->launch($client, $s);
-        self::assertResponseStatusCodeSame(201);
+        self::assertResponseIsSuccessful();
     }
 }

@@ -95,7 +95,7 @@ final class PlanningStatisticsService
         }
         $familyKeys = array_keys($familyNames);
 
-        /** @var array<int, array{member: PlanningTeamMember, weekday: array<string, int>, family: array<string, int>}> $byMemberId */
+        /** @var array<int, array{member: PlanningTeamMember, weekday: array<string, int>, family: array<string, int>, dutyType: array<string, int>, weightedLoad: float}> $byMemberId */
         $byMemberId = [];
         foreach ($assignments as $assignment) {
             $member = $assignment->getTeamMember();
@@ -105,6 +105,8 @@ final class PlanningStatisticsService
                     'member' => $member,
                     'weekday' => array_fill_keys(self::WEEKDAYS, 0),
                     'family' => array_fill_keys($familyKeys, 0),
+                    'dutyType' => [],
+                    'weightedLoad' => 0.0,
                 ];
             }
             // ISO-8601 weekday: 1 = Monday .. 7 = Sunday — each constituent Duty of a
@@ -112,6 +114,11 @@ final class PlanningStatisticsService
             $weekday = self::WEEKDAYS[((int) $assignment->getDuty()->getLocalDate()->format('N')) - 1];
             ++$byMemberId[$memberId]['weekday'][$weekday];
             ++$byMemberId[$memberId]['family'][$assignment->getDuty()->getAllocationFamily()?->getName() ?? ''];
+            // docs/decisions.md D147: the duty type's own real weight (DutyType::workloadValue), per
+            // constituent Duty — the same "charge pondérée" the per-person summary already shows.
+            $dutyType = $assignment->getDuty()->getDutyType();
+            $byMemberId[$memberId]['dutyType'][$dutyType->getName()] = ($byMemberId[$memberId]['dutyType'][$dutyType->getName()] ?? 0) + 1;
+            $byMemberId[$memberId]['weightedLoad'] += $dutyType->getWorkloadValue();
         }
 
         $rows = [];
@@ -124,6 +131,8 @@ final class PlanningStatisticsService
                 $entry['weekday'],
                 $entry['family'],
                 array_sum($entry['weekday']),
+                $entry['dutyType'],
+                round($entry['weightedLoad'], 2),
             );
         }
 

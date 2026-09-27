@@ -75,7 +75,7 @@ final class PlanningStatisticsControllerTest extends WebTestCase
         $client = static::createClient();
         $s = $this->pilotScenario($client);
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-06'], ['2027-01-06', '2027-01-07']]);
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
 
         $stats = $this->statistics($client, $s);
 
@@ -92,7 +92,7 @@ final class PlanningStatisticsControllerTest extends WebTestCase
         foreach (['admin', 'alice'] as $who) {
             $this->declareRange($client, $s[$who], '2027-01-05', '2027-01-07');
         }
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
 
         $stats = $this->statistics($client, $s);
         $lineId = $stats['currentPeriod']['groups'][0]['groupStableId'];
@@ -111,7 +111,7 @@ final class PlanningStatisticsControllerTest extends WebTestCase
         $s = $this->pilotScenario($client);
         // Saturday 2027-01-09 + Sunday 2027-01-10.
         $this->prepareBlockGeneration($s['planningId'], '2027-01-09', '2027-01-09', '2027-01-10', '2027-01-10', '2027-01-11');
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
 
         $stats = $this->statistics($client, $s);
         $lineId = $stats['currentPeriod']['groups'][0]['groupStableId'];
@@ -154,7 +154,7 @@ final class PlanningStatisticsControllerTest extends WebTestCase
         foreach (['admin', 'alice'] as $who) {
             $this->declareRange($client, $s[$who], '2027-01-05', '2027-01-07');
         }
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
 
         $stats = $this->statistics($client, $s);
         $lineId = $stats['currentPeriod']['groups'][0]['groupStableId'];
@@ -174,7 +174,7 @@ final class PlanningStatisticsControllerTest extends WebTestCase
         $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/lines", ['name' => 'Renfort'], $s['creator']);
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-06']], lineIndex: 0);
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-06']], lineIndex: 1);
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
 
         $stats = $this->statistics($client, $s);
         // The second line has no members at all (never generated members for it) — real INCOMPLETE, no group entry with 0 rows expected beyond an empty members array.
@@ -189,7 +189,7 @@ final class PlanningStatisticsControllerTest extends WebTestCase
         $client = static::createClient();
         $s1 = $this->pilotScenario($client);
         $this->prepareGeneration($s1['planningId'], [['2027-01-05', '2027-01-06']]);
-        $this->api($client, 'POST', "/api/plannings/{$s1['planningId']}/generations", [], $s1['creator']);
+        $this->generateNow($client, $s1['planningId'], $s1['creator']);
 
         // A second, wholly independent planning.
         $creator2 = $this->userToken($client, 'creator2@example.com');
@@ -197,7 +197,7 @@ final class PlanningStatisticsControllerTest extends WebTestCase
         $s2 = ['planningId' => $planningId2, 'teamId' => $teamId2, 'creator' => $creator2];
         $this->prepareGeneration($planningId2, [['2027-01-05', '2027-01-06']]);
         // No member at all for planning 2's line: a real INCOMPLETE outcome, no candidate to assign.
-        $this->api($client, 'POST', "/api/plannings/{$planningId2}/generations", [], $creator2);
+        $this->generateNow($client, $planningId2, $creator2);
 
         $stats1 = $this->statistics($client, $s1);
         $stats2 = $this->api($client, 'GET', "/api/plannings/{$planningId2}/statistics", token: $creator2);
@@ -210,7 +210,7 @@ final class PlanningStatisticsControllerTest extends WebTestCase
         $client = static::createClient();
         $s = $this->pilotScenario($client);
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-06']]);
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
 
         $before = $this->statistics($client, $s);
         $lineId = $before['currentPeriod']['groups'][0]['groupStableId'];
@@ -220,7 +220,7 @@ final class PlanningStatisticsControllerTest extends WebTestCase
         $view = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/duties/{$dutyStableId}/reassignment-candidates", token: $s['creator']);
         $newMemberId = null;
         foreach ($view['candidates'] as $candidate) {
-            if ($candidate['selectable'] && $candidate['teamMemberStableId'] !== $originalMemberId) {
+            if ($candidate['teamMemberStableId'] !== $originalMemberId) {
                 $newMemberId = $candidate['teamMemberStableId'];
                 break;
             }
@@ -248,9 +248,9 @@ final class PlanningStatisticsControllerTest extends WebTestCase
         $client = static::createClient();
         $s = $this->pilotScenario($client);
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-06']]);
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
         // Regenerate a second time for the very same line/period.
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
 
         $stats = $this->statistics($client, $s);
         $total = array_sum(array_column($stats['currentPeriod']['groups'][0]['members'], 'total'));
@@ -274,7 +274,7 @@ final class PlanningStatisticsControllerTest extends WebTestCase
         $client = static::createClient();
         $s = $this->pilotScenario($client);
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-06']]);
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
 
         $stats = $this->statistics($client, $s);
 
@@ -289,7 +289,7 @@ final class PlanningStatisticsControllerTest extends WebTestCase
         $client = static::createClient();
         $s = $this->pilotScenario($client);
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-06']]);
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
 
         $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/statistics", token: $s['outsider']);
         self::assertResponseStatusCodeSame(403);

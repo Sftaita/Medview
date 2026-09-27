@@ -18,6 +18,7 @@ use App\Exception\StalePlanningGenerationDataException;
 use App\Fairness\CoverageStatus;
 use App\Fairness\OptimizationResult;
 use App\Repository\PlanningGenerationRepository;
+use App\Repository\PlanningJobRepository;
 use App\Repository\PlanningPeriodRepository;
 use App\Repository\PlanningSnapshotRepository;
 use App\Repository\PlanningSnapshotRuleSetRepository;
@@ -53,6 +54,7 @@ final class PlanningGenerationController
         private readonly UnsatReportPresenter $unsatReportPresenter,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
         private readonly RestPolicyRequestParser $restPolicyParser,
+        private readonly PlanningJobRepository $jobRepository,
     ) {
     }
 
@@ -128,12 +130,23 @@ final class PlanningGenerationController
      * business logic here is authorization + status-code mapping;
      * everything else lives in `PlanningGenerationService::generate()`
      * (CLAUDE.md: "aucune logique métier dans les contrôleurs").
+     *
+     * Technical endpoint since D149: no screen calls it (the UI queues a
+     * PlanningJob run by the worker). Refused while the planning has an
+     * active job; a request of it cut by the web time limit leaves a
+     * SOLVING generation that PlanningJobRecovery fails later.
      */
     #[Route('/api/planning-generations/{stableId}/solve', name: 'api_planning_generation_solve', methods: ['POST'])]
     public function solve(string $stableId): JsonResponse
     {
         $generation = $this->resolveGeneration($stableId);
         $this->denyUnlessCanManage($generation->getPlanningPeriod()->getTeam());
+
+        // Technical, per-period endpoint (no screen calls it — the UI queues a PlanningJob, D149):
+        // never a second engine run next to the planning's queued/running job.
+        if (null !== $this->jobRepository->findActiveForPlanning($generation->getPlanningPeriod()->getTeam()->getPlanning())) {
+            return new JsonResponse(['error' => 'job_in_progress', 'message' => 'A generation or a completion is already in progress for this planning.'], 409);
+        }
 
         try {
             $result = $this->generationService->generate($generation);

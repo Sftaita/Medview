@@ -18,8 +18,10 @@ use Symfony\Component\Uid\Uuid;
  * $previousAssignment is null exactly when the Duty had no current
  * assignment before this event (a previously NON COUVERTE duty being
  * filled for the first time) — never a magic sentinel row. $newAssignment
- * is never null: an event only exists once a new current DutyAssignment
- * really was persisted. $wasPublished freezes whether the PlanningPeriod
+ * is null exactly when the change was a deliberate removal without
+ * replacement ("Retirer l'affectation", docs/decisions.md D144): the Duty
+ * has no current assignment after this event. Never both null — that
+ * would record nothing. $wasPublished freezes whether the PlanningPeriod
  * was already PUBLISHED at the moment of the change — needed to decide,
  * after the fact, whether that change should have triggered a
  * notification email (D131 §5), without ever re-deriving it from the
@@ -57,8 +59,8 @@ class DutyAssignmentEvent
     private ?DutyAssignment $previousAssignment;
 
     #[ORM\ManyToOne(targetEntity: DutyAssignment::class)]
-    #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
-    private DutyAssignment $newAssignment;
+    #[ORM\JoinColumn(nullable: true, onDelete: 'RESTRICT')]
+    private ?DutyAssignment $newAssignment;
 
     #[ORM\ManyToOne(targetEntity: User::class)]
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
@@ -75,11 +77,15 @@ class DutyAssignmentEvent
         PlanningGeneration $generation,
         Duty $duty,
         ?DutyAssignment $previousAssignment,
-        DutyAssignment $newAssignment,
+        ?DutyAssignment $newAssignment,
         User $author,
         bool $wasPublished,
         \DateTimeImmutable $occurredAt,
     ) {
+        if (null === $previousAssignment && null === $newAssignment) {
+            throw new \InvalidArgumentException('A DutyAssignmentEvent records a previous or a new assignment, never neither.');
+        }
+
         $this->stableId = Uuid::v7();
         $this->planning = $planning;
         $this->generation = $generation;
@@ -121,7 +127,7 @@ class DutyAssignmentEvent
         return $this->previousAssignment;
     }
 
-    public function getNewAssignment(): DutyAssignment
+    public function getNewAssignment(): ?DutyAssignment
     {
         return $this->newAssignment;
     }

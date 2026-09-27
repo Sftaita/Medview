@@ -67,10 +67,13 @@ final class CpSatPayloadBuilder
         return [
             'solveType' => 'STRICT',
             'dutyUnits' => $dutyUnitsSection,
-            // No real lock/fixed-assignment concept exists on
-            // OptimizationProblem yet (docs/fairness.md §10,
-            // docs/decisions.md D090) — never fabricated here.
-            'excludedEdges' => [],
+            // Already applied to each unit's `eligibleCandidates` (effectiveCandidates()); repeated
+            // here so the script's own excludedEdges guard stays a real second check, never a no-op
+            // contract field (docs/decisions.md D145).
+            'excludedEdges' => array_map(
+                static fn (DutyAssignmentEdge $edge): array => ['dutyUnitKey' => $edge->dutyUnitStableKey, 'candidateId' => $edge->sourceTeamMemberStableId],
+                $problem->getExcludedEdges(),
+            ),
             'conflicts' => $this->buildConflictsSection($problem, $excludePolicyHardConflicts),
             'feasibilityOnly' => false,
             'phases' => $this->buildPhasesSection($problem, $stintsByPerson, $unitsByStint),
@@ -95,6 +98,15 @@ final class CpSatPayloadBuilder
                 static fn (AssignmentConflict $c): bool => ConstraintTier::POLICY_HARD !== $c->tier,
             ));
         }
+
+        // Two fixed units (docs/decisions.md D145) are facts of the current calendar, not
+        // decisions: a conflict between them is never re-litigated by this solve (it would only
+        // make it infeasible) — the publication preflight is what reports it.
+        $conflicts = array_values(array_filter(
+            $conflicts,
+            static fn (AssignmentConflict $c): bool => null === $problem->getFixedAssignee($c->leftDutyUnitStableKey)
+                || null === $problem->getFixedAssignee($c->rightDutyUnitStableKey),
+        ));
 
         // Canonical order (docs/decisions.md D100 §Déterminisme) — never
         // left to insertion order, which AssignmentConflictAnalyzer
@@ -189,33 +201,65 @@ final class CpSatPayloadBuilder
         $section = [];
 
         foreach ($problem->getRequiredDutyUnits() as $unit) {
-            $section[] = $this->buildDutyUnitEntry($unit, $matrix, required: true);
+            $section[] = $this->buildDutyUnitEntry($problem, $unit, $matrix, required: true);
         }
 
         foreach ($problem->getOptionalDutyUnits() as $unit) {
-            $section[] = $this->buildDutyUnitEntry($unit, $matrix, required: false);
+            $section[] = $this->buildDutyUnitEntry($problem, $unit, $matrix, required: false);
         }
 
         return $section;
     }
 
     /**
-     * @return array{key: string, required: bool, eligibleCandidates: list<string>}
+     * @return array{key: string, required: bool, eligibleCandidates: list<string>, fixedCandidateId?: string}
      */
-    private function buildDutyUnitEntry(DutyUnit $unit, EligibilityMatrix $matrix, bool $required): array
+    private function buildDutyUnitEntry(OptimizationProblem $problem, DutyUnit $unit, EligibilityMatrix $matrix, bool $required): array
     {
-        $eligibleCandidates = [];
-        foreach ($matrix->getForDutyUnit($unit) as $stintStableId => $result) {
-            if ($result->eligible) {
-                $eligibleCandidates[] = $stintStableId;
+        $entry = [
+            'key' => $unit->getStableKey(),
+            'required' => $required,
+            'eligibleCandidates' => $this->effectiveCandidates($problem, $unit, $matrix),
+        ];
+
+        $fixed = $problem->getFixedAssignee($unit->getStableKey());
+        if (null !== $fixed) {
+            $entry['fixedCandidateId'] = $fixed;
+        }
+
+        return $entry;
+    }
+
+    /**
+     * The candidates a CP-SAT variable exists for, for one unit — the single
+     * rule every section of the payload reads (docs/decisions.md D145): a
+     * fixed unit has exactly its fixed candidate; any other unit has the
+     * snapshot's eligible candidates minus the problem's excluded edges.
+     *
+     * @return list<string>
+     */
+    private function effectiveCandidates(OptimizationProblem $problem, DutyUnit $unit, EligibilityMatrix $matrix): array
+    {
+        $fixed = $problem->getFixedAssignee($unit->getStableKey());
+        if (null !== $fixed) {
+            return [$fixed];
+        }
+
+        $excluded = [];
+        foreach ($problem->getExcludedEdges() as $edge) {
+            if ($edge->dutyUnitStableKey === $unit->getStableKey()) {
+                $excluded[$edge->sourceTeamMemberStableId] = true;
             }
         }
 
-        return [
-            'key' => $unit->getStableKey(),
-            'required' => $required,
-            'eligibleCandidates' => $eligibleCandidates,
-        ];
+        $candidates = [];
+        foreach ($matrix->getForDutyUnit($unit) as $stintStableId => $result) {
+            if ($result->eligible && !isset($excluded[(string) $stintStableId])) {
+                $candidates[] = (string) $stintStableId;
+            }
+        }
+
+        return $candidates;
     }
 
     /**
@@ -332,8 +376,8 @@ final class CpSatPayloadBuilder
             \assert($pairPenalty instanceof SpacingPairPenalty);
             $unitA = $unitsByKey[$pairPenalty->unitAKey];
             $unitB = $unitsByKey[$pairPenalty->unitBKey];
-            $eligibleForA = array_keys(array_filter($matrix->getForDutyUnit($unitA), static fn ($r) => $r->eligible));
-            $eligibleForB = array_keys(array_filter($matrix->getForDutyUnit($unitB), static fn ($r) => $r->eligible));
+            $eligibleForA = $this->effectiveCandidates($problem, $unitA, $matrix);
+            $eligibleForB = $this->effectiveCandidates($problem, $unitB, $matrix);
 
             foreach (array_intersect($eligibleForA, $eligibleForB) as $candidateId) {
                 $terms[] = [
@@ -371,8 +415,9 @@ final class CpSatPayloadBuilder
         $variableCoefficients = [];
 
         foreach ([...$problem->getRequiredDutyUnits(), ...$problem->getOptionalDutyUnits()] as $unit) {
+            $effective = array_flip($this->effectiveCandidates($problem, $unit, $matrix));
             foreach ($matrix->getForDutyUnit($unit) as $candidateId => $result) {
-                if ($result->eligible && $result->preferred) {
+                if (isset($effective[(string) $candidateId]) && $result->preferred) {
                     $variableCoefficients[] = [
                         'dutyUnitKey' => $unit->getStableKey(),
                         'candidateId' => $candidateId,

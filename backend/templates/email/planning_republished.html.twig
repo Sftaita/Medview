@@ -1,0 +1,38 @@
+{# ------------------------------------------------------------------
+   MedVue — Republication : modifications d'un planning publié (docs/decisions.md D143)
+   Objet : Modification du planning de garde — <planning>
+   Contexte : firstName, planningName, planningUrl,
+     units[{line, when, block, before, after}] — un bloc une seule fois, avec ses dates ;
+     days[{label, rows[{line, text}]}] — chaque date impactée, toutes les lignes.
+   Envoyé uniquement aux personnes concernées par une date impactée. Pas de PDF.
+   ------------------------------------------------------------------ #}
+{% extends 'email/_base.html.twig' %}
+{% import  'email/_components.html.twig' as ui %}
+
+{% set preheader  = 'Le planning ' ~ planningName ~ ' a été modifié.' %}
+{% set accent     = '#2D7FF9' %}
+{% set eyebrow    = 'Modification' %}
+{% set h1         = 'Modification du<br>planning de garde' %}
+{% set panelLabel = 'Planning' %}
+{% set panelTitle = planningName %}
+{% set panelSub   = units|length > 1 ? units|length ~ ' modifications' : '1 modification' %}
+{% set ctaLabel   = 'Voir le planning actualisé' %}
+{% set ctaUrl     = planningUrl %}
+{% set footerNote = 'Vous recevez cet email car vous êtes de garde à une date modifiée de ce planning, ou l’étiez.' %}
+
+{% block title %}Modification du planning de garde{% endblock %}
+{% block postal %}{% endblock %}
+
+{% block content %}
+{{ ui.p('Bonjour ' ~ firstName|e ~ ',', 24) }}
+{{ ui.p('Le planning de garde ' ~ ui.b(planningName) ~ ' a été modifié.', 18) }}
+{% for unit in units %}
+{{ ui.p(ui.b(unit.line) ~ ' — ' ~ unit.when|e ~ (unit.block ? ' (bloc ' ~ unit.block|e ~ ')' : '') ~ '<br>' ~ unit.before|e ~ ' → ' ~ ui.b(unit.after), 14) }}
+{% endfor %}
+{% for day in days %}
+{{ ui.divider() }}
+{{ ui.p(ui.b(day.label), 18) }}
+{{ ui.rows(day.rows|map(row => [row.line, row.text])) }}
+{% endfor %}
+{{ ui.p('Le planning actualisé est disponible dans MedVue.', 22) }}
+{% endblock %}

@@ -703,3 +703,63 @@ statistiques par famille équilibrées, puis une vraie génération
 INCOMPLETE provoquée par un `TEAM_MIN_REST` volontairement excessif —
 diagnostic et relaxation réels affichés, jamais simulés. Nettoyage
 complet vérifié (zéro résidu, 17 tables).
+
+## 22. De la proposition au planning diffusé (docs/decisions.md D143-D148)
+
+Workflow : générer → calendrier vertical multi-lignes (`PlanningCalendar`) →
+corrections (remplacer / retirer, bloc toujours entier) → gardes non
+attribuées → « Compléter automatiquement » (trous uniquement) → statistiques
+→ publier (email + PDF à chaque participant) → planning publié, toujours
+éditable → « Modifications non publiées » → republier (email aux seules
+personnes concernées par les dates modifiées) → rappel du samedi.
+
+| Endpoint | Droit | Rôle |
+|---|---|---|
+| `GET /api/plannings/{id}/duties/{duty}/reassignment-candidates` | MANAGE_CALENDAR | titulaire courant + remplaçants **réellement** possibles de la même ligne (D144) |
+| `POST .../duties/{duty}/reassign` | MANAGE_CALENDAR | remplace le titulaire du bloc entier, revalidation serveur |
+| `POST .../duties/{duty}/unassign` | MANAGE_CALENDAR | retire le titulaire du bloc entier (non attribué volontaire) |
+| `POST /api/plannings/{id}/complete` | MANAGE_CALENDAR | comble les trous, affectations existantes fixées (D145) |
+| `GET /api/plannings/{id}/statistics` | VIEW | + `weightedLoad`, `countsByDutyType` |
+| `POST /api/plannings/{id}/publish` | PUBLISH | première diffusion, enregistrée garde par garde (D143) |
+| `POST /api/plannings/{id}/republish` | PUBLISH | diffuse les changements depuis la dernière diffusion |
+| `GET /api/plannings/{id}/publication-state` | VIEW (détails : PUBLISH) | publié ?, dates, changements non diffusés, historique |
+| `GET /api/plannings/{id}/publication.pdf` | VIEW | PDF de la dernière diffusion |
+| `PUT /api/plannings/{id}/teams/{t}/members/{m}/role` | MANAGE (créateur) | accorde/retire « Gestionnaire » (ADMIN, D147) |
+
+Commande : `app:duty-reminders:weekly` (D146, cron du samedi).
+
+Tables (migration `Version20260927090000`) : `planning_publications`,
+`planning_publication_entries`, `planning_publication_deliveries`,
+`weekly_duty_reminders` (toutes append-only) ;
+`duty_assignment_events.new_assignment_id` nullable (retrait).
+
+## 23. Génération et complétion asynchrones (docs/decisions.md D149)
+
+« Générer le planning » et « Compléter automatiquement » ne s'exécutent plus
+dans la requête HTTP.
+
+Cycle d'une génération :
+
+1. `POST /api/plannings/{id}/generations` (GENERATE) : récupération des jobs
+   morts du planning, refus si un job est actif (409 `job_in_progress`),
+   préflight (409 `not_launchable` + blockers), insertion d'un `PlanningJob`
+   `QUEUED`, message `RunPlanningJob`, **202** `{job}`. Aucune
+   `PlanningGeneration` n'est créée ici.
+2. Le worker réclame le job (`QUEUED → RUNNING`), démarre le battement, puis
+   `PlanningGenerationLauncher::launch()` : préflight refait, et par ligne
+   `create → snapshot → generate` (`SNAPSHOTTED → SOLVING → COMPLETED|FAILED`).
+3. Fin : `SUCCEEDED` + `outcome` (résumé par ligne, `coverage`
+   COMPLETE/INCOMPLETE, diagnostics) — ou `FAILED` + code.
+
+Cycle d'une complétion : identique avec `POST /api/plannings/{id}/complete`
+(MANAGE_CALENDAR) et `PlanningCompletionService::complete()` (D145, inchangé :
+titulaires courants figés, trous seuls calculés, relecture sous verrou avant
+écriture).
+
+Suivi : `GET /api/plannings/{id}/jobs/latest` (VIEW) — le job actif, sinon le
+plus récent, jamais le détail technique d'un échec. Travaux abandonnés :
+`PlanningJobRecovery` (5 min sans battement, 30 min en file). Exploitation :
+`docs/deployment.md` §5 ter.
+
+Tables : `planning_jobs` (index unique partiel « un job actif par
+planning »), `messenger_messages` — migration `Version20260927170000`.

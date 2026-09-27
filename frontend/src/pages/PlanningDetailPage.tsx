@@ -11,6 +11,7 @@ import {
   renamePlanning,
 } from '../features/planning/api'
 import { AvailabilityCollectionsPanel } from '../features/planning/AvailabilityCollectionsPanel'
+import { PlanningCalendar } from '../features/planning/calendar/PlanningCalendar'
 import { ActionMenu } from '../features/planning/detail/ActionMenu'
 import { LinesTab, type Face } from '../features/planning/detail/LinesTab'
 import { MembersSheet } from '../features/planning/detail/MembersSheet'
@@ -20,10 +21,14 @@ import { PlanningSteps, type DetailTab, type Step } from '../features/planning/d
 import { Sheet } from '../features/planning/detail/Sheet'
 import '../features/planning/detail/planningDetail.css'
 import { ExtendPlanningForm } from '../features/planning/ExtendPlanningForm'
+import { PlanningJobBanner } from '../features/planning/jobs/PlanningJobBanner'
+import { usePlanningJob } from '../features/planning/jobs/usePlanningJob'
 import { PersonalPlanningView } from '../features/planning/PersonalPlanningView'
 import { CollectionStatusPanel } from '../features/planning/pilot/CollectionStatusPanel'
+import { ResultBody } from '../features/planning/pilot/GenerationModal'
 import { PilotHeaderActions, type PilotDialog } from '../features/planning/pilot/PilotHeaderActions'
-import type { CollectionStatus } from '../features/planning/pilot/types'
+import type { CollectionStatus, LaunchResult, PlanningJob } from '../features/planning/pilot/types'
+import { completePlanning } from '../features/planning/result/api'
 import { usePlanningPilot } from '../features/planning/pilot/usePlanningPilot'
 import type { PlanningDetail, PlanningLineSummary, PlanningPeriodStatus } from '../features/planning/types'
 import { ApiError } from '../lib/apiClient'
@@ -66,8 +71,27 @@ export function PlanningDetailPage() {
   const [collectionsReload, setCollectionsReload] = useState(0)
   // Bumped after a generation so the per-person view (which reads on mount) shows the new assignments.
   const [generationVersion, setGenerationVersion] = useState(0)
+  // The vertical multi-line calendar is the main screen after a generation (docs/decisions.md D148).
+  const [planningView, setPlanningView] = useState<'calendar' | 'person'>('calendar')
 
   const pilot = usePlanningPilot(planningId ?? '', planning?.canManageAvailability === true)
+  const [jobDetail, setJobDetail] = useState<PlanningJob | null>(null)
+  // The engine job (generation or completion) is followed from the server, on every tab
+  // (docs/decisions.md D149): when it ends on this screen, everything that shows its effect re-reads.
+  const jobs = usePlanningJob(planningId ?? '', (job) => {
+    setGenerationVersion((count) => count + 1)
+    load()
+    void pilot.reload()
+    if (job.kind === 'GENERATE' && job.status === 'SUCCEEDED') {
+      setTab('planning')
+    }
+  })
+
+  async function requestCompletion() {
+    if (!planningId) return
+    const { job } = await completePlanning(planningId)
+    jobs.track(job)
+  }
   const tabsId = useId()
 
   function load() {
@@ -224,6 +248,8 @@ export function PlanningDetailPage() {
   const primaryLine = planning.lines.find((line) => line.type === 'PRIMARY')
   const status = primaryLine?.periodStatus ?? 'DRAFT'
   const generated = planning.lines.some((line) => line.periodStatus && line.periodStatus !== 'DRAFT')
+  // After publication no general (re)generation is offered (the server refuses it anyway, PERIOD_LOCKED).
+  const published = planning.lines.some((line) => line.active && line.periodStatus === 'PUBLISHED')
   const steps = buildSteps(planning, pilot.status, generated, status)
   const onRename = planning.canManage
     ? () => {
@@ -283,11 +309,9 @@ export function PlanningDetailPage() {
               primaryLineName={primaryLine?.name}
               onRename={onRename}
               onChanged={() => void pilot.reload()}
-              onGenerated={() => {
-                setGenerationVersion((count) => count + 1)
-                setTab('planning')
-                load()
-              }}
+              onLaunched={(job) => jobs.track(job)}
+              canLaunchGeneration={!published}
+              busy={jobs.active}
               dialog={pilotDialog}
               onDialogChange={setPilotDialog}
             />
@@ -304,6 +328,23 @@ export function PlanningDetailPage() {
           )}
         </div>
       </section>
+
+      <PlanningJobBanner
+        job={jobs.job}
+        finished={jobs.finished}
+        canRelaunch={planning.canGenerate === true || planning.canManageCalendar === true}
+        onRelaunch={(kind) => {
+          if (kind === 'GENERATE') {
+            setPilotDialog('generate')
+          } else {
+            requestCompletion().catch(() =>
+              setActionError('La complétion automatique n’a pas pu être relancée.'),
+            )
+          }
+        }}
+        onShowDetail={setJobDetail}
+        onDismiss={jobs.dismiss}
+      />
 
       {actionError && (
         <p role="alert" className="alert alert--error">
@@ -412,7 +453,37 @@ export function PlanningDetailPage() {
 
           {tab === 'planning' &&
             (generated ? (
-              <PersonalPlanningView key={generationVersion} planning={planning} />
+              <div className="pd-stack">
+                <div className="stats-panel__tabs" role="group" aria-label="Affichage du planning">
+                  <button
+                    type="button"
+                    aria-pressed={planningView === 'calendar'}
+                    className={`btn btn--sm ${planningView === 'calendar' ? 'btn--primary' : 'btn--secondary'}`}
+                    onClick={() => setPlanningView('calendar')}
+                  >
+                    Calendrier
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={planningView === 'person'}
+                    className={`btn btn--sm ${planningView === 'person' ? 'btn--primary' : 'btn--secondary'}`}
+                    onClick={() => setPlanningView('person')}
+                  >
+                    Par personne
+                  </button>
+                </div>
+                {planningView === 'calendar' ? (
+                  <PlanningCalendar
+                    key={generationVersion}
+                    planning={planning}
+                    onPublished={load}
+                    onRequestCompletion={requestCompletion}
+                    jobActive={jobs.active}
+                  />
+                ) : (
+                  <PersonalPlanningView key={generationVersion} planning={planning} />
+                )}
+              </div>
             ) : (
               <div className="pd-card pd-empty">
                 <span className="pd-empty-icon" aria-hidden>
@@ -437,6 +508,12 @@ export function PlanningDetailPage() {
             ))}
         </div>
       </section>
+
+      {jobDetail?.outcome && (
+        <Sheet title="Résultat de la génération" wide onClose={() => setJobDetail(null)}>
+          <ResultBody result={jobDetail.outcome as unknown as LaunchResult} timezone={planning.timezone} />
+        </Sheet>
+      )}
 
       {renameOpen && (
         <Sheet title="Modifier le nom" onClose={() => setRenameOpen(false)}>

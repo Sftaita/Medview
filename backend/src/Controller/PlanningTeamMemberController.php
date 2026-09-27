@@ -8,6 +8,7 @@ use App\Dto\AddPlanningTeamMemberRequest;
 use App\Entity\Planning;
 use App\Entity\PlanningTeam;
 use App\Entity\PlanningTeamMember;
+use App\Entity\TeamMemberRole;
 use App\Exception\PlanningTeamMembershipConflictException;
 use App\Repository\PlanningRepository;
 use App\Repository\PlanningTeamMemberRepository;
@@ -110,6 +111,33 @@ final class PlanningTeamMemberController
             $this->membershipService->endMembership($member, $membershipEnd);
         } catch (\InvalidArgumentException|\LogicException $exception) {
             return new JsonResponse(['error' => 'validation_failed', 'violations' => ['membershipEnd' => $exception->getMessage()]], 422);
+        }
+
+        return new JsonResponse($this->toArray($member));
+    }
+
+    /**
+     * Grant or withdraw "Gestionnaire du planning" (docs/decisions.md D147):
+     * `{"role": "ADMIN"}` or `{"role": "MEMBER"}` — creator only, like every
+     * other membership write here.
+     */
+    #[Route('/api/plannings/{planningStableId}/teams/{teamStableId}/members/{memberStableId}/role', name: 'api_planning_team_member_role', methods: ['PUT'])]
+    public function changeRole(string $planningStableId, string $teamStableId, string $memberStableId, Request $request): JsonResponse
+    {
+        [$planning, $team] = $this->resolveTeam($planningStableId, $teamStableId);
+        $this->denyUnlessCanManage($planning);
+        $member = $this->resolveMember($team, $memberStableId);
+
+        $raw = json_decode($request->getContent() ?: '{}', true);
+        $role = \is_array($raw) && \is_string($raw['role'] ?? null) ? TeamMemberRole::tryFrom($raw['role']) : null;
+        if (null === $role) {
+            return new JsonResponse(['error' => 'validation_failed', 'violations' => ['role' => 'Expected "ADMIN" or "MEMBER".']], 422);
+        }
+
+        try {
+            $this->membershipService->changeManagementRole($member, $role);
+        } catch (\InvalidArgumentException $exception) {
+            return new JsonResponse(['error' => 'validation_failed', 'violations' => ['role' => $exception->getMessage()]], 422);
         }
 
         return new JsonResponse($this->toArray($member));

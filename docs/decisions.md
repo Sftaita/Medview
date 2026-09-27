@@ -4522,3 +4522,277 @@ l'ancienne (voir légende).
   JWT stateless évite précisément, D019) ; réutiliser `active` comme proxy
   d'invalidation (sémantique différente : un compte peut rester actif
   alors que ses credentials ont changé).
+
+## D143 — Publication enregistrée par garde, « Modifications non publiées » par comparaison d'états, audience d'une republication par DATE
+
+- **Audit préalable** : avant ce lot, publier (D133) ne faisait que
+  transitionner les `PlanningPeriod` ; rien n'enregistrait *quand* ni *quoi*
+  avait été diffusé, et aucun email n'était envoyé. `DutyAssignmentEvent.wasPublished`
+  ne suffit pas à dire « qu'est-ce qui diffère de la dernière diffusion » :
+  A → B → A produit deux événements alors que personne n'a rien à apprendre.
+- **Décision — `PlanningPublication` + `PlanningPublicationEntry`** (append-only,
+  trigger) : chaque diffusion réelle (FIRST ou UPDATE) fige, garde par garde,
+  le `PlanningTeamMember` diffusé (ou `null` = diffusée non couverte), dans la
+  même transaction que les transitions de statut et sous le `CalendarWriteLock`
+  (D144). La dernière publication est **la** référence : « Modifications non
+  publiées » = gardes dont le titulaire courant (`DutyAssignment.current`)
+  diffère de l'entrée figée — comparaison d'états, jamais un rejeu
+  d'événements, jamais l'ancienne sortie du solveur. `DutyAssignmentEvent`
+  reste l'audit « qui a changé quoi quand ». Pas de deuxième vérité : l'état
+  courant reste `DutyAssignment.current` ; les entrées sont un fait historique
+  (ce qui a été annoncé), comme `PlanningSnapshot`.
+- **Première publication** : préflight strict inchangé (D133), puis email à
+  chaque participant (adhésion intersectant la période dans une ligne active,
+  compte actif, qu'il ait une garde ou non) avec le PDF joint.
+- **Republication** (`POST /republish`) : refusée sans référence
+  (`not_yet_published`) ou sans différence (`no_changes` — rien n'est
+  enregistré ; le calcul est refait sous verrou, une annulation entre-temps
+  fait rollback). Préflight `republishable` : mêmes contrôles que
+  `publishable`, **sauf** qu'une garde non couverte sur une ligne déjà publiée
+  ne bloque pas — un retrait sans remplacement est précisément une nouvelle à
+  annoncer. Une ligne jamais publiée garde l'exigence de couverture complète.
+- **Audience d'une republication — règle métier** : anciens titulaires ∪
+  nouveaux titulaires des gardes changées ∪ toute personne actuellement de
+  garde, sur n'importe quelle ligne, à une date impactée. Un bloc changé
+  impacte chacune de ses dates. Dédupliqué par utilisateur, comptes inactifs
+  exclus. Email = détail des changements (un bloc une fois, avec sa plage de
+  dates) + pour chaque date impactée la situation de chaque ligne
+  (« A → B » ou « C — inchangé »). Pas de PDF.
+- **Emails après commit** : un échec d'envoi n'annule jamais une publication ;
+  chaque tentative est tracée (`PlanningPublicationDelivery`).
+- **PDF** (`dompdf/dompdf`, pur PHP, aucune extension nouvelle) : construit
+  **uniquement** depuis les entrées de la publication — même source pour la
+  pièce jointe et « Télécharger le PDF » (`GET /publication.pdf`, VIEW), donc
+  jamais les modifications non encore diffusées.
+- **Reprise de l'existant** : la migration crée une publication FIRST pour tout
+  planning déjà PUBLISHED (date = dernière mise à jour de sa période, auteur =
+  créateur, entrées = calendrier courant au moment de la migration) — la seule
+  référence reconstructible honnêtement ; aucun email renvoyé.
+- **Rejeté** : dériver les changements des `DutyAssignmentEvent` postérieurs à
+  un horodatage (A → B → A, lignes ajoutées, fenêtres de concurrence) ; un
+  indicateur « dirty » stocké (se désynchronise) ; renvoyer le PDF complet à
+  chaque republication ; emailer tout le planning à chaque changement.
+
+## D144 — Éditeur d'affectation : candidats impossibles absents, retrait sans remplacement, écritures du calendrier sérialisées
+
+- **Candidats** (supersède la partie « liste complète avec raisons » de D131,
+  sur demande produit explicite) : `/reassignment-candidates` ne renvoie que
+  les membres **de la ligne de la garde** (son `PlanningTeam`), présents dans le
+  snapshot de la génération (sans quoi aucune `DutyAssignment` ne peut les
+  référencer — ce cas levait une 500 avant ce lot), sans aucune raison
+  bloquante sur **tout** le bloc ; le titulaire courant est exposé à part
+  (`currentAssignee`). `ReassignmentCandidateService::assignabilityError()` est
+  l'unique contrôle, partagé par la liste et par l'écriture — un membre d'une
+  autre ligne envoyé à la main est refusé (`NOT_A_LINE_MEMBER`, 409).
+- **Retrait** (`POST .../unassign`, `expectedCurrentTeamMemberStableId`
+  obligatoire) : toutes les lignes courantes du bloc sont `markSuperseded()`
+  (jamais supprimées), un `DutyAssignmentEvent` par garde avec
+  `newAssignment = null` (colonne rendue nullable, CHECK « jamais ni l'un ni
+  l'autre »). État « non attribué » volontaire, pas une erreur.
+- **Concurrence** : `CalendarWriteLock` — `pg_advisory_xact_lock` par Planning,
+  pris **avant** toute lecture par la réaffectation, le retrait, la
+  persistance de la complétion et l'enregistrement d'une publication. Deux
+  sauvegardes simultanées du même bloc : la seconde attend puis lit l'état du
+  premier → 409 `stale_reassignment` (le contrôle d'identité de D131 seul ne
+  voyait pas deux requêtes ayant lu avant tout commit). Une violation d'index
+  unique résiduelle est convertie en 409, jamais une 500.
+
+## D145 — « Compléter automatiquement » : `fixedAssignments` réels, dans la génération courante — pas REPAIR
+
+- **Audit** : `OptimizationMode::REPAIR` et `fixedAssignments` n'existaient que
+  dans `docs/allocation-algorithm.md` (§11/§21) ; `ObjectivePhaseFactory`
+  refusait REPAIR, le payload CP-SAT envoyait `excludedEdges: []` en dur.
+- **Décision** : `OptimizationProblem::withFixedAssignments(fixed, excluded)` —
+  `fixedAssignments` (unité → candidat) et `excludedEdges` deviennent réels.
+  `CpSatPayloadBuilder` applique une règle unique (`effectiveCandidates`) :
+  une unité fixée n'a que son candidat fixé (`fixedCandidateId`, forcé à 1 par
+  `cp_sat_solver.py`), les autres ont l'éligibilité du snapshot moins les
+  arêtes exclues ; cette même règle alimente les termes d'équité,
+  d'espacement et de préférence. Un conflit entre deux unités **toutes deux
+  fixées** n'est pas envoyé (ce sont des faits ; le préflight de publication
+  les signale).
+- **Complétion** (`PlanningCompletionService`, `POST /complete`,
+  MANAGE_CALENDAR) : toute unité ayant un titulaire courant est fixée ; seules
+  les unités sans aucune affectation sont des décisions. Le problème est celui
+  du snapshot de la génération (cibles, dimensions, conflits, repos — jamais
+  recalculés), restreint par l'éligibilité **live** de chaque trou
+  (`assignabilityError` : indisponibilités déclarées depuis, conflits avec le
+  calendrier actuel). Ordre des phases GENERATE : les trous vont à qui l'équité
+  favorise *compte tenu* de la charge déjà tenue. Écrit dans la génération
+  COMPLETED courante (une vérité, stable ids et historique préservés) :
+  `DutyAssignment` AUTO + événement (previous = null, auteur = gestionnaire).
+  Persistance d'un seul tenant pour toutes les lignes, sous `CalendarWriteLock`,
+  après relecture : si l'état fixé ou les trous ont changé pendant le solve,
+  rien n'est écrit (409 `calendar_changed`). Même verrou de session que le
+  lanceur de génération (jamais génération et complétion en parallèle).
+- **Ce n'est pas REPAIR** : aucune affectation existante ne peut bouger, il n'y
+  a donc pas de coût de changement à minimiser ; REPAIR (§11) reste non
+  implémenté. Une unité incohérente (bloc à deux titulaires, jamais produite
+  par l'application) n'est ni fixée ni complétée.
+
+## D146 — Rappel du samedi : calendrier courant au moment de l'envoi, semaine dans le fuseau du planning, jamais d'email vide
+
+- Commande `app:duty-reminders:weekly` (cron hôte, `docs/deployment.md` §5 bis),
+  `--now` pour rejouer. Plannings ayant au moins une ligne active PUBLISHED ;
+  lignes PUBLISHED seulement. Semaine = premier lundi strictement après
+  « aujourd'hui » **dans le fuseau du planning**, jusqu'au lundi suivant ;
+  comparée au `localDate` des gardes (déjà dans ce fuseau) : le fuseau du
+  serveur n'entre jamais en jeu. Lecture de `DutyAssignment.current` au moment
+  de l'envoi (une modification tardive, republiée ou non, est prise en
+  compte). Une personne sans garde n'est jamais listée, donc jamais emailée.
+  Blocs regroupés (« Samedi 17 + dimanche 18 octobre — Bloc Week-end »).
+  Idempotence par `weekly_duty_reminders (user, planning, week_start)` unique,
+  append-only, écrit seulement après un envoi accepté.
+- **Rejeté** : Symfony Scheduler + worker Messenger (un process de plus pour une
+  tâche hebdomadaire ; le serveur a déjà un crontab géré, D109).
+
+## D147 — « Gestionnaire du planning » = ADMIN d'une équipe du planning, accordé/retiré par le créateur
+
+- **Audit** : `PlanningVoter` accordait déjà, pour **tout** le planning,
+  MANAGE_AVAILABILITY/GENERATE/MANAGE_CALENDAR/PUBLISH/MANAGE_LINE_STRUCTURE/
+  MANAGE_RULE_SET au créateur et à tout OWNER/ADMIN ouvert d'une de ses équipes
+  (D124, D131, D133) ; ADMIN donne aussi INVITE et la non-participation de son
+  équipe ; MANAGE (structure : renommer, lignes, membres, prolonger) reste au
+  seul créateur. Le rôle n'était modifiable qu'à l'ajout. ADMIN signifie donc
+  déjà exactement « gestionnaire du planning ».
+- **Décision (évolution minimale)** : `PUT .../members/{id}/role`
+  (`ADMIN` | `MEMBER`), réservé au créateur (MANAGE), jamais sur/vers OWNER
+  (rôle de participation du créateur, D123), adhésion ouverte uniquement.
+  L'interface nomme ADMIN « Gestionnaire » (« Rendre gestionnaire » /
+  « Retirer la gestion »). Aucune nouvelle politique ni nouvelle table.
+- **Rejeté** : une entité `PlanningManager` parallèle (deux mécanismes
+  accordant les mêmes droits) ; détourner OWNER.
+
+## D148 — Écran principal après génération : calendrier vertical multi-lignes
+
+- `PlanningCalendar` (onglet « Planning », vue par défaut ; « Par personne » en
+  second) : dates verticales, une colonne par ligne générée, groupement par
+  semaine ISO, navigation par mois ; un bloc est dessiné comme une unité (filet
+  continu, libellé sur le premier jour) et cliquer l'un quelconque de ses
+  jours ouvre l'éditeur du bloc entier ; une garde non couverte affiche
+  « ⚠ Non attribué ». Actions gestionnaire : Compléter automatiquement (inactif
+  sans trou), Statistiques, Publier le planning / Republier les modifications
+  (inactif sans différence), Télécharger le PDF ; badges « Planning publié ·
+  dernière diffusion le … » et « Modifications non publiées (N) ». Un membre
+  a la lecture et le PDF.
+- `/result` expose `groupInstanceStableId`/`groupLabel`/`groupDates` : le
+  frontend ne déduit jamais l'atomicité lui-même.
+- `PersonalPlanningView` devient lecture seule : une seule interface par action.
+- Statistiques : `weightedLoad` (Σ `DutyType.workloadValue`) et
+  `countsByDutyType` s'ajoutent aux jours de semaine et familles, toujours
+  relus depuis `DutyAssignment.current`.
+
+## D149 — Génération et complétion asynchrones : `PlanningJob` + Symfony Messenger (transport Doctrine), un worker dédié
+
+- **Audit préalable** :
+  1. `POST /api/plannings/{id}/generations` appelait
+     `PlanningGenerationLauncher::launch()` **dans la requête** :
+     verrou consultatif de session (7351) → préflight → pour chaque ligne,
+     création de la `PlanningGeneration`, snapshot, puis
+     `PlanningGenerationService::generate()`.
+  2. `generate()` pose `SOLVING` (`claimSolving()`, verrou optimiste, sa
+     propre transaction) puis appelle `PlanningSolver::solve()`.
+  3. OR-Tools tourne dans `OrToolsPlanningSolver::runProcess()` (sous-processus
+     Python, `Process::run()` bloquant).
+  4. La persistance (`DutyAssignment` AUTO, `COMPLETED`) est une transaction
+     finale.
+  5. Les erreurs du solveur deviennent `ERROR` → génération `FAILED`, mais
+     un process PHP tué (limite web de 30 s) laissait la génération en
+     `SOLVING` pour toujours. Mesure réelle (UAT D148) : 1 mois / 2 lignes
+     = 67 s.
+  6. `POST /complete` (D145) exécutait `PlanningCompletionService::complete()`
+     de la même façon, synchrone.
+  7. Le frontend attendait la réponse complète (`GenerationModal`).
+  8. **Aucune** infrastructure asynchrone n'existait : ni `symfony/messenger`,
+     ni Scheduler, ni worker.
+- **Décision — un job persistant, puis un message** : `PlanningJob`
+  (`planning_jobs`), kind `GENERATE` | `COMPLETE`. La requête fait les
+  contrôles synchrones bon marché (GENERATE : le même préflight, un refus
+  technique reste un 409 immédiat avec ses blockers), insère le job
+  `QUEUED`, publie `RunPlanningJob(jobId)` et répond **202**.
+  `RunPlanningJobHandler`, exécuté par `messenger:consume`, n'ajoute aucune
+  logique moteur : il appelle `PlanningGenerationLauncher::launch()` ou
+  `PlanningCompletionService::complete()`, inchangés (verrous, préflight
+  refait au moment du calcul, écriture atomique, refus d'un résultat de
+  complétion devenu obsolète). Le message ne porte que l'id : tout le
+  reste (planning, demandeur, politique de repos) est sur le job.
+- **États** : `QUEUED` (accepté, aucun worker n'a commencé — le clic ne met
+  jamais rien en `SOLVING`), `RUNNING` (réclamé atomiquement :
+  `UPDATE … WHERE status = 'QUEUED'`), `SUCCEEDED` (avec
+  `outcome.coverage` = `COMPLETE` | `INCOMPLETE`, exactement comme
+  `PlanningGeneration.coverageStatus`, diagnostics par ligne conservés),
+  `FAILED` (code stable : `unexpected_error`, `generation_failed`,
+  `completion_failed`, `not_launchable`, `calendar_changed`, `engine_busy`,
+  `worker_lost`, `never_started`, `dispatch_failed` ; détail technique en
+  base et dans les logs, jamais dans l'API). Les statuts existants de
+  `PlanningGeneration` sont réutilisés tels quels à l'intérieur du job.
+  Une ligne sans résultat exploitable rend le job `FAILED` avec son détail
+  par ligne, jamais un faux succès.
+- **Aucun SOLVING éternel** : exception → le handler (qui ne relance jamais)
+  annule les transactions ouvertes, réinitialise l'EntityManager fermé,
+  enregistre `FAILED` en SQL simple et passe `FAILED` toute génération
+  `SOLVING` du planning. Worker tué sans atteindre son `catch` :
+  `heartbeat_at`, rafraîchi toutes les 10 s, y compris **pendant** la
+  résolution (`runProcess()` passe de `run()` à `start()` + attente
+  active qui bat), cesse ; `PlanningJobRecovery` échoue un `RUNNING`
+  muet depuis 5 min (`worker_lost`) et un `QUEUED` jamais démarré après
+  30 min (`never_started`). La récupération s'exécute au démarrage du
+  worker, à chaque lecture de l'état et avant toute nouvelle demande
+  (un job mort ne bloque jamais une relance) ; la commande
+  `app:planning-jobs:recover` la lance à la main. Le critère est le
+  silence du worker, jamais la durée : un calcul d'une heure qui bat n'est
+  jamais touché. Un message redélivré après récupération ne fait rien (la
+  réclamation conditionnelle échoue). Toutes les heures des jobs viennent
+  de PostgreSQL (`LOCALTIMESTAMP`), jamais de PHP. Reprise de l'existant :
+  la migration passe `FAILED` toute génération encore `SOLVING` (reliquat
+  d'une requête synchrone coupée à 30 s — aucun calcul ne peut tourner
+  pendant la migration qui supprime ce chemin).
+- **Concurrence** : un index unique partiel
+  `planning_jobs (planning_id) WHERE status IN ('QUEUED','RUNNING')` — au
+  plus un calcul actif par planning, quel que soit le nombre de clics,
+  d'onglets ou de gestionnaires, génération et complétion confondues (409
+  `job_in_progress` avec le job gagnant). Les verrous existants restent
+  (lanceur 7351, `CalendarWriteLock` D144), et la complétion garde sa
+  relecture sous verrou : une modification manuelle pendant le calcul fait
+  échouer le job (`calendar_changed`), rien n'est écrit.
+- **Transport** : Doctrine (PostgreSQL, la base de l'application), pas de
+  retry (`max_retries: 0`), transport `failed` pour les seuls messages dont
+  le handler aurait levé une exception avant de pouvoir enregistrer quoi
+  que ce soit. Worker = service Docker `worker` (même image,
+  `restart: unless-stopped`, `--time-limit=3600`, `pcntl` pour l'arrêt
+  propre sur SIGTERM, `stop_grace_period: 15m`) — `docs/deployment.md`
+  §5 ter. Les tests utilisent ce même transport et exécutent le worker
+  explicitement (`PlanningJobTestHelpers`).
+- **Frontend** : `usePlanningJob` lit `GET /api/plannings/{id}/jobs/latest`
+  au montage (revenir sur la page retrouve le calcul), toutes les 3 s tant
+  qu'il est actif, plus jamais ensuite. Le bandeau `PlanningJobBanner`
+  affiche un indicateur indéterminé (aucun pourcentage inventé), « Vous
+  pouvez quitter cette page », l'échec compréhensible et « Relancer », et
+  annonce le résultat du calcul qui vient de se terminer. À la fin,
+  calendrier, couverture, statistiques et actions se relisent.
+  « Générer le planning » est **masqué dès qu'une ligne active est
+  PUBLISHED** (le serveur refuse déjà, `PERIOD_LOCKED` — masquer n'est
+  jamais la protection). « Compléter automatiquement », « Publier » et
+  « Republier » sont désactivés pendant un calcul actif.
+- **Inchangé** : la règle de complétion (`fixedAssignments` : tout titulaire
+  courant reste figé, seuls les trous sont calculés — pas REPAIR, toujours
+  non implémenté), la publication et la republication (D143).
+- **Hors périmètre, documenté** : les endpoints techniques par période
+  (`POST /api/planning-generations/{id}/solve`, D106) restent synchrones —
+  aucun écran ne les appelle, ils servent aux tests et au diagnostic.
+- **Audit avant mise en production** (même lot) : `/solve` est refusé
+  (409 `job_in_progress`) pendant qu'un job est actif sur le planning, et
+  `PlanningJobRecovery` passe aussi `FAILED` une génération `SOLVING`
+  orpheline (plus de 15 min, aucun job `RUNNING` sur son planning — une
+  requête synchrone coupée) ; `GET …/jobs/latest` ne renvoie l'`outcome`
+  (diagnostics du solveur) qu'à un gestionnaire, un membre ne voit que
+  l'état ; le worker reçoit un vrai healthcheck (`messenger:stats`) à la
+  place de celui, hérité de l'image FrankenPHP, qui le déclarait
+  « unhealthy » en permanence.
+- **Rejeté** : Redis/RabbitMQ (un service de plus pour un débit de quelques
+  jobs par jour, alors que PostgreSQL est déjà là) ; relever la limite
+  d'exécution web (ne règle ni le process tué ni le retour sur la page) ;
+  un statut `QUEUED` ajouté à `PlanningGeneration` (une génération de
+  planning est un ensemble de lignes, et la complétion n'en crée aucune) ;
+  WebSocket/SSE (aucune infrastructure existante, le polling suffit) ;
+  échouer un job sur sa durée.

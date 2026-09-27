@@ -24,6 +24,12 @@ const WEEKDAY_LABEL: Record<Weekday, string> = {
 
 const DATE_FORMAT = new Intl.DateTimeFormat('fr-BE', { day: 'numeric', month: 'long', year: 'numeric' })
 
+const LOAD_FORMAT = new Intl.NumberFormat('fr-BE', { maximumFractionDigits: 2 })
+
+function formatLoad(load: number | undefined): string {
+  return LOAD_FORMAT.format(load ?? 0)
+}
+
 function formatDate(date: string): string {
   return DATE_FORMAT.format(new Date(`${date}T00:00:00Z`))
 }
@@ -105,7 +111,8 @@ export function StatisticsPanel({ planningStableId, refreshKey }: Props) {
       </div>
 
       <p className="muted stats-panel__bounds tnum">
-        {formatDate(scope.startsAt)} → {formatDate(scope.endsAt)}
+        {formatDate(scope.startsAt)} → {formatDate(scope.endsAt)} · calculées sur les affectations actuelles,
+        corrections comprises
       </p>
 
       {scope.groups.length === 0 && <p className="muted">Aucune garde générée pour le moment.</p>}
@@ -138,6 +145,11 @@ function StatisticsTable({
   // used (docs/decisions.md D137) — every member row shares the same keys,
   // never a hardcoded "Week-end"/"Semaine".
   const familyKeys = Object.keys(group.members[0]?.countsByFamily ?? {})
+  // Duty types really held by someone in this group (docs/decisions.md D147) — a member without
+  // that type reads 0, never a guessed list of types.
+  const dutyTypeKeys = [
+    ...new Set(group.members.flatMap((member) => Object.keys(member.countsByDutyType ?? {}))),
+  ].sort()
 
   return (
     <div className="stats-panel__group">
@@ -160,7 +172,14 @@ function StatisticsTable({
                     {family || 'Sans famille'}
                   </th>
                 ))}
+                {dutyTypeKeys.length > 1 &&
+                  dutyTypeKeys.map((type) => (
+                    <th key={`type-${type}`} className="pilot-table__num">
+                      {type}
+                    </th>
+                  ))}
                 <th className="pilot-table__num">Total</th>
+                <th className="pilot-table__num">Charge pondérée</th>
               </tr>
             </thead>
             <tbody>
@@ -183,8 +202,17 @@ function StatisticsTable({
                       {member.countsByFamily[family]}
                     </td>
                   ))}
+                  {dutyTypeKeys.length > 1 &&
+                    dutyTypeKeys.map((type) => (
+                      <td key={`type-${type}`} className="pilot-table__num tnum" data-label={type}>
+                        {member.countsByDutyType?.[type] ?? 0}
+                      </td>
+                    ))}
                   <td className="pilot-table__num tnum" data-label="Total">
                     <strong>{member.total}</strong>
+                  </td>
+                  <td className="pilot-table__num tnum" data-label="Charge pondérée">
+                    {formatLoad(member.weightedLoad)}
                   </td>
                 </tr>
               ))}

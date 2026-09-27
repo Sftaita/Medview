@@ -230,11 +230,34 @@ export type LaunchLineResult = {
   snapshot: { capturedAt: string; memberCount: number; unavailableCount: number } | null
 }
 
-/** POST /api/plannings/{id}/generations. */
+/** A finished generation's per-line result — the `outcome` of a GENERATE job. */
 export type LaunchResult = {
-  planningStableId: string
   lines: LaunchLineResult[]
 }
+
+export type PlanningJobStatus = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED'
+
+/**
+ * One engine operation run by the worker, outside any HTTP request
+ * (docs/decisions.md D149) — GET /api/plannings/{id}/jobs/latest is the
+ * only source of truth for "en cours / terminé / échoué", never local state.
+ * `outcome.lines` is a LaunchLineResult (GENERATE) or a CompletionLineResult
+ * (COMPLETE); `failureCode` is a stable code, never an internal message.
+ */
+export type PlanningJob = {
+  stableId: string
+  kind: 'GENERATE' | 'COMPLETE'
+  status: PlanningJobStatus
+  requestedBy: { firstName: string; lastName: string }
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
+  failureCode: string | null
+  outcome: { lines: unknown[]; coverage: 'COMPLETE' | 'INCOMPLETE' | null } | null
+}
+
+/** POST .../generations and .../complete: 202 with the queued job. */
+export type PlanningJobResponse = { job: PlanningJob }
 
 /** GET/POST .../rule-set(/activate) — never DRAFT/ACTIVE/RETIRED, version or
  * stableId: a manager only ever sees whether generation rules are active. */

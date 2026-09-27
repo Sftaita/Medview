@@ -353,6 +353,13 @@ App\Solver\OrToolsPlanningSolver (PHP, implements PlanningSolver)
   → ortools.sat.python.cp_model (CP-SAT)
 ```
 
+> **Depuis D149** : le sous-processus est lancé par `start()` puis attendu par
+> une boucle qui vérifie son délai (`checkTimeout()`) et appelle
+> `WorkHeartbeat::beat()` — le worker signale ainsi qu'il est vivant pendant
+> une résolution de plusieurs minutes. Hors d'un job du worker, le battement
+> ne fait rien. Le solveur lui-même ne s'exécute plus jamais dans une requête
+> HTTP de l'interface (`docs/planning-generation.md` §23).
+
 Un seul appel subprocess par `solve()`/`checkFeasibility()` — pas un
 appel par phase : le script Python construit le modèle CP-SAT une fois,
 puis boucle en interne sur les phases lexicographiques, réutilisant le

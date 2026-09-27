@@ -81,6 +81,7 @@ final class PlanningGenerationLauncher
         private readonly WeeklyDutyCalendarService $weeklyDutyCalendarService,
         private readonly DutyUnitFactory $dutyUnitFactory,
         private readonly EntityManagerInterface $entityManager,
+        private readonly WorkHeartbeat $heartbeat,
     ) {
     }
 
@@ -206,6 +207,7 @@ final class PlanningGenerationLauncher
         // Planning gets the exact same choice, never one different per
         // line; a manager who genuinely needs different rest rules per
         // line already has the per-period endpoint for that.
+        $this->heartbeat->beat();
         $generation = $this->generationService->create($line->getPlanningPeriod(), $launchedBy, $restPolicy);
 
         try {

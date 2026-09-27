@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Repository;
 
 use App\Entity\Planning;
+use App\Entity\PlanningLine;
+use App\Entity\PlanningPeriodStatus;
 use App\Entity\User;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
@@ -18,6 +20,25 @@ class PlanningRepository extends ServiceEntityRepository
     public function __construct(ManagerRegistry $registry)
     {
         parent::__construct($registry, Planning::class);
+    }
+
+    /**
+     * Plannings with at least one active line whose period is PUBLISHED —
+     * the only ones the weekly duty reminder concerns (docs/decisions.md D146).
+     *
+     * @return list<Planning>
+     */
+    public function findWithPublishedLine(): array
+    {
+        return $this->createQueryBuilder('p')
+            ->distinct()
+            ->join(PlanningLine::class, 'l', 'WITH', 'l.planning = p AND l.active = true')
+            ->join('l.planningPeriod', 'pp')
+            ->andWhere('pp.status = :published')
+            ->setParameter('published', PlanningPeriodStatus::PUBLISHED)
+            ->orderBy('p.id', 'ASC')
+            ->getQuery()
+            ->getResult();
     }
 
     public function findOneByStableId(string $stableId): ?Planning

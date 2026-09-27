@@ -13,6 +13,8 @@ use App\Entity\UserAvailabilityType;
 use App\Exception\DutyNotGeneratedException;
 use App\Repository\DutyAssignmentRepository;
 use App\Repository\PlanningGenerationRepository;
+use App\Repository\PlanningSnapshotMemberRepository;
+use App\Repository\PlanningSnapshotRepository;
 use App\Repository\PlanningTeamMemberRepository;
 use App\Repository\TeamMemberNonParticipationPeriodRepository;
 use App\Repository\UserAvailabilityPeriodRepository;
@@ -34,20 +36,31 @@ use App\Repository\UserAvailabilityPeriodRepository;
  *
  * Reasons are computed in the same precedence AssignmentConflictAnalyzer
  * uses (structural reasons first, then CONFLICT, then LEGAL_MIN_REST, then
- * TEAM_MIN_REST) — the first one found is reported; a candidate is never
- * shown with more than one blocking reason, matching the existing UI
- * vocabulary the frontend already renders (ExclusionReasonLabeler).
+ * TEAM_MIN_REST) — the first one found is reported.
+ *
+ * The candidate list (docs/decisions.md D144) only ever contains members
+ * with no blocking reason at all: an impossible candidate is absent, never
+ * shown disabled. Two structural rules come first, shared verbatim with the
+ * write path (assignabilityError()): the member belongs to the duty's own
+ * line (its PlanningTeam — a person of another line never appears and is
+ * refused at save time), and to the generation's snapshot (a DutyAssignment
+ * always references its frozen PlanningSnapshotMember, D131 — a member who
+ * joined after the generation cannot hold one of its duties).
  */
 final class ReassignmentCandidateService
 {
+    public const NOT_A_LINE_MEMBER = 'NOT_A_LINE_MEMBER';
+    public const NOT_IN_GENERATION_SNAPSHOT = 'NOT_IN_GENERATION_SNAPSHOT';
+
     public function __construct(
         private readonly PlanningGenerationRepository $generationRepository,
         private readonly PlanningTeamMemberRepository $teamMemberRepository,
         private readonly DutyAssignmentRepository $assignmentRepository,
         private readonly UserAvailabilityPeriodRepository $availabilityRepository,
         private readonly TeamMemberNonParticipationPeriodRepository $nonParticipationRepository,
+        private readonly PlanningSnapshotRepository $snapshotRepository,
+        private readonly PlanningSnapshotMemberRepository $snapshotMemberRepository,
         private readonly RestGapCalculator $restGapCalculator,
-        private readonly ExclusionReasonLabeler $reasonLabeler,
     ) {
     }
 
@@ -72,18 +85,48 @@ final class ReassignmentCandidateService
 
         $candidates = [];
         foreach ($this->teamMemberRepository->findIntersecting($team, $blockStart, $blockEnd) as $member) {
-            $candidates[] = $this->evaluate($generation, $block, $member, $currentTeamMember);
+            if ($member === $currentTeamMember) {
+                continue;
+            }
+            if (null !== $this->assignabilityError($generation, $block, $member)) {
+                continue;
+            }
+            $candidates[] = new ReassignmentCandidate((string) $member->getStableId(), $member->getUser()->getFirstName(), $member->getUser()->getLastName());
         }
 
         usort($candidates, static fn (ReassignmentCandidate $a, ReassignmentCandidate $b): int => [$a->lastName, $a->firstName] <=> [$b->lastName, $b->firstName]);
 
         return new ReassignmentCandidatesView(
-            $duty->getGroupInstance()?->getStableId() ? (string) $duty->getGroupInstance()?->getStableId() : null,
+            null !== $duty->getGroupInstance() ? (string) $duty->getGroupInstance()->getStableId() : null,
+            $duty->getGroupInstance()?->getPattern()->getName(),
             array_map(static fn (Duty $d): ReassignmentBlockDuty => new ReassignmentBlockDuty($d), $block),
             (string) $generation->getStableId(),
-            null !== $currentTeamMember ? (string) $currentTeamMember->getStableId() : null,
+            $currentTeamMember,
             $candidates,
         );
+    }
+
+    /**
+     * Why $member cannot take $block right now, or null when they can — the
+     * single check behind both the candidate list and the save
+     * (DutyReassignmentService), so the two can never disagree: the two
+     * structural rules first (own line, generation snapshot), then every
+     * live reason of firstBlockingReason().
+     *
+     * @param list<Duty> $block
+     */
+    public function assignabilityError(PlanningGeneration $generation, array $block, PlanningTeamMember $member): ?string
+    {
+        if ($member->getPlanningTeam() !== $block[0]->getTeam()) {
+            return self::NOT_A_LINE_MEMBER;
+        }
+
+        $snapshot = $this->snapshotRepository->findOneByGeneration($generation);
+        if (null === $snapshot || null === $this->snapshotMemberRepository->findOneBySnapshotAndTeamMemberStableId($snapshot, $member->getStableId())) {
+            return self::NOT_IN_GENERATION_SNAPSHOT;
+        }
+
+        return $this->firstBlockingReason($generation, $block, $member)?->value;
     }
 
     /**
@@ -133,24 +176,6 @@ final class ReassignmentCandidateService
         }
 
         return $member;
-    }
-
-    /**
-     * @param list<Duty> $block
-     */
-    private function evaluate(PlanningGeneration $generation, array $block, PlanningTeamMember $member, ?PlanningTeamMember $currentTeamMember): ReassignmentCandidate
-    {
-        $isCurrent = $currentTeamMember === $member;
-        $reason = $this->firstBlockingReason($generation, $block, $member);
-
-        return new ReassignmentCandidate(
-            (string) $member->getStableId(),
-            $member->getUser()->getFirstName(),
-            $member->getUser()->getLastName(),
-            selectable: null === $reason,
-            isCurrent: $isCurrent,
-            blockingReasons: null !== $reason ? [$this->reasonLabeler->label($reason)] : [],
-        );
     }
 
     /**

@@ -5,20 +5,19 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Entity\Planning;
+use App\Entity\RestPolicyOptions;
 use App\Entity\User;
-use App\Entity\UserAvailabilityType;
-use App\Exception\PlanningGenerationInProgressException;
+use App\Exception\PlanningJobInProgressException;
 use App\Exception\PlanningNotLaunchableException;
-use App\Fairness\CoverageStatus;
 use App\Repository\PlanningRepository;
 use App\Security\Voter\PlanningVoter;
 use App\Service\LaunchLineReadiness;
-use App\Service\LaunchLineResult;
 use App\Service\PlanningGenerationLauncher;
 use App\Service\PlanningGenerationPreflight;
+use App\Service\PlanningJobPresenter;
+use App\Service\PlanningJobService;
 use App\Service\PreflightIssue;
 use App\Service\RestPolicyRequestParser;
-use App\Service\UnsatReportPresenter;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -34,8 +33,9 @@ use Symfony\Component\Security\Http\Attribute\CurrentUser;
  * status-code mapping only — every step is PlanningGenerationLauncher and
  * the services it calls.
  *
- * Synchronous, like POST /api/planning-generations/{id}/solve (D106): the
- * response carries the outcome. A generation is *never* refused because
+ * Asynchronous since docs/decisions.md D149: the launch only runs the
+ * preflight and queues a PlanningJob (202); the worker runs the pipeline and
+ * the screen follows GET .../jobs/latest. A generation is *never* refused because
  * some members have not confirmed or because the availability deadline is
  * passed — only for a technical impossibility (409 `not_launchable`).
  */
@@ -44,9 +44,10 @@ final class PlanningLaunchController
     public function __construct(
         private readonly PlanningRepository $planningRepository,
         private readonly PlanningGenerationLauncher $launcher,
+        private readonly PlanningJobService $jobService,
+        private readonly PlanningJobPresenter $jobPresenter,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
         private readonly RestPolicyRequestParser $restPolicyParser,
-        private readonly UnsatReportPresenter $unsatReportPresenter,
     ) {
     }
 
@@ -71,21 +72,23 @@ final class PlanningLaunchController
         }
 
         try {
-            $results = $this->launcher->launch($planning, $user, $restPolicy);
+            $job = $this->jobService->requestGeneration($planning, $user, $restPolicy ?? RestPolicyOptions::none());
         } catch (PlanningNotLaunchableException $exception) {
             return new JsonResponse([
                 'error' => 'not_launchable',
                 'message' => $exception->getMessage(),
                 'blockers' => array_map($this->issueToArray(...), $exception->preflight->blockers),
             ], 409);
-        } catch (PlanningGenerationInProgressException $exception) {
-            return new JsonResponse(['error' => 'generation_in_progress', 'message' => $exception->getMessage()], 409);
+        } catch (PlanningJobInProgressException $exception) {
+            return new JsonResponse([
+                'error' => 'job_in_progress',
+                'message' => $exception->getMessage(),
+                'job' => null !== $exception->activeJob ? $this->jobPresenter->toArray($exception->activeJob) : null,
+            ], 409);
         }
 
-        return new JsonResponse([
-            'planningStableId' => (string) $planning->getStableId(),
-            'lines' => array_map($this->lineResultToArray(...), $results),
-        ], 201);
+        // 202: accepted — the worker runs it; the screen follows GET .../jobs/latest (docs/decisions.md D149).
+        return new JsonResponse(['job' => $this->jobPresenter->toArray($job)], 202);
     }
 
     private function resolvePlanning(string $stableId): Planning
@@ -158,55 +161,6 @@ final class PlanningLaunchController
             'code' => $issue->code->value,
             'lineStableId' => null !== $issue->line ? (string) $issue->line->getStableId() : null,
             'lineName' => $issue->line?->getName(),
-        ];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    private function lineResultToArray(LaunchLineResult $line): array
-    {
-        $generation = $line->generation;
-        $result = $line->result;
-
-        $snapshot = null;
-        if (null !== $line->snapshot) {
-            $unavailable = 0;
-            foreach ($line->snapshot->getMembers() as $member) {
-                foreach ($member->getAvailabilityPeriods() as $period) {
-                    if (UserAvailabilityType::UNAVAILABLE === $period->getType()) {
-                        ++$unavailable;
-                    }
-                }
-            }
-            $snapshot = [
-                'capturedAt' => $line->snapshot->getCreatedAt()->format(\DATE_ATOM),
-                'memberCount' => \count($line->snapshot->getMembers()),
-                'unavailableCount' => $unavailable,
-            ];
-        }
-
-        return [
-            'lineStableId' => (string) $line->line->getStableId(),
-            'lineName' => $line->line->getName(),
-            'generationStableId' => (string) $generation->getStableId(),
-            'status' => $generation->getStatus()->value,
-            'error' => $line->error,
-            'coverageStatus' => $result?->coverageStatus->value,
-            'strictSolverStatus' => $result?->strictSolverStatus->value,
-            'partialSolverStatus' => $result?->partialSolverStatus?->value,
-            'assignmentCount' => null !== $result ? \count($result->assignments) : null,
-            'unassignedDutyCount' => null !== $result ? \count($result->unassignedDuties) : null,
-            // docs/decisions.md D137: OPTIMAL vs FEASIBLE must never be
-            // conflated in the UI (§20 of the spec) — the planning-level
-            // façade previously dropped this, forcing a caller to the
-            // per-period endpoint just to know whether optimality was
-            // actually proven.
-            'optimality' => $result?->optimality,
-            'diagnostics' => null !== $result && CoverageStatus::INCOMPLETE === $result->coverageStatus
-                ? $this->unsatReportPresenter->toArray($result->diagnostics)
-                : null,
-            'snapshot' => $snapshot,
         ];
     }
 }

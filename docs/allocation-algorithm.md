@@ -578,6 +578,15 @@ d'optimisation (hors phase 0/1, qui ne sont pas des phases d'objectif) —
 
 ### REPAIR
 
+> **Statut d'implémentation (D145)** : REPAIR tel que décrit ci-dessous
+> (déplacer des affectations existantes en minimisant un coût de changement)
+> **n'est toujours pas implémenté**. Ce qui existe désormais est plus étroit :
+> « Compléter automatiquement » — `fixedAssignments` réels (toute unité ayant
+> un titulaire courant est figée, jamais reconsidérée) + `excludedEdges`
+> (éligibilité live des trous), résolus avec l'ordre GENERATE. Aucune
+> affectation existante ne pouvant bouger, `changedAssignmentCount` y vaut
+> toujours 0 par construction ; `changeCostByUnit` reste absent.
+
 La fairness devient une **contrainte de non-régression**, pas un objectif
 actif — cohérent avec l'objectif de changement minimal.
 
@@ -1051,6 +1060,14 @@ reste de l'équipe, sans jamais améliorer le ratio apparent du déclarant.
 > première contrainte globale réelle (`AssignmentConflict`, D100),
 > absente du contrat abstrait de ce §21 mais nécessaire pour que le
 > solveur arbitre réellement entre affectations concurrentes.
+>
+> **Statut d'implémentation (D145)** : `fixedAssignments` existe désormais
+> réellement (`OptimizationProblem::withFixedAssignments()`, `fixedCandidateId`
+> dans le payload, forcé à 1 par `cp_sat_solver.py`), ainsi que des
+> `excludedEdges` sur le solve lui-même (et plus seulement sur
+> `checkFeasibility`). Seul consommateur : « Compléter automatiquement »
+> (`PlanningCompletionService`). `changeCostByUnit` et le mode REPAIR restent
+> absents (§11).
 >
 > **Statut d'implémentation (Lot 6E, `docs/decisions.md` D106,
 > `docs/planning-solver.md` §37)** : `OptimizationProblem` porte

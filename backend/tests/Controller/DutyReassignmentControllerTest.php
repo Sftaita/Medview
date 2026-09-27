@@ -81,7 +81,7 @@ final class DutyReassignmentControllerTest extends WebTestCase
 
     // --- live candidates ------------------------------------------------------------
 
-    public function testAvailableCandidateIsSelectableAndTheCurrentAssigneeIsIdentified(): void
+    public function testOnlyReallyAssignableCandidatesAreListedAndTheCurrentHolderIsIdentified(): void
     {
         $client = static::createClient();
         $s = $this->pilotScenario($client);
@@ -90,7 +90,7 @@ final class DutyReassignmentControllerTest extends WebTestCase
         foreach (['admin', 'alice'] as $who) {
             $this->declareRange($client, $s[$who], '2027-01-05', '2027-01-06');
         }
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
 
         $dutyStableId = $this->onlyDutyStableIdOf($s['planningId']);
         $bobMemberId = $this->memberIdOf($client, $s, 'bob@example.com');
@@ -99,25 +99,28 @@ final class DutyReassignmentControllerTest extends WebTestCase
         $view = $this->candidates($client, $s, $dutyStableId);
         self::assertResponseIsSuccessful();
         self::assertSame($bobMemberId, $view['currentTeamMemberStableId']);
+        self::assertSame($bobMemberId, $view['currentAssignee']['teamMemberStableId']);
 
-        $bob = $this->candidateOf($view['candidates'], $bobMemberId);
-        self::assertTrue($bob['selectable']);
-        self::assertTrue($bob['isCurrent']);
-        self::assertSame([], $bob['blockingReasons']);
+        // docs/decisions.md D144: an impossible candidate is absent, never listed as disabled —
+        // admin and alice are unavailable, bob already holds it: nobody can replace him.
+        $listed = array_column($view['candidates'], 'teamMemberStableId');
+        self::assertNotContains($adminMemberId, $listed, 'An unavailable member is never proposed.');
+        self::assertNotContains($bobMemberId, $listed, 'The current holder is not a replacement.');
+        self::assertSame([], $listed);
 
-        $admin = $this->candidateOf($view['candidates'], $adminMemberId);
-        self::assertFalse($admin['selectable']);
-        self::assertFalse($admin['isCurrent']);
-        self::assertSame(['indisponible'], $admin['blockingReasons']);
+        // ...and the server refuses them anyway if a client sends one.
+        $response = $this->reassign($client, $s, $dutyStableId, $adminMemberId, $bobMemberId);
+        self::assertResponseStatusCodeSame(409);
+        self::assertSame('invalid_candidate', $response['error']);
     }
 
-    public function testConflictingCandidateIsDisabled(): void
+    public function testAConflictingCandidateIsNeverListed(): void
     {
         $client = static::createClient();
         $s = $this->pilotScenario($client);
         // Two overlapping standalone duties (05→07 and 06→08): whoever holds one can never take the other.
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-07'], ['2027-01-06', '2027-01-08']]);
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
 
         $result = $this->readResult($client, $s['planningId'], $s['creator']);
         $duties = $result['lines'][0]['duties'];
@@ -129,10 +132,14 @@ final class DutyReassignmentControllerTest extends WebTestCase
         $view = $this->candidates($client, $s, $duty06['dutyStableId']);
         self::assertResponseIsSuccessful();
 
-        $conflicting = $this->candidateOf($view['candidates'], $this->memberStableIdOfUser($client, $s, $firstAssigneeStableId));
-        self::assertFalse($conflicting['isCurrent'], 'This candidate holds the OTHER duty of the pair, not this one.');
-        self::assertFalse($conflicting['selectable']);
-        self::assertSame(['déjà affecté à une garde incompatible'], $conflicting['blockingReasons']);
+        $conflictingMemberId = $this->memberStableIdOfUser($client, $s, $firstAssigneeStableId);
+        self::assertNotSame($conflictingMemberId, $view['currentTeamMemberStableId'], 'This candidate holds the OTHER duty of the pair, not this one.');
+        self::assertNotContains($conflictingMemberId, array_column($view['candidates'], 'teamMemberStableId'));
+
+        $response = $this->reassign($client, $s, $duty06['dutyStableId'], $conflictingMemberId, $view['currentTeamMemberStableId']);
+        self::assertResponseStatusCodeSame(409);
+        self::assertSame('invalid_candidate', $response['error']);
+        self::assertStringContainsString('CONFLICT', $response['message']);
     }
 
     // --- block atomicity --------------------------------------------------------------
@@ -142,7 +149,7 @@ final class DutyReassignmentControllerTest extends WebTestCase
         $client = static::createClient();
         $s = $this->pilotScenario($client);
         [$group, $duty0, $duty1] = $this->prepareBlockGeneration($s['planningId'], '2027-01-09', '2027-01-09', '2027-01-10', '2027-01-10', '2027-01-11');
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
 
         $view = $this->candidates($client, $s, (string) $duty0->getStableId());
         self::assertResponseIsSuccessful();
@@ -177,7 +184,7 @@ final class DutyReassignmentControllerTest extends WebTestCase
         $client = static::createClient();
         $s = $this->pilotScenario($client);
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-06']]);
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
 
         $dutyStableId = $this->onlyDutyStableIdOf($s['planningId']);
         $view = $this->candidates($client, $s, $dutyStableId);
@@ -209,7 +216,7 @@ final class DutyReassignmentControllerTest extends WebTestCase
         foreach (['admin', 'alice', 'bob'] as $who) {
             $this->declareRange($client, $s[$who], '2027-01-05', '2027-01-06');
         }
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
         self::assertResponseIsSuccessful();
 
         $dutyStableId = $this->onlyDutyStableIdOf($s['planningId']);
@@ -246,7 +253,7 @@ final class DutyReassignmentControllerTest extends WebTestCase
         $client = static::createClient();
         $s = $this->pilotScenario($client);
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-06']]);
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
 
         $dutyStableId = $this->onlyDutyStableIdOf($s['planningId']);
         $view = $this->candidates($client, $s, $dutyStableId);
@@ -276,13 +283,13 @@ final class DutyReassignmentControllerTest extends WebTestCase
         $client = static::createClient();
         $s = $this->pilotScenario($client);
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-06']]);
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
 
         $dutyStableId = $this->onlyDutyStableIdOf($s['planningId']);
         $view = $this->candidates($client, $s, $dutyStableId);
         $original = $view['currentTeamMemberStableId'];
         $aliceMemberId = $this->memberIdOf($client, $s, 'alice@example.com');
-        self::assertTrue($this->candidateOf($view['candidates'], $aliceMemberId)['selectable'], 'Precondition: alice starts selectable.');
+        self::assertSame($aliceMemberId, $this->candidateOf($view['candidates'], $aliceMemberId)['teamMemberStableId'], 'Precondition: alice is listed.');
 
         // alice becomes unavailable after the modal opened, before "Enregistrer" is clicked — the
         // concurrency identity ($original) is unaffected, only her own eligibility changed.
@@ -300,7 +307,7 @@ final class DutyReassignmentControllerTest extends WebTestCase
         $client = static::createClient();
         $s = $this->pilotScenario($client);
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-06']]);
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
 
         $dutyStableId = $this->onlyDutyStableIdOf($s['planningId']);
         $view = $this->candidates($client, $s, $dutyStableId);
@@ -328,7 +335,7 @@ final class DutyReassignmentControllerTest extends WebTestCase
         $client = static::createClient();
         $s = $this->pilotScenario($client);
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-06']]);
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
         $dutyStableId = $this->onlyDutyStableIdOf($s['planningId']);
 
         // A plain member (alice) cannot view candidates nor reassign.
@@ -399,7 +406,7 @@ final class DutyReassignmentControllerTest extends WebTestCase
     private function firstOtherSelectable(array $candidateList, ?string $excludingTeamMemberStableId): string
     {
         foreach ($candidateList as $candidate) {
-            if ($candidate['selectable'] && $candidate['teamMemberStableId'] !== $excludingTeamMemberStableId) {
+            if ($candidate['teamMemberStableId'] !== $excludingTeamMemberStableId) {
                 return $candidate['teamMemberStableId'];
             }
         }

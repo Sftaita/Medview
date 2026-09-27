@@ -18,6 +18,8 @@ function row(overrides: Partial<StatisticsMemberRow> = {}): StatisticsMemberRow 
     countsByWeekday: { MON: 0, TUE: 1, WED: 0, THU: 0, FRI: 0, SAT: 1, SUN: 1 },
     countsByFamily: { '': 1, 'Week-end': 2 },
     total: 3,
+    countsByDutyType: { Garde: 3 },
+    weightedLoad: 3,
     ...overrides,
   }
 }

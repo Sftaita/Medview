@@ -1,0 +1,35 @@
+# Planning generation/completion jobs (docs/decisions.md D149).
+#
+# One transport, PostgreSQL (the application's own database — no broker to
+# operate). The worker is a dedicated container (docs/deployment.md §5 ter).
+#
+# No automatic retry: a solve that failed is not a transient network hiccup —
+# the handler records the job FAILED itself and the manager relaunches it on
+# purpose. The failure transport only ever receives a message whose handler
+# threw before it could record anything (a bug), for inspection with
+# `messenger:failed:show`.
+framework:
+    messenger:
+        failure_transport: failed
+
+        transports:
+            planning_jobs:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                options:
+                    queue_name: planning_jobs
+                    # A message whose worker was killed is handed out again after this delay; the handler
+                    # then finds its job already recovered (PlanningJobRecovery) and does nothing.
+                    redeliver_timeout: 3600
+                retry_strategy:
+                    max_retries: 0
+            failed:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                options:
+                    queue_name: failed
+
+        routing:
+            App\Message\RunPlanningJob: planning_jobs
+
+# Tests use this same Doctrine transport (inside each test's rolled-back transaction) and run the
+# worker explicitly — PlanningJobTestHelpers::runQueuedPlanningJobs() — so a test can also observe a
+# job while it is still QUEUED, and a queued message survives the browser's kernel reboots.

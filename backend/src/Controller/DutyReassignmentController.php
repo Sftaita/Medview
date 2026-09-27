@@ -8,6 +8,7 @@ use App\Dto\ReassignDutyRequest;
 use App\Entity\Duty;
 use App\Entity\PlanningPeriodStatus;
 use App\Entity\User;
+use App\Exception\DutyAlreadyUncoveredException;
 use App\Exception\DutyNotGeneratedException;
 use App\Exception\InvalidReassignmentCandidateException;
 use App\Exception\PlanningGenerationNotSnapshottedException;
@@ -58,13 +59,57 @@ final class DutyReassignmentController
             return new JsonResponse(['error' => 'duty_not_generated', 'message' => $exception->getMessage()], 409);
         }
 
+        $current = $view->currentTeamMember;
+
         return new JsonResponse([
             'groupInstanceStableId' => $view->groupInstanceStableId,
+            'groupLabel' => $view->groupLabel,
             'blockDuties' => array_map($this->blockDutyToArray(...), $view->blockDuties),
             'generationStableId' => $view->generationStableId,
-            'currentTeamMemberStableId' => $view->currentTeamMemberStableId,
+            'currentTeamMemberStableId' => null !== $current ? (string) $current->getStableId() : null,
+            'currentAssignee' => null === $current ? null : [
+                'teamMemberStableId' => (string) $current->getStableId(),
+                'firstName' => $current->getUser()->getFirstName(),
+                'lastName' => $current->getUser()->getLastName(),
+            ],
             'candidates' => array_map($this->candidateToArray(...), $view->candidates),
         ]);
+    }
+
+    /**
+     * "Retirer l'affectation" (docs/decisions.md D144): the whole block
+     * becomes NON COUVERT on purpose. Same concurrency identity as a
+     * reassignment — the holder the editor showed must still be the holder.
+     */
+    #[Route('/api/plannings/{planningStableId}/duties/{dutyStableId}/unassign', name: 'api_duty_unassign', methods: ['POST'])]
+    public function unassign(string $planningStableId, string $dutyStableId, Request $request, #[CurrentUser] User $user): JsonResponse
+    {
+        $duty = $this->resolveDuty($planningStableId, $dutyStableId);
+
+        try {
+            $raw = json_decode($request->getContent(), true, flags: \JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return new JsonResponse(['error' => 'invalid_json', 'message' => 'The request body is not valid JSON.'], 400);
+        }
+
+        $expected = $raw['expectedCurrentTeamMemberStableId'] ?? null;
+        if (!\is_string($expected) || '' === $expected) {
+            return new JsonResponse(['error' => 'validation_failed', 'violations' => ['expectedCurrentTeamMemberStableId' => 'This value should not be blank.']], 422);
+        }
+
+        $wasPublished = PlanningPeriodStatus::PUBLISHED === $duty->getPlanningPeriod()->getStatus();
+
+        try {
+            $this->reassignmentService->unassign($duty, $expected, $user, $wasPublished);
+        } catch (DutyNotGeneratedException $exception) {
+            return new JsonResponse(['error' => 'duty_not_generated', 'message' => $exception->getMessage()], 409);
+        } catch (StaleReassignmentException $exception) {
+            return new JsonResponse(['error' => 'stale_reassignment', 'message' => $exception->getMessage()], 409);
+        } catch (DutyAlreadyUncoveredException $exception) {
+            return new JsonResponse(['error' => 'already_uncovered', 'message' => $exception->getMessage()], 409);
+        }
+
+        return new JsonResponse(['status' => 'unassigned'], 200);
     }
 
     #[Route('/api/plannings/{planningStableId}/duties/{dutyStableId}/reassign', name: 'api_duty_reassign', methods: ['POST'])]
@@ -160,9 +205,6 @@ final class DutyReassignmentController
             'teamMemberStableId' => $candidate->teamMemberStableId,
             'firstName' => $candidate->firstName,
             'lastName' => $candidate->lastName,
-            'selectable' => $candidate->selectable,
-            'isCurrent' => $candidate->isCurrent,
-            'blockingReasons' => $candidate->blockingReasons,
         ];
     }
 }

@@ -69,6 +69,22 @@ export function addTeamMember(
   })
 }
 
+/**
+ * Grant ("ADMIN") or withdraw ("MEMBER") the right to manage the planning
+ * (docs/decisions.md D147) — creator only.
+ */
+export function changeTeamMemberRole(
+  planningStableId: string,
+  teamStableId: string,
+  memberStableId: string,
+  role: 'ADMIN' | 'MEMBER',
+): Promise<PlanningTeamMember> {
+  return apiFetch<PlanningTeamMember>(
+    `/api/plannings/${planningStableId}/teams/${teamStableId}/members/${memberStableId}/role`,
+    { method: 'PUT', body: { role } },
+  )
+}
+
 export function endTeamMembership(
   planningStableId: string,
   teamStableId: string,

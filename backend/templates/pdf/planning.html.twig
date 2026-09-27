@@ -1,0 +1,74 @@
+{# ------------------------------------------------------------------
+   MedVue — PDF d'un planning publié (docs/decisions.md D143)
+   Contexte : PlanningPdfRenderer::view() — planningName, periodLabel,
+   publishedAtLabel, lines[{name}], weeks[{label, days[{label, weekend,
+   cells[ligne][{name, dutyType, block, blockPart}]}]}].
+   Rendu par dompdf : CSS 2.1 simple, police DejaVu Sans (glyphes ⚠ / →).
+   ------------------------------------------------------------------ #}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>{{ planningName }}</title>
+<style>
+  @page { margin: 14mm 12mm 14mm 12mm; }
+  body { font-family: 'DejaVu Sans', sans-serif; font-size: 8.5pt; color: #16202B; }
+  h1 { font-size: 15pt; margin: 0 0 2pt 0; color: #2C7D5F; }
+  .meta { color: #52606D; margin: 0 0 10pt 0; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { background: #2C7D5F; color: #fff; font-weight: bold; text-align: left; padding: 4pt 5pt; }
+  th.date, td.date { width: 62pt; }
+  tr.week td { background: #EEF3F6; color: #3A4754; font-weight: bold; padding: 5pt 5pt 3pt 5pt; border-top: 6pt solid #fff; }
+  td { padding: 3pt 5pt; border-bottom: 0.5pt solid #E1E6EB; vertical-align: top; }
+  tr.weekend td.date { color: #2C7D5F; font-weight: bold; }
+  tr.weekend td { background: #FAFBFC; }
+  .who { font-weight: bold; }
+  .type { color: #727E8C; font-size: 7.5pt; }
+  .none { color: #B7BFC7; }
+  .uncovered { color: #B42318; font-weight: bold; }
+  .block { border-left: 3pt solid #2D7FF9; padding-left: 4pt; }
+  .block-first { border-top: 1pt solid #2D7FF9; }
+  .block-last { border-bottom: 1pt solid #2D7FF9; }
+  .block-label { color: #2D7FF9; font-size: 7pt; }
+  .legend { margin-top: 10pt; color: #52606D; font-size: 7.5pt; }
+</style>
+</head>
+<body>
+  <h1>{{ planningName }}</h1>
+  <p class="meta">{{ periodLabel }} · Planning publié le {{ publishedAtLabel }}</p>
+
+  <table>
+    <thead>
+      <tr>
+        <th class="date">Date</th>
+        {% for line in lines %}<th>{{ line.name }}</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for week in weeks %}
+        <tr class="week"><td colspan="{{ lines|length + 1 }}">{{ week.label }}</td></tr>
+        {% for day in week.days %}
+          <tr class="{{ day.weekend ? 'weekend' : '' }}">
+            <td class="date">{{ day.label }}</td>
+            {% for items in day.cells %}
+              <td>
+                {% for item in items %}
+                  <div class="{{ item.block ? 'block block-' ~ item.blockPart : '' }}">
+                    {% if item.name %}<span class="who">{{ item.name }}</span>{% else %}<span class="uncovered">⚠ Non attribué</span>{% endif %}
+                    {% if item.dutyType %}<span class="type"> · {{ item.dutyType }}</span>{% endif %}
+                    {% if item.block and item.blockPart in ['first', 'single'] %}<div class="block-label">Bloc {{ item.block }}</div>{% endif %}
+                  </div>
+                {% else %}
+                  <span class="none">—</span>
+                {% endfor %}
+              </td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <p class="legend">Un filet bleu relie les jours d’un même bloc : un bloc est toujours attribué d’un seul tenant, à une seule personne. « — » : pas de garde ce jour-là sur cette ligne.</p>
+</body>
+</html>

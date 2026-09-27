@@ -72,7 +72,9 @@
    le process est root), puis `lexik:jwt:check-config`. Utiliser
    `docker exec` (sans `-i`) dans un script `ssh ... <<EOF` : un
    `docker compose exec -T` y consomme le reste du script via stdin.
-8. `<CACHE_CLEAR_CMD>` puis `docker compose -f docker-compose.prod.yml restart backend`.
+8. `<CACHE_CLEAR_CMD>` puis `docker compose -f docker-compose.prod.yml restart backend worker`
+   (le worker, §5 ter, a pu redémarrer en boucle tant que la table
+   `messenger_messages` n'existait pas : c'est attendu avant les migrations).
 9. Vérifier les logs Traefik pour la génération des certificats
    Let's Encrypt des deux routeurs (`medvue-web`, `medvue-api`).
 10. Checks de santé (§2).
@@ -94,7 +96,16 @@
   (`docker exec medvue-backend sha256sum /app/config/jwt/public.pem`, sans
   jamais afficher la clé), `lexik:jwt:check-config` OK, et un `login` réel
   fonctionne toujours après la recréation.
-- `medvue-database`, `medvue-backend`, `medvue-frontend` tous `Up`.
+- `medvue-database`, `medvue-backend`, `medvue-worker`, `medvue-frontend` tous `Up`
+  (le worker **stable**, pas en boucle de redémarrage :
+  `docker inspect medvue-worker --format '{{.RestartCount}}'` ne doit pas
+  augmenter entre deux lectures).
+- Worker (D149) : `docker logs --tail 50 medvue-worker` montre
+  `Consuming messages from transport "planning_jobs"` ; une génération
+  réelle lancée depuis l'interface passe `QUEUED → RUNNING → SUCCEEDED`
+  (`GET /api/plannings/{id}/jobs/latest`), et
+  `docker exec medvue-backend php bin/console messenger:failed:show` est vide.
+- Cron du samedi installé (§5 bis) : `crontab -l | grep duty-reminders`.
 - `medvue-database` injoignable depuis un conteneur d'une autre app
   (`docker exec surgicalhub-php sh -c "getent hosts medvue-database"`
   doit échouer).
@@ -126,9 +137,16 @@ docker compose -f docker-compose.prod.yml up -d --no-build
 # relecture, puis migrate). Jamais `migrate` sans relecture préalable.
 docker exec medvue-backend php bin/console cache:clear
 docker exec medvue-backend php bin/console lexik:jwt:generate-keypair --skip-if-exists   # idempotent
-docker compose -f docker-compose.prod.yml restart backend
+docker compose -f docker-compose.prod.yml restart backend worker
 scripts/deploy/check-trusted-proxy.sh
 ```
+
+`up -d` recrée aussi `medvue-worker` avec la nouvelle image : Docker lui
+envoie SIGTERM, il **termine le calcul en cours** puis s'arrête (au plus
+`stop_grace_period: 15m`), et le nouveau démarre. Pour éviter d'attendre,
+déployer quand `GET /api/plannings/{id}/jobs/latest` ne montre aucun job
+actif — sinon, rien n'est perdu : un calcul coupé au-delà du délai devient
+`FAILED` (`worker_lost`) et le gestionnaire le relance (§5 ter).
 
 Toujours précédé d'un rapport d'écart si le serveur a plus d'un commit de
 retard (jamais de déploiement partiel), et des mêmes checks de santé
@@ -158,6 +176,51 @@ prouve qu'une sauvegarde se restaure, dans une cible jetable. Le `.env`
 (dont `JWT_PASSPHRASE`) n'est **pas** sauvegardé avec les clés : il doit être
 conservé séparément, hors serveur. Les sauvegardes des autres applications
 (`/home/deploy/scripts/*`, crontab existant) ne sont pas modifiées.
+
+## 5 bis. Rappel hebdomadaire des gardes (samedi, D146)
+
+`app:duty-reminders:weekly` envoie à chaque personne **ayant au moins une
+garde** la semaine suivante (lundi → dimanche dans le fuseau de chaque
+planning, lignes publiées uniquement) le récapitulatif de ses gardes. Aucun
+email pour quelqu'un sans garde. Idempotent (`weekly_duty_reminders`) : le
+relancer le même samedi n'envoie rien deux fois ; un envoi échoué n'écrit
+rien et sera retenté au passage suivant (code de sortie ≠ 0 si un envoi a
+échoué).
+
+À ajouter **une seule fois** au crontab de `deploy` (même précautions que
+les sauvegardes, `docs/backup.md` : copie de sécurité du crontab, ne rien
+toucher d'autre). Le crontab existant définit `CRON_TZ=Europe/Brussels` ;
+l'heure exacte importe peu (la semaine est calculée dans le fuseau du
+planning, jamais celui du serveur), il suffit que ce soit un samedi :
+
+```bash
+0 8 * * 6 cd /opt/stack/apps/medvue && docker compose -f docker-compose.prod.yml exec -T backend php bin/console app:duty-reminders:weekly >> /home/deploy/backups/medvue/weekly-reminders.log 2>&1
+```
+
+Rejouer un samedi manqué : `... app:duty-reminders:weekly --now="<samedi> 08:00 Europe/Brussels"`.
+
+## 5 ter. Worker des calculs de planning (D149)
+
+« Générer le planning » et « Compléter automatiquement » ne sont **plus
+exécutés dans la requête HTTP** : la requête enregistre un `PlanningJob`
+(`QUEUED`) et un message, répond `202`, et le conteneur `medvue-worker`
+exécute le calcul OR-Tools, aussi long soit-il.
+
+| Sujet | Mise en œuvre |
+|---|---|
+| Transport | Symfony Messenger, transport Doctrine sur la **même base PostgreSQL** (`MESSENGER_TRANSPORT_DSN=doctrine://default?auto_setup=0`), file `planning_jobs` ; table `messenger_messages` créée par migration (`Version20260927170000`), jamais par le transport. Aucun service supplémentaire (ni Redis, ni RabbitMQ). |
+| Processus | Service `worker` de `docker-compose.prod.yml` (conteneur `medvue-worker`, même image que le backend) : `php bin/console messenger:consume planning_jobs --time-limit=3600 --memory-limit=512M -v`. Jamais lancé à la main dans un terminal. |
+| Redémarrage automatique | `restart: unless-stopped` : relancé par Docker après un crash, après `--time-limit` (recyclage horaire volontaire) et **après un reboot du serveur** (le démon Docker redémarre les conteneurs `unless-stopped`). |
+| Healthcheck | `php bin/console messenger:stats planning_jobs` toutes les 60 s (le conteneur atteint PostgreSQL et lit sa file) ; `docker ps` doit montrer `medvue-worker` `(healthy)`. Le consommateur est le PID 1 : s'il meurt, Docker redémarre le conteneur. |
+| Arrêt propre | `pcntl` est installé dans l'image : sur SIGTERM (`up -d`, `stop`, `restart`), le worker termine le message en cours puis s'arrête ; `stop_grace_period: 15m`. |
+| Retry | **Aucun** (`max_retries: 0`) : un calcul qui échoue est enregistré `FAILED` par le handler lui-même, avec un code stable, et le gestionnaire le relance explicitement. Le transport `failed` ne reçoit qu'un message dont le handler aurait levé une exception avant de pouvoir l'enregistrer (bug) : `messenger:failed:show` / `messenger:failed:retry`. |
+| Jobs abandonnés | Un job `RUNNING` dont le battement (`heartbeat_at`, rafraîchi toutes les 10 s même pendant la résolution CP-SAT) date de plus de 5 min, ou un job `QUEUED` depuis plus de 30 min, est passé `FAILED` (`worker_lost` / `never_started`) et ses générations `SOLVING` deviennent `FAILED` — au démarrage du worker, à chaque lecture de l'état du job et avant toute nouvelle demande. Manuel : `docker exec medvue-backend php bin/console app:planning-jobs:recover`. La durée d'un calcul n'est **jamais** un critère d'échec. Une génération `SOLVING` orpheline (plus de 15 min sans job `RUNNING` sur son planning — requête synchrone technique coupée) est aussi passée `FAILED`. |
+| Horloge | Tous les horodatages de jobs viennent de PostgreSQL (`LOCALTIMESTAMP`, session UTC), jamais de PHP : API et worker comparent la même horloge. |
+| Logs | `docker logs medvue-worker` (sortie de `messenger:consume -v` + erreurs `PlanningJob … failed`). Le détail technique d'un échec est aussi conservé en base (`planning_jobs.failure_detail`), jamais exposé à l'API. |
+| Code | Un process PHP long garde le code avec lequel il a démarré : après tout déploiement, `restart backend worker` (§3) — le recyclage horaire le garantit de toute façon. |
+
+Vérifier après chaque déploiement (§2) : worker stable, une génération réelle
+aboutit, `messenger:failed:show` vide.
 
 ## 6. Historique des déploiements
 

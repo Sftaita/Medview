@@ -24,6 +24,7 @@ trait PlanningPilotTestHelpers
     use InvitationTestHelpers;
     use PlanningDomainTestHelpers;
     use PlanningGenerationTestHelpers;
+    use PlanningJobTestHelpers;
 
     /**
      * Planning 2027-01-01 → 2027-05-01 (last day 2027-04-30), primary team "Seniors".

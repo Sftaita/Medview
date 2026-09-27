@@ -2,7 +2,8 @@ import { apiFetch } from '../../../lib/apiClient'
 import type {
   CollectionStatus,
   GenerationPreflight,
-  LaunchResult,
+  PlanningJob,
+  PlanningJobResponse,
   MemberStatusDetail,
   PendingRemindersResult,
   PlanningSettingsResult,
@@ -59,11 +60,17 @@ export function fetchGenerationPreflight(planningStableId: string): Promise<Gene
 export function launchGeneration(
   planningStableId: string,
   restPolicy?: RestPolicyChoice,
-): Promise<LaunchResult> {
-  return apiFetch<LaunchResult>(`/api/plannings/${planningStableId}/generations`, {
+): Promise<PlanningJobResponse> {
+  // Answers at once with a QUEUED job (docs/decisions.md D149): the worker runs the solve.
+  return apiFetch<PlanningJobResponse>(`/api/plannings/${planningStableId}/generations`, {
     method: 'POST',
     body: restPolicy ?? {},
   })
+}
+
+/** The active engine job of the planning, or its most recent one, or null. */
+export function fetchLatestJob(planningStableId: string): Promise<{ job: PlanningJob | null }> {
+  return apiFetch<{ job: PlanningJob | null }>(`/api/plannings/${planningStableId}/jobs/latest`)
 }
 
 export function fetchRuleSetStatus(lineStableId: string): Promise<RuleSetStatus> {

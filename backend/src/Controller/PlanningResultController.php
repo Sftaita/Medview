@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Entity\Duty;
 use App\Entity\DutyAssignment;
 use App\Entity\Planning;
 use App\Repository\PlanningRepository;
@@ -131,6 +132,12 @@ final class PlanningResultController
         $duty = $result->duty;
         $type = $duty->getDutyType();
         $assignment = $result->assignment;
+        $group = $duty->getGroupInstance();
+        $groupDates = null;
+        if (null !== $group) {
+            $groupDates = array_map(static fn (Duty $d): string => $d->getLocalDate()->format('Y-m-d'), $group->getDuties()->toArray());
+            sort($groupDates);
+        }
 
         return [
             'dutyStableId' => (string) $duty->getStableId(),
@@ -140,7 +147,12 @@ final class PlanningResultController
             'timezone' => $duty->getTimezone(),
             'dutyType' => ['stableId' => (string) $type->getStableId(), 'code' => $type->getCode(), 'name' => $type->getName()],
             'required' => $duty->isRequired(),
-            'grouped' => null !== $duty->getGroupInstance(),
+            'grouped' => null !== $group,
+            // The atomic block this duty belongs to (docs/decisions.md D148): the calendar draws it as
+            // one unit and any edit of one of its days edits all of them — never inferred client-side.
+            'groupInstanceStableId' => null !== $group ? (string) $group->getStableId() : null,
+            'groupLabel' => $group?->getPattern()->getName(),
+            'groupDates' => $groupDates,
             'covered' => $result->covered,
             'assignment' => null === $assignment ? null : $this->assignmentToArray($assignment),
             'reasons' => array_map($this->reasonToArray(...), $result->reasons),
@@ -158,6 +170,7 @@ final class PlanningResultController
             'stableId' => (string) $assignment->getStableId(),
             'source' => $assignment->getSource()->value,
             'locked' => $assignment->isLocked(),
+            'teamMemberStableId' => (string) $assignment->getTeamMember()->getStableId(),
             'user' => [
                 'stableId' => (string) $user->getStableId(),
                 'firstName' => $user->getFirstName(),

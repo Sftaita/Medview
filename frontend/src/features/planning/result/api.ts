@@ -1,11 +1,13 @@
-import { apiFetch } from '../../../lib/apiClient'
+import { apiFetch, apiFetchBlob } from '../../../lib/apiClient'
 import type {
   PlanningResult,
+  PublicationState,
   PlanningStatistics,
   PublicationPreflight,
   PublicationResult,
   ReassignmentCandidatesView,
 } from './types'
+import type { PlanningJobResponse } from '../pilot/types'
 
 /**
  * The whole-period coverage picture of a planning (docs/decisions.md D130):
@@ -58,6 +60,51 @@ export function reassignDuty(
     method: 'POST',
     body: { teamMemberStableId, expectedCurrentTeamMemberStableId },
   })
+}
+
+/**
+ * "Retirer l'affectation" (docs/decisions.md D144): the whole block becomes
+ * uncovered on purpose. `expectedCurrentTeamMemberStableId` is the holder the
+ * editor showed; a stale one fails with a 409.
+ */
+export function unassignDuty(
+  planningStableId: string,
+  dutyStableId: string,
+  expectedCurrentTeamMemberStableId: string,
+): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>(`/api/plannings/${planningStableId}/duties/${dutyStableId}/unassign`, {
+    method: 'POST',
+    body: { expectedCurrentTeamMemberStableId },
+  })
+}
+
+/**
+ * "Compléter automatiquement" (docs/decisions.md D145): fills the holes only, every existing
+ * assignment kept. Answers at once with a QUEUED job run by the worker (D149).
+ */
+export function completePlanning(planningStableId: string): Promise<PlanningJobResponse> {
+  return apiFetch<PlanningJobResponse>(`/api/plannings/${planningStableId}/complete`, {
+    method: 'POST',
+    body: {},
+  })
+}
+
+/** Published or not, since when, and — for a manager — what changed since the last diffusion. */
+export function fetchPublicationState(planningStableId: string): Promise<PublicationState> {
+  return apiFetch<PublicationState>(`/api/plannings/${planningStableId}/publication-state`)
+}
+
+/** "Republier les modifications": emails only the people concerned by an impacted date. */
+export function republishPlanning(planningStableId: string): Promise<PublicationResult> {
+  return apiFetch<PublicationResult>(`/api/plannings/${planningStableId}/republish`, {
+    method: 'POST',
+    body: {},
+  })
+}
+
+/** The PDF of the last diffusion, exactly as it was published. */
+export function fetchPublicationPdf(planningStableId: string): Promise<Blob> {
+  return apiFetchBlob(`/api/plannings/${planningStableId}/publication.pdf`)
 }
 
 /**

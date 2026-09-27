@@ -1,0 +1,263 @@
+/* ==================================================================
+   Calendrier vertical multi-lignes d'un planning (docs/decisions.md D148).
+   Préfixe cal-. Tokens : styles/tokens.css. Mobile d'abord : la table
+   défile horizontalement dans .cal-scroll, la colonne des dates reste
+   collée à gauche.
+   ================================================================== */
+
+.cal {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cal-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.cal-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.cal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.cal-dirty {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--amber-50);
+  color: var(--amber-700);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.cal-summary {
+  font-size: 14px;
+  color: var(--text-muted);
+}
+
+.cal-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+.cal-month {
+  min-width: 160px;
+  text-align: center;
+  font-weight: 800;
+  color: var(--text-strong);
+}
+
+.cal-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md, 12px);
+  background: var(--surface-card);
+}
+.cal-table {
+  width: 100%;
+  min-width: calc(96px + var(--cal-lines, 1) * 150px);
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.cal-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 10px 12px;
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-align: left;
+}
+.cal-week th {
+  padding: 12px 12px 6px;
+  background: var(--surface-card);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  font-weight: 800;
+  text-align: left;
+  border-top: 1px solid var(--border-subtle);
+}
+.cal-day th,
+.cal-day td {
+  padding: 4px 12px;
+  border-top: 1px solid var(--gray-100);
+  vertical-align: top;
+}
+.cal-date {
+  position: sticky;
+  left: 0;
+  width: 96px;
+  background: var(--surface-card);
+  color: var(--text-body);
+  font-weight: 700;
+  text-align: left;
+  white-space: nowrap;
+}
+.cal-day--weekend .cal-date {
+  color: var(--green-800);
+}
+.cal-day--weekend td,
+.cal-day--weekend .cal-date {
+  background: var(--gray-50);
+}
+
+.cal-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+  width: 100%;
+  min-height: 32px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-strong);
+  font: inherit;
+  text-align: left;
+}
+button.cal-item {
+  cursor: pointer;
+}
+button.cal-item:hover {
+  background: var(--surface-hover);
+}
+button.cal-item:focus-visible {
+  outline: 2px solid var(--blue-600);
+  outline-offset: 1px;
+}
+.cal-who {
+  font-weight: 700;
+}
+.cal-type {
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+.cal-none {
+  display: inline-block;
+  padding: 5px 8px;
+  color: var(--text-subtle);
+}
+.cal-uncovered {
+  color: var(--red-700);
+  font-weight: 800;
+}
+.cal-item--uncovered {
+  background: var(--red-50);
+}
+button.cal-item--uncovered:hover {
+  background: var(--red-100);
+}
+
+/* An atomic block: its days are visibly one unit — a continuous blue rail. */
+.cal-block {
+  border-left: 3px solid var(--blue-600);
+  border-radius: 0;
+  background: var(--blue-50);
+}
+.cal-block--first,
+.cal-block--single {
+  border-top-right-radius: 8px;
+}
+.cal-block--last,
+.cal-block--single {
+  border-bottom-right-radius: 8px;
+}
+button.cal-block:hover {
+  background: var(--blue-100);
+}
+.cal-block.cal-item--uncovered {
+  background: var(--red-50);
+}
+.cal-block-label {
+  flex-basis: 100%;
+  color: var(--blue-700);
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.cal-changes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+.cal-changes li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+}
+.cal-changes__when {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.reassignment-current {
+  margin: 4px 0 12px;
+}
+.reassignment-heading {
+  margin: 8px 0;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--text-strong);
+}
+.reassignment-remove {
+  margin-top: 14px;
+  color: var(--red-700);
+}
+
+.stats-panel__num-strong {
+  font-weight: 800;
+}
+
+@media (max-width: 640px) {
+  .cal-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .cal-actions .pd-btn {
+    flex: 1 1 auto;
+  }
+  /* Two lines must fit a phone without scrolling; three or more scroll inside the card. */
+  .cal-table {
+    min-width: calc(64px + var(--cal-lines, 1) * 128px);
+    font-size: 13px;
+  }
+  .cal-date {
+    width: 64px;
+  }
+  .cal-day th,
+  .cal-day td,
+  .cal-table thead th,
+  .cal-week th {
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+  .cal-item {
+    padding: 4px 6px;
+  }
+}

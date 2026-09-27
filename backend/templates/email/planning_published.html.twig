@@ -1,0 +1,31 @@
+{# ------------------------------------------------------------------
+   MedVue — Première publication d'un planning (docs/decisions.md D143)
+   Objet : Planning de garde disponible — <planning>
+   Contexte : firstName, planningName, periodLabel, planningUrl ; PDF joint.
+   ------------------------------------------------------------------ #}
+{% extends 'email/_base.html.twig' %}
+{% import  'email/_components.html.twig' as ui %}
+
+{% set preheader  = 'Le planning de garde ' ~ periodLabel ~ ' est disponible.' %}
+{% set accent     = '#42A882' %}
+{% set eyebrow    = 'Planning publié' %}
+{% set h1         = 'Votre planning de garde<br>est disponible' %}
+{% set panelLabel = 'Planning' %}
+{% set panelTitle = planningName %}
+{% set panelSub   = 'Période ' ~ periodLabel %}
+{% set ctaLabel   = 'Voir le planning' %}
+{% set ctaUrl     = planningUrl %}
+{% set footerNote = 'Vous recevez cet email car vous participez à ce planning de garde sur MedVue.' %}
+
+{% block title %}Planning de garde disponible{% endblock %}
+{% block postal %}{% endblock %}
+
+{% block content %}
+{{ ui.p('Bonjour ' ~ firstName|e ~ ',', 24) }}
+{{ ui.p('Le planning de garde ' ~ ui.b(planningName) ~ ' ' ~ periodLabel|e ~ ' est disponible.', 18) }}
+{{ ui.p('Vous le trouverez en pièce jointe (PDF) : toutes les dates, chaque ligne de garde et la personne affectée. Il reste consultable à tout moment dans MedVue.') }}
+{% endblock %}
+
+{% block after_cta %}
+{{ ui.info('Et ensuite ?', 'Si le planning est modifié, les personnes concernées par les dates modifiées recevront un email détaillant le changement. Chaque samedi, vous recevrez le récapitulatif de vos gardes de la semaine suivante si vous en avez.') }}
+{% endblock %}

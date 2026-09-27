@@ -1,11 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Icon } from '../../components/Icon'
 import { fetchAssignments, fetchTeamMembers } from './api'
 import { CoverageHeader } from './result/CoverageHeader'
 import { fetchPlanningResult } from './result/api'
-import { PublishModal } from './result/PublishModal'
-import { ReassignmentModal } from './result/ReassignmentModal'
-import { StatisticsPanel } from './result/StatisticsPanel'
 import type { PlanningResult, PlanningResultDuty } from './result/types'
 import { UncoveredDuty } from './result/UncoveredDuty'
 import type { PlanningAssignment, PlanningAssignments, PlanningDetail, PlanningTeamMember } from './types'
@@ -73,7 +70,9 @@ type FlatResultDuty = PlanningResultDuty & { lineName: string; lineStableId: str
  * REQUIRED duty, covered or not, with real reasons for an uncovered one);
  * picking one person switches to their own duties and workload summary,
  * exactly as before. Reads what the engine produced; nothing is computed
- * or estimated here.
+ * or estimated here. Read-only for everyone since docs/decisions.md D148:
+ * editing, completion, statistics and publication live in the calendar
+ * (PlanningCalendar) — one path for each action, never two.
  */
 export function PersonalPlanningView({ planning }: Props) {
   const [people, setPeople] = useState<PlanningTeamMember[]>([])
@@ -82,21 +81,6 @@ export function PersonalPlanningView({ planning }: Props) {
   const [result, setResult] = useState<PlanningAssignments | null>(null)
   const [teamResult, setTeamResult] = useState<PlanningResult | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [editingDutyStableId, setEditingDutyStableId] = useState<string | null>(null)
-  const [statsRefreshKey, setStatsRefreshKey] = useState(0)
-  const [showingPublishModal, setShowingPublishModal] = useState(false)
-  // `planning` is a prop owned by the parent screen — a successful publish doesn't automatically
-  // refresh it, so the real per-line statuses the POST /publish response returned are kept here
-  // and preferred over the (now stale) prop, exactly like teamResult's own refresh pattern.
-  const [publishedPeriodStatuses, setPublishedPeriodStatuses] = useState<Record<string, string>>({})
-
-  /** Re-reads the team result as-is — used after a reassignment is saved (no cancellation guard needed: a deliberate, one-off refresh, not a rapid navigation sequence). Also bumps the statistics panel's own refresh (D132 §39: both scopes must reflect a saved reassignment). */
-  const refreshTeamResult = useCallback(() => {
-    fetchPlanningResult(planning.stableId, { from: month, to: monthStart(month, 1) })
-      .then((data) => setTeamResult(data))
-      .catch(() => setError('Impossible de charger le planning.'))
-    setStatsRefreshKey((key) => key + 1)
-  }, [planning.stableId, month])
 
   // Everyone who has been in one of the planning's teams, once each (the same person may have left and rejoined).
   useEffect(() => {
@@ -191,13 +175,6 @@ export function PersonalPlanningView({ planning }: Props) {
     return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b))
   }, [teamResult])
 
-  const activeLines = useMemo(() => planning.lines.filter((line) => line.active), [planning.lines])
-  const statusOf = (lineStableId: string, fallback?: string) =>
-    publishedPeriodStatuses[lineStableId] ?? fallback ?? 'DRAFT'
-  const isFullyPublished =
-    activeLines.length > 0 &&
-    activeLines.every((line) => statusOf(line.stableId, line.periodStatus) === 'PUBLISHED')
-
   return (
     <section className="card person-view" aria-label="Planning par personne">
       <div className="section-title">
@@ -268,20 +245,6 @@ export function PersonalPlanningView({ planning }: Props) {
               Chargement…
             </p>
           )}
-          <div className="planning-status">
-            <span className={`tag ${isFullyPublished ? 'tag--green' : ''}`}>
-              Statut : {isFullyPublished ? 'Publié' : 'Non publié'}
-            </span>
-            {planning.canPublish && (
-              <button
-                type="button"
-                className="btn btn--sm btn--primary"
-                onClick={() => setShowingPublishModal(true)}
-              >
-                Publier le planning
-              </button>
-            )}
-          </div>
           {teamResult !== null && <CoverageHeader lines={teamResult.lines} />}
           {teamResult !== null &&
             byDayResult.length === 0 &&
@@ -309,15 +272,6 @@ export function PersonalPlanningView({ planning }: Props) {
                         {planning.lines.length > 1 && (
                           <span className="muted duty__line">{duty.lineName}</span>
                         )}
-                        {planning.canManageCalendar && (
-                          <button
-                            type="button"
-                            className="btn btn--ghost btn--sm duty__edit"
-                            onClick={() => setEditingDutyStableId(duty.dutyStableId)}
-                          >
-                            {duty.covered ? 'Réattribuer' : 'Attribuer'}
-                          </button>
-                        )}
                       </li>
                     ))}
                   </ul>
@@ -325,7 +279,6 @@ export function PersonalPlanningView({ planning }: Props) {
               ))}
             </ul>
           )}
-          <StatisticsPanel planningStableId={planning.stableId} refreshKey={statsRefreshKey} />
         </>
       ) : (
         <>
@@ -413,33 +366,6 @@ export function PersonalPlanningView({ planning }: Props) {
             </ul>
           )}
         </>
-      )}
-
-      {editingDutyStableId && (
-        <ReassignmentModal
-          planningStableId={planning.stableId}
-          dutyStableId={editingDutyStableId}
-          onClose={() => setEditingDutyStableId(null)}
-          onReassigned={refreshTeamResult}
-        />
-      )}
-
-      {showingPublishModal && (
-        <PublishModal
-          planningStableId={planning.stableId}
-          onClose={() => setShowingPublishModal(false)}
-          onPublished={(result) => {
-            // The POST /publish response itself carries the real, authoritative per-line
-            // statuses — never assumed, never re-derived client-side.
-            setPublishedPeriodStatuses((current) => {
-              const next = { ...current }
-              for (const line of result.lines) {
-                next[line.lineStableId] = line.periodStatus
-              }
-              return next
-            })
-          }}
-        />
       )}
     </section>
   )

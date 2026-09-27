@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { makePreflight, makeStatus } from '../../../testUtils/pilotFixtures'
 import { status as httpStatus, stubApi } from '../../../testUtils/stubApi'
 import { PilotHeaderActions } from './PilotHeaderActions'
-import type { CollectionStatus, LaunchResult } from './types'
+import { ResultBody } from './GenerationModal'
+import type { CollectionStatus, LaunchResult, PlanningJob } from './types'
 
 beforeEach(() => localStorage.setItem('medvue.auth.token', 'jwt'))
 afterEach(() => {
@@ -14,7 +15,7 @@ afterEach(() => {
 
 function renderActions(
   status: CollectionStatus | null = makeStatus(),
-  handlers = { onChanged: vi.fn(), onGenerated: vi.fn() },
+  handlers = { onChanged: vi.fn(), onLaunched: vi.fn() },
   lineProps: { primaryLineStableId?: string; primaryLineName?: string } = {},
 ) {
   render(
@@ -23,7 +24,7 @@ function renderActions(
       timezone="Europe/Brussels"
       status={status}
       onChanged={handlers.onChanged}
-      onGenerated={handlers.onGenerated}
+      onLaunched={handlers.onLaunched}
       {...lineProps}
     />,
   )
@@ -81,7 +82,7 @@ describe('PilotHeaderActions — buttons and menu', () => {
         status={makeStatus()}
         onRename={onRename}
         onChanged={vi.fn()}
-        onGenerated={vi.fn()}
+        onLaunched={vi.fn()}
       />,
     )
 
@@ -109,7 +110,7 @@ describe('PilotHeaderActions — buttons and menu', () => {
         timezone="Europe/Brussels"
         status={makeStatus()}
         onChanged={vi.fn()}
-        onGenerated={vi.fn()}
+        onLaunched={vi.fn()}
         dialog="generate"
         onDialogChange={onDialogChange}
       />,
@@ -238,8 +239,21 @@ describe('PlanningSettingsModal', () => {
   })
 })
 
+const QUEUED: { job: PlanningJob } = {
+  job: {
+    stableId: 'job-1',
+    kind: 'GENERATE',
+    status: 'QUEUED',
+    requestedBy: { firstName: 'Camille', lastName: 'Dupont' },
+    createdAt: '2026-09-27T10:00:00+00:00',
+    startedAt: null,
+    finishedAt: null,
+    failureCode: null,
+    outcome: null,
+  },
+}
+
 const SUCCESS: LaunchResult = {
-  planningStableId: 'plan-1',
   lines: [
     {
       lineStableId: 'line-1',
@@ -257,6 +271,10 @@ const SUCCESS: LaunchResult = {
       snapshot: { capturedAt: '2026-09-21T08:14:00+00:00', memberCount: 16, unavailableCount: 42 },
     },
   ],
+}
+
+function renderResult(result: LaunchResult) {
+  render(<ResultBody result={result} timezone="Europe/Brussels" />)
 }
 
 describe('GenerationModal', () => {
@@ -333,17 +351,17 @@ describe('GenerationModal', () => {
     expect(within(dialog).getByRole('button', { name: 'Générer quand même' })).toBeEnabled()
   })
 
-  it('launches once even on a double click, shows the result, and tells the page', async () => {
+  it('requests the generation once even on a double click, then hands the queued job over to the page (docs/decisions.md D149)', async () => {
     let release: () => void = () => {}
     const held = new Promise<void>((resolve) => (release = resolve))
     const api = stubApi({
       [preflightUrl]: () => makePreflight(),
       [launchUrl]: async () => {
         await held
-        return SUCCESS
+        return httpStatus(202, QUEUED)
       },
     })
-    const { onGenerated } = renderActions()
+    const { onLaunched } = renderActions()
 
     fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
     const dialog = await screen.findByRole('dialog')
@@ -351,39 +369,53 @@ describe('GenerationModal', () => {
     fireEvent.click(confirm)
     fireEvent.click(confirm)
 
-    expect(await within(dialog).findByRole('button', { name: 'Génération en cours…' })).toBeDisabled()
-    expect(within(dialog).getByText('La génération peut durer quelques secondes…')).toBeInTheDocument()
-    // Nothing can dismiss the dialog while it runs.
+    expect(await within(dialog).findByRole('button', { name: 'Envoi…' })).toBeDisabled()
+    // Nothing can dismiss the dialog while the request is being sent.
     fireEvent.keyDown(document, { key: 'Escape' })
     expect(screen.getByRole('dialog')).toBeInTheDocument()
 
     release()
-    const result = await within(dialog).findByRole('list', { name: 'Résultat de la génération' })
-    expect(within(result).getByText(/couverture complète, 28 gardes affectées/)).toBeInTheDocument()
-    expect(
-      within(result).getByText(/État figé le 21\/09\/2026 à 10:14 \(16 membres, 42 indisponibilités\)/),
-    ).toBeInTheDocument()
+    // The server answered at once with a queued job: the dialog closes, the page follows the job.
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(api.requests('POST', '/api/plannings/plan-1/generations')).toHaveLength(1)
-    expect(onGenerated).toHaveBeenCalledTimes(1)
+    expect(onLaunched).toHaveBeenCalledTimes(1)
+    expect(onLaunched).toHaveBeenCalledWith(QUEUED.job)
+  })
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Fermer' }))
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  it('is not offered once the planning is published, and is disabled while a job runs', () => {
+    render(
+      <PilotHeaderActions
+        planningStableId="plan-1"
+        timezone="Europe/Brussels"
+        status={makeStatus()}
+        onChanged={vi.fn()}
+        onLaunched={vi.fn()}
+        canLaunchGeneration={false}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: 'Générer le planning' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Plus d’actions' })).toBeInTheDocument()
+    cleanup()
+
+    render(
+      <PilotHeaderActions
+        planningStableId="plan-1"
+        timezone="Europe/Brussels"
+        status={makeStatus()}
+        onChanged={vi.fn()}
+        onLaunched={vi.fn()}
+        busy
+      />,
+    )
+    expect(screen.getByRole('button', { name: 'Générer le planning' })).toBeDisabled()
   })
 
   it('reports an incomplete coverage honestly', async () => {
-    stubApi({
-      [preflightUrl]: () => makePreflight(),
-      [launchUrl]: () => ({
-        ...SUCCESS,
-        lines: [
-          { ...SUCCESS.lines[0], coverageStatus: 'INCOMPLETE', assignmentCount: 25, unassignedDutyCount: 3 },
-        ],
-      }),
+    renderResult({
+      lines: [
+        { ...SUCCESS.lines[0], coverageStatus: 'INCOMPLETE', assignmentCount: 25, unassignedDutyCount: 3 },
+      ],
     })
-    renderActions()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
-    fireEvent.click(await enabledConfirm())
 
     expect(
       await screen.findByText(/couverture incomplète, 25 gardes affectées, 3 gardes non pourvues/),
@@ -424,7 +456,7 @@ describe('GenerationModal', () => {
   it('tells when another generation is already running', async () => {
     stubApi({
       [preflightUrl]: () => makePreflight(),
-      [launchUrl]: () => httpStatus(409, { error: 'generation_in_progress' }),
+      [launchUrl]: () => httpStatus(409, { error: 'job_in_progress' }),
     })
     renderActions()
 
@@ -458,7 +490,7 @@ describe('GenerationModal', () => {
   it('sends the chosen rest policy with the launch, disabled by default', async () => {
     const api = stubApi({
       [preflightUrl]: () => makePreflight(),
-      [launchUrl]: () => SUCCESS,
+      [launchUrl]: () => httpStatus(202, QUEUED),
     })
     renderActions()
 
@@ -478,7 +510,7 @@ describe('GenerationModal', () => {
   it('enables team min rest with a chosen number of hours', async () => {
     const api = stubApi({
       [preflightUrl]: () => makePreflight(),
-      [launchUrl]: () => SUCCESS,
+      [launchUrl]: () => httpStatus(202, QUEUED),
     })
     renderActions()
 
@@ -500,77 +532,59 @@ describe('GenerationModal', () => {
   })
 
   it('never calls a FEASIBLE-but-complete result "optimal"', async () => {
-    stubApi({
-      [preflightUrl]: () => makePreflight(),
-      [launchUrl]: () => ({
-        ...SUCCESS,
-        lines: [{ ...SUCCESS.lines[0], strictSolverStatus: 'FEASIBLE' }],
-      }),
-    })
-    renderActions()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
-    fireEvent.click(await enabledConfirm())
+    renderResult({ lines: [{ ...SUCCESS.lines[0], strictSolverStatus: 'FEASIBLE' }] })
 
     expect(await screen.findByText(/L’optimalité mathématique n’a pas pu être démontrée/)).toBeInTheDocument()
     expect(screen.queryByText(/prouvé optimal/)).not.toBeInTheDocument()
   })
 
-  it('says a truly OPTIMAL result was proven optimal', async () => {
-    stubApi({ [preflightUrl]: () => makePreflight(), [launchUrl]: () => SUCCESS })
-    renderActions()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
-    fireEvent.click(await enabledConfirm())
+  it('says a truly OPTIMAL result was proven optimal, with the frozen snapshot it used', async () => {
+    renderResult(SUCCESS)
 
     expect(await screen.findByText(/prouvé optimal/)).toBeInTheDocument()
+    expect(screen.getByText(/couverture complète, 28 gardes affectées/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/État figé le 21\/09\/2026 à 10:14 \(16 membres, 42 indisponibilités\)/),
+    ).toBeInTheDocument()
   })
 
   it('reuses the real UNSAT diagnostic instead of inventing a cause in React', async () => {
-    stubApi({
-      [preflightUrl]: () => makePreflight(),
-      [launchUrl]: () => ({
-        ...SUCCESS,
-        lines: [
-          {
-            ...SUCCESS.lines[0],
-            coverageStatus: 'INCOMPLETE',
-            assignmentCount: 25,
-            unassignedDutyCount: 3,
-            diagnostics: {
-              strictSolverStatus: 'UNSATISFIABLE',
-              partialSolverStatus: 'OPTIMAL',
-              requiredDutyCount: 28,
-              assignedDutyCount: 25,
-              unassignedDuties: [
-                {
-                  dutyUnitStableKey: 'duty-1',
-                  critical: true,
-                  candidateExclusions: [
-                    { candidateId: 'user-1', exclusions: [{ reason: 'UNAVAILABLE', context: {} }] },
-                  ],
-                },
-              ],
-              structuralDiagnostics: [{ code: 'NO_ELIGIBLE_CANDIDATE', dutyUnitStableKey: 'duty-1' }],
-              solverAnalysis: { available: true },
-              diagnosticRelaxations: [
-                {
-                  ruleCode: 'TEAM_MIN_REST',
-                  tier: 'POLICY_HARD',
-                  phrasing: 'Relâcher le repos minimum d’équipe permettrait de couvrir 1 garde de plus.',
-                  disclaimer: 'Une relaxation possible parmi d’autres — pas nécessairement la cause unique.',
-                },
-              ],
-              existingDataConflict: null,
-            },
+    renderResult({
+      lines: [
+        {
+          ...SUCCESS.lines[0],
+          coverageStatus: 'INCOMPLETE',
+          assignmentCount: 25,
+          unassignedDutyCount: 3,
+          diagnostics: {
+            strictSolverStatus: 'UNSATISFIABLE',
+            partialSolverStatus: 'OPTIMAL',
+            requiredDutyCount: 28,
+            assignedDutyCount: 25,
+            unassignedDuties: [
+              {
+                dutyUnitStableKey: 'duty-1',
+                critical: true,
+                candidateExclusions: [
+                  { candidateId: 'user-1', exclusions: [{ reason: 'UNAVAILABLE', context: {} }] },
+                ],
+              },
+            ],
+            structuralDiagnostics: [{ code: 'NO_ELIGIBLE_CANDIDATE', dutyUnitStableKey: 'duty-1' }],
+            solverAnalysis: { available: true },
+            diagnosticRelaxations: [
+              {
+                ruleCode: 'TEAM_MIN_REST',
+                tier: 'POLICY_HARD',
+                phrasing: 'Relâcher le repos minimum d’équipe permettrait de couvrir 1 garde de plus.',
+                disclaimer: 'Une relaxation possible parmi d’autres — pas nécessairement la cause unique.',
+              },
+            ],
+            existingDataConflict: null,
           },
-        ],
-      }),
+        },
+      ],
     })
-    renderActions()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
-    fireEvent.click(await enabledConfirm())
 
     expect(await screen.findByText('Indisponibilité déclarée (1)')).toBeInTheDocument()
     expect(screen.getByText('Au moins une garde n’a aucun candidat éligible.')).toBeInTheDocument()

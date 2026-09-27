@@ -49,7 +49,15 @@ final class PlanningResultControllerTest extends WebTestCase
      */
     private function launch(KernelBrowser $client, array $s, ?string $token = null): array
     {
-        return $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $token ?? $s['creator']);
+        // Asynchronous since docs/decisions.md D149: returns the finished job's outcome (`lines`).
+        $response = $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $token ?? $s['creator']);
+        if (202 !== $client->getResponse()->getStatusCode()) {
+            return $response;
+        }
+        $this->runQueuedPlanningJobs();
+        $job = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/jobs/latest", token: $token ?? $s['creator'])['job'];
+
+        return ($job['outcome'] ?? []) + ['job' => $job];
     }
 
     /**
@@ -96,12 +104,12 @@ final class PlanningResultControllerTest extends WebTestCase
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-06']]);
 
         $first = $this->launch($client, $s);
-        self::assertResponseStatusCodeSame(201);
+        self::assertResponseIsSuccessful();
         $firstGenerationId = $first['lines'][0]['generationStableId'];
 
         // A second, real generation is created for the very same line.
         $second = $this->launch($client, $s);
-        self::assertResponseStatusCodeSame(201);
+        self::assertResponseIsSuccessful();
         $secondGenerationId = $second['lines'][0]['generationStableId'];
         self::assertNotSame($firstGenerationId, $secondGenerationId);
 
@@ -120,7 +128,7 @@ final class PlanningResultControllerTest extends WebTestCase
         }
 
         $first = $this->launch($client, $s);
-        self::assertResponseStatusCodeSame(201);
+        self::assertResponseIsSuccessful();
         $firstGenerationId = $first['lines'][0]['generationStableId'];
         self::assertSame('INCOMPLETE', $first['lines'][0]['coverageStatus']);
 
@@ -135,7 +143,7 @@ final class PlanningResultControllerTest extends WebTestCase
             $client->request('DELETE', '/api/me/calendar/'.$this->onlyAvailabilityStableIdOf($who), server: $this->bearer($s[$who]));
         }
         $second = $this->launch($client, $s);
-        self::assertResponseStatusCodeSame(201);
+        self::assertResponseIsSuccessful();
         self::assertSame('COMPLETE', $second['lines'][0]['coverageStatus']);
 
         // Re-resolved from a fresh container reference: the requests above rebooted the kernel,
@@ -195,7 +203,7 @@ final class PlanningResultControllerTest extends WebTestCase
         }
 
         $launch = $this->launch($client, $s);
-        self::assertResponseStatusCodeSame(201);
+        self::assertResponseIsSuccessful();
         self::assertSame('INCOMPLETE', $launch['lines'][0]['coverageStatus']);
 
         $result = $this->readResult($client, $s);
@@ -248,7 +256,7 @@ final class PlanningResultControllerTest extends WebTestCase
         $client = static::createClient();
         $s = $this->pilotScenario($client);
         $secondaryLine = $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/lines", ['name' => 'Renfort'], $s['creator']);
-        self::assertResponseStatusCodeSame(201);
+        self::assertResponseIsSuccessful();
 
         // Both active lines must be launchable at once (PlanningGenerationLauncher checks every
         // active line): the primary gets its real members and a coverable duty; the freshly
@@ -258,7 +266,7 @@ final class PlanningResultControllerTest extends WebTestCase
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-06']], lineIndex: 1);
 
         $launch = $this->launch($client, $s);
-        self::assertResponseStatusCodeSame(201);
+        self::assertResponseIsSuccessful();
         self::assertCount(2, $launch['lines']);
 
         $result = $this->readResult($client, $s);

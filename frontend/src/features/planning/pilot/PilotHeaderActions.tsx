@@ -5,7 +5,7 @@ import { ActionMenu, type ActionMenuItem } from '../detail/ActionMenu'
 import { GenerationModal } from './GenerationModal'
 import { PlanningSettingsModal } from './PlanningSettingsModal'
 import { RuleSetModal } from './RuleSetModal'
-import type { CollectionStatus } from './types'
+import type { CollectionStatus, PlanningJob } from './types'
 
 export type PilotDialog = 'settings' | 'generate' | 'week-structure' | 'rule-set'
 
@@ -23,8 +23,13 @@ type Props = {
   onRename?: () => void
   /** Settings saved or generation created: the page refreshes the pilot data. */
   onChanged: () => void
-  /** A generation was created: the page refreshes what displays assignments. */
-  onGenerated: () => void
+  /** A generation was accepted (a QUEUED job, docs/decisions.md D149): the page follows it. */
+  onLaunched: (job: PlanningJob) => void
+  /** False once the planning is published: no general (re)generation is offered any more — the
+   * server refuses it anyway (PERIOD_LOCKED); hiding the button is never the protection. */
+  canLaunchGeneration?: boolean
+  /** A generation or a completion is queued or running: no second launch from here. */
+  busy?: boolean
   /** Optional control of the open dialog, so the page can open one from elsewhere (the empty "Planning" tab). */
   dialog?: PilotDialog | null
   onDialogChange?: (dialog: PilotDialog | null) => void
@@ -45,7 +50,9 @@ export function PilotHeaderActions({
   primaryLineName,
   onRename,
   onChanged,
-  onGenerated,
+  onLaunched,
+  canLaunchGeneration = true,
+  busy = false,
   dialog: controlledDialog,
   onDialogChange,
 }: Props) {
@@ -69,14 +76,18 @@ export function PilotHeaderActions({
 
   return (
     <div className="pd-head-actions">
-      <button
-        type="button"
-        className="pd-btn pd-btn-primary pd-btn-lg pd-grow"
-        onClick={() => setDialog('generate')}
-      >
-        Générer le planning
-        <Icon name="arrow" size={18} strokeWidth={2.2} />
-      </button>
+      {canLaunchGeneration && (
+        <button
+          type="button"
+          className="pd-btn pd-btn-primary pd-btn-lg pd-grow"
+          onClick={() => setDialog('generate')}
+          disabled={busy}
+          title={busy ? 'Un calcul est déjà en cours sur ce planning' : undefined}
+        >
+          Générer le planning
+          <Icon name="arrow" size={18} strokeWidth={2.2} />
+        </button>
+      )}
       <ActionMenu label="Plus d’actions" items={menu} large />
 
       {dialog === 'settings' && (
@@ -107,11 +118,10 @@ export function PilotHeaderActions({
       {dialog === 'generate' && (
         <GenerationModal
           planningStableId={planningStableId}
-          timezone={timezone}
           onClose={() => setDialog(null)}
-          onGenerated={() => {
+          onLaunched={(job) => {
             onChanged()
-            onGenerated()
+            onLaunched(job)
           }}
         />
       )}

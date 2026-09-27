@@ -109,6 +109,60 @@ final class OrToolsPlanningSolverTest extends KernelTestCase
         }
     }
 
+    /**
+     * docs/decisions.md D145 ("Compléter automatiquement"): fixed units are
+     * never decisions — the solve keeps them exactly, and the fairness phases
+     * give the remaining hole to whoever is under target *given* that load.
+     */
+    public function testFixedAssignmentsAreKeptAndTheHoleGoesToWhoeverFairnessFavours(): void
+    {
+        [$solver, $problem] = $this->scenarioFourDutiesTwoEquallyExposedCandidates();
+        $units = $problem->getRequiredDutyUnits();
+        $candidates = array_map(static fn ($m): string => (string) $m->getSourceTeamMemberStableId(), $problem->getEligibilityMatrix()->getCandidates());
+        [$a, $b] = $candidates;
+
+        // Three duties already held by A (as a manager could have done by hand); the fourth is a hole.
+        $fixed = [$units[0]->getStableKey() => $a, $units[1]->getStableKey() => $a, $units[2]->getStableKey() => $a];
+        $result = $solver->solve($problem->withFixedAssignments($fixed, []));
+
+        self::assertSame(SolverStatus::OPTIMAL, $result->strictSolverStatus);
+        $assigned = [];
+        foreach ($result->assignments as $edge) {
+            $assigned[$edge->dutyUnitStableKey] = $edge->sourceTeamMemberStableId;
+        }
+        foreach ($fixed as $key => $who) {
+            self::assertSame($who, $assigned[$key], 'A fixed unit is never reconsidered.');
+        }
+        self::assertSame($b, $assigned[$units[3]->getStableKey()], 'The hole goes to B: 3/1 beats 4/0.');
+
+        // Excluding B from the hole (a live reason found since the snapshot): A is the only option left.
+        $result = $solver->solve($problem->withFixedAssignments($fixed, [new DutyAssignmentEdge($units[3]->getStableKey(), $b)]));
+        self::assertSame(SolverStatus::OPTIMAL, $result->strictSolverStatus);
+        $assigned = [];
+        foreach ($result->assignments as $edge) {
+            $assigned[$edge->dutyUnitStableKey] = $edge->sourceTeamMemberStableId;
+        }
+        self::assertSame($a, $assigned[$units[3]->getStableKey()]);
+    }
+
+    public function testFixedUnitsExposeOnlyTheirFixedCandidateInThePayload(): void
+    {
+        [, $problem] = $this->scenarioFourDutiesTwoEquallyExposedCandidates();
+        $units = $problem->getRequiredDutyUnits();
+        [$a, $b] = array_map(static fn ($m): string => (string) $m->getSourceTeamMemberStableId(), $problem->getEligibilityMatrix()->getCandidates());
+
+        $payload = self::getContainer()->get(CpSatPayloadBuilder::class)->buildSolvePayload(
+            $problem->withFixedAssignments([$units[0]->getStableKey() => $b], [new DutyAssignmentEdge($units[1]->getStableKey(), $a)]),
+        );
+
+        $byKey = array_column($payload['dutyUnits'], null, 'key');
+        self::assertSame([$b], $byKey[$units[0]->getStableKey()]['eligibleCandidates']);
+        self::assertSame($b, $byKey[$units[0]->getStableKey()]['fixedCandidateId']);
+        self::assertSame([$b], $byKey[$units[1]->getStableKey()]['eligibleCandidates'], 'An excluded edge is never a variable.');
+        self::assertArrayNotHasKey('fixedCandidateId', $byKey[$units[1]->getStableKey()]);
+        self::assertSame([['dutyUnitKey' => $units[1]->getStableKey(), 'candidateId' => $a]], $payload['excludedEdges']);
+    }
+
     public function testSecondaryPhasesActuallyOptimizeWithRealDimensions(): void
     {
         [$solver, $problem] = $this->scenarioFourDutiesTwoEquallyExposedCandidates();

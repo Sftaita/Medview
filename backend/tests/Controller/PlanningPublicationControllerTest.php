@@ -62,7 +62,7 @@ final class PlanningPublicationControllerTest extends WebTestCase
     private function generateComplete(KernelBrowser $client, array $s): void
     {
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-06']]);
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
         self::assertResponseIsSuccessful();
     }
 
@@ -90,7 +90,7 @@ final class PlanningPublicationControllerTest extends WebTestCase
         foreach (['admin', 'alice', 'bob'] as $who) {
             $this->declareRange($client, $s[$who], '2027-01-05', '2027-01-06');
         }
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
 
         $preflight = $this->preflight($client, $s);
 
@@ -115,7 +115,7 @@ final class PlanningPublicationControllerTest extends WebTestCase
         $client = static::createClient();
         $s = $this->pilotScenario($client);
         [$group, $duty0, $duty1] = $this->prepareBlockGeneration($s['planningId'], '2027-01-09', '2027-01-09', '2027-01-10', '2027-01-10', '2027-01-11');
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
         self::assertResponseIsSuccessful();
 
         // Corrupt the coherent block directly (bypassing Sub-lot A's own atomicity guard —
@@ -152,7 +152,7 @@ final class PlanningPublicationControllerTest extends WebTestCase
         $client = static::createClient();
         $s = $this->pilotScenario($client);
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-07'], ['2027-01-06', '2027-01-08']]);
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
         self::assertResponseIsSuccessful();
 
         // Force both overlapping duties onto the SAME member directly — the solver and
@@ -193,7 +193,7 @@ final class PlanningPublicationControllerTest extends WebTestCase
         foreach (['admin', 'alice', 'bob'] as $who) {
             $this->declareRange($client, $s[$who], '2027-01-05', '2027-01-06');
         }
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        $this->generateNow($client, $s['planningId'], $s['creator']);
 
         $response = $this->publish($client, $s);
         self::assertResponseStatusCodeSame(409);
@@ -249,7 +249,7 @@ final class PlanningPublicationControllerTest extends WebTestCase
         $view = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/duties/{$dutyStableId}/reassignment-candidates", token: $s['creator']);
         $newMemberId = null;
         foreach ($view['candidates'] as $candidate) {
-            if ($candidate['selectable'] && $candidate['teamMemberStableId'] !== $view['currentTeamMemberStableId']) {
+            if ($candidate['teamMemberStableId'] !== $view['currentTeamMemberStableId']) {
                 $newMemberId = $candidate['teamMemberStableId'];
                 break;
             }

@@ -27,6 +27,8 @@ final readonly class PublicationPreflight
         public array $inconsistentGroups,
         public array $invalidAssignments,
         public array $conflicts,
+        /** docs/decisions.md D143 — same checks as $publishable, except an uncovered duty on an already-published line (a removal being announced) does not block. */
+        public bool $republishable = false,
     ) {
     }
 }

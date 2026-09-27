@@ -1,0 +1,23 @@
+Modification du planning de garde
+
+Bonjour {{ firstName }},
+
+Le planning de garde {{ planningName }} a été modifié.
+{% for unit in units %}
+
+{{ unit.line }} — {{ unit.when }}{% if unit.block %} (bloc {{ unit.block }}){% endif %}
+
+  {{ unit.before }} → {{ unit.after }}
+{% endfor %}
+{% for day in days %}
+
+{{ day.label }}
+{% for row in day.rows %}
+  {{ row.line }} : {{ row.text }}
+{% endfor %}
+{% endfor %}
+
+Le planning actualisé est disponible dans MedVue :
+{{ planningUrl }}
+
+L'équipe MedVue

@@ -10,6 +10,7 @@ use App\Entity\DutyAssignment;
 use App\Entity\Planning;
 use App\Entity\PlanningGeneration;
 use App\Entity\PlanningLine;
+use App\Entity\PlanningPeriodStatus;
 use App\Entity\PlanningTeamMember;
 use App\Repository\DutyAssignmentRepository;
 use App\Repository\DutyRepository;
@@ -64,14 +65,24 @@ final class PlanningPublicationPreflightService
             $this->checkLine($line, $generation, $uncoveredDuties, $inconsistentGroups, $invalidAssignments, $conflicts);
         }
 
-        $publishable = $allReady
-            && [] === $uncoveredDuties
+        $coherent = $allReady
             && [] === $inconsistentGroups
             && [] === $invalidAssignments
             && [] === $conflicts
             && [] !== $lineReadiness;
 
-        return new PublicationPreflight($publishable, $lineReadiness, $uncoveredDuties, $inconsistentGroups, $invalidAssignments, $conflicts);
+        $publishable = $coherent && [] === $uncoveredDuties;
+
+        // Republication (docs/decisions.md D143): a duty deliberately left uncovered after the
+        // planning went out ("Retirer l'affectation") is itself news worth announcing — so an
+        // uncovered duty only blocks on a line that has never been published yet (its first
+        // PUBLISHED transition still requires full coverage, PlanningPeriodLifecycleService).
+        $republishable = $coherent && [] === array_filter(
+            $uncoveredDuties,
+            static fn (UncoveredPublicationDuty $item): bool => PlanningPeriodStatus::PUBLISHED !== $item->duty->getPlanningPeriod()->getStatus(),
+        );
+
+        return new PublicationPreflight($publishable, $lineReadiness, $uncoveredDuties, $inconsistentGroups, $invalidAssignments, $conflicts, $republishable);
     }
 
     /**

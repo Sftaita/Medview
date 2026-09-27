@@ -114,6 +114,15 @@ export function PublishModal({ planningStableId, onClose, onPublished }: Props) 
       )}
 
       {result && (
+        <p className="alert alert--success">
+          <Icon name="check" size={18} strokeWidth={2} />
+          <span>
+            Planning publié. {result.recipientCount} participant{result.recipientCount > 1 ? 's ont' : ' a'}{' '}
+            reçu l’email de publication avec le PDF du planning.
+          </span>
+        </p>
+      )}
+      {result && (
         <ul className="preflight-issues" aria-label="Résultat de la publication">
           {result.lines.map((line) => (
             <li key={line.lineStableId} className="alert alert--success">
@@ -134,7 +143,10 @@ function PreflightBody({ preflight }: { preflight: PublicationPreflight }) {
     return (
       <p className="alert alert--success">
         <Icon name="check" size={18} strokeWidth={2} />
-        <span>Le calendrier actuel est complet et cohérent : il peut être publié.</span>
+        <span>
+          Le calendrier actuel est complet et cohérent : il peut être publié. Chaque participant recevra un
+          email avec le PDF du planning.
+        </span>
       </p>
     )
   }

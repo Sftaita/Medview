@@ -157,11 +157,15 @@ function resultDuty(
     dutyType: { stableId: 'dt', code: 'JOUR', name: 'Jour' },
     required: true,
     grouped: false,
+    groupInstanceStableId: null,
+    groupLabel: null,
+    groupDates: null,
     covered: true,
     assignment: {
       stableId: `dr-${id}`,
       source: 'AUTO',
       locked: false,
+      teamMemberStableId: 'm-alice',
       user: { stableId: 'u-alice', firstName: 'Alice', lastName: 'Martin' },
     },
     reasons: [],
@@ -220,6 +224,7 @@ describe('PersonalPlanningView — whole team (generated result)', () => {
               stableId: 'dr-b1',
               source: 'AUTO',
               locked: false,
+              teamMemberStableId: 'm-bob',
               user: { stableId: 'u-bob', firstName: 'Bob', lastName: 'Durand' },
             },
           }),
@@ -240,7 +245,7 @@ describe('PersonalPlanningView — whole team (generated result)', () => {
     expect(api.requests('GET', '/api/plannings/plan-1/result')[0].query.get('to')).toBe('2027-03-01')
   })
 
-  it('offers no edit control to a plain member, but opens the reassignment modal for a manager (docs/decisions.md D131)', async () => {
+  it('is read-only for everyone, a manager included: editing and publication live in the calendar (docs/decisions.md D148)', async () => {
     stubApi({
       'GET /api/plannings/plan-1/teams/t1/members': () => MEMBERS,
       'GET /api/plannings/plan-1/result': () => ({
@@ -253,87 +258,12 @@ describe('PersonalPlanningView — whole team (generated result)', () => {
           }),
         ],
       }),
-      'GET /api/plannings/plan-1/duties/a1/reassignment-candidates': () => ({
-        groupInstanceStableId: null,
-        blockDuties: [
-          { dutyStableId: 'a1', date: '2027-02-05', startsAt: '', endsAt: '', dutyTypeName: 'Jour' },
-        ],
-        generationStableId: 'g1',
-        currentTeamMemberStableId: 'm1',
-        candidates: [],
-      }),
     })
-    render(<PersonalPlanningView planning={{ ...PLANNING, canManageCalendar: false }} />)
+    render(<PersonalPlanningView planning={{ ...PLANNING, canManageCalendar: true, canPublish: true }} />)
 
     await screen.findByText('Couverture complète')
     expect(screen.queryByRole('button', { name: 'Réattribuer' })).not.toBeInTheDocument()
-    cleanup()
-
-    stubApi({
-      'GET /api/plannings/plan-1/teams/t1/members': () => MEMBERS,
-      'GET /api/plannings/plan-1/result': () => ({
-        planningStableId: 'plan-1',
-        lines: [
-          makeLine({
-            requiredDutyCount: 1,
-            coveredRequiredDutyCount: 1,
-            duties: [resultDuty('a1', '2027-02-05')],
-          }),
-        ],
-      }),
-      'GET /api/plannings/plan-1/duties/a1/reassignment-candidates': () => ({
-        groupInstanceStableId: null,
-        blockDuties: [
-          { dutyStableId: 'a1', date: '2027-02-05', startsAt: '', endsAt: '', dutyTypeName: 'Jour' },
-        ],
-        generationStableId: 'g1',
-        currentTeamMemberStableId: 'm1',
-        candidates: [],
-      }),
-    })
-    render(<PersonalPlanningView planning={{ ...PLANNING, canManageCalendar: true }} />)
-
-    const editButton = await screen.findByRole('button', { name: 'Réattribuer' })
-    fireEvent.click(editButton)
-    expect(await screen.findByText('Modifier la garde')).toBeInTheDocument()
-  })
-
-  it('shows the real publication status, offers the publish button only to a manager, and opens the modal (docs/decisions.md D133)', async () => {
-    stubApi({
-      'GET /api/plannings/plan-1/teams/t1/members': () => MEMBERS,
-      'GET /api/plannings/plan-1/result': () => ({ planningStableId: 'plan-1', lines: [makeLine()] }),
-      'GET /api/plannings/plan-1/publication-preflight': () => ({
-        publishable: true,
-        lines: [{ lineStableId: 'l1', lineName: 'Seniors', periodStatus: 'GENERATED', hasGeneration: true }],
-        uncoveredDuties: [],
-        inconsistentGroups: [],
-        invalidAssignments: [],
-        conflicts: [],
-      }),
-    })
-    render(<PersonalPlanningView planning={{ ...PLANNING, canPublish: false }} />)
-
-    expect(await screen.findByText('Statut : Non publié')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Publier le planning' })).not.toBeInTheDocument()
-    cleanup()
-
-    stubApi({
-      'GET /api/plannings/plan-1/teams/t1/members': () => MEMBERS,
-      'GET /api/plannings/plan-1/result': () => ({ planningStableId: 'plan-1', lines: [makeLine()] }),
-      'GET /api/plannings/plan-1/publication-preflight': () => ({
-        publishable: true,
-        lines: [{ lineStableId: 'l1', lineName: 'Seniors', periodStatus: 'GENERATED', hasGeneration: true }],
-        uncoveredDuties: [],
-        inconsistentGroups: [],
-        invalidAssignments: [],
-        conflicts: [],
-      }),
-    })
-    render(<PersonalPlanningView planning={{ ...PLANNING, canPublish: true }} />)
-
-    const publishButton = await screen.findByRole('button', { name: 'Publier le planning' })
-    fireEvent.click(publishButton)
-    expect(await screen.findByText('Publier ce planning ?')).toBeInTheDocument()
   })
 
   it('shows an incomplete coverage and an uncovered duty with its real reasons', async () => {
@@ -514,6 +444,7 @@ describe('PersonalPlanningView — one person (unchanged)', () => {
                   stableId: 'dr-b1',
                   source: 'AUTO',
                   locked: false,
+                  teamMemberStableId: 'm-bob',
                   user: { stableId: 'u-bob', firstName: 'Bob', lastName: 'Durand' },
                 },
               }),

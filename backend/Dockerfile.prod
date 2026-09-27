@@ -21,6 +21,7 @@ RUN install-php-extensions \
     pdo_pgsql \
     intl \
     opcache \
+    pcntl \
     zip
 
 # OR-Tools CP-SAT has no official PHP bindings (docs/decisions.md D031,

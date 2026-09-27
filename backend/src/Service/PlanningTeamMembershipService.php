@@ -81,6 +81,30 @@ final class PlanningTeamMembershipService
      * participationFactorAt() correctly returns "no data" for this
      * PlanningTeamMember beyond the end date rather than a stale factor.
      */
+    /**
+     * "Gestionnaire du planning" (docs/decisions.md D147): the creator grants
+     * or withdraws the management right by switching a member between MEMBER
+     * and ADMIN — the role PlanningVoter already reads for every planning
+     * management action (calendar, completion, generation, publication,
+     * availability follow-up). OWNER is never granted nor withdrawn here: it
+     * is the creator's own participation role (D123).
+     *
+     * @throws \InvalidArgumentException when the change touches OWNER
+     */
+    public function changeManagementRole(PlanningTeamMember $teamMember, TeamMemberRole $role): void
+    {
+        if (TeamMemberRole::OWNER === $role || TeamMemberRole::OWNER === $teamMember->getRole()) {
+            throw new \InvalidArgumentException('Only MEMBER and ADMIN can be granted or withdrawn — OWNER is the creator\'s own role.');
+        }
+
+        if (!$teamMember->isCurrentlyOpen()) {
+            throw new \InvalidArgumentException('This membership has ended.');
+        }
+
+        $teamMember->changeRole($role);
+        $this->entityManager->flush();
+    }
+
     public function endMembership(PlanningTeamMember $teamMember, \DateTimeImmutable $membershipEnd): void
     {
         $teamMember->close($membershipEnd);
