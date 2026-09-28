@@ -566,6 +566,14 @@
   padding-bottom: 72px;
 }
 
+/* Sidebar shown (760px), calendar still stacked: no bottom navigation to sit on, and no bar under the sidebar. */
+@media (min-width: 760px) and (max-width: 899px) {
+  .availability__actions {
+    bottom: 0;
+    left: 248px;
+  }
+}
+
 /* ---------- Ordinateur ---------- */
 @media (min-width: 900px) {
   .availability {

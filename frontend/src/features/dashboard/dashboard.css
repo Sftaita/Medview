@@ -1,0 +1,431 @@
+/* Tableau de bord — maquette docs/Design/react_dashboard (préfixe db-). Breakpoint : 760px. */
+
+/* The mockup's own text defaults (16px, line-height normal), not the app's body ones. */
+.db {
+  font-size: 16px;
+  line-height: normal;
+  color: var(--text-body);
+}
+/* Only the dashboard's own links: callouts and alerts keep their button/link colors. */
+.db .db-head-link,
+.db .db-planning,
+.db .db-row,
+.db .db-btn {
+  text-decoration: none;
+}
+.db .db-head-link {
+  color: var(--green-700);
+}
+.db .db-head-link:hover {
+  color: var(--green-800);
+}
+.db :focus-visible {
+  outline: 3px solid var(--green-300);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+.db h1,
+.db h2 {
+  text-wrap: wrap;
+}
+.db-num {
+  font-variant-numeric: tabular-nums;
+}
+.db-muted {
+  font-size: 13.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+.db-short {
+  display: none;
+}
+
+/* Main */
+.db-main {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: clamp(20px, 3.2vw, 40px) clamp(16px, 3.2vw, 40px) 48px;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(20px, 2.6vw, 28px);
+}
+.db-hello {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.db-hello h1 {
+  margin: 0;
+  font-size: clamp(26px, 3.4vw, 34px);
+  line-height: 1.1;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text-strong);
+}
+.db-hello p {
+  margin: 0;
+  font-size: 15.5px;
+  color: var(--text-muted);
+}
+.db-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  align-items: start;
+  gap: clamp(14px, 2vw, 20px);
+}
+
+/* Cards */
+.db-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+}
+.db-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 14px;
+}
+.db-card-head-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.db-card-head h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: normal;
+  letter-spacing: normal;
+  color: var(--text-strong);
+  white-space: nowrap;
+}
+.db .db-head-link {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  font-size: 14.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.db-card-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px 20px;
+  border-top: 1px solid var(--border-subtle);
+}
+.db-chevron {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-subtle);
+}
+
+.db-pill {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.db-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.db-pill-info {
+  background: var(--blue-50);
+  color: var(--blue-700);
+}
+.db-pill-live {
+  background: var(--green-50);
+  color: var(--green-800);
+}
+.db-pill-done {
+  background: var(--gray-100);
+  color: var(--text-muted);
+}
+.db-pill-warn {
+  background: var(--status-warn-surface);
+  color: var(--status-warn-fg);
+}
+
+/* Planning row */
+.db .db-planning {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 20px 18px;
+  border-top: 1px solid var(--border-subtle);
+  color: inherit;
+}
+.db .db-planning:hover {
+  background: var(--surface-hover);
+  color: inherit;
+}
+.db .db-planning:last-child {
+  border-radius: 0 0 12px 12px;
+}
+.db-planning-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.db-planning-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.db-planning-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.db-planning-name {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--text-strong);
+}
+.db-planning-range {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text-body);
+  text-wrap: balance;
+}
+.db-planning .db-chevron {
+  width: 36px;
+  height: 36px;
+  margin-top: -4px;
+}
+
+.db-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.db-timeline-bar {
+  position: relative;
+  display: flex;
+  gap: 3px;
+  height: 10px;
+}
+.db-timeline-seg {
+  background: var(--green-200);
+}
+.db-timeline-mark {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  border-radius: 3px;
+  background: var(--red-500);
+  box-shadow: 0 0 0 1.5px var(--surface-card);
+}
+.db-timeline-labels {
+  display: flex;
+  gap: 3px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.db-timeline-labels span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.db-legend {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  color: var(--text-muted);
+}
+.db-legend-swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--red-500);
+}
+.db-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--gray-50);
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text-body);
+  text-wrap: pretty;
+}
+.db-note-icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--text-muted);
+}
+.db-note-link {
+  color: var(--green-700);
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Unavailability list */
+.db-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.db .db-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 68px;
+  padding: 10px 20px;
+  border-top: 1px solid var(--border-subtle);
+  color: inherit;
+}
+.db .db-row:hover {
+  background: var(--surface-hover);
+  color: inherit;
+}
+.db-date-tile {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  background: var(--red-50);
+  color: var(--red-700);
+  line-height: 1;
+}
+.db-date-tile-day {
+  font-size: 18px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.db-date-tile-mon {
+  margin-top: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.db-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.db-row-title {
+  font-size: 15.5px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.db-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 20px;
+  border-top: 1px solid var(--border-subtle);
+}
+.db-empty-center {
+  align-items: center;
+  gap: 10px;
+  padding: 28px 24px 8px;
+  text-align: center;
+}
+.db-empty-center .db-muted {
+  max-width: 340px;
+  font-size: 14.5px;
+  text-wrap: pretty;
+}
+.db-empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: var(--gray-100);
+  color: var(--text-muted);
+}
+.db-empty-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+
+.db .db-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--brand);
+  color: #fff;
+  font: inherit;
+  font-size: 15.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background 120ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 120ms;
+}
+.db .db-btn:hover {
+  background: var(--green-600);
+  color: #fff;
+}
+.db .db-btn:active {
+  background: var(--green-700);
+  transform: translateY(0.5px);
+}
+.db-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  text-wrap: pretty;
+}
+
+@media (max-width: 759px) {
+  /* The bottom navigation is fixed over the page: keep the mockup's 48px above it. */
+  .db-main {
+    padding-bottom: calc(48px + var(--bottomnav-height) + env(safe-area-inset-bottom));
+  }
+  .db-long {
+    display: none;
+  }
+  .db-short {
+    display: inline;
+  }
+}

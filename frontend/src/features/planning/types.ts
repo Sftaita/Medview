@@ -18,6 +18,12 @@ export type PlanningSummary = {
   canManageCalendar?: boolean
   /** Creator or team OWNER/ADMIN: may run the publication preflight and publish (D133). */
   canPublish?: boolean
+  /** Name of the line the caller takes part in; null when they are in none (dashboard). */
+  myLineName?: string | null
+  /** People with a membership over one of the active lines, each counted once (dashboard). */
+  memberCount?: number
+  /** At least one active line is published (dashboard). */
+  published?: boolean
   startsAt: string
   endsAt: string
   timezone: string

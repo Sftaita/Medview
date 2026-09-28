@@ -38,6 +38,31 @@ function period(
   }
 }
 
+/** A whole-day period on local calendar days, both included (the API end is exclusive). */
+function days(stableId: string, type: 'UNAVAILABLE' | 'PREFER_DUTY', from: string, lastDay: string) {
+  const [y1, m1, d1] = from.split('-').map(Number)
+  const [y2, m2, d2] = lastDay.split('-').map(Number)
+  return period(stableId, type, new Date(y1, m1 - 1, d1), new Date(y2, m2 - 1, d2 + 1))
+}
+
+/** The dashboard mockup's day (docs/Design/react_dashboard): Saturday 26 September 2026. */
+function frozenMockupDay() {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(new Date(2026, 8, 26, 9, 0))
+}
+
+const TRAUMA = {
+  ...PLANNING,
+  stableId: 'trauma',
+  name: 'Trauma Delta',
+  startsAt: '2026-10-01',
+  // Exclusive: the planning runs up to 31 January 2027 included.
+  endsAt: '2027-02-01',
+  myLineName: 'Première ligne',
+  memberCount: 17,
+  published: false,
+}
+
 function renderDashboard() {
   render(
     <MemoryRouter>
@@ -86,23 +111,122 @@ describe('DashboardPage', () => {
     vi.unstubAllGlobals()
   })
 
-  it('greets the user and lists their plannings and upcoming availability', async () => {
-    const start = new Date()
-    start.setDate(start.getDate() + 10)
-    start.setHours(0, 0, 0, 0)
-    const end = new Date(start)
-    end.setDate(end.getDate() + 3)
-    createFakeBackend({ plannings: [PLANNING], periods: [period('a1', 'UNAVAILABLE', start, end)] }).install()
+  it('greets the user with the date, as in the mockup', async () => {
+    frozenMockupDay()
+    createFakeBackend().install()
 
     renderDashboard()
 
     expect(await screen.findByRole('heading', { name: /Bonjour, Alice/ })).toBeInTheDocument()
-    expect(await screen.findByRole('link', { name: /Gardes 2026-2027/ })).toHaveAttribute(
-      'href',
-      '/plannings/p1',
+    expect(screen.getByText('Samedi 26 septembre 2026')).toBeInTheDocument()
+  })
+
+  it('summarizes a planning: status, inclusive period, own line, head count, timeline', async () => {
+    frozenMockupDay()
+    createFakeBackend({
+      plannings: [TRAUMA],
+      periods: [
+        days('u1', 'UNAVAILABLE', '2026-10-03', '2026-10-04'),
+        days('u2', 'UNAVAILABLE', '2026-11-20', '2026-11-22'),
+        // Past: neither listed nor marked.
+        days('u0', 'UNAVAILABLE', '2026-09-10', '2026-09-11'),
+      ],
+    }).install()
+
+    renderDashboard()
+
+    const row = await screen.findByRole('link', { name: /Trauma Delta/ })
+    expect(row).toHaveAttribute('href', '/plannings/trauma')
+    expect(within(row).getByText('Commence dans 5 jours')).toBeInTheDocument()
+    expect(within(row).getByText('Jeu. 1 oct. 2026 → dim. 31 janv. 2027')).toBeInTheDocument()
+    expect(within(row).getByText('1 oct. 2026 → 31 janv. 2027')).toBeInTheDocument()
+    expect(row).toHaveTextContent('123 jours · Première ligne · 17 membres')
+    expect(Array.from(row.querySelectorAll('.db-timeline-labels span')).map((el) => el.textContent)).toEqual([
+      'Oct.',
+      'Nov.',
+      'Déc.',
+      'Janv.',
+    ])
+    await waitFor(() => expect(row.querySelectorAll('.db-timeline-mark')).toHaveLength(2))
+    expect(within(row).getByText(/2 de vos indisponibilités tombent/)).toBeInTheDocument()
+    expect(within(row).getByText(/Planning en préparation/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Tous les plannings/ })).toHaveAttribute('href', '/plannings')
+  })
+
+  it('tells a running and a finished planning apart, and leaves out the line of a non-participant', async () => {
+    frozenMockupDay()
+    createFakeBackend({
+      plannings: [
+        {
+          ...PLANNING,
+          stableId: 'run',
+          name: 'En cours',
+          startsAt: '2026-09-01',
+          endsAt: '2026-10-01',
+          myLineName: null,
+          memberCount: 1,
+        },
+        { ...PLANNING, stableId: 'old', name: 'Ancien', startsAt: '2026-01-01', endsAt: '2026-03-01' },
+      ],
+    }).install()
+
+    renderDashboard()
+
+    const running = await screen.findByRole('link', { name: /En cours/ })
+    expect(within(running).getByText('En cours · jour 26 sur 30')).toBeInTheDocument()
+    expect(running).toHaveTextContent('30 jours · 1 membre')
+    expect(within(screen.getByRole('link', { name: /Ancien/ })).getByText('Terminé')).toBeInTheDocument()
+  })
+
+  it('offers the duties of a published planning without following the planning link', async () => {
+    frozenMockupDay()
+    createFakeBackend({ plannings: [{ ...TRAUMA, published: true }] }).install()
+    render(
+      <MemoryRouter>
+        <AuthProvider>
+          <MyAvailabilityProvider>
+            <Routes>
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/my-duties" element={<p>Page mes gardes</p>} />
+              <Route path="/plannings/:id" element={<p>Page planning</p>} />
+            </Routes>
+          </MyAvailabilityProvider>
+        </AuthProvider>
+      </MemoryRouter>,
     )
-    expect(await screen.findByText(/3 jours/)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Ouvrir le calendrier' })).toHaveAttribute(
+
+    fireEvent.click(await screen.findByText('Voir mes gardes'))
+
+    expect(await screen.findByText('Page mes gardes')).toBeInTheDocument()
+    expect(screen.queryByText('Page planning')).not.toBeInTheDocument()
+  })
+
+  it('lists upcoming unavailabilities only, the next one with its countdown', async () => {
+    frozenMockupDay()
+    createFakeBackend({
+      periods: [
+        days('u3', 'UNAVAILABLE', '2026-11-26', '2026-11-26'),
+        days('u1', 'UNAVAILABLE', '2026-10-03', '2026-10-04'),
+        days('u4', 'UNAVAILABLE', '2026-11-30', '2026-12-02'),
+        days('p1', 'PREFER_DUTY', '2026-10-10', '2026-10-11'),
+      ],
+    }).install()
+
+    renderDashboard()
+
+    const card = await screen.findByRole('region', { name: 'Mes indisponibilités' })
+    await waitFor(() => expect(within(card).getAllByRole('listitem')).toHaveLength(3))
+    const rows = within(card).getAllByRole('listitem')
+    expect(rows[0]).toHaveTextContent('Sam. 3 → dim. 4 oct.')
+    expect(rows[0]).toHaveTextContent('2 jours')
+    expect(within(rows[0]).getByText('Dans 7 jours')).toBeInTheDocument()
+    expect(rows[1]).toHaveTextContent('Jeu. 26 nov.')
+    expect(rows[1]).toHaveTextContent('Journée entière')
+    expect(within(rows[1]).queryByText(/^Dans/)).not.toBeInTheDocument()
+    expect(rows[2]).toHaveTextContent('Lun. 30 nov. → mer. 2 déc.')
+    expect(within(card).getByText('3 périodes · 6 jours au total')).toBeInTheDocument()
+    expect(within(card).getByRole('link', { name: /Calendrier/ })).toHaveAttribute('href', '/my-availability')
+    expect(within(card).getByRole('link', { name: /Déclarer une indisponibilité/ })).toHaveAttribute(
       'href',
       '/my-availability',
     )
@@ -143,10 +267,9 @@ describe('DashboardPage', () => {
     renderDashboard()
 
     expect(await screen.findByRole('heading', { name: /Bonjour, Alice/ })).toBeInTheDocument()
-    await waitFor(() => expect(screen.getByText('Aucun planning pour le moment.')).toBeInTheDocument())
-    await waitFor(() =>
-      expect(screen.getByText('Aucune indisponibilité ou préférence à venir.')).toBeInTheDocument(),
-    )
+    await waitFor(() => expect(screen.getByText("Aucun planning pour l'instant")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('Aucune indisponibilité à venir')).toBeInTheDocument())
+    expect(screen.getByRole('link', { name: /Déclarer une indisponibilité/ })).toBeInTheDocument()
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
@@ -199,8 +322,8 @@ describe('DashboardPage — synchronized with the calendar', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Accueil' }))
 
     expect(await screen.findByRole('heading', { name: /Bonjour, Alice/ })).toBeInTheDocument()
-    expect(screen.queryByText('Aucune indisponibilité ou préférence à venir.')).not.toBeInTheDocument()
-    expect(screen.getByText('Indisponible')).toBeInTheDocument()
+    expect(screen.queryByText('Aucune indisponibilité à venir')).not.toBeInTheDocument()
+    expect(screen.getByText('Journée entière')).toBeInTheDocument()
     expect(backend.requests('GET', '/api/me/calendar')).toHaveLength(calendarReadsBefore)
   })
 
@@ -218,7 +341,7 @@ describe('DashboardPage — synchronized with the calendar', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Retirer/ }))
     fireEvent.click(screen.getByRole('link', { name: 'Accueil' }))
 
-    expect(await screen.findByText('Aucune indisponibilité ou préférence à venir.')).toBeInTheDocument()
+    expect(await screen.findByText('Aucune indisponibilité à venir')).toBeInTheDocument()
     await waitFor(() => expect(backend.periods).toHaveLength(0))
   })
 
@@ -239,7 +362,7 @@ describe('DashboardPage — synchronized with the calendar', () => {
     await screen.findByRole('alert')
     fireEvent.click(screen.getByRole('link', { name: 'Accueil' }))
 
-    expect(await screen.findByText('Aucune indisponibilité ou préférence à venir.')).toBeInTheDocument()
+    expect(await screen.findByText('Aucune indisponibilité à venir')).toBeInTheDocument()
   })
 })
 

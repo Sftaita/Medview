@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
@@ -100,6 +100,15 @@ describe('App', () => {
     // The brand appears in the sidebar and in the phone top bar (one DOM, switched by CSS).
     expect(screen.getAllByText('MedVue').length).toBeGreaterThan(0)
     expect(screen.getByRole('navigation', { name: 'Navigation principale' })).toBeInTheDocument()
+    // Phone: four short entries, the account behind the top bar's avatar (docs/Design/react_dashboard).
+    const tabs = within(screen.getByRole('navigation', { name: 'Navigation mobile' })).getAllByRole('link')
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['Accueil', 'Plannings', 'Gardes', 'Indispos'])
+    expect(
+      screen.getAllByRole('link', { name: 'Mon compte' }).map((link) => link.getAttribute('href')),
+    ).toEqual(['/account', '/account'])
+    expect(screen.getByRole('button', { name: 'Se déconnecter' })).toBeInTheDocument()
+    // The dashboard lays out its own margins.
+    expect(screen.getByRole('main')).toHaveClass('shell__content--bare')
   })
 
   // Regression test for a UAT finding: /login (and /register) stayed
