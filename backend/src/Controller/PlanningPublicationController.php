@@ -14,6 +14,7 @@ use App\Exception\PlanningAlreadyPublishedException;
 use App\Exception\PlanningNotPublishableException;
 use App\Exception\PlanningNotYetPublishedException;
 use App\Exception\PlanningPublicationInProgressException;
+use App\Repository\PlanningLineRepository;
 use App\Repository\PlanningPublicationDeliveryRepository;
 use App\Repository\PlanningPublicationRepository;
 use App\Repository\PlanningRepository;
@@ -60,6 +61,7 @@ final class PlanningPublicationController
         private readonly PlanningPdfRenderer $pdfRenderer,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
         private readonly LiveDemandPresenter $demandPresenter,
+        private readonly PlanningLineRepository $lineRepository,
     ) {
     }
 
@@ -355,10 +357,17 @@ final class PlanningPublicationController
      */
     private function dutyToArray(Duty $duty): array
     {
+        $line = $this->lineRepository->findOneByPlanningPeriod($duty->getPlanningPeriod());
+
         return [
             'dutyStableId' => (string) $duty->getStableId(),
             'date' => $duty->getLocalDate()->format('Y-m-d'),
             'dutyTypeName' => $duty->getDutyType()->getName(),
+            // docs/decisions.md D167: which line, and whether it is a reinforcement — so a missing reinforcement is
+            // presented as such, without the frontend guessing.
+            'lineStableId' => null !== $line ? (string) $line->getStableId() : null,
+            'lineName' => $line?->getName(),
+            'conditional' => $duty->isConditional(),
         ];
     }
 

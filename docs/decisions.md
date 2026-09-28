@@ -5656,3 +5656,105 @@ l'ancienne (voir légende).
   textuel dans les exports ; compter un renfort superflu comme demande ou le
   retirer de la charge ; traiter l'indéterminé comme non requis.
 - **Aucune migration.**
+
+## D167 — Frontend de la ligne de renfort : un dialogue « Paramètres de la ligne », une matrice par personne locale jusqu'à l'enregistrement, des états présentés tels que le backend les calcule
+
+- **Contexte** : L8 du chantier « ligne secondaire conditionnelle ». Un
+  administrateur doit configurer une ligne de renfort sans connaître le
+  modèle technique, et lire immédiatement dans le calendrier quand un
+  renfort est requis, manquant, attribué, inutile, superflu ou non
+  évaluable. `master` a d'abord reçu `fix/planning-week-template-ui`
+  (`843968e`, conflit `Overlay.tsx` résolu en gardant `stableLayout` **et**
+  `wide`), intégré dans la branche du chantier (`75fcb85`).
+- **Décision — un seul point d'entrée, « Paramètres de la ligne »** (menu
+  « ⋯ » de chaque ligne, droit `canManageLineStructure` exposé par l'API =
+  `PlanningVoter::MANAGE_LINE_STRUCTURE`) : `LineSettingsDialog`. Il réunit
+  la semaine type de la ligne et, pour une ligne secondaire seulement, le
+  « Mode de couverture » (`Garde indépendante` / `Renfort selon le
+  chirurgien de garde`), la « Ligne à renforcer » (uniquement les
+  `sourceOptions` renvoyées par le backend) et la matrice. La ligne
+  principale n'affiche jamais le mode renfort (aucune option que le backend
+  refuserait). La semaine type réutilise `WeekStructureModal` tel quel : le
+  dialogue des paramètres **cède la place** à celui de la semaine type (jamais
+  deux dialogues empilés, deux pièges de focus), garde la matrice non
+  enregistrée et recharge la politique (jours sans garde, avertissements)
+  quand la structure a été enregistrée. Conséquence : une ligne secondaire
+  a enfin une interface de semaine type (dette D136 levée pour elles).
+- **Décision — la matrice chirurgiens × jours** (`CoverageMatrix`,
+  `coverageModel`) : une ligne par **personne** (`User`), jamais par stint
+  (dédoublonnée) ; colonnes `Lun…Dim` ↔ `MONDAY…SUNDAY` par une table de
+  correspondance explicite (`weekdays.ts`), jamais une comparaison de
+  chaînes ; case, « Tous les jours » / « Aucun jour » par personne, et
+  (desktop) sélection d'un jour pour tous. Tout est **local** jusqu'à
+  « Enregistrer » (aucun appel par case) ; « Enregistrer » n'est proposé
+  que si le brouillon diffère de l'état serveur. Un jour sans garde dans la
+  semaine type n'accepte pas de nouvelle sélection mais garde visible (et
+  décochable) une sélection existante ; une personne cochée qui ne fait
+  plus partie de la ligne source reste affichée, signalée — jamais une
+  sélection perdue en silence. Après l'enregistrement, l'écran montre
+  exactement la réponse du serveur (nouvelle version ou « Aucune
+  modification »), jamais un numéro de version supposé.
+- **Décision — mise en page responsive mesurée, pas devinée** : la matrice
+  choisit tableau (≥ 620 px disponibles) ou une carte par personne avec ses
+  jours en ligne (en dessous), d'après la largeur **réellement disponible**
+  (`useElementWidth`, le même hook que la semaine type), pas une media
+  query sur l'écran : sur desktop le dialogue s'élargit (`wide`). Piège
+  trouvé en recette et corrigé : le corps du dialogue est une grille CSS,
+  dont la piste s'élargissait au tableau — la matrice mesurait alors sa
+  propre largeur et ne passait jamais en cartes ; `min-width: 0` sur les
+  sections.
+- **Décision — le calendrier présente l'état, il ne le calcule pas** :
+  `presentDuty()` lit `demand.state` (D165) — `REQUIRED_ASSIGNED` : le nom
+  (contexte « renfort requis » pour les technologies d'assistance) ;
+  `REQUIRED_UNASSIGNED` : « ⚠ Renfort requis — non attribué » ;
+  `NOT_REQUIRED_UNASSIGNED` : absent (le tiret discret « Pas de garde »),
+  jamais « Non attribué » ; `NOT_REQUIRED_ASSIGNED` : le nom + « Renfort non
+  requis » ; `UNDETERMINED` : « ? Renfort non évalué » (contour pointillé
+  ambre). Jamais la couleur seule. Le résumé distingue gardes non
+  attribuées, renforts requis manquants, renforts non évalués et renforts
+  superflus ; « Compléter automatiquement » ne compte que ce qu'il peut
+  traiter.
+- **Décision — réaffectation, retrait, impacts** : le modal affiche l'état
+  du renfort ; non requis → « Aucun renfort n'est actuellement requis pour
+  cette garde. », indéterminé → « Le besoin de renfort ne peut pas être
+  évalué tant que la garde source n'est pas attribuée. » (aucun sélecteur,
+  aucun bouton « Remplacer ») ; superflu → explication et « Retirer le
+  renfort » (confirmation, « L'historique des affectations est conservé »).
+  Les `dependentImpacts` changés sont résumés dans le modal et restent
+  affichés sur le calendrier après sa fermeture — une ligne compacte par
+  renfort, jamais une succession de fenêtres. Un refus `invalid_candidate`
+  affiche la raison réelle : l'API renvoie désormais `reason` et
+  `reasonLabel` (`SELF_COVERAGE` → « déjà de garde sur la ligne à
+  renforcer »).
+- **Décision — publication** : le préflight nomme la ligne de chaque garde
+  non couverte (`lineName`, `conditional`) : « N gardes obligatoires » et
+  « N renforts requis » sont des bloquants distincts, « renfort non évalué »
+  aussi ; les renforts superflus sont listés sous « Avertissements — ils
+  n'empêchent pas la publication », que le calendrier soit publiable ou
+  non. Le récapitulatif de republication présente un renfort requis
+  manquant comme « Renfort requis — non attribué » (jamais « Non attribué —
+  inchangé », trouvé en recette : il n'existait pas à la diffusion
+  précédente).
+- **Ajouts de contrat (additifs)** : `canManageLineStructure` (planning),
+  `reason`/`reasonLabel` (409 `invalid_candidate`), `lineStableId`/
+  `lineName`/`conditional` (gardes du préflight), libellé `SELF_COVERAGE`.
+- **Statistiques** : inchangées (D166) — la charge réelle ; les compteurs de
+  couverture live apparaissent dans le résumé du calendrier.
+- **Rejeté** : un second dialogue de semaine type ; recalculer côté
+  frontend si un renfort est requis, l'atomicité d'un bloc, `SELF_COVERAGE`,
+  les avertissements ou la publiabilité ; un bouton « compléter les
+  renforts » ; une media query d'écran pour la matrice.
+- **Tests** : frontend 467 (dont 33 nouveaux : `coverageModel`,
+  `LineSettingsDialog`, `PlanningCalendarReinforcement`, modal de
+  réaffectation, publication, page de détail) ; backend : assertions sur
+  `reasonLabel`, `canManageLineStructure`, `lineName`/`conditional` et le
+  récapitulatif de republication. Recette navigateur desktop (17 étapes) et
+  smartphone (390 px) sur la stack du chantier, OR-Tools et worker réels.
+- **Constat de recette hors périmètre, non corrigé ici** (préexistant,
+  `master`) : `PlanningTeamMemberRepository::findIntersecting()` compare la
+  date de début d'adhésion à des instants ; pour une garde du premier jour
+  d'adhésion qui se termine avant minuit UTC (fuseau Europe/Brussels), la
+  personne n'est pas listée parmi les candidats de réaffectation, alors que
+  l'écriture l'accepte. Aucun effet sur la génération. À traiter dans un
+  correctif dédié.
+- **Aucune migration.**

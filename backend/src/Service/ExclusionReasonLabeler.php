@@ -27,7 +27,7 @@ final class ExclusionReasonLabeler
             ExclusionReason::CROSS_LINE_CONFLICT => 'déjà de garde au même moment sur une autre ligne',
             ExclusionReason::CROSS_LINE_LEGAL_MIN_REST => 'repos légal insuffisant avec une garde sur une autre ligne',
             ExclusionReason::CROSS_LINE_TEAM_MIN_REST => "repos d'équipe insuffisant avec une garde sur une autre ligne",
-            ExclusionReason::SELF_COVERAGE => 'ne peut pas être son propre renfort',
+            ExclusionReason::SELF_COVERAGE => 'déjà de garde sur la ligne à renforcer',
             ExclusionReason::MAX_DUTIES => 'quota de gardes atteint',
             ExclusionReason::MAX_WEEKENDS => 'quota de week-ends atteint',
             ExclusionReason::MAX_CONSECUTIVE_NIGHTS => 'trop de nuits consécutives',

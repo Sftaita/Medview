@@ -1,5 +1,6 @@
 import { apiFetch, apiFetchBlob } from '../../../lib/apiClient'
 import type {
+  DependentImpact,
   PlanningResult,
   PublicationState,
   PlanningStatistics,
@@ -55,8 +56,8 @@ export function reassignDuty(
   dutyStableId: string,
   teamMemberStableId: string,
   expectedCurrentTeamMemberStableId: string | null,
-): Promise<{ status: string }> {
-  return apiFetch<{ status: string }>(`/api/plannings/${planningStableId}/duties/${dutyStableId}/reassign`, {
+): Promise<CalendarWriteResult> {
+  return apiFetch<CalendarWriteResult>(`/api/plannings/${planningStableId}/duties/${dutyStableId}/reassign`, {
     method: 'POST',
     body: { teamMemberStableId, expectedCurrentTeamMemberStableId },
   })
@@ -71,8 +72,8 @@ export function unassignDuty(
   planningStableId: string,
   dutyStableId: string,
   expectedCurrentTeamMemberStableId: string,
-): Promise<{ status: string }> {
-  return apiFetch<{ status: string }>(`/api/plannings/${planningStableId}/duties/${dutyStableId}/unassign`, {
+): Promise<CalendarWriteResult> {
+  return apiFetch<CalendarWriteResult>(`/api/plannings/${planningStableId}/duties/${dutyStableId}/unassign`, {
     method: 'POST',
     body: { expectedCurrentTeamMemberStableId },
   })
@@ -135,3 +136,10 @@ export function publishPlanning(planningStableId: string): Promise<PublicationRe
     body: {},
   })
 }
+
+/**
+ * The answer of a reassignment or a removal: what it did to the
+ * reinforcements depending on the changed duty (docs/decisions.md D165) —
+ * computed by the backend, only presented here.
+ */
+export type CalendarWriteResult = { status: string; dependentImpacts?: DependentImpact[] }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Dto\ReassignDutyRequest;
+use App\Eligibility\ExclusionReason;
 use App\Entity\Duty;
 use App\Entity\PlanningPeriodStatus;
 use App\Entity\User;
@@ -20,6 +21,7 @@ use App\Repository\PlanningTeamMemberRepository;
 use App\Security\Voter\PlanningVoter;
 use App\Service\DependentImpact;
 use App\Service\DutyReassignmentService;
+use App\Service\ExclusionReasonLabeler;
 use App\Service\LiveDemandPresenter;
 use App\Service\ReassignmentBlockDuty;
 use App\Service\ReassignmentCandidate;
@@ -50,7 +52,22 @@ final class DutyReassignmentController
         private readonly DutyReassignmentService $reassignmentService,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
         private readonly LiveDemandPresenter $demandPresenter,
+        private readonly ExclusionReasonLabeler $reasonLabeler,
     ) {
+    }
+
+    private function reasonLabel(string $reason): string
+    {
+        $exclusion = ExclusionReason::tryFrom($reason);
+        if (null !== $exclusion) {
+            return $this->reasonLabeler->label($exclusion);
+        }
+
+        return match ($reason) {
+            ReassignmentCandidateService::NOT_A_LINE_MEMBER => 'ne fait pas partie de cette ligne',
+            ReassignmentCandidateService::NOT_IN_GENERATION_SNAPSHOT => 'a rejoint la ligne après la génération',
+            default => 'ne remplit pas les conditions',
+        };
     }
 
     #[Route('/api/plannings/{planningStableId}/duties/{dutyStableId}/reassignment-candidates', name: 'api_duty_reassignment_candidates', methods: ['GET'])]
@@ -146,7 +163,8 @@ final class DutyReassignmentController
         } catch (StaleReassignmentException $exception) {
             return new JsonResponse(['error' => 'stale_reassignment', 'message' => $exception->getMessage()], 409);
         } catch (InvalidReassignmentCandidateException $exception) {
-            return new JsonResponse(['error' => 'invalid_candidate', 'message' => $exception->getMessage()], 409);
+            // docs/decisions.md D167: the real reason, as a stable code and in plain words (e.g. SELF_COVERAGE).
+            return new JsonResponse(['error' => 'invalid_candidate', 'message' => $exception->getMessage(), 'reason' => $exception->reason, 'reasonLabel' => $this->reasonLabel($exception->reason)], 409);
         } catch (PlanningGenerationNotSnapshottedException $exception) {
             return new JsonResponse(['error' => 'generation_not_snapshotted', 'message' => $exception->getMessage()], 409);
         } catch (CoverageNotRequiredException $exception) {

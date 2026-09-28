@@ -923,3 +923,21 @@ Limite (D145, inchangée) : la complétion garde l'éligibilité figée par le
 snapshot ; pour un renfort devenu requis après la génération, une personne
 indisponible au moment de la génération reste exclue même si elle est libre
 aujourd'hui.
+
+## 28. Interface de la ligne de renfort (docs/decisions.md D167)
+
+- **Configurer** : menu « ⋯ » → « Paramètres de la ligne » → semaine type,
+  « Mode de couverture », « Ligne à renforcer », matrice chirurgiens × jours
+  (locale jusqu'à « Enregistrer », avertissements du backend affichés).
+- **Lire le calendrier** : renfort requis et attribué → le nom ; requis et
+  vide → « ⚠ Renfort requis — non attribué » ; non requis et vide → rien ;
+  non requis mais tenu → le nom + « Renfort non requis » ; non évaluable →
+  « ? Renfort non évalué ». Résumé : gardes et renforts manquants, renforts
+  non évalués, renforts superflus.
+- **Modifier** : après une réaffectation de la ligne source, ses
+  conséquences sur les renforts (`dependentImpacts`) sont résumées dans le
+  modal puis sur le calendrier ; un renfort superflu se retire par
+  « Retirer le renfort » ; un renfort non requis ou non évaluable n'ouvre
+  aucun sélecteur.
+- **Publier** : bloquants (gardes, renforts requis, renforts non évalués)
+  et avertissements (renforts superflus, jamais bloquants) séparés.

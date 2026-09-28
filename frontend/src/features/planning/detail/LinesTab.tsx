@@ -11,9 +11,12 @@ type Props = {
   /** Members' initials per team stableId, when known (pilot data, managers only). */
   facesByTeam: Record<string, Face[]>
   canManage: boolean
+  /** May open "Paramètres de la ligne" (weekly structure, coverage mode) — docs/decisions.md D167. */
+  canConfigure?: boolean
   saving: boolean
   onManageMembers: (line: PlanningLineSummary) => void
   onDeleteLine: (lineStableId: string) => void
+  onConfigureLine?: (line: PlanningLineSummary) => void
   /** Resolves true once the line is created. */
   onAddLine: (name: string) => Promise<boolean>
 }
@@ -25,9 +28,11 @@ export function LinesTab({
   lines,
   facesByTeam,
   canManage,
+  canConfigure = false,
   saving,
   onManageMembers,
   onDeleteLine,
+  onConfigureLine,
   onAddLine,
 }: Props) {
   const [adding, setAdding] = useState(false)
@@ -84,16 +89,29 @@ export function LinesTab({
                   <Icon name="users" size={17} strokeWidth={2} />
                   Membres
                 </button>
-                {canManage && line.type === 'SECONDARY' && (
+                {((canConfigure && onConfigureLine) || (canManage && line.type === 'SECONDARY')) && (
                   <ActionMenu
                     label={`Actions pour ${line.name}`}
                     items={[
-                      {
-                        label: 'Supprimer la ligne',
-                        icon: 'trash',
-                        danger: true,
-                        onSelect: () => onDeleteLine(line.stableId),
-                      },
+                      ...(canConfigure && onConfigureLine
+                        ? [
+                            {
+                              label: 'Paramètres de la ligne',
+                              icon: 'settings' as const,
+                              onSelect: () => onConfigureLine(line),
+                            },
+                          ]
+                        : []),
+                      ...(canManage && line.type === 'SECONDARY'
+                        ? [
+                            {
+                              label: 'Supprimer la ligne',
+                              icon: 'trash' as const,
+                              danger: true,
+                              onSelect: () => onDeleteLine(line.stableId),
+                            },
+                          ]
+                        : []),
                     ]}
                   />
                 )}

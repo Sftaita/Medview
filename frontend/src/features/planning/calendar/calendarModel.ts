@@ -34,7 +34,14 @@ export type CalendarMonth = {
 export type CalendarModel = {
   lines: { stableId: string; name: string }[]
   months: CalendarMonth[]
+  /** What "Compléter automatiquement" can act on: uncovered duties and missing required reinforcements. */
   uncoveredCount: number
+  /** docs/decisions.md D167 — of which: reinforcements required but not assigned. */
+  missingReinforcementCount: number
+  /** Reinforcements whose need cannot be evaluated (never completable, never "not required"). */
+  undeterminedCount: number
+  /** Reinforcements no longer required but still held — real assignments, a warning only. */
+  superfluousCount: number
 }
 
 /** Pure calendar arithmetic on "YYYY-MM-DD" strings — no timezone involved. */
@@ -80,8 +87,14 @@ export function buildCalendar(
 
   // Only what "Compléter automatiquement" can act on: never a reinforcement nobody needs, never an undetermined one.
   let uncoveredCount = 0
+  let missingReinforcementCount = 0
+  let undeterminedCount = 0
+  let superfluousCount = 0
   for (const line of generated) {
     uncoveredCount += line.duties.filter((duty) => !duty.covered && isShown(duty) && !isUndetermined(duty)).length
+    missingReinforcementCount += line.duties.filter((duty) => duty.demand?.state === 'REQUIRED_UNASSIGNED').length
+    undeterminedCount += line.duties.filter(isUndetermined).length
+    superfluousCount += line.duties.filter((duty) => duty.demand?.state === 'NOT_REQUIRED_ASSIGNED').length
   }
 
   const months: CalendarMonth[] = []
@@ -115,6 +128,9 @@ export function buildCalendar(
     lines: generated.map((line) => ({ stableId: line.lineStableId, name: line.lineName })),
     months,
     uncoveredCount,
+    missingReinforcementCount,
+    undeterminedCount,
+    superfluousCount,
   }
 }
 
@@ -130,4 +146,42 @@ export function isShown(duty: PlanningResultDuty): boolean {
 /** A reinforcement whose demand cannot be evaluated — its own explicit label, never "Non attribué". */
 export function isUndetermined(duty: PlanningResultDuty): boolean {
   return duty.demand?.state === 'UNDETERMINED'
+}
+
+/**
+ * docs/decisions.md D167 — how one duty reads on the calendar, straight from
+ * the backend's live state (`demand.state`): never re-deriving whether a
+ * reinforcement is required. An intrinsic duty (demand null) reads as before.
+ */
+export type DutyPresentation = {
+  /** Shown instead of a name when nobody holds it. */
+  gap: string | null
+  /** A short qualifier next to a name, e.g. "Renfort non requis". */
+  tag: string | null
+  tone: 'normal' | 'missing' | 'undetermined' | 'superfluous'
+  /** Spoken context for assistive technologies. */
+  spoken: string
+}
+
+export function presentDuty(duty: PlanningResultDuty): DutyPresentation {
+  const held = duty.assignment !== null
+  switch (duty.demand?.state) {
+    case 'REQUIRED_ASSIGNED':
+      return { gap: null, tag: null, tone: 'normal', spoken: 'renfort requis, attribué' }
+    case 'REQUIRED_UNASSIGNED':
+      return { gap: 'Renfort requis — non attribué', tag: null, tone: 'missing', spoken: 'renfort requis, non attribué' }
+    case 'NOT_REQUIRED_ASSIGNED':
+      return { gap: null, tag: 'Renfort non requis', tone: 'superfluous', spoken: 'renfort non requis, encore attribué' }
+    case 'UNDETERMINED':
+      return held
+        ? { gap: null, tag: 'Renfort non évalué', tone: 'undetermined', spoken: 'besoin de renfort non évaluable' }
+        : { gap: 'Renfort non évalué', tag: null, tone: 'undetermined', spoken: 'besoin de renfort non évaluable' }
+    case 'NOT_REQUIRED_UNASSIGNED':
+      // Never reaches the calendar (isShown), kept for completeness.
+      return { gap: null, tag: 'Pas de renfort', tone: 'normal', spoken: 'pas de renfort nécessaire' }
+    default:
+      return held
+        ? { gap: null, tag: null, tone: 'normal', spoken: '' }
+        : { gap: 'Non attribué', tag: null, tone: 'missing', spoken: 'non attribué' }
+  }
 }

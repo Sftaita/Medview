@@ -15,6 +15,7 @@ import { PlanningCalendar } from '../features/planning/calendar/PlanningCalendar
 import { ActionMenu } from '../features/planning/detail/ActionMenu'
 import { LinesTab, type Face } from '../features/planning/detail/LinesTab'
 import { MembersSheet } from '../features/planning/detail/MembersSheet'
+import { LineSettingsDialog } from '../features/planning/coverage/LineSettingsDialog'
 import { PeriodCard } from '../features/planning/detail/PeriodCard'
 import { formatShortDate } from '../features/planning/detail/period'
 import { PlanningSteps, type DetailTab, type Step } from '../features/planning/detail/PlanningSteps'
@@ -64,6 +65,7 @@ export function PlanningDetailPage() {
   const [newName, setNewName] = useState('')
   const [extendOpen, setExtendOpen] = useState(false)
   const [membersLine, setMembersLine] = useState<PlanningLineSummary | null>(null)
+  const [settingsLine, setSettingsLine] = useState<PlanningLineSummary | null>(null)
   const [pilotDialog, setPilotDialog] = useState<PilotDialog | null>(null)
   // The per-collection detail (history, close) is one click away for a manager, not the first thing they see.
   const [showCollectionHistory, setShowCollectionHistory] = useState(false)
@@ -398,9 +400,11 @@ export function PlanningDetailPage() {
               lines={planning.lines}
               facesByTeam={facesByTeam}
               canManage={planning.canManage}
+              canConfigure={planning.canManageLineStructure === true}
               saving={saving}
               onManageMembers={setMembersLine}
               onDeleteLine={handleDeleteLine}
+              onConfigureLine={setSettingsLine}
               onAddLine={handleAddLine}
             />
           )}
@@ -554,6 +558,17 @@ export function PlanningDetailPage() {
             }}
           />
         </Sheet>
+      )}
+
+      {settingsLine && (
+        <LineSettingsDialog
+          line={settingsLine}
+          onClose={() => setSettingsLine(null)}
+          onSaved={() => {
+            load()
+            void pilot.reload()
+          }}
+        />
       )}
 
       {membersLine && (

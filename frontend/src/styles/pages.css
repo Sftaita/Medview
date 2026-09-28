@@ -1144,3 +1144,9 @@
   margin-top: 8px;
   font-size: var(--text-sm);
 }
+
+/* docs/decisions.md D167 — warnings next to the publication preflight: shown, never blocking. */
+.preflight-heading {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--text-md);
+}

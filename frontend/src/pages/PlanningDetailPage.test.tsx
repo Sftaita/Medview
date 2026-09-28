@@ -248,6 +248,36 @@ describe('PlanningDetailPage — lines', () => {
     await waitFor(() => expect(api.requests('DELETE', '/api/plannings/plan-1/lines/line-2')).toHaveLength(1))
   })
 
+  it('opens "Paramètres de la ligne" for any line when allowed — the reinforcement mode only for a secondary one (D167)', async () => {
+    renderPage(planning({ canManageLineStructure: true }), {
+      'GET /api/planning-lines/line-2/demand-policy': () => ({
+        schemaVersion: 1,
+        line: { stableId: 'line-2', name: 'Assistant', type: 'SECONDARY' },
+        mode: 'INDEPENDENT',
+        policy: null,
+        source: null,
+        triggers: [],
+        weekdays: ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'],
+        sourceOptions: [],
+        targetStructure: { configured: false, excludedWeekdays: [], blocks: [] },
+        warnings: [],
+      }),
+    })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions pour Première ligne' }))
+    const primaryMenu = screen.getByRole('menu', { name: 'Actions pour Première ligne' })
+    expect(within(primaryMenu).getByRole('menuitem', { name: 'Paramètres de la ligne' })).toBeInTheDocument()
+    expect(within(primaryMenu).queryByRole('menuitem', { name: 'Supprimer la ligne' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Actions pour Première ligne' })) // closes it
+
+    fireEvent.click(screen.getByRole('button', { name: 'Actions pour Assistant' }))
+    const menu = screen.getByRole('menu', { name: 'Actions pour Assistant' })
+    expect(within(menu).getByRole('menuitem', { name: 'Supprimer la ligne' })).toBeInTheDocument()
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Paramètres de la ligne' }))
+    expect(await screen.findByText('Paramètres — Assistant')).toBeInTheDocument()
+    expect(await screen.findByRole('radio', { name: /Renfort selon le chirurgien de garde/ })).toBeInTheDocument()
+  })
+
   it('adds a line with a name', async () => {
     const api = renderPage(planning(), {
       'POST /api/plannings/plan-1/lines': () => line({ stableId: 'line-3' }),

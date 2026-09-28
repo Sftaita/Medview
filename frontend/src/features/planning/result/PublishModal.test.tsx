@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { status, stubApi } from '../../../testUtils/stubApi'
 import { PublishModal } from './PublishModal'
@@ -97,8 +97,29 @@ describe('PublishModal', () => {
     renderModal()
 
     expect(await screen.findByText(/complet et cohérent/)).toBeInTheDocument()
-    expect(screen.getByText(/Carol Dubois reste affecté/)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /ils n’empêchent pas la publication/ })).toBeInTheDocument()
+    expect(within(screen.getByRole('list', { name: 'Avertissements' })).getByText(/Carol Dubois reste affecté/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Publier' })).toBeInTheDocument()
+  })
+
+  it('names a missing required reinforcement as such, apart from missing duties (D167)', async () => {
+    stubPreflight(
+      preflight({
+        publishable: false,
+        uncoveredDuties: [
+          { dutyStableId: 'd1', date: '2027-01-05', dutyTypeName: 'Garde', lineStableId: 'l1', lineName: 'Seniors', conditional: false },
+          { dutyStableId: 'r1', date: '2027-01-06', dutyTypeName: 'Garde', lineStableId: 'l2', lineName: 'Renfort', conditional: true },
+          { dutyStableId: 'r2', date: '2027-01-07', dutyTypeName: 'Garde', lineStableId: 'l2', lineName: 'Renfort', conditional: true },
+        ],
+      }),
+    )
+    renderModal()
+
+    expect(await screen.findByText('Publication impossible.')).toBeInTheDocument()
+    const blockers = screen.getByRole('list', { name: 'Points bloquants' })
+    expect(within(blockers).getByText(/1 garde obligatoire reste non couverte/)).toBeInTheDocument()
+    expect(within(blockers).getByText(/2 renforts requis ne sont pas attribués \(ligne « Renfort »\)/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Publier' })).not.toBeInTheDocument()
   })
 
   it('names a reinforcement whose demand cannot be evaluated as a blocker (docs/decisions.md D165)', async () => {

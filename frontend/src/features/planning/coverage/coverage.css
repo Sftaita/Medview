@@ -1,0 +1,190 @@
+/* Line settings: coverage mode, line to reinforce, the people × days matrix (docs/decisions.md D167). */
+
+/* The dialog body is a grid: without min-width 0 its track grows to the table's width, the matrix then
+   measures that width and never switches to cards — the layout must follow the space really available. */
+.cov-sections,
+.cov-section,
+.cov-matrix {
+  min-width: 0;
+}
+.cov-matrix {
+  overflow-x: auto;
+}
+
+.cov-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-block: var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+}
+.cov-section:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.cov-section h3 {
+  margin: 0;
+  font-size: var(--text-md);
+}
+.cov-label {
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
+}
+.cov-help {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.cov-modes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.cov-mode {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  padding: var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+.cov-mode:has(input:checked) {
+  border-color: var(--brand);
+  background: var(--surface-brand-soft);
+}
+.cov-mode input {
+  margin-top: 3px;
+}
+.cov-mode strong {
+  display: block;
+}
+
+.cov-select {
+  min-height: var(--control-h-md);
+  padding-inline: var(--control-pad-x);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  color: var(--text-body);
+  font: inherit;
+  max-width: 100%;
+}
+
+/* --- the matrix --- */
+.cov-matrix {
+  width: 100%;
+}
+.cov-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.cov-table th,
+.cov-table td {
+  padding: var(--space-1) var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: center;
+}
+.cov-table th[scope='row'],
+.cov-table thead th:first-child {
+  text-align: left;
+}
+.cov-name {
+  font-weight: var(--weight-semibold);
+}
+.cov-col-toggle {
+  min-width: 40px;
+  min-height: 32px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--surface-card);
+  color: var(--text-body);
+  font: inherit;
+  font-weight: var(--weight-semibold);
+  cursor: pointer;
+}
+.cov-col-toggle:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.cov-off {
+  color: var(--text-subtle);
+}
+.cov-day {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: var(--tap-min, 44px);
+  min-height: var(--tap-min, 44px);
+  justify-content: center;
+  cursor: pointer;
+}
+.cov-day input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--brand);
+}
+.cov-day--off {
+  /* Not a colour-only signal: the box is also disabled and its label says so. */
+  text-decoration: line-through;
+  color: var(--text-subtle);
+}
+.cov-row-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+.cov-note {
+  display: block;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-regular);
+  color: var(--amber-700);
+}
+
+/* Narrow screens: one card per person, days on a wrapping row. */
+.cov-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.cov-card fieldset {
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.cov-card legend {
+  padding: 0 var(--space-1);
+}
+.cov-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+.cov-days .cov-day {
+  flex-direction: column;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
+  font-size: var(--text-sm);
+}
+
+.cov-warnings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}

@@ -3,8 +3,9 @@
 > **Statut (2026-09-24)** : **branché de bout en bout** (docs/decisions.md
 > D136). Endpoint réel `GET/PUT /api/planning-lines/{id}/week-structure`
 > (`WeekStructureController`/`WeekStructureService`), intégré dans
-> `PilotHeaderActions` (bouton « Semaine type », ligne principale
-> uniquement — voir la dette D136 pour les lignes secondaires), et
+> `PilotHeaderActions` (bouton « Semaine type », ligne principale) et,
+> depuis D167, « Paramètres de la ligne » pour **toute** ligne (le même
+> `WeekStructureModal`, ouvert depuis `LineSettingsDialog`), et
 > réellement consommé par la génération : `PlanningGenerationLauncher::preflight()`
 > matérialise le calendrier de `Duty` à la demande
 > (`WeeklyDutyCalendarService`) avant tout solve. Le composant lui-même
@@ -227,11 +228,9 @@ largeurs — les tests tournent au palier `s`).
 ## 8. Reste à faire / questions ouvertes
 
 1. ~~Intégration dans les paramètres d'une ligne de planning~~ — fait
-   (D136) : bouton « Semaine type » dans `PilotHeaderActions`, mais
-   **seulement pour la ligne principale** — aucune UI ne permet encore de
-   choisir une ligne secondaire (l'API accepte pourtant n'importe quel
-   `stableId` de ligne). Aucun scénario réel testé n'a de ligne secondaire
-   configurée différemment ; à étendre le jour où un vrai besoin apparaît.
+   (D136) pour la ligne principale (`PilotHeaderActions`), et depuis D167
+   pour **chaque** ligne via « Paramètres de la ligne » (`LineSettingsDialog`,
+   qui cède la place au `WeekStructureModal` inchangé puis se recharge).
 2. ~~Endpoint `week-structure` et conversion en `DutyPattern`~~ — fait
    (D136) : `WeekStructureController`/`WeekStructureService`, remplacement
    atomique complet à chaque `PUT`, effet sur les générations futures

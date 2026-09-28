@@ -154,6 +154,10 @@ function PreflightBody({ preflight }: { preflight: PublicationPreflight }) {
     )
   }
 
+  // docs/decisions.md D167: a missing reinforcement is named as one — the backend says which duty is conditional.
+  const missingDuties = preflight.uncoveredDuties.filter((duty) => !duty.conditional)
+  const missingReinforcements = preflight.uncoveredDuties.filter((duty) => duty.conditional)
+
   const totalIssues =
     preflight.uncoveredDuties.length +
     preflight.inconsistentGroups.length +
@@ -176,16 +180,22 @@ function PreflightBody({ preflight }: { preflight: PublicationPreflight }) {
               <span>Ligne « {line.lineName} » : aucun planning généré pour le moment.</span>
             </li>
           ))}
-        {preflight.uncoveredDuties.length > 0 && (
+        {missingDuties.length > 0 && (
           <li className="alert alert--warning">
             <Icon name="alert" size={18} strokeWidth={2} />
             <span>
-              {plural(
-                preflight.uncoveredDuties.length,
-                'garde obligatoire reste',
-                'gardes obligatoires restent',
-              )}{' '}
-              non couverte{preflight.uncoveredDuties.length > 1 ? 's' : ''}.
+              {plural(missingDuties.length, 'garde obligatoire reste', 'gardes obligatoires restent')} non couverte
+              {missingDuties.length > 1 ? 's' : ''}.
+            </span>
+          </li>
+        )}
+        {missingReinforcements.length > 0 && (
+          <li className="alert alert--warning">
+            <Icon name="alert" size={18} strokeWidth={2} />
+            <span>
+              {plural(missingReinforcements.length, 'renfort requis n’est', 'renforts requis ne sont')} pas attribué
+              {missingReinforcements.length > 1 ? 's' : ''}
+              {missingReinforcements[0].lineName ? ` (ligne « ${missingReinforcements[0].lineName} »)` : ''}.
             </span>
           </li>
         )}
@@ -233,6 +243,7 @@ function PreflightBody({ preflight }: { preflight: PublicationPreflight }) {
       {totalIssues === 0 && preflight.lines.every((line) => !line.hasGeneration) && (
         <p className="muted">Aucune ligne de ce planning n&apos;a encore été générée.</p>
       )}
+      <SuperfluousWarnings items={preflight.superfluousCoverages} />
     </>
   )
 }
@@ -264,7 +275,9 @@ function publishErrorMessage(err: unknown): string {
 function SuperfluousWarnings({ items }: { items: PublicationPreflight['superfluousCoverages'] }) {
   if (items.length === 0) return null
   return (
-    <ul className="preflight-issues" aria-label="Avertissements">
+    <>
+      <h3 className="preflight-heading">Avertissements — ils n’empêchent pas la publication</h3>
+      <ul className="preflight-issues" aria-label="Avertissements">
       {items.map((item) => (
         <li key={item.unitStableKey} className="alert alert--warning">
           <Icon name="alert" size={18} strokeWidth={2} />
@@ -273,6 +286,7 @@ function SuperfluousWarnings({ items }: { items: PublicationPreflight['superfluo
           </span>
         </li>
       ))}
-    </ul>
+      </ul>
+    </>
   )
 }

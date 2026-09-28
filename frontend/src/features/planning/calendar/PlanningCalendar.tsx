@@ -5,11 +5,12 @@ import { Sheet } from '../detail/Sheet'
 import { ExportModal } from '../export/ExportModal'
 import { fetchPlanningResult, fetchPublicationPdf, fetchPublicationState } from '../result/api'
 import { PublishModal } from '../result/PublishModal'
+import { impactSummary } from '../result/impacts'
 import { ReassignmentModal } from '../result/ReassignmentModal'
 import { StatisticsPanel } from '../result/StatisticsPanel'
 import type { PlanningResult, PublicationState } from '../result/types'
 import type { PlanningDetail } from '../types'
-import { buildCalendar, type CalendarItem, isUndetermined } from './calendarModel'
+import { buildCalendar, type CalendarItem, presentDuty } from './calendarModel'
 import { RepublishModal } from './RepublishModal'
 import './calendar.css'
 
@@ -289,10 +290,27 @@ export function PlanningCalendar({ planning, onPublished, onRequestCompletion, j
       {model && model.uncoveredCount > 0 && (
         <p className="cal-summary">
           <span className="cal-uncovered">
-            ⚠ {model.uncoveredCount} garde{model.uncoveredCount > 1 ? 's' : ''} non attribuée
-            {model.uncoveredCount > 1 ? 's' : ''}
+            ⚠ {summaryText(model.uncoveredCount - model.missingReinforcementCount, model.missingReinforcementCount)}
           </span>
           {canEdit && ' — attribuez-les une à une ou utilisez « Compléter automatiquement ».'}
+        </p>
+      )}
+      {model && model.undeterminedCount > 0 && (
+        <p className="cal-summary">
+          <span className="cal-undetermined">
+            ? {model.undeterminedCount} renfort{model.undeterminedCount > 1 ? 's' : ''} non évalué
+            {model.undeterminedCount > 1 ? 's' : ''}
+          </span>{' '}
+          — la garde dont {model.undeterminedCount > 1 ? 'ils dépendent' : 'il dépend'} n’a pas de titulaire.
+          Attribuez-la d’abord.
+        </p>
+      )}
+      {model && model.superfluousCount > 0 && (
+        <p className="cal-summary cal-summary--quiet">
+          {model.superfluousCount} renfort{model.superfluousCount > 1 ? 's' : ''} attribué
+          {model.superfluousCount > 1 ? 's' : ''} mais plus nécessaire{model.superfluousCount > 1 ? 's' : ''} (« Renfort non
+          requis ») — {model.superfluousCount > 1 ? 'ils restent' : 'il reste'} en place tant que vous ne
+          {model.superfluousCount > 1 ? ' les' : ' le'} retirez pas.
         </p>
       )}
 
@@ -380,9 +398,15 @@ export function PlanningCalendar({ planning, onPublished, onRequestCompletion, j
           planningStableId={planning.stableId}
           dutyStableId={editing}
           onClose={() => setEditing(null)}
-          onChanged={() => {
-            // A completion/publication message no longer describes the calendar once it is edited.
-            setNotice(null)
+          onChanged={(impacts) => {
+            // A completion/publication message no longer describes the calendar once it is edited; what the change
+            // did to the reinforcements depending on it (docs/decisions.md D165) stays in view instead.
+            const consequences = impactSummary(impacts)
+            setNotice(
+              consequences.length > 0
+                ? { tone: 'info', text: `Conséquence${consequences.length > 1 ? 's' : ''} sur les renforts — ${consequences.join(' ; ')}.` }
+                : null,
+            )
             reload()
           }}
         />
@@ -433,10 +457,19 @@ function DutyCell({
 }) {
   const { duty, blockPart, showType } = item
   const who = duty.assignment ? `${duty.assignment.user.firstName} ${duty.assignment.user.lastName}` : null
-  const gap = isUndetermined(duty) ? 'Renfort non évalué' : 'Non attribué'
+  // docs/decisions.md D167: the live state decides — the calendar only presents it.
+  const presentation = presentDuty(duty)
+  const gap = presentation.gap ?? 'Non attribué'
   const content = (
     <>
-      {who ? <span className="cal-who">{who}</span> : <span className="cal-uncovered">⚠ {gap}</span>}
+      {who ? (
+        <span className="cal-who">{who}</span>
+      ) : presentation.tone === 'undetermined' ? (
+        <span className="cal-undetermined">? {gap}</span>
+      ) : (
+        <span className="cal-uncovered">⚠ {gap}</span>
+      )}
+      {presentation.tag && <span className={`cal-tag cal-tag--${presentation.tone}`}>{presentation.tag}</span>}
       {showType && <span className="cal-type"> · {duty.dutyType.name}</span>}
       {(blockPart === 'first' || blockPart === 'single') && (
         <span className="cal-block-label">Bloc {duty.groupLabel ?? ''}</span>
@@ -446,11 +479,12 @@ function DutyCell({
   const className = [
     'cal-item',
     blockPart ? `cal-block cal-block--${blockPart}` : '',
-    who ? '' : 'cal-item--uncovered',
+    who ? '' : presentation.tone === 'undetermined' ? 'cal-item--undetermined' : 'cal-item--uncovered',
+    presentation.tone === 'superfluous' ? 'cal-item--superfluous' : '',
   ]
     .filter(Boolean)
     .join(' ')
-  const label = `${who ?? gap}${blockPart ? ` — bloc ${duty.groupLabel ?? ''}` : ''}, ${duty.date}`
+  const label = `${who ?? gap}${presentation.spoken && who ? ` (${presentation.spoken})` : ''}${blockPart ? ` — bloc ${duty.groupLabel ?? ''}` : ''}, ${duty.date}`
 
   return canEdit ? (
     <button
@@ -464,4 +498,13 @@ function DutyCell({
   ) : (
     <div className={className}>{content}</div>
   )
+}
+
+/** "3 gardes non attribuées, dont 1 renfort requis" — reinforcements named as such (D167). */
+function summaryText(duties: number, reinforcements: number): string {
+  const parts: string[] = []
+  if (duties > 0) parts.push(`${duties} garde${duties > 1 ? 's' : ''} non attribuée${duties > 1 ? 's' : ''}`)
+  if (reinforcements > 0)
+    parts.push(`${reinforcements} renfort${reinforcements > 1 ? 's' : ''} requis non attribué${reinforcements > 1 ? 's' : ''}`)
+  return parts.join(' et ')
 }

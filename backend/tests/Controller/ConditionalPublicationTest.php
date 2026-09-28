@@ -150,6 +150,8 @@ final class ConditionalPublicationTest extends WebTestCase
     {
         $client = static::createClient();
         $s = $this->generatedScenario($client, self::DR_B_TUESDAY);
+        self::assertTrue($this->api($client, 'GET', "/api/plannings/{$s['planningId']}", token: $s['creator'])['canManageLineStructure']);
+        self::assertFalse($this->api($client, 'GET', "/api/plannings/{$s['planningId']}", token: $s['carol'])['canManageLineStructure'], 'A plain member configures nothing.');
 
         // REQUIRED_ASSIGNED (Tuesday) and NOT_REQUIRED_UNASSIGNED (the block): nothing to say.
         $preflight = $this->preflight($client, $s);
@@ -163,6 +165,10 @@ final class ConditionalPublicationTest extends WebTestCase
         $preflight = $this->preflight($client, $s);
         self::assertFalse($preflight['publishable']);
         self::assertSame([self::FRI, self::SAT, self::SUN], array_column($preflight['uncoveredDuties'], 'date'));
+        foreach ($preflight['uncoveredDuties'] as $uncovered) {
+            self::assertSame('Renfort', $uncovered['lineName'], 'A missing reinforcement is named as one (D167).');
+            self::assertTrue($uncovered['conditional']);
+        }
         $refused = $this->publish($client, $s);
         self::assertResponseStatusCodeSame(409);
         self::assertSame('not_publishable', $refused['error']);
@@ -269,6 +275,17 @@ final class ConditionalPublicationTest extends WebTestCase
             self::assertStringContainsString($this->nameOf('admin@example.com').' → '.$this->nameOf('bob@example.com'), $body);
             self::assertStringNotContainsString('Renfort', $body, 'The reinforcement nobody needs is not part of that day.');
             self::assertStringNotContainsString('Non attribué', $body);
+        }
+
+        // Dr C → Dr B: the reinforcement is now needed and missing — named as such, never "Non attribué — inchangé".
+        $this->reassignTo($client, $s, $this->dutyOn($s['planningId'], self::TUE), 'alice@example.com');
+        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/republish", [], $s['creator']);
+        self::assertResponseIsSuccessful();
+        $bodies = array_map(static fn (Email $m): string => (string) $m->getTextBody(), array_filter(self::getMailerMessages(), static fn ($m): bool => $m instanceof Email));
+        self::assertNotEmpty($bodies);
+        foreach ($bodies as $body) {
+            self::assertMatchesRegularExpression('/^\s*Renfort : Renfort requis — non attribué$/m', $body);
+            self::assertStringNotContainsString('Renfort : Non attribué', $body);
         }
     }
 

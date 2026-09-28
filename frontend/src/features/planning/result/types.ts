@@ -274,6 +274,10 @@ export type PublicationDutyRef = {
   dutyStableId: string
   date: string
   dutyTypeName: string
+  /** docs/decisions.md D167 — the duty's line, and whether it is a reinforcement (named as such when missing). */
+  lineStableId?: string | null
+  lineName?: string | null
+  conditional?: boolean
 }
 
 export type PublicationMemberRef = {

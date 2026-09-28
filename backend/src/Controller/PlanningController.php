@@ -231,6 +231,7 @@ final class PlanningController
             'canGenerate' => $this->authorizationChecker->isGranted(PlanningVoter::GENERATE, $planning),
             'canManageCalendar' => $this->authorizationChecker->isGranted(PlanningVoter::MANAGE_CALENDAR, $planning),
             'canPublish' => $this->authorizationChecker->isGranted(PlanningVoter::PUBLISH, $planning),
+            'canManageLineStructure' => $this->authorizationChecker->isGranted(PlanningVoter::MANAGE_LINE_STRUCTURE, $planning),
             'startsAt' => $planning->getStartsAt()->format('Y-m-d'),
             'endsAt' => $planning->getEndsAt()->format('Y-m-d'),
             'timezone' => $planning->getTimezone(),

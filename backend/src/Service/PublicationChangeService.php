@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Demand\LiveCoverageState;
 use App\Entity\Planning;
 use App\Entity\PlanningPublication;
 use App\Entity\PlanningTeamMember;
@@ -203,7 +204,7 @@ final class PublicationChangeService
                 }
                 $text = null !== $change
                     ? self::holder($change->before, $change->beforeShown).' → '.self::holder($change->after, $change->afterShown)
-                    : self::holder($cell->member).' — inchangé';
+                    : self::unchangedText($cell);
                 $rows[] = [
                     'line' => $cell->line->getName().($showType ? ' · '.$cell->duty->getDutyType()->getName() : ''),
                     'text' => $text,
@@ -214,6 +215,23 @@ final class PublicationChangeService
         }
 
         return ['units' => $unitRows, 'days' => $days];
+    }
+
+    /**
+     * An unchanged cell of the day (docs/decisions.md D167): a reinforcement reads as its live state — "Renfort
+     * requis — non attribué" when it is needed and missing (it may not even have existed at the last
+     * diffusion), never a plain "Non attribué" that would look like nothing changed for it.
+     */
+    private static function unchangedText(CalendarCell $cell): string
+    {
+        if (null === $cell->member && LiveCoverageState::REQUIRED_UNASSIGNED === $cell->coverageState) {
+            return 'Renfort requis — non attribué';
+        }
+        if (null === $cell->member && $cell->isUndetermined()) {
+            return 'Renfort non évalué';
+        }
+
+        return self::holder($cell->member).' — inchangé';
     }
 
     /**

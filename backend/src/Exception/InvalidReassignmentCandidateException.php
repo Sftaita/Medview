@@ -14,7 +14,10 @@ namespace App\Exception;
  */
 final class InvalidReassignmentCandidateException extends \RuntimeException
 {
-    public function __construct(string $reason)
+    /**
+     * @param string $reason an ExclusionReason value, or one of ReassignmentCandidateService's structural codes
+     */
+    public function __construct(public readonly string $reason)
     {
         parent::__construct(\sprintf('This candidate is not selectable for this duty: %s.', $reason));
     }

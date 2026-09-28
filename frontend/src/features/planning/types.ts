@@ -18,6 +18,8 @@ export type PlanningSummary = {
   canManageCalendar?: boolean
   /** Creator or team OWNER/ADMIN: may run the publication preflight and publish (D133). */
   canPublish?: boolean
+  /** Creator or team OWNER/ADMIN: may configure a line — its weekly structure and how it is covered (D162/D167). */
+  canManageLineStructure?: boolean
   startsAt: string
   endsAt: string
   timezone: string

@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { status, stubApi } from '../../../testUtils/stubApi'
 import { ReassignmentModal } from './ReassignmentModal'
-import type { ReassignmentCandidatesView } from './types'
+import type { LiveCoverageState, LiveUnitDemand, ReassignmentCandidatesView } from './types'
 
 afterEach(() => {
   cleanup()
@@ -28,6 +28,17 @@ function view(overrides: Partial<ReassignmentCandidatesView> = {}): Reassignment
     notAssignableReason: null,
     demand: null,
     ...overrides,
+  }
+}
+
+function liveDemand(state: LiveCoverageState): LiveUnitDemand {
+  return {
+    state,
+    required: state === 'UNDETERMINED' ? null : state.startsWith('REQUIRED'),
+    reason: 'HOLDER_HAS_NO_TRIGGER',
+    superfluous: state === 'NOT_REQUIRED_ASSIGNED',
+    triggeringDutyStableIds: [],
+    triggeringDates: [],
   }
 }
 
@@ -163,7 +174,7 @@ describe('ReassignmentModal (assignment editor)', () => {
     )
     renderModal()
 
-    expect(await screen.findByText(/Ce renfort n.est pas requis actuellement/)).toBeInTheDocument()
+    expect(await screen.findByText(/Aucun renfort n.est actuellement requis pour cette garde/)).toBeInTheDocument()
     expect(screen.queryByText(/Personne de cette ligne/)).not.toBeInTheDocument()
   })
 
@@ -179,7 +190,7 @@ describe('ReassignmentModal (assignment editor)', () => {
     )
     renderModal()
 
-    expect(await screen.findByText(/la garde dont il dépend n.a pas de titulaire/)).toBeInTheDocument()
+    expect(await screen.findByText(/ne peut pas être évalué tant que la garde source n.est pas attribuée/)).toBeInTheDocument()
   })
 
   it('explains a save refused because the reinforcement is not required any more (409 coverage_not_required)', async () => {
@@ -189,7 +200,73 @@ describe('ReassignmentModal (assignment editor)', () => {
     await chooseBob()
     fireEvent.click(screen.getByRole('button', { name: 'Remplacer' }))
 
-    expect(await screen.findByText(/Ce renfort n.est plus requis/)).toBeInTheDocument()
+    expect(await screen.findByText(/Aucun renfort n.est actuellement requis pour cette garde/)).toBeInTheDocument()
+  })
+
+  it('offers "Retirer le renfort" for a reinforcement no longer required, with a plain confirmation (D167)', async () => {
+    const api = stubCandidates(
+      view({ candidates: [], assignable: false, notAssignableReason: 'coverage_not_required', demand: liveDemand('NOT_REQUIRED_ASSIGNED') }),
+      undefined,
+      { status: 'unassigned', dependentImpacts: [] },
+    )
+    const { onChanged } = renderModal()
+
+    expect(await screen.findByText('Renfort : Renfort non requis')).toBeInTheDocument()
+    expect(screen.getByText(/n’est plus nécessaire selon le titulaire actuel/)).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /Remplacer par/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Remplacer' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Retirer le renfort' }))
+    expect(screen.getByText(/L’historique des affectations est conservé/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmer le retrait' }))
+
+    await waitFor(() => expect(onChanged).toHaveBeenCalledWith([]))
+    expect(api.requests('POST', '/api/plannings/plan-1/duties/d1/unassign')[0].body).toEqual({
+      expectedCurrentTeamMemberStableId: 'm-alice',
+    })
+    expect(await screen.findByText('Le renfort a été retiré.')).toBeInTheDocument()
+  })
+
+  it('names the real reason of a refusal in plain words — "déjà de garde sur la ligne à renforcer" (SELF_COVERAGE)', async () => {
+    stubCandidates(
+      view({ demand: liveDemand('REQUIRED_UNASSIGNED') }),
+      status(409, { error: 'invalid_candidate', reason: 'SELF_COVERAGE', reasonLabel: 'déjà de garde sur la ligne à renforcer' }),
+    )
+    renderModal()
+
+    expect(await screen.findByText('Renfort : Renfort requis — non attribué')).toBeInTheDocument()
+    await chooseBob()
+    fireEvent.click(screen.getByRole('button', { name: 'Remplacer' }))
+
+    expect(await screen.findByText('Cette attribution n’est plus possible : déjà de garde sur la ligne à renforcer.')).toBeInTheDocument()
+  })
+
+  it('reports what the change did to the reinforcements depending on it, changed ones only (D165)', async () => {
+    const impacts = [
+      {
+        lineStableId: 'l2', lineName: 'Renfort', unitStableKey: 'b1', groupInstanceStableId: 'b1',
+        dutyStableIds: ['r8', 'r9', 'r10'], dates: ['2027-01-08', '2027-01-09', '2027-01-10'],
+        previousState: 'REQUIRED_ASSIGNED' as const, newState: 'NOT_REQUIRED_ASSIGNED' as const, changed: true,
+        required: false, assigned: true,
+        assignee: { teamMemberStableId: 'm-carol', userStableId: 'u-carol', firstName: 'Carol', lastName: 'Dubois' },
+        reason: 'HOLDER_HAS_NO_TRIGGER', triggeringDates: [],
+      },
+      {
+        lineStableId: 'l2', lineName: 'Renfort', unitStableKey: 'r5', groupInstanceStableId: null,
+        dutyStableIds: ['r5'], dates: ['2027-01-05'],
+        previousState: 'NOT_REQUIRED_UNASSIGNED' as const, newState: 'NOT_REQUIRED_UNASSIGNED' as const, changed: false,
+        required: false, assigned: false, assignee: null, reason: 'HOLDER_HAS_NO_TRIGGER', triggeringDates: [],
+      },
+    ]
+    stubCandidates(view(), { status: 'reassigned', dependentImpacts: impacts })
+    const { onChanged } = renderModal()
+
+    await chooseBob()
+    fireEvent.click(screen.getByRole('button', { name: 'Remplacer' }))
+
+    await waitFor(() => expect(onChanged).toHaveBeenCalledWith(impacts))
+    const box = await screen.findByRole('status')
+    expect(within(box).getByText('Renfort, du ven. 8 janv. au dim. 10 janv. : renfort plus nécessaire — Carol Dubois reste affecté(e)')).toBeInTheDocument()
+    expect(within(box).getAllByRole('listitem')).toHaveLength(1)
   })
 
   it('works on the whole atomic block, named by its pattern and date range', async () => {

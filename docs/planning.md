@@ -459,6 +459,16 @@ garde son titulaire jusqu'à « Retirer l'affectation » ; « Compléter
 automatiquement » couvre la demande live. Détail :
 `docs/planning-generation.md` §26.
 
+**Interface (D167)** : menu « ⋯ » d'une ligne → « Paramètres de la
+ligne » : semaine type (le dialogue existant), et pour une ligne secondaire
+« Mode de couverture » (*Garde indépendante* / *Renfort selon le chirurgien
+de garde*), « Ligne à renforcer », puis une matrice **chirurgiens × jours**
+(une ligne par personne, `Lun…Dim`) : cocher les jours où la garde de ce
+chirurgien sur la ligne à renforcer nécessite un deuxième chirurgien. Rien
+n'est envoyé avant « Enregistrer » ; les avertissements du backend sont
+affichés tels quels. Sur un téléphone, une carte par chirurgien remplace le
+tableau.
+
 **Publication et sorties (D166)** : un renfort superflu n'empêche jamais la
 publication (avertissement) ; un renfort requis vide ou indéterminé la
 bloque. Un renfort que personne ne demande ni ne tient n'apparaît dans

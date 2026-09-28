@@ -322,7 +322,13 @@ final class ConditionalCalendarTest extends WebTestCase
             self::assertResponseStatusCodeSame(409);
             self::assertSame('invalid_candidate', $refused['error']);
             self::assertStringContainsString($reason, $refused['message'], $email);
+            self::assertSame($reason, $refused['reason'], 'The reason, as a stable code (D167)…');
+            self::assertNotEmpty($refused['reasonLabel'], '…and in plain words.');
         }
+        self::assertSame('déjà de garde sur la ligne à renforcer', $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/duties/{$tuesday}/reassign", [
+            'teamMemberStableId' => $this->memberStableIdIn($s['planningId'], 'alice@example.com', 1),
+            'expectedCurrentTeamMemberStableId' => null,
+        ], $s['creator'])['reasonLabel']);
 
         // "Compléter automatiquement" applies the same rules: the need stays uncovered.
         $outcome = $this->completePlanning($client, $s);
