@@ -4900,3 +4900,75 @@ l'ancienne (voir légende).
   mobiles n'affichent pas un PDF dans une `<iframe>`). (4) En-tête/pied
   Excel : 80 caractères par section avant doublement des `&` (limite Excel
   de 255).
+
+## D152 — Dépendances d'exécution déclarées et vérifiées sur une installation `--no-dev`, test fumée du solveur dans l'image de production
+
+- **Incident** (`docs/deployment.md` §8 point 10) : en production, toute
+  génération échouait avec `Error: Class "Symfony\Component\Process\Process"
+  not found` (`OrToolsPlanningSolver::runProcess()`). `symfony/process`
+  n'arrivait que transitivement par `require-dev` (`friendsofphp/php-cs-fixer`,
+  `symfony/maker-bundle`) depuis l'arrivée du solveur réel en subprocess
+  Python (D031, commit `4afbfe9`, 2026-09-20),
+  et `backend/Dockerfile.prod` installe `--no-dev`. Tests, CI et recettes
+  tournaient tous avec les dépendances de dev : rien ne pouvait le voir.
+- **Correctif** : `symfony/process` `7.4.*` dans `require`. Le lock ne fait
+  que déplacer le paquet de `packages-dev` vers `packages`, **même version**
+  (v7.4.18, `composer update symfony/process --with symfony/process:7.4.18`
+  pour ne pas embarquer une montée de version dans un correctif).
+- **Audit** (`composer install --no-dev` + `composer-require-checker`) :
+  `symfony/process` était le **seul** paquet utilisé par `src/` et absent
+  d'une installation `--no-dev`. Les 65 autres symboles signalés venaient de
+  paquets déjà installés en production, mais seulement transitivement
+  (`framework-bundle`, `security-bundle`, `doctrine/orm`…), plus `ext-intl`
+  (`Collator`, `transliterator_transliterate`) et `ext-mbstring`.
+- **Décision — déclarer, pas de liste blanche** : ces 19 paquets
+  (`doctrine/collections`, `doctrine/dbal`, `doctrine/persistence`,
+  `psr/log`, `twig/twig`, `symfony/clock`, `dependency-injection`,
+  `doctrine-bridge`, `event-dispatcher`, `http-foundation`, `http-kernel`,
+  `mime`, `password-hasher`, `routing`, `security-core`, `security-http`,
+  `serializer`, `twig-bridge`, `validator`) et `ext-intl`/`ext-mbstring`
+  sont déclarés dans `require`, contraintes calées sur les versions
+  installées (`7.4.*` pour Symfony, `^majeure.mineure` sinon). Aucun paquet
+  installé ne change (lock : `content-hash` et `platform` seulement, `vendor/`
+  de production identique). Une liste blanche de 65 symboles aurait fait
+  échouer la CI à chaque nouvelle contrainte de validation ou classe
+  Symfony utilisée, sans rien protéger de plus. **Aucune configuration ni
+  liste blanche** de `composer-require-checker` n'est nécessaire.
+- **Garde-fou 1 — job CI `backend-prod-dependencies`** :
+  `composer validate --no-check-publish`, `composer install --no-dev`, puis
+  `composer-require-checker` **4.20.0** (phar épinglé, vérifié contre le
+  digest SHA-256 publié par GitHub — pas une dépendance Composer : il a ses
+  propres dépendances et n'a rien à faire dans le lock du projet). 4.20.0 est
+  la dernière version qui tourne sous PHP 8.3 (4.21+ exigent 8.4 et
+  s'arrêtent sur le contrôle de plateforme de leur propre phar, constaté) :
+  le job garde la version de PHP de l'image de production. Un symbole de
+  `src/` fourni par un paquet non déclaré dans `require` fait échouer le job ;
+  un paquet `require-dev` n'est même pas installé, donc ses classes sont
+  signalées. Vérifié en rejouant l'incident (retrait de `symfony/process`
+  de `require`) : le job échoue sur `Symfony\Component\Process\Process` et
+  `Symfony\Component\Process\Exception\ProcessTimedOutException`.
+  `--no-check-publish` : `name`/`description` ne servent qu'à publier un
+  paquet sur Packagist, ce que ce projet n'est pas.
+- **Garde-fou 2 — job CI `backend-prod-image` et commande `app:solver:smoke`** :
+  construit réellement `backend/Dockerfile.prod`, puis dans l'image :
+  `class_exists(Process::class)`, `import ortools` avec le Python du venv, et
+  `app:solver:smoke`. La commande (`SolverSmokeCheck`) résout un problème
+  **en mémoire, jamais persisté** — deux gardes REQUIRED sur deux jours
+  consécutifs, deux candidats éligibles, une vraie phase `SPACING_SCORE` —
+  par le `PlanningSolver` configuré : PHP → `OrToolsPlanningSolver` → Symfony
+  Process → `/opt/ortools-venv/bin/python3` → `cp_sat_solver.py` → CP-SAT →
+  JSON → `OptimizationResult`. Attendu : STRICT `OPTIMAL`, couverture
+  `COMPLETE`, version d'OR-Tools rapportée par le script, les deux gardes
+  attribuées à **deux candidats différents** (seul optimum de l'espacement).
+  Aucune base de données : sûre en CI, sur une image fraîchement construite
+  et en production après déploiement, dans `medvue-backend` comme dans
+  `medvue-worker` (`docs/deployment.md` §2).
+- **Tests** : `SolverSmokeCheckTest` (chemin réel → succès ; classe
+  `Process` absente → la commande ne rend jamais « OK » ; interpréteur
+  Python inutilisable → échec `ERROR` et aucune version ; solution qui rate
+  l'optimum d'espacement → échec), `CiWorkflowTest` (les deux jobs, l'ordre
+  install `--no-dev` → vérification, le phar vérifié, les contrôles exécutés
+  dans l'image construite ; `symfony/process` dans `require` et dans
+  `packages`).
+- **Hors périmètre** : les deux `PlanningGeneration` `FAILED` du 2026-09-28
+  restent dans l'historique (jamais nettoyées) ; aucune reprise automatique.
