@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Demand\LiveCoverageState;
 use App\Entity\Planning;
 use App\Entity\PlanningLine;
 use App\Repository\DutyAssignmentRepository;
@@ -18,6 +19,11 @@ use App\Repository\PlanningLineRepository;
  * the publication snapshot, the "Modifications non publiées" diff, the
  * republication audience and the weekly reminder all share — never a
  * second interpretation of "current".
+ *
+ * docs/decisions.md D166: each conditional duty's cell carries its live
+ * coverage state (LiveDemandView: the rules frozen by its line's current
+ * generation, today's source holders), computed here once — the outputs
+ * never re-derive the conditional rule.
  */
 final class CurrentCalendarReader
 {
@@ -26,6 +32,7 @@ final class CurrentCalendarReader
         private readonly PlanningGenerationRepository $generationRepository,
         private readonly DutyRepository $dutyRepository,
         private readonly DutyAssignmentRepository $assignmentRepository,
+        private readonly LiveDemandViewFactory $demandViewFactory,
     ) {
     }
 
@@ -37,6 +44,7 @@ final class CurrentCalendarReader
     public function read(Planning $planning, ?callable $lineFilter = null): array
     {
         $cells = [];
+        $demand = null;
         foreach ($this->lineRepository->findByPlanning($planning) as $line) {
             if (!$line->isActive() || (null !== $lineFilter && !$lineFilter($line))) {
                 continue;
@@ -53,7 +61,13 @@ final class CurrentCalendarReader
             }
 
             foreach ($this->dutyRepository->findByPlanningPeriod($line->getPlanningPeriod()) as $duty) {
-                $cells[] = new CalendarCell($line, $duty, $memberByDutyId[(int) $duty->getId()] ?? null);
+                $member = $memberByDutyId[(int) $duty->getId()] ?? null;
+                $state = null;
+                if ($duty->isConditional()) {
+                    $demand ??= $this->demandViewFactory->forPlanning($planning);
+                    $state = LiveCoverageState::of($demand->forDuty($duty), null !== $member);
+                }
+                $cells[] = new CalendarCell($line, $duty, $member, $state);
             }
         }
 

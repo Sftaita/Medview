@@ -141,13 +141,16 @@ export function PublishModal({ planningStableId, onClose, onPublished }: Props) 
 function PreflightBody({ preflight }: { preflight: PublicationPreflight }) {
   if (preflight.publishable) {
     return (
-      <p className="alert alert--success">
-        <Icon name="check" size={18} strokeWidth={2} />
-        <span>
-          Le calendrier actuel est complet et cohérent : il peut être publié. Chaque participant recevra un
-          email avec le PDF du planning.
-        </span>
-      </p>
+      <>
+        <p className="alert alert--success">
+          <Icon name="check" size={18} strokeWidth={2} />
+          <span>
+            Le calendrier actuel est complet et cohérent : il peut être publié. Chaque participant recevra un
+            email avec le PDF du planning.
+          </span>
+        </p>
+        <SuperfluousWarnings items={preflight.superfluousCoverages} />
+      </>
     )
   }
 
@@ -252,4 +255,24 @@ function publishErrorMessage(err: unknown): string {
     }
   }
   return 'La publication a échoué.'
+}
+
+/**
+ * docs/decisions.md D166: a reinforcement no longer required but still held
+ * — shown, never blocking, never removed automatically.
+ */
+function SuperfluousWarnings({ items }: { items: PublicationPreflight['superfluousCoverages'] }) {
+  if (items.length === 0) return null
+  return (
+    <ul className="preflight-issues" aria-label="Avertissements">
+      {items.map((item) => (
+        <li key={item.unitStableKey} className="alert alert--warning">
+          <Icon name="alert" size={18} strokeWidth={2} />
+          <span>
+            Ligne « {item.lineName} » : {item.explanation}
+          </span>
+        </li>
+      ))}
+    </ul>
+  )
 }

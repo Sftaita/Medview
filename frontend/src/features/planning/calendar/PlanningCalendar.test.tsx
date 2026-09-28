@@ -88,6 +88,7 @@ function line(id: string, name: string, duties: PlanningResultDuty[]): PlanningR
     uncoveredRequiredDutyCount: duties.filter((d) => !d.covered).length,
     undeterminedDutyCount: 0,
     superfluousDutyCount: 0,
+    notRequiredDutyCount: 0,
     duties,
   }
 }
@@ -317,6 +318,8 @@ describe('PlanningCalendar', () => {
             groupInstanceStableId: null,
             before: { firstName: 'Anne', lastName: 'Dupont' },
             after: { firstName: 'Bruno', lastName: 'Martin' },
+            beforeShown: true,
+            afterShown: true,
           },
         ],
       },
@@ -340,6 +343,49 @@ describe('PlanningCalendar', () => {
     const changes = screen.getByRole('list', { name: 'Modifications non publiées' })
     expect(within(changes).getByText('Bruno Martin')).toBeInTheDocument()
     expect(within(changes).getByText(/mardi 6 octobre · Ligne principale/)).toBeInTheDocument()
+  })
+
+  it('announces a removed reinforcement nobody needs any more as "Pas de renfort", never "Non attribué" (D166)', async () => {
+    setup(
+      {
+        ...NOT_PUBLISHED,
+        published: true,
+        lastPublishedAt: '2026-10-01T08:00:00+00:00',
+        hasUnpublishedChanges: true,
+        changes: [
+          {
+            dutyStableId: 'r6',
+            date: '2026-10-06',
+            lineStableId: 'l2',
+            lineName: 'Renfort',
+            groupInstanceStableId: null,
+            before: { firstName: 'Carol', lastName: 'Dubois' },
+            after: null,
+            beforeShown: true,
+            afterShown: false,
+          },
+        ],
+      },
+      {
+        'GET /api/plannings/plan-1/publication-preflight': () => ({
+          publishable: true,
+          republishable: true,
+          lines: [],
+          uncoveredDuties: [],
+          inconsistentGroups: [],
+          invalidAssignments: [],
+          conflicts: [],
+          undeterminedDuties: [],
+          superfluousCoverages: [],
+        }),
+      },
+    )
+    render(<PlanningCalendar planning={MANAGER} />)
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Republier les modifications' }))
+    const changes = await screen.findByRole('list', { name: 'Modifications non publiées' })
+    expect(within(changes).getByText('Pas de renfort')).toBeInTheDocument()
+    expect(within(changes).queryByText('Non attribué')).not.toBeInTheDocument()
   })
 
   it('a member sees the publication status and can download the PDF, never republish', async () => {

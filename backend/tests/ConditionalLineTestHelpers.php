@@ -16,6 +16,8 @@ use App\Repository\PlanningRepository;
 use App\Repository\PlanningSnapshotRepository;
 use App\Repository\UserRepository;
 use App\Service\PlanningRuleSetService;
+use App\Service\SnapshotHasher;
+use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 
 /**
@@ -229,5 +231,47 @@ trait ConditionalLineTestHelpers
         }
 
         return null;
+    }
+
+    /**
+     * Everything a generation froze about its demand, plus its stored and recomputed hash.
+     *
+     * @return array<string, mixed>
+     */
+    private function history(array $s): array
+    {
+        static::getContainer()->get(EntityManagerInterface::class)->clear();
+        $generation = $this->currentGeneration($s, 1);
+        $snapshot = $this->snapshotOf($generation);
+        $decisions = [];
+        foreach ($snapshot->getDemandDecisions() as $decision) {
+            $decisions[$decision->getDuty()->getLocalDate()->format('Y-m-d')] = [
+                $decision->getRequired(),
+                $decision->getReason()->value,
+                $decision->getDayReason()->value,
+                (string) $decision->getSourceUserStableId(),
+                (string) $decision->getTriggerStableId(),
+                $decision->getWeekday()->value,
+            ];
+        }
+        ksort($decisions);
+        $policy = $snapshot->getDemandPolicy();
+        $triggers = [];
+        foreach ($policy->getTriggers() as $trigger) {
+            $triggers[(string) $trigger->getUserStableId()] = [array_map(static fn ($w): string => $w->value, $trigger->getWeekdays()), $trigger->getIncrement()];
+        }
+        ksort($triggers);
+
+        return [
+            'generation' => (string) $generation->getStableId(),
+            'status' => $generation->getStatus()->value,
+            'coverage' => $generation->getCoverageStatus()?->value,
+            'diagnostics' => $generation->getDiagnostics(),
+            'storedHash' => $generation->getSnapshotHash(),
+            'recomputedHash' => static::getContainer()->get(SnapshotHasher::class)->hash($snapshot),
+            'policy' => [(string) $policy->getPolicyStableId(), $policy->getPolicyVersion(), (string) $policy->getSourceGenerationStableId()],
+            'triggers' => $triggers,
+            'decisions' => $decisions,
+        ];
     }
 }

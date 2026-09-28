@@ -19,8 +19,10 @@ const DAY = new Intl.DateTimeFormat('fr-BE', {
   timeZone: 'UTC',
 })
 
-function holder(person: { firstName: string; lastName: string } | null): string {
-  return person ? `${person.firstName} ${person.lastName}` : 'Non attribué'
+/** docs/decisions.md D166: `shown: false` is a reinforcement nobody needs — never presented as a missing holder. */
+function holder(person: { firstName: string; lastName: string } | null, shown = true): string {
+  if (person) return `${person.firstName} ${person.lastName}`
+  return shown ? 'Non attribué' : 'Pas de renfort'
 }
 
 /**
@@ -129,7 +131,7 @@ export function RepublishModal({ planningStableId, changes, onClose, onRepublish
                   · {change.lineName}
                 </span>
                 <span>
-                  {holder(change.before)} → <strong>{holder(change.after)}</strong>
+                  {holder(change.before, change.beforeShown)} → <strong>{holder(change.after, change.afterShown)}</strong>
                 </span>
               </li>
             ))}

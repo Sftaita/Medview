@@ -18,6 +18,8 @@ use App\Repository\PlanningPublicationDeliveryRepository;
 use App\Repository\PlanningPublicationRepository;
 use App\Repository\PlanningRepository;
 use App\Security\Voter\PlanningVoter;
+use App\Service\FrenchDate;
+use App\Service\LiveDemandPresenter;
 use App\Service\ConditionalPublicationDuty;
 use App\Service\InconsistentPublicationGroup;
 use App\Service\InvalidPublicationAssignment;
@@ -57,6 +59,7 @@ final class PlanningPublicationController
         private readonly PlanningPublicationDeliveryRepository $deliveryRepository,
         private readonly PlanningPdfRenderer $pdfRenderer,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
+        private readonly LiveDemandPresenter $demandPresenter,
     ) {
     }
 
@@ -156,6 +159,9 @@ final class PlanningPublicationController
                 'groupInstanceStableId' => null !== $change->duty->getGroupInstance() ? (string) $change->duty->getGroupInstance()->getStableId() : null,
                 'before' => null === $change->before ? null : ['firstName' => $change->before->getUser()->getFirstName(), 'lastName' => $change->before->getUser()->getLastName()],
                 'after' => null === $change->after ? null : ['firstName' => $change->after->getUser()->getFirstName(), 'lastName' => $change->after->getUser()->getLastName()],
+                // docs/decisions.md D166: false = a reinforcement nobody needed / needs — "Pas de renfort", never "Non attribuée".
+                'beforeShown' => $change->beforeShown,
+                'afterShown' => $change->afterShown,
             ], $state->changes);
             $body['history'] = array_map(fn (PlanningPublication $publication): array => [
                 'stableId' => (string) $publication->getStableId(),
@@ -255,10 +261,40 @@ final class PlanningPublicationController
      */
     private function conditionalDutyToArray(ConditionalPublicationDuty $item): array
     {
+        $demand = $this->demandPresenter->dutyToArray($item->unitDemand, $item->dutyDemand, $item->state);
+
         return [
+            'code' => $item->code,
+            'lineStableId' => (string) $item->line->getStableId(),
+            'lineName' => $item->line->getName(),
             'duty' => $this->dutyToArray($item->duty),
+            'unitStableKey' => (string) ($item->duty->getGroupInstance()?->getStableId() ?? $item->duty->getStableId()),
+            'dates' => array_map(static fn (Duty $d): string => $d->getLocalDate()->format('Y-m-d'), $item->block),
             'member' => null !== $item->holder ? $this->memberToArray($item->holder) : null,
+            'source' => [
+                'dutyStableId' => $demand['sourceDutyStableId'],
+                'date' => $demand['sourceDate'],
+                'holder' => $demand['sourceHolder'],
+            ],
+            'reason' => $demand['dayReason'],
+            'explanation' => $this->explanation($item, $demand['sourceHolder']),
         ];
+    }
+
+    /**
+     * @param array{firstName: string, lastName: string}|null $sourceHolder
+     */
+    private function explanation(ConditionalPublicationDuty $item, ?array $sourceHolder): string
+    {
+        $sourceDate = FrenchDate::long($item->dutyDemand->ownDay->sourceDuty->getLocalDate());
+        if (ConditionalPublicationDuty::UNDETERMINED === $item->code) {
+            return \sprintf('La garde source du %s n’a pas de titulaire : impossible de savoir si ce renfort est requis.', $sourceDate);
+        }
+
+        $holder = null !== $item->holder ? $item->holder->getUser()->getFirstName().' '.$item->holder->getUser()->getLastName() : '';
+        $source = null !== $sourceHolder ? $sourceHolder['firstName'].' '.$sourceHolder['lastName'] : 'le titulaire actuel';
+
+        return \sprintf('Renfort non requis : %s (garde source du %s) ne déclenche pas de renfort. %s reste affecté ; son retrait n’est pas obligatoire.', $source, $sourceDate, $holder);
     }
 
     /**

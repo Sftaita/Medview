@@ -124,6 +124,7 @@ final class PlanningResultController
             'uncoveredRequiredDutyCount' => $result->uncoveredRequiredDutyCount,
             'undeterminedDutyCount' => $result->undeterminedDutyCount,
             'superfluousDutyCount' => $result->superfluousDutyCount,
+            'notRequiredDutyCount' => $result->notRequiredDutyCount,
             'duties' => array_map($this->dutyToArray(...), $result->duties),
         ];
     }

@@ -74,7 +74,7 @@
                   <td class="{{ day.weekend ? 'we' : '' }}{{ day.inRange ? '' : ' out' }}">
                     {%- if day.inRange -%}
                       {%- for item in day.cells[column] -%}
-                        <span class="who">{% if item.name %}{{ item.name }}{% else %}<span class="uncovered">Non attribué</span>{% endif %}{% if item.dutyType %}<span class="type"> · {{ item.dutyType }}</span>{% endif %}</span>
+                        <span class="who">{% if item.name %}{{ item.name }}{% else %}<span class="uncovered">{{ item.gap }}</span>{% endif %}{% if item.dutyType %}<span class="type"> · {{ item.dutyType }}</span>{% endif %}</span>
                       {%- else -%}
                         <span class="none">—</span>
                       {%- endfor -%}

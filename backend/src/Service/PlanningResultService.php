@@ -83,6 +83,7 @@ final class PlanningResultService
 
         $undeterminedCount = 0;
         $superfluousCount = 0;
+        $notRequiredCount = 0;
         foreach ($this->dutyRepository->findByPlanningPeriod($line->getPlanningPeriod()) as $duty) {
             $dutyDemand = $demand->forDuty($duty);
             $required = $dutyDemand->required;
@@ -97,8 +98,11 @@ final class PlanningResultService
                 $coverageState = LiveCoverageState::of($dutyDemand, $covered);
                 if (LiveCoverageState::UNDETERMINED === $coverageState) {
                     ++$undeterminedCount;
-                } elseif ($coverageState->isSuperfluous()) {
-                    ++$superfluousCount;
+                } elseif (!$coverageState->isRequired()) {
+                    ++$notRequiredCount;
+                    if ($coverageState->isSuperfluous()) {
+                        ++$superfluousCount;
+                    }
                 }
             }
 
@@ -131,6 +135,7 @@ final class PlanningResultService
             $resultDuties,
             $undeterminedCount,
             $superfluousCount,
+            $notRequiredCount,
         );
     }
 

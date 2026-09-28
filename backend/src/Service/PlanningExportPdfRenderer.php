@@ -116,7 +116,7 @@ final class PlanningExportPdfRenderer
      * the weeks holding at least one exported date; a date of the month
      * outside the exported range keeps its number but shows no duty.
      *
-     * @return array{title: string, periodLabel: string, generatedAtLabel: string, lines: list<string>, months: list<array{label: string, weeks: list<list<array{number: ?string, inRange: bool, weekend: bool, cells: list<list<array{name: ?string, dutyType: ?string}>>}>>}>}
+     * @return array{title: string, periodLabel: string, generatedAtLabel: string, lines: list<string>, months: list<array{label: string, weeks: list<list<array{number: ?string, inRange: bool, weekend: bool, cells: list<list<array{name: ?string, dutyType: ?string, gap: ?string}>>}>>}>}
      */
     public function view(PlanningExportData $data): array
     {
@@ -146,7 +146,7 @@ final class PlanningExportPdfRenderer
                         'weekend' => $offset >= 5,
                         'cells' => null === $day ? [] : array_map(
                             static fn (array $items): array => array_map(
-                                static fn (PlanningExportItem $item): array => ['name' => $item->personName, 'dutyType' => $item->dutyTypeName],
+                                static fn (PlanningExportItem $item): array => ['name' => $item->personName, 'dutyType' => $item->dutyTypeName, 'gap' => $item->gapLabel()],
                                 $items,
                             ),
                             $day->cells,

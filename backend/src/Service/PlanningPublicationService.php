@@ -193,6 +193,11 @@ final class PlanningPublicationService
             $publication = new PlanningPublication($planning, $kind, $publishedBy, $changedDutyCount($cells), new \DateTimeImmutable());
             $this->entityManager->persist($publication);
             foreach ($cells as $cell) {
+                // docs/decisions.md D166: a conditional duty nobody needs and nobody holds is not part of what is
+                // published — never recorded, so the publication PDF can never show it as "Non attribué".
+                if (!$cell->isShown()) {
+                    continue;
+                }
                 $this->entityManager->persist(new PlanningPublicationEntry($publication, $cell->duty, $cell->member));
             }
             $this->entityManager->flush();

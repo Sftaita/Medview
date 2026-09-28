@@ -114,6 +114,8 @@ export type PlanningResultLine = {
   undeterminedDutyCount: number
   /** Conditional duties not required any more but still held (D165). */
   superfluousDutyCount: number
+  /** Conditional duties the live demand does not require, held or not (D166) — never "to cover". */
+  notRequiredDutyCount: number
   duties: PlanningResultDuty[]
 }
 
@@ -188,6 +190,9 @@ export type PublicationChange = {
   groupInstanceStableId: string | null
   before: PersonName | null
   after: PersonName | null
+  /** docs/decisions.md D166 — false: a reinforcement nobody needed / needs ("Pas de renfort", never "Non attribué"). */
+  beforeShown: boolean
+  afterShown: boolean
 }
 
 export type PublicationHistoryItem = {
@@ -300,9 +305,24 @@ export type PublicationPreflight = {
   invalidAssignments: InvalidPublicationAssignment[]
   conflicts: PublicationConflict[]
   /** Reinforcements whose demand cannot be evaluated — block publication and republication (D165). */
-  undeterminedDuties: { duty: PublicationDutyRef; member: PublicationMemberRef | null }[]
-  /** Reinforcements not required any more but still held — a warning, never a blocker (D165). */
-  superfluousCoverages: { duty: PublicationDutyRef; member: PublicationMemberRef | null }[]
+  undeterminedDuties: ConditionalPublicationItem[]
+  /** Reinforcements not required any more but still held — a warning, never a blocker (D165/D166). */
+  superfluousCoverages: ConditionalPublicationItem[]
+}
+
+/** One conditional unit reported by the publication preflight (docs/decisions.md D166), a block once. */
+export type ConditionalPublicationItem = {
+  code: 'SUPERFLUOUS_CONDITIONAL_COVERAGE' | 'UNDETERMINED_CONDITIONAL_DEMAND'
+  lineStableId: string
+  lineName: string
+  duty: PublicationDutyRef
+  unitStableKey: string
+  dates: string[]
+  member: PublicationMemberRef | null
+  source: { dutyStableId: string; date: string; holder: { userStableId: string; firstName: string; lastName: string } | null }
+  reason: string
+  /** Plain-language explanation, computed by the backend. */
+  explanation: string
 }
 
 export type PublicationLineResult = {

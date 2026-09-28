@@ -197,6 +197,7 @@ function makeLine(overrides: Partial<PlanningResultLine> = {}): PlanningResultLi
     uncoveredRequiredDutyCount: 0,
     undeterminedDutyCount: 0,
     superfluousDutyCount: 0,
+    notRequiredDutyCount: 0,
     duties: [],
     ...overrides,
   }

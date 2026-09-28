@@ -53,9 +53,11 @@ final class PublicationChangeService
         $changes = [];
         foreach ($cells as $cell) {
             // A duty the reference never saw (a line added since) was never announced: it reads as "uncovered" before.
+            // D166: except a conditional duty, which is absent from a publication only when it was not required then.
+            $recorded = \array_key_exists((int) $cell->duty->getId(), $publishedByDutyId);
             $before = $publishedByDutyId[(int) $cell->duty->getId()] ?? null;
             if ($before?->getId() !== $cell->member?->getId()) {
-                $changes[] = new PublicationChange($cell->line, $cell->duty, $before, $cell->member);
+                $changes[] = new PublicationChange($cell->line, $cell->duty, $before, $cell->member, $recorded || !$cell->duty->isConditional(), $cell->isShown());
             }
         }
 
@@ -171,8 +173,8 @@ final class PublicationChangeService
                 'line' => $change->line->getName(),
                 'when' => FrenchDate::range($dates[0], $dates[\count($dates) - 1]),
                 'block' => $change->duty->getGroupInstance()?->getPattern()->getName(),
-                'before' => self::holder($change->before),
-                'after' => self::holder($change->after),
+                'before' => self::holder($change->before, $change->beforeShown),
+                'after' => self::holder($change->after, $change->afterShown),
             ];
         }
 
@@ -196,8 +198,11 @@ final class PublicationChangeService
             foreach ($cellsOfDay as $cell) {
                 $showType = \count($perLine[(int) $cell->line->getId()]) > 1;
                 $change = $changeByDutyId[(int) $cell->duty->getId()] ?? null;
+                if (null === $change && !$cell->isShown()) {
+                    continue; // D166: a reinforcement nobody needs, unchanged — not part of the day's situation
+                }
                 $text = null !== $change
-                    ? self::holder($change->before).' → '.self::holder($change->after)
+                    ? self::holder($change->before, $change->beforeShown).' → '.self::holder($change->after, $change->afterShown)
                     : self::holder($cell->member).' — inchangé';
                 $rows[] = [
                     'line' => $cell->line->getName().($showType ? ' · '.$cell->duty->getDutyType()->getName() : ''),
@@ -211,8 +216,15 @@ final class PublicationChangeService
         return ['units' => $unitRows, 'days' => $days];
     }
 
-    private static function holder(?PlanningTeamMember $member): string
+    /**
+     * @param bool $shown false: a reinforcement nobody needs (D166) — "Pas de renfort", never "Non attribué"
+     */
+    private static function holder(?PlanningTeamMember $member, bool $shown = true): string
     {
-        return null !== $member ? $member->getUser()->getFirstName().' '.$member->getUser()->getLastName() : 'Non attribué';
+        if (null !== $member) {
+            return $member->getUser()->getFirstName().' '.$member->getUser()->getLastName();
+        }
+
+        return $shown ? 'Non attribué' : 'Pas de renfort';
     }
 }

@@ -898,3 +898,28 @@ Préflight de publication : non requis + couvert → `superfluousCoverages`
 republication, et la transition `PUBLISHED`).
 
 Tests : `ConditionalCalendarTest`.
+
+## 27. Publication et sorties avec une ligne conditionnelle (docs/decisions.md D166)
+
+Une seule décision live, prise par `CurrentCalendarReader` (état de chaque
+garde conditionnelle, `CalendarCell::isShown()` / `isUndetermined()`),
+lue par toutes les sorties du calendrier courant :
+
+| État | Préflight | Publication | PDF de publication | Export | Récapitulatif de republication |
+|---|---|---|---|---|---|
+| requis + tenu | OK | oui | titulaire | titulaire | normal |
+| requis + vide | bloquant | non (règle D143 de republication inchangée) | « Non attribué » | « Non attribué » | « Non attribué » |
+| non requis + vide | rien | oui | absent (non enregistré) | absent | absent, ou « Pas de renfort » s'il a changé |
+| non requis + tenu | avertissement `SUPERFLUOUS_CONDITIONAL_COVERAGE` | **oui** | titulaire | titulaire | normal |
+| indéterminé | bloquant `UNDETERMINED_CONDITIONAL_DEMAND` | non (publication et republication) | — | « Renfort non évalué » | — |
+
+Statistiques : « Cette période » et « Cumul du planning » comptent la
+**charge réelle** (toutes les affectations courantes, renfort superflu
+compris) ; la **demande** et la **couverture manquante** se lisent dans
+`/result` (`requiredDutyCount`, `uncoveredRequiredDutyCount`,
+`notRequiredDutyCount`, `superfluousDutyCount`, `undeterminedDutyCount`).
+
+Limite (D145, inchangée) : la complétion garde l'éligibilité figée par le
+snapshot ; pour un renfort devenu requis après la génération, une personne
+indisponible au moment de la génération reste exclue même si elle est libre
+aujourd'hui.

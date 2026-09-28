@@ -46,10 +46,10 @@ final class PlanningExportRenderersTest extends KernelTestCase
         self::assertFalse($firstWeek[0]['inRange']);
         self::assertSame('1', $firstWeek[3]['number'], 'Thursday 1 October.');
         self::assertTrue($firstWeek[5]['weekend']);
-        self::assertSame([['name' => 'Alice Martin', 'dutyType' => null]], $firstWeek[3]['cells'][0]);
-        self::assertSame([['name' => self::LONG_NAME, 'dutyType' => null]], $firstWeek[3]['cells'][1], 'A long name is kept whole, never truncated.');
+        self::assertSame([['name' => 'Alice Martin', 'dutyType' => null, 'gap' => null]], $firstWeek[3]['cells'][0]);
+        self::assertSame([['name' => self::LONG_NAME, 'dutyType' => null, 'gap' => null]], $firstWeek[3]['cells'][1], 'A long name is kept whole, never truncated.');
         self::assertSame([], $firstWeek[4]['cells'][1], 'No duty that day on that line.');
-        self::assertSame([['name' => null, 'dutyType' => 'Jour'], ['name' => 'Bob Durand', 'dutyType' => 'Nuit']], $firstWeek[5]['cells'][0], 'Several duties: each with its type; uncovered = null.');
+        self::assertSame([['name' => null, 'dutyType' => 'Jour', 'gap' => 'Non attribué'], ['name' => 'Bob Durand', 'dutyType' => 'Nuit', 'gap' => null]], $firstWeek[5]['cells'][0], 'Several duties: each with its type; uncovered = null, labelled "Non attribué" as before (D166).');
 
         $pdf = $renderer->render($data);
         self::assertStringStartsWith('%PDF-', $pdf);

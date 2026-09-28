@@ -75,14 +75,51 @@ describe('PublishModal', () => {
     expect(screen.queryByRole('button', { name: 'Publier' })).not.toBeInTheDocument()
   })
 
+  it('shows a superfluous reinforcement as a warning next to a publishable calendar (docs/decisions.md D166)', async () => {
+    stubPreflight(
+      preflight({
+        superfluousCoverages: [
+          {
+            code: 'SUPERFLUOUS_CONDITIONAL_COVERAGE',
+            lineStableId: 'l2',
+            lineName: 'Renfort',
+            duty: { dutyStableId: 'r1', date: '2027-01-05', dutyTypeName: 'Renfort' },
+            unitStableKey: 'r1',
+            dates: ['2027-01-05'],
+            member: { teamMemberStableId: 'm-carol', firstName: 'Carol', lastName: 'Dubois' },
+            source: { dutyStableId: 's1', date: '2027-01-05', holder: null },
+            reason: 'HOLDER_HAS_NO_TRIGGER',
+            explanation: 'Renfort non requis : Anne Admin (garde source du 5 janvier 2027) ne déclenche pas de renfort. Carol Dubois reste affecté ; son retrait n’est pas obligatoire.',
+          },
+        ],
+      }),
+    )
+    renderModal()
+
+    expect(await screen.findByText(/complet et cohérent/)).toBeInTheDocument()
+    expect(screen.getByText(/Carol Dubois reste affecté/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Publier' })).toBeInTheDocument()
+  })
+
   it('names a reinforcement whose demand cannot be evaluated as a blocker (docs/decisions.md D165)', async () => {
     stubPreflight(
       preflight({
         publishable: false,
         republishable: false,
         undeterminedDuties: [
-          { duty: { dutyStableId: 'r1', date: '2027-01-05', dutyTypeName: 'Renfort' }, member: null },
-        ] as PublicationPreflight['undeterminedDuties'],
+          {
+            code: 'UNDETERMINED_CONDITIONAL_DEMAND',
+            lineStableId: 'l2',
+            lineName: 'Renfort',
+            duty: { dutyStableId: 'r1', date: '2027-01-05', dutyTypeName: 'Renfort' },
+            unitStableKey: 'r1',
+            dates: ['2027-01-05'],
+            member: null,
+            source: { dutyStableId: 's1', date: '2027-01-05', holder: null },
+            reason: 'SOURCE_UNASSIGNED',
+            explanation: 'La garde source du 5 janvier 2027 n’a pas de titulaire : impossible de savoir si ce renfort est requis.',
+          },
+        ],
       }),
     )
     renderModal()

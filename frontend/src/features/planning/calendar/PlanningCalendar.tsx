@@ -9,7 +9,7 @@ import { ReassignmentModal } from '../result/ReassignmentModal'
 import { StatisticsPanel } from '../result/StatisticsPanel'
 import type { PlanningResult, PublicationState } from '../result/types'
 import type { PlanningDetail } from '../types'
-import { buildCalendar, type CalendarItem } from './calendarModel'
+import { buildCalendar, type CalendarItem, isUndetermined } from './calendarModel'
 import { RepublishModal } from './RepublishModal'
 import './calendar.css'
 
@@ -433,9 +433,10 @@ function DutyCell({
 }) {
   const { duty, blockPart, showType } = item
   const who = duty.assignment ? `${duty.assignment.user.firstName} ${duty.assignment.user.lastName}` : null
+  const gap = isUndetermined(duty) ? 'Renfort non évalué' : 'Non attribué'
   const content = (
     <>
-      {who ? <span className="cal-who">{who}</span> : <span className="cal-uncovered">⚠ Non attribué</span>}
+      {who ? <span className="cal-who">{who}</span> : <span className="cal-uncovered">⚠ {gap}</span>}
       {showType && <span className="cal-type"> · {duty.dutyType.name}</span>}
       {(blockPart === 'first' || blockPart === 'single') && (
         <span className="cal-block-label">Bloc {duty.groupLabel ?? ''}</span>
@@ -449,7 +450,7 @@ function DutyCell({
   ]
     .filter(Boolean)
     .join(' ')
-  const label = `${who ?? 'Non attribué'}${blockPart ? ` — bloc ${duty.groupLabel ?? ''}` : ''}, ${duty.date}`
+  const label = `${who ?? gap}${blockPart ? ` — bloc ${duty.groupLabel ?? ''}` : ''}, ${duty.date}`
 
   return canEdit ? (
     <button

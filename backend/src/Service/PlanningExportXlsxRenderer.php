@@ -48,7 +48,6 @@ final class PlanningExportXlsxRenderer
 
     private const WEEKDAYS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
     private const DATE_FORMAT = 'dd/mm/yyyy';
-    private const UNCOVERED = 'Non attribué';
 
     public function render(PlanningExportData $data): string
     {
@@ -96,7 +95,7 @@ final class PlanningExportXlsxRenderer
     public static function cellText(array $items): string
     {
         return implode(' / ', array_map(
-            static fn (PlanningExportItem $item): string => ($item->personName ?? self::UNCOVERED).(null !== $item->dutyTypeName ? ' ('.$item->dutyTypeName.')' : ''),
+            static fn (PlanningExportItem $item): string => ($item->personName ?? $item->gapLabel()).(null !== $item->dutyTypeName ? ' ('.$item->dutyTypeName.')' : ''),
             $items,
         ));
     }

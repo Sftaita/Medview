@@ -458,3 +458,9 @@ ne reçoit personne (`coverage_not_required`) ; un renfort devenu inutile
 garde son titulaire jusqu'à « Retirer l'affectation » ; « Compléter
 automatiquement » couvre la demande live. Détail :
 `docs/planning-generation.md` §26.
+
+**Publication et sorties (D166)** : un renfort superflu n'empêche jamais la
+publication (avertissement) ; un renfort requis vide ou indéterminé la
+bloque. Un renfort que personne ne demande ni ne tient n'apparaît dans
+aucune sortie (PDF, export, emails) — jamais comme « Non attribué ». Détail :
+`docs/planning-generation.md` §27.

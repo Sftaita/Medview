@@ -72,15 +72,16 @@ export function buildCalendar(
   const generated = lines.filter((line) => line.generationStableId !== null)
   const byLineAndDate = generated.map((line) => {
     const map = new Map<string, PlanningResultDuty[]>()
-    for (const duty of line.duties) {
+    for (const duty of line.duties.filter(isShown)) {
       map.set(duty.date, [...(map.get(duty.date) ?? []), duty])
     }
     return map
   })
 
+  // Only what "Compléter automatiquement" can act on: never a reinforcement nobody needs, never an undetermined one.
   let uncoveredCount = 0
   for (const line of generated) {
-    uncoveredCount += line.duties.filter((duty) => !duty.covered).length
+    uncoveredCount += line.duties.filter((duty) => !duty.covered && isShown(duty) && !isUndetermined(duty)).length
   }
 
   const months: CalendarMonth[] = []
@@ -115,4 +116,18 @@ export function buildCalendar(
     months,
     uncoveredCount,
   }
+}
+
+/**
+ * docs/decisions.md D166 — the backend's live state decides: a conditional
+ * duty nobody needs and nobody holds is not part of the calendar (never a
+ * "Non attribué" gap). An intrinsic duty (demand null) is always shown.
+ */
+export function isShown(duty: PlanningResultDuty): boolean {
+  return duty.demand?.state !== 'NOT_REQUIRED_UNASSIGNED'
+}
+
+/** A reinforcement whose demand cannot be evaluated — its own explicit label, never "Non attribué". */
+export function isUndetermined(duty: PlanningResultDuty): boolean {
+  return duty.demand?.state === 'UNDETERMINED'
 }

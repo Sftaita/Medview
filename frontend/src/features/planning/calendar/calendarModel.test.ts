@@ -1,6 +1,23 @@
 import { describe, expect, it } from 'vitest'
-import type { PlanningResultDuty, PlanningResultLine } from '../result/types'
+import type { LiveCoverageState, LiveDutyDemand, PlanningResultDuty, PlanningResultLine } from '../result/types'
 import { addDays, buildCalendar, isoWeekday } from './calendarModel'
+
+function demand(state: LiveCoverageState): LiveDutyDemand {
+  return {
+    state,
+    required: state === 'UNDETERMINED' ? null : state.startsWith('REQUIRED'),
+    reason: 'HOLDER_HAS_NO_TRIGGER',
+    superfluous: state === 'NOT_REQUIRED_ASSIGNED',
+    triggeringDutyStableIds: [],
+    triggeringDates: [],
+    dayReason: 'HOLDER_HAS_NO_TRIGGER',
+    weekday: 'TUESDAY',
+    sourceDutyStableId: 's1',
+    sourceDate: '2026-10-06',
+    sourceHolder: null,
+    trigger: null,
+  }
+}
 
 function duty(date: string, overrides: Partial<PlanningResultDuty> = {}): PlanningResultDuty {
   return {
@@ -36,6 +53,7 @@ function line(name: string, duties: PlanningResultDuty[], generated = true): Pla
     uncoveredRequiredDutyCount: 0,
     undeterminedDutyCount: 0,
     superfluousDutyCount: 0,
+    notRequiredDutyCount: 0,
     duties,
   }
 }
@@ -123,5 +141,27 @@ describe('buildCalendar', () => {
     const [monday, tuesday] = model.months[0].weeks[0].days
     expect(monday.cells[0].map((i) => i.showType)).toEqual([true, true])
     expect(tuesday.cells[0][0].showType).toBe(false)
+  })
+
+  it('never shows nor counts a reinforcement nobody needs as a gap (docs/decisions.md D166)', () => {
+    const model = buildCalendar(
+      [
+        line('Renfort', [
+          duty('2026-10-05', { covered: false, required: false, demand: demand('NOT_REQUIRED_UNASSIGNED') }),
+          duty('2026-10-06', { covered: false, required: false, demand: demand('UNDETERMINED') }),
+          duty('2026-10-07', { covered: false, demand: demand('REQUIRED_UNASSIGNED') }),
+          duty('2026-10-08', { covered: true, required: false, demand: demand('NOT_REQUIRED_ASSIGNED') }),
+        ]),
+      ],
+      '2026-10-05',
+      '2026-10-09',
+    )
+    const [monday, tuesday, wednesday, thursday] = model.months[0].weeks[0].days
+    expect(monday.cells[0]).toEqual([])
+    expect(tuesday.cells[0]).toHaveLength(1)
+    expect(wednesday.cells[0]).toHaveLength(1)
+    expect(thursday.cells[0]).toHaveLength(1)
+    // Only what "Compléter automatiquement" can act on: the required, uncovered one.
+    expect(model.uncoveredCount).toBe(1)
   })
 })

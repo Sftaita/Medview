@@ -39,6 +39,10 @@ final class PlanningExportDataBuilder
         $cellsByDate = [];
         $selected = static fn ($line): bool => isset($columnByLineId[(int) $line->getId()]);
         foreach ($this->calendarReader->read($request->planning, $selected) as $cell) {
+            // docs/decisions.md D166: a reinforcement nobody needs and nobody holds is not exported at all.
+            if (!$cell->isShown()) {
+                continue;
+            }
             $date = $cell->duty->getLocalDate()->format('Y-m-d');
             if ($date < $fromKey || $date >= $toKey) {
                 continue;
@@ -56,6 +60,7 @@ final class PlanningExportDataBuilder
                 $cells[] = array_map(static fn (CalendarCell $cell): PlanningExportItem => new PlanningExportItem(
                     null === $cell->member ? null : $cell->member->getUser()->getFirstName().' '.$cell->member->getUser()->getLastName(),
                     $showType ? $cell->duty->getDutyType()->getName() : null,
+                    null === $cell->member && $cell->isUndetermined(),
                 ), $calendarCells);
             }
             $days[] = new PlanningExportDay($date, $cells);

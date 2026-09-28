@@ -32,6 +32,8 @@ final readonly class PlanningResultLine
         public int $undeterminedDutyCount = 0,
         /** docs/decisions.md D165 — conditional duties not required any more but still held (kept on purpose, warned about). */
         public int $superfluousDutyCount = 0,
+        /** docs/decisions.md D166 — conditional duties the live demand does not require (held or not): never "to cover", never "missing". */
+        public int $notRequiredDutyCount = 0,
     ) {
     }
 }

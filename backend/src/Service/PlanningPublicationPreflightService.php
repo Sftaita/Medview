@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Demand\LiveCoverageState;
-use App\Demand\DemandView;
+use App\Demand\LiveDemandView;
 use App\Eligibility\ExclusionReason;
 use App\Entity\Duty;
 use App\Entity\DutyAssignment;
@@ -105,7 +105,7 @@ final class PlanningPublicationPreflightService
     private function checkLine(
         PlanningLine $line,
         PlanningGeneration $generation,
-        DemandView $demand,
+        LiveDemandView $demand,
         array &$uncoveredDuties,
         array &$inconsistentGroups,
         array &$invalidAssignments,
@@ -122,6 +122,7 @@ final class PlanningPublicationPreflightService
         }
 
         $seenGroupIds = [];
+        $seenConditionalUnits = [];
         foreach ($duties as $duty) {
             // The live demand (D164): a conditional duty only counts when its source holder triggers it.
             $dutyDemand = $demand->forDuty($duty);
@@ -131,12 +132,23 @@ final class PlanningPublicationPreflightService
             }
             // D165: required + assigned → OK; required + unassigned → uncovered (above); not required + unassigned → OK;
             // not required + assigned → warning; undetermined → blocker.
-            if ($duty->isConditional()) {
+            // D166: one structured item per unit (a block once), with its line, holder and explanation.
+            $unitKey = (string) ($duty->getGroupInstance()?->getStableId() ?? $duty->getStableId());
+            if ($duty->isConditional() && !isset($seenConditionalUnits[$unitKey])) {
+                $seenConditionalUnits[$unitKey] = true;
                 $state = LiveCoverageState::of($dutyDemand, null !== $current);
-                if (LiveCoverageState::UNDETERMINED === $state) {
-                    $undeterminedDuties[] = new ConditionalPublicationDuty($duty, $current?->getTeamMember());
-                } elseif ($state->isSuperfluous()) {
-                    $superfluousCoverages[] = new ConditionalPublicationDuty($duty, $current?->getTeamMember());
+                $code = match (true) {
+                    LiveCoverageState::UNDETERMINED === $state => ConditionalPublicationDuty::UNDETERMINED,
+                    $state->isSuperfluous() => ConditionalPublicationDuty::SUPERFLUOUS,
+                    default => null,
+                };
+                if (null !== $code) {
+                    $item = new ConditionalPublicationDuty($code, $line, $duty, $this->candidateService->blockDuties($duty), $current?->getTeamMember(), $demand->forUnitOf($duty), $dutyDemand, $state);
+                    if (ConditionalPublicationDuty::UNDETERMINED === $code) {
+                        $undeterminedDuties[] = $item;
+                    } else {
+                        $superfluousCoverages[] = $item;
+                    }
                 }
             }
 

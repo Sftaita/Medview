@@ -5552,3 +5552,107 @@ l'ancienne (voir légende).
   l'indéterminé comme « non requis » (ou comme « requis ») ; un solve global
   multi-lignes ; un second mécanisme de synchronisation frontend.
 - **Aucune migration.**
+
+## D166 — Sorties du calendrier courant avec une ligne conditionnelle : une seule décision live, publication, statistiques, emails, PDF et export
+
+- **Contexte** : L7 du chantier « ligne secondaire conditionnelle ».
+  `feature/planning-export` (D150) est mergée dans `master` ; `master` a été
+  intégré dans la branche du chantier par un merge (`8057f9b`, aucun conflit
+  de code ; `docs/decisions.md` : D150 placé avant D160). Aucune collision
+  D16x. L'export a été audité et adapté dans ce lot (pas de raccord
+  restant).
+- **Décision — une seule décision, au bon endroit** :
+  `CurrentCalendarReader` — la lecture unique du calendrier courant (D143),
+  déjà partagée par la publication, le diff « Modifications non publiées »,
+  l'audience de republication, le rappel du samedi et l'export — attache à
+  chaque cellule d'une garde conditionnelle son `LiveCoverageState`
+  (`LiveDemandView` : règles figées par la génération courante, titulaires
+  d'aujourd'hui). `CalendarCell::isShown()` (faux seulement pour
+  `NOT_REQUIRED_UNASSIGNED`) et `isUndetermined()` sont les seules questions
+  que posent les sorties ; aucune ne réimplémente `CONDITIONAL +
+  coverageSource + titulaire source + déclencheur + bloc`. Les vues
+  historiques d'une génération restent sur `SnapshotDemandView` (D164).
+- **Décision — matrice finale du préflight de publication** :
+
+  | État live | Préflight | Publication / republication |
+  |---|---|---|
+  | `REQUIRED_ASSIGNED` | OK | possible |
+  | `REQUIRED_UNASSIGNED` | `uncoveredDuties` (bloquant) | impossible (republication : règle D143 inchangée, un retrait sur une ligne déjà publiée s'annonce) |
+  | `NOT_REQUIRED_UNASSIGNED` | rien | possible |
+  | `NOT_REQUIRED_ASSIGNED` | `superfluousCoverages` (avertissement) | **toujours** possible |
+  | `UNDETERMINED` | `undeterminedDuties` (bloquant) | impossible, publication comme republication, et transition `PUBLISHED` |
+
+  Toutes les autres règles D133 sont inchangées.
+- **Décision — avertissement structuré** : une entrée par unité (un bloc
+  une fois), `code` = `SUPERFLUOUS_CONDITIONAL_COVERAGE` (ou
+  `UNDETERMINED_CONDITIONAL_DEMAND` pour un bloquant), `lineStableId`,
+  `lineName`, `duty`, `unitStableKey`, `dates`, `member` (le chirurgien
+  affecté), `source` (garde source, date, titulaire actuel), `reason`
+  (raison du jour) et `explanation` (phrase calculée par le backend). Rien
+  n'est retiré automatiquement.
+- **Décision — la publication n'enregistre pas un renfort que personne ne
+  demande ni ne tient** : `PlanningPublicationService::record()` n'écrit
+  pas d'entrée pour une cellule `NOT_REQUIRED_UNASSIGNED` ; le PDF de
+  publication, construit depuis ces entrées (historique de la diffusion),
+  ne peut donc jamais la montrer « ⚠ Non attribué ». Un renfort superflu
+  tenu est enregistré et affiché comme toute affectation réelle.
+- **Décision — diff et emails de republication** : `PublicationChange`
+  porte `beforeShown`/`afterShown` (exposés par `publication-state`) :
+  une garde conditionnelle absente de la publication de référence n'y était
+  pas requise ; « Pas de renfort » remplace « Non attribué » dans ce cas.
+  Dans le récapitulatif par jour, un renfort non requis et inchangé n'est
+  pas listé. Retirer un renfort superflu s'annonce « X → Pas de renfort ».
+  Email de première publication : générique + PDF (voir ci-dessus). Rappel
+  du samedi : les gardes réellement tenues, renfort superflu compris
+  (comportement habituel d'une affectation). Les notifications déjà
+  envoyées ne sont jamais recalculées.
+- **Décision — export PDF/XLSX (D150)** : `PlanningExportDataBuilder`
+  n'exporte pas une cellule `NOT_REQUIRED_UNASSIGNED` ;
+  `PlanningExportItem::gapLabel()` décide seul du libellé d'un trou —
+  « Non attribué » (y compris renfort requis non couvert, et toute ligne
+  indépendante, inchangée) ou « Renfort non évalué » (indéterminé, jamais
+  confondu avec non requis) — lu par les deux renderers. Un renfort superflu
+  tenu est exporté (feuille « Planning » et « Par personne »).
+- **Décision — demande, couverture manquante, charge réelle** :
+  - **demande effective** (`GET /result`, par ligne) : `requiredDutyCount`
+    ne compte que les gardes requises par la demande live ;
+    `notRequiredDutyCount` (nouveau), `superfluousDutyCount`,
+    `undeterminedDutyCount` distinguent les trois autres situations ;
+  - **couverture manquante** : `uncoveredRequiredDutyCount` — jamais un
+    renfort non requis, jamais un indéterminé (compté à part, bloquant) ;
+  - **charge réelle** (`GET /statistics`) : les affectations courantes,
+    **toutes**, renfort superflu compris — jamais retirées parce que
+    `required = false`.
+- **Décision — source de vérité des statistiques** : « Cette période » et
+  « Cumul du planning » lisent toutes deux le calendrier **courant**
+  (`DutyAssignment.current` de la génération COMPLETED la plus récente de
+  chaque ligne, D132) — ce sont des statistiques de charge réelle, pas de
+  demande ; elles ne consultent ni `LiveDemandView` ni `SnapshotDemandView`
+  (inutile : une affectation réelle compte, requise ou non). Aucune
+  statistique existante ne représente « ce qui avait été décidé lors d'une
+  génération » ; si une telle vue apparaît, elle devra lire les décisions
+  figées (D164). Aucun changement de code dans `PlanningStatisticsService`.
+- **Décision — calendrier (frontend, minimal, la présentation reste à
+  L8)** : un renfort non requis et vide n'est ni affiché ni compté comme
+  « non attribué » ; un indéterminé est libellé « Renfort non évalué » et
+  n'est pas compté comme complétable ; le modal de publication montre
+  l'avertissement de renfort superflu et le bloquant indéterminé.
+- **Limite documentée (D145, inchangée)** : « Compléter automatiquement »
+  garde l'éligibilité figée par le snapshot de la génération ; pour un
+  renfort devenu requis après la génération, une personne indisponible au
+  moment de la génération reste exclue même si elle est libre aujourd'hui
+  (l'affectation manuelle, elle, lit le live).
+- **Non-régression des lignes indépendantes** : `coverageState = null`,
+  `isShown() = true` pour toutes leurs cellules ; préflight, publication,
+  statistiques, emails (« → Non attribué »), PDF et export (« Non
+  attribué ») inchangés — testé explicitement, et toutes les suites
+  existantes passent.
+- **Tests** : `ConditionalPublicationTest` (9 tests bout en bout).
+  Mutations toutes détectées : `NOT_REQUIRED_UNASSIGNED` traité comme un
+  trou, `NOT_REQUIRED_ASSIGNED` bloquant, `UNDETERMINED` accepté, renfort
+  superflu retiré des statistiques de charge, demande snapshot dans une
+  sortie courante, renfort non requis vide exporté « Non attribué ».
+- **Rejeté** : un filtre conditionnel dans chaque renderer ; un avertissement
+  textuel dans les exports ; compter un renfort superflu comme demande ou le
+  retirer de la charge ; traiter l'indéterminé comme non requis.
+- **Aucune migration.**

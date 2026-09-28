@@ -253,3 +253,21 @@ repart du planning.
 - Vérifications manuelles (Chrome, stack de dev) : téléchargements PDF et
   XLSX réels (une requête, nom de fichier, URL blob libérée, aucun fichier
   sur erreur serveur), dialogue à 1 600, 817 et 387 px de large.
+
+## 12. Ligne conditionnelle (docs/decisions.md D166)
+
+La décision vient de `CurrentCalendarReader` (état live de chaque garde
+conditionnelle, `CalendarCell`), jamais du renderer :
+
+| Garde | PDF et XLSX |
+|---|---|
+| Ligne indépendante non attribuée | « Non attribué » (inchangé) |
+| Conditionnelle requise et attribuée | le titulaire |
+| Conditionnelle requise non attribuée | « Non attribué » |
+| Conditionnelle non requise et vide | **absente** (jamais « Non attribué ») |
+| Conditionnelle non requise mais tenue (superflue) | le titulaire (feuille « Planning » et « Par personne ») |
+| Conditionnelle indéterminée non tenue | « Renfort non évalué » (jamais assimilée à non requise) |
+
+`PlanningExportItem::gapLabel()` est l'unique source du libellé d'un trou,
+lue par les deux renderers. Aucun avertissement textuel n'est ajouté aux
+fichiers. Tests : `ConditionalPublicationTest`.
