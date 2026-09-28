@@ -12,6 +12,8 @@ type Props = {
   dismissible?: boolean
   children: ReactNode
   footer?: ReactNode
+  /** A wider modal (e.g. to show a document preview beside the form). */
+  wide?: boolean
 }
 
 const FOCUSABLE =
@@ -22,7 +24,15 @@ const FOCUSABLE =
  * and comes back to where it was, Tab stays inside, and the page behind does
  * not scroll. Used for the settings and generation modals and the member drawer.
  */
-export function Overlay({ title, onClose, variant = 'modal', dismissible = true, children, footer }: Props) {
+export function Overlay({
+  title,
+  onClose,
+  variant = 'modal',
+  dismissible = true,
+  children,
+  footer,
+  wide = false,
+}: Props) {
   const titleId = useId()
   const panelRef = useRef<HTMLDivElement>(null)
   // Read through refs so the effect below runs once per mount, not on every render.
@@ -85,7 +95,7 @@ export function Overlay({ title, onClose, variant = 'modal', dismissible = true,
     >
       <div
         ref={panelRef}
-        className="overlay__panel"
+        className={wide ? 'overlay__panel overlay__panel--wide' : 'overlay__panel'}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

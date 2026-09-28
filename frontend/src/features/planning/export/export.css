@@ -1,0 +1,139 @@
+/* "Exporter le planning" (docs/planning-export.md). */
+
+.export {
+  display: grid;
+  gap: 16px;
+}
+
+.export--with-preview {
+  grid-template-columns: minmax(0, 400px) minmax(0, 1fr);
+  align-items: start;
+}
+
+.export-note {
+  margin: 0;
+  font-size: var(--text-sm);
+}
+
+.export-fieldset {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.export-fieldset > legend {
+  margin-bottom: 8px;
+  padding: 0;
+}
+
+.export-error {
+  margin: 0;
+  color: var(--red-700);
+}
+
+.export-lines {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.export-line {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+}
+
+.export-line[data-selected='false'] {
+  background: var(--surface-sunken);
+}
+
+.export-line__order {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.export-line__body {
+  display: grid;
+  flex: 1;
+  gap: 6px;
+  min-width: 0;
+}
+
+.export-check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 32px;
+  cursor: pointer;
+}
+
+.export-check input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--green-600);
+}
+
+.export-line__name {
+  overflow-wrap: anywhere;
+  font-weight: var(--weight-semibold);
+  color: var(--text-strong);
+}
+
+.export-alias {
+  display: grid;
+  gap: 4px;
+}
+
+.export-period {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.export-preview {
+  position: sticky;
+  top: 0;
+  min-width: 0;
+}
+
+.export-preview__frame {
+  display: block;
+  width: 100%;
+  height: min(70vh, 640px);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+
+@media (max-width: 820px) {
+  .export--with-preview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .export-preview {
+    position: static;
+  }
+}
+
+@media (max-width: 420px) {
+  .export-period {
+    grid-template-columns: 1fr;
+  }
+}

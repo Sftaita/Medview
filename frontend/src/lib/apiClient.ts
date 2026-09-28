@@ -182,6 +182,68 @@ export async function apiFetchBlob(path: string, _isRetry = false): Promise<Blob
   return response.blob()
 }
 
+export type DownloadedFile = { blob: Blob; filename: string | null }
+
+/** The file name of an `attachment` Content-Disposition (RFC 6266 `filename*` first), or null. */
+export function filenameFromDisposition(header: string | null): string | null {
+  if (!header) return null
+  const extended = /filename\*=UTF-8''([^;]+)/i.exec(header)
+  if (extended) {
+    try {
+      return decodeURIComponent(extended[1].trim())
+    } catch {
+      // fall through to the plain parameter
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(header)
+  return plain ? plain[1].trim() : null
+}
+
+/**
+ * A POST whose answer is a file (e.g. an export built from a JSON body),
+ * with the same auth, one-shot refresh and ApiError (JSON error body
+ * included) as apiFetch. The server's file name is read from
+ * Content-Disposition (exposed by the CORS configuration).
+ */
+export async function apiDownload(path: string, body: unknown, _isRetry = false): Promise<DownloadedFile> {
+  const headers = new Headers({ 'Content-Type': 'application/json' })
+  const token = getStoredToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: 'POST',
+    headers,
+    credentials: 'include',
+    body: JSON.stringify(body),
+  })
+  if (response.status === 401 && !_isRetry) {
+    try {
+      await refreshAccessToken()
+    } catch {
+      clearStoredToken()
+      window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
+      throw new ApiError(401, null, 'Session expired, please log in again.')
+    }
+    return apiDownload(path, body, true)
+  }
+  if (!response.ok) {
+    const contentType = response.headers.get('content-type') ?? ''
+    const errorBody = contentType.includes('application/json') ? await response.json() : null
+    throw new ApiError(
+      response.status,
+      errorBody,
+      (errorBody as { message?: string } | null)?.message ?? `Request failed with status ${response.status}`,
+    )
+  }
+
+  return {
+    blob: await response.blob(),
+    filename: filenameFromDisposition(response.headers.get('content-disposition')),
+  }
+}
+
 export type HealthStatus = {
   status: 'ok' | 'error'
   database: 'ok' | 'error'

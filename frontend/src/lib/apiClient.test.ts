@@ -1,5 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { apiFetch, ApiError, clearStoredToken, setStoredToken, UNAUTHORIZED_EVENT } from './apiClient'
+import {
+  apiDownload,
+  apiFetch,
+  ApiError,
+  clearStoredToken,
+  filenameFromDisposition,
+  setStoredToken,
+  UNAUTHORIZED_EVENT,
+} from './apiClient'
 
 function jsonResponse(body: unknown, status = 200) {
   return Promise.resolve(
@@ -133,5 +141,65 @@ describe('apiFetch', () => {
     await requests
 
     expect(refreshCalls).toBe(1)
+  })
+})
+
+describe('filenameFromDisposition', () => {
+  it('reads the plain, quoted and RFC 6266 forms', () => {
+    expect(filenameFromDisposition('attachment; filename=Gardes_2026-10.pdf')).toBe('Gardes_2026-10.pdf')
+    expect(filenameFromDisposition('attachment; filename="a b.xlsx"')).toBe('a b.xlsx')
+    expect(
+      filenameFromDisposition("attachment; filename=x.pdf; filename*=UTF-8''Gardes%20%C3%A9t%C3%A9.pdf"),
+    ).toBe('Gardes été.pdf')
+    expect(filenameFromDisposition(null)).toBeNull()
+    expect(filenameFromDisposition('inline')).toBeNull()
+  })
+})
+
+describe('apiDownload', () => {
+  beforeEach(() => {
+    clearStoredToken()
+  })
+
+  it('POSTs the JSON body with the token and returns the file and its name', async () => {
+    setStoredToken('access')
+    const fetchMock = vi.fn(
+      async () =>
+        new Response('%PDF', {
+          status: 200,
+          headers: { 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename=P.pdf' },
+        }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const file = await apiDownload('/api/x/export', { format: 'pdf' })
+
+    expect(file.filename).toBe('P.pdf')
+    expect(await file.blob.text()).toBe('%PDF')
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(init.method).toBe('POST')
+    expect(init.body).toBe('{"format":"pdf"}')
+    expect(new Headers(init.headers).get('Authorization')).toBe('Bearer access')
+    vi.unstubAllGlobals()
+  })
+
+  it('turns a JSON error into an ApiError carrying its body', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: 'not_yet_published', message: 'No.' }), {
+            status: 409,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+      ),
+    )
+
+    const error = await apiDownload('/api/x/export', {}).catch((err: unknown) => err)
+
+    expect(error).toBeInstanceOf(ApiError)
+    expect((error as ApiError).status).toBe(409)
+    expect((error as ApiError).body).toEqual({ error: 'not_yet_published', message: 'No.' })
+    vi.unstubAllGlobals()
   })
 })

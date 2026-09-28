@@ -44,6 +44,10 @@ export function stubApi(routes: Record<string, Route>) {
       }
       // A route may return a promise, to hold the response while a test looks at the "in progress" screen.
       return Promise.resolve(route({ body, query: url.searchParams })).then((value) => {
+        // A route may answer with a ready-made Response (a file download, custom headers).
+        if (value instanceof Response) {
+          return value
+        }
         const reply = value as { __status?: number; body?: unknown }
         if (reply && typeof reply === 'object' && '__status' in reply) {
           return json(reply.body, reply.__status)

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Icon } from '../../../components/Icon'
 import { ApiError } from '../../../lib/apiClient'
 import { Sheet } from '../detail/Sheet'
+import { ExportModal } from '../export/ExportModal'
 import { fetchPlanningResult, fetchPublicationPdf, fetchPublicationState } from '../result/api'
 import { PublishModal } from '../result/PublishModal'
 import { ReassignmentModal } from '../result/ReassignmentModal'
@@ -74,7 +75,9 @@ function initialMonth(keys: string[]): string | undefined {
  * Everything is read from the current calendar (`/result`); nothing is
  * computed here beyond laying it out. A manager can edit a duty, complete
  * the holes automatically, open the statistics, publish, republish the
- * changes and download the published PDF; a member only reads.
+ * changes and download the published PDF; a member only reads. Once the
+ * planning is published, anyone who reads it can export the current
+ * calendar (PDF or Excel, docs/planning-export.md).
  */
 export function PlanningCalendar({ planning, onPublished, onRequestCompletion, jobActive = false }: Props) {
   const canEdit = planning.canManageCalendar === true
@@ -84,7 +87,7 @@ export function PlanningCalendar({ planning, onPublished, onRequestCompletion, j
   const [error, setError] = useState<string | null>(null)
   const [month, setMonth] = useState<string | undefined>(undefined)
   const [editing, setEditing] = useState<string | null>(null)
-  const [dialog, setDialog] = useState<'stats' | 'publish' | 'republish' | null>(null)
+  const [dialog, setDialog] = useState<'stats' | 'publish' | 'republish' | 'export' | null>(null)
   const [completing, setCompleting] = useState(false)
   const [notice, setNotice] = useState<{ tone: 'success' | 'error' | 'info'; text: string } | null>(null)
   const [statsKey, setStatsKey] = useState(0)
@@ -209,6 +212,11 @@ export function PlanningCalendar({ planning, onPublished, onRequestCompletion, j
           {published && (
             <button type="button" className="pd-btn pd-btn-secondary" onClick={handleDownload}>
               Télécharger le PDF
+            </button>
+          )}
+          {published && (
+            <button type="button" className="pd-btn pd-btn-secondary" onClick={() => setDialog('export')}>
+              Exporter
             </button>
           )}
           {canPublish &&
@@ -385,6 +393,8 @@ export function PlanningCalendar({ planning, onPublished, onRequestCompletion, j
           }}
         />
       )}
+
+      {dialog === 'export' && <ExportModal planning={planning} onClose={() => setDialog(null)} />}
 
       {dialog === 'republish' && state?.changes && (
         <RepublishModal

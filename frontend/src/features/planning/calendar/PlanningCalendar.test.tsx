@@ -267,6 +267,10 @@ describe('PlanningCalendar', () => {
     expect(await screen.findByText('Non publié')).toBeInTheDocument()
     expect(await screen.findByRole('button', { name: 'Publier le planning' })).toBeEnabled()
     expect(screen.queryByRole('button', { name: 'Télécharger le PDF' })).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Exporter' }),
+      'Nothing to export before a publication.',
+    ).not.toBeInTheDocument()
   })
 
   it('once published: shows the date, the PDF, and a disabled "Republier" while nothing changed', async () => {
@@ -338,5 +342,8 @@ describe('PlanningCalendar', () => {
     expect(await screen.findByText('Planning publié')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Télécharger le PDF' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Republier les modifications' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Exporter' }))
+    expect(await screen.findByRole('dialog', { name: 'Exporter le planning' })).toBeInTheDocument()
   })
 })

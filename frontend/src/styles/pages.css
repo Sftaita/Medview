@@ -1022,6 +1022,10 @@
   border-radius: var(--radius-md);
 }
 
+.overlay--modal .overlay__panel--wide {
+  width: min(1120px, 100%);
+}
+
 .overlay--drawer .overlay__panel {
   width: min(460px, 100%);
   height: 100%;

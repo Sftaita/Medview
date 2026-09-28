@@ -15,6 +15,7 @@ const PATHS = {
   left: '<path d="m15 18-6-6 6-6"></path>',
   right: '<path d="m9 18 6-6-6-6"></path>',
   down: '<path d="m6 9 6 6 6-6"></path>',
+  up: '<path d="m18 15-6-6-6 6"></path>',
   plus: '<path d="M5 12h14"></path><path d="M12 5v14"></path>',
   x: '<path d="M18 6 6 18"></path><path d="m6 6 12 12"></path>',
   mail: '<rect width="20" height="16" x="2" y="4" rx="2"></rect><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path>',
