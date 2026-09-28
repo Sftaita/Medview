@@ -75,6 +75,71 @@ jobs:
       - name: Run tests
         run: composer test
 
+  # docs/decisions.md D152: the production image installs `--no-dev`, so a
+  # class used by src/ whose package only arrives through require-dev
+  # (symfony/process, 2026-09-28: every generation failed in production)
+  # passes every test above and breaks only in production. This job sees
+  # exactly what the production image sees.
+  backend-prod-dependencies:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Same extensions as backend/Dockerfile.prod.
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: pdo_pgsql, intl, zip
+          coverage: none
+
+      - name: Validate composer.json and composer.lock
+        run: composer validate --no-check-publish
+
+      - name: Install production dependencies only
+        run: composer install --no-dev --no-scripts --no-interaction --prefer-dist
+
+      # Fails on any symbol used by src/ that no package of `require` (or a
+      # declared ext-*) provides — a require-dev-only package is not even
+      # installed here, so its classes are reported as unknown. Pinned
+      # release, checked against the digest GitHub publishes for it. 4.20.0
+      # is the last release that runs on PHP 8.3 (4.21+ require 8.4): the
+      # job keeps the production image's PHP version.
+      - name: Check runtime dependencies (composer-require-checker)
+        run: |
+          curl -fsSL -o /tmp/composer-require-checker.phar https://github.com/maglnet/ComposerRequireChecker/releases/download/4.20.0/composer-require-checker.phar
+          echo "a526005d485acaf4845cd0fa3f33b9315ed642a325c5e98c5125946bb43f985e  /tmp/composer-require-checker.phar" | sha256sum -c -
+          php /tmp/composer-require-checker.phar check composer.json
+
+  # docs/decisions.md D152: build the real production image and run the
+  # engine path that was broken in it — PHP → OrToolsPlanningSolver →
+  # Symfony Process → venv Python → cp_sat_solver.py → OR-Tools → result.
+  # No database: `app:solver:smoke` solves an in-memory problem.
+  backend-prod-image:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend/Dockerfile.prod
+        run: docker build -f backend/Dockerfile.prod -t medvue-backend:ci backend
+
+      - name: Symfony Process is installed
+        run: |
+          docker run --rm medvue-backend:ci php -r 'require "vendor/autoload.php"; exit(class_exists(Symfony\Component\Process\Process::class) ? 0 : 1);'
+
+      - name: The configured Python has OR-Tools
+        run: |
+          docker run --rm medvue-backend:ci /opt/ortools-venv/bin/python3 -c 'import ortools; print(ortools.__version__)'
+
+      - name: Solver smoke test
+        run: |
+          docker run --rm medvue-backend:ci php bin/console app:solver:smoke
+
   frontend:
     runs-on: ubuntu-latest
 
