@@ -403,3 +403,37 @@ Détail complet : `docs/availability-collection.md`.
 - **`GET /api/plannings/{id}/assignments`** (D125) : affectations de la génération `COMPLETED` la plus
   récente de chaque ligne, filtrables par personne et par mois, avec résumé par personne.
 - Chaque planning ouvre à sa création une collecte sur toute sa plage.
+
+## 16. Politique de demande d'une ligne (D162)
+
+Une ligne est `INDEPENDENT` (sa propre semaine type — c'est aussi ce que
+signifie l'absence de politique) ou `CONDITIONAL_ON_SOURCE_ASSIGNMENT` : une
+de ses gardes n'est nécessaire que lorsque la personne titulaire de la garde
+correspondante de la **ligne source** la déclenche ce jour-là
+(`DemandTrigger` : personne × jours de semaine × `increment`, V1 = 1).
+
+- `PlanningLineDemandPolicy` est **versionnée** : chaque changement crée une
+  nouvelle version active et retire la précédente, jamais modifiée.
+- V1 : la source est une autre ligne active du même Planning, elle-même
+  indépendante ; la cible est une ligne secondaire qui n'est la source de
+  personne (profondeur 1, ni chaîne ni cycle). La ligne principale n'est
+  jamais conditionnelle.
+- Qui **déclenche** (les personnes de la ligne source) et qui **assure** le
+  renfort (la population de la ligne cible) restent deux notions distinctes.
+- Une ligne source en vigueur ne peut pas être supprimée
+  (`line_is_demand_source`).
+- **Limitation V1** : configurer une ligne conditionnelle est refusé
+  (`planning_already_published`) dès qu'une ligne du Planning est publiée —
+  elle ne pourrait plus être générée pour la période ; changer de mode ou de
+  source est refusé une fois les gardes de la ligne matérialisées
+  (`line_already_materialized`).
+
+```
+GET /api/planning-lines/{lineStableId}/demand-policy
+PUT /api/planning-lines/{lineStableId}/demand-policy
+```
+
+Droit : `PlanningVoter::MANAGE_LINE_STRUCTURE`. Contrat complet, codes
+d'erreur et avertissements : `docs/decisions.md` D162. La génération
+conditionnelle elle-même (gardes `CONDITIONAL`, `coverageSource`, demande
+effective) arrive dans les lots suivants du chantier.

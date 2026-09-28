@@ -10,6 +10,7 @@ use App\Entity\Planning;
 use App\Entity\PlanningLine;
 use App\Entity\PlanningLineType;
 use App\Exception\OverlappingFairnessPeriodException;
+use App\Exception\PlanningLineIsDemandSourceException;
 use App\Exception\PrimaryPlanningLineNotDeletableException;
 use App\Repository\PlanningLineRepository;
 use App\Repository\PlanningRepository;
@@ -106,6 +107,8 @@ final class PlanningLineController
             $this->planningLineService->deleteLine($line);
         } catch (PrimaryPlanningLineNotDeletableException $exception) {
             return new JsonResponse(['error' => 'primary_line_not_deletable', 'message' => $exception->getMessage()], 409);
+        } catch (PlanningLineIsDemandSourceException $exception) {
+            return new JsonResponse(['error' => 'line_is_demand_source', 'message' => $exception->getMessage()], 409);
         }
 
         return new Response(status: 204);

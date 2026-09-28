@@ -233,3 +233,15 @@ largeurs — les tests tournent au palier `s`).
 5. Exceptions calendaires datées (ex. dimanche 25 décembre = garde
    exceptionnelle malgré une structure « dimanche = aucune garde ») —
    point d'extension documenté par D136, rien d'implémenté.
+6. **Ligne conditionnelle (D162)** : la semaine type d'une ligne de renfort
+   définit les jours où un renfort **peut** exister (un jour `excluded` =
+   renfort impossible ce jour-là, quel que soit le déclencheur), ses blocs
+   (atomiques : un seul jour déclenché exigera tout le bloc) et ses familles
+   d'équité. La politique de demande signale ces cas par des avertissements
+   (`TRIGGER_DAY_EXCLUDED_FROM_TARGET`,
+   `TRIGGER_PARTIALLY_COVERS_TARGET_BLOCK`). **Dette confirmée (D136/D162)** :
+   `WeeklyDutyCalendarService` matérialise toute la période au premier
+   préflight ; une fois les gardes d'une ligne matérialisées, une
+   modification de la semaine type n'a plus d'effet sur cette période, et un
+   changement de mode ou de source de la politique de demande est refusé
+   (`line_already_materialized`). Non refondu dans ce chantier.

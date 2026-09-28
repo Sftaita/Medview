@@ -4983,3 +4983,116 @@ l'ancienne (voir légende).
   raison doit dire que l'autre garde est sur une autre ligne) ; relire les
   affectations *live* des autres lignes pendant un solve (casserait
   l'immuabilité de l'entrée du solve et l'explication historique).
+
+## D162 — Politique de demande d'une ligne : versionnée, déclencheurs par personne × jours, profondeur 1
+
+- **Contexte** : chantier « ligne secondaire conditionnelle ». Une ligne de
+  renfort n'a besoin d'une garde que lorsque le chirurgien titulaire de la
+  garde correspondante de la ligne source la déclenche, selon le jour
+  (Dr A jamais, Dr B toujours, Dr C vendredi/samedi/dimanche). Ce lot
+  construit uniquement le **domaine de configuration** : ni
+  `DutyDemandType::CONDITIONAL`, ni `Duty.coverageSource`, ni `DemandView`,
+  ni génération conditionnelle (lots suivants).
+- **Décision — `PlanningLineDemandPolicy`, versionnée et immuable** (table
+  `planning_line_demand_policies`, migration `Version20260928150000`) :
+  `targetLine`, `version` (séquentiel par ligne, attribué par le service),
+  `mode` (`INDEPENDENT` | `CONDITIONAL_ON_SOURCE_ASSIGNMENT`), `sourceLine`,
+  `status` (`ACTIVE` | `RETIRED`), `createdBy`/`createdAt`/`retiredAt`. Pas
+  d'état DRAFT (contrairement à `PlanningRuleSet`) : une politique est
+  remplacée en entier par un `PUT`, il n'y a pas d'état intermédiaire édité.
+  Un changement réel crée la version suivante `ACTIVE` et retire la
+  précédente, dans une transaction (deux `flush()`, même raison que
+  `PlanningRuleSetService::activate()`) ; resoumettre le contenu en vigueur
+  ne crée rien. Au plus une version `ACTIVE` par ligne (index unique
+  partiel). Aucune méthode de modification : les déclencheurs sont figés à
+  la création (ajouter un déclencheur à une version enregistrée lève une
+  exception).
+- **Absence de politique = `INDEPENDENT`** : le comportement de toutes les
+  lignes existantes, donc aucune migration de données. Soumettre
+  `INDEPENDENT` pour une ligne sans politique n'enregistre rien ; revenir à
+  `INDEPENDENT` depuis une ligne conditionnelle crée une version explicite.
+- **Décision — `DemandTrigger`** (table `planning_line_demand_triggers`) :
+  une ligne par personne et par version, `user` (FK `users`, jamais un
+  `PlanningTeamMember` : une personne qui quitte et revient, ou qui
+  appartient à plusieurs lignes (D160), reste le même déclencheur), jours de
+  semaine en masque ISO (bit 0 = lundi … bit 6 = dimanche, CHECK 1..127,
+  exposés comme liste ordonnée), `increment` explicite (CHECK ≥ 1) —
+  jamais un booléen « doublé », pour qu'un futur « +N » reste un changement
+  de données. **V1 : `increment = 1` uniquement** (refus 422
+  `UNSUPPORTED_INCREMENT`). Une personne sans déclencheur ne déclenche
+  jamais rien. Au plus un déclencheur par personne et par version.
+- **Décision — évaluateur pur** : `App\Demand\DemandTriggerEvaluator`
+  répond à `(DemandRules, sourceUserStableId, Weekday) → déclencheur | null`
+  à partir de valeurs (`DemandRules`/`DemandTriggerRule`), sans lire ni base,
+  ni calendrier, ni `DutyAssignment.current`, ni snapshot — les lots
+  suivants l'appelleront avec le titulaire réel (figé ou live). Aucun
+  titulaire (`null`) ou ligne indépendante → jamais déclenché. La propagation
+  au bloc n'est **pas** faite ici (L4/L5).
+- **Règles de structure V1** (422 `invalid_demand_policy`, `code` stable +
+  `field`) : source = autre ligne active **du même Planning**
+  (`SOURCE_NOT_IN_PLANNING` — une ligne d'un autre Planning est traitée
+  comme inconnue), jamais la cible (`SOURCE_IS_TARGET`), elle-même
+  `INDEPENDENT` (`SOURCE_NOT_INDEPENDENT`) ; la cible est une ligne
+  **secondaire** active (`PRIMARY_LINE_CANNOT_BE_CONDITIONAL`,
+  `TARGET_INACTIVE`) qui n'est la source d'aucune ligne conditionnelle en
+  vigueur (`TARGET_IS_A_SOURCE`). D'où profondeur 1, ni chaîne ni cycle, par
+  construction. Plus : `UNSUPPORTED_SCHEMA_VERSION`, `UNKNOWN_MODE`,
+  `INDEPENDENT_WITH_SOURCE`, `INDEPENDENT_WITH_TRIGGERS`, `SOURCE_REQUIRED`,
+  `UNKNOWN_USER`, `DUPLICATE_TRIGGER_PERSON`, `NO_WEEKDAY`,
+  `UNKNOWN_WEEKDAY`, `DUPLICATE_WEEKDAY`, `UNSUPPORTED_INCREMENT`. Un
+  champ inconnu ou un type faux reste un 422 `validation_failed` (D116).
+- **Règles d'état** (409) :
+  - `planning_already_published` — toute configuration **conditionnelle**
+    (nouvelle ou changement de déclencheurs) est refusée dès qu'une ligne
+    active du Planning est `PUBLISHED`/`ARCHIVED` : aucune ligne ne peut plus
+    être générée pour la période (D133), la configuration serait
+    inutilisable. **Limitation V1 assumée** (décision D1 du chantier) : la
+    ligne conditionnelle se configure avant la première publication. Le
+    besoin « générer uniquement les lignes non publiées en considérant les
+    lignes publiées comme engagements figés » est une extension possible,
+    non construite ;
+  - `line_already_materialized` — un changement de **mode ou de source**
+    est refusé dès qu'une `Duty` existe pour la période de la ligne : le
+    genre de demande d'une garde est fixé à sa matérialisation, et
+    `WeeklyDutyCalendarService` matérialise toute la période au premier
+    préflight (dette D136 documentée, non refondue ici). Un changement de
+    **déclencheurs seuls** reste possible : il s'applique aux prochaines
+    générations ;
+  - `concurrent_update` — deux `PUT` simultanés sur la même ligne : le
+    second échoue sur l'index unique.
+- **Suppression d'une ligne** : la source d'une politique conditionnelle en
+  vigueur ne peut pas être supprimée (409 `line_is_demand_source`, et une
+  CHECK en base l'empêche aussi). La source est conservée deux fois : une
+  relation (`ON DELETE SET NULL`) et sa valeur `source_line_stable_id`
+  (jamais perdue) — une version retirée continue de dire de quelle ligne
+  elle dépendait. Supprimer une ligne conditionnelle supprime ses propres
+  versions (`ON DELETE CASCADE`) : l'historique des générations ne dépendra
+  jamais de ces lignes vivantes (il figera ses décisions dans le snapshot,
+  L5). Aucun endpoint ne désactive une ligne aujourd'hui ; la règle
+  « source active » est vérifiée quand même.
+- **Avertissements, jamais des refus** (`DemandPolicyWarning` : `code`,
+  `details` structurés, `message` en français) :
+  `TARGET_HAS_NO_WEEK_STRUCTURE`, `TRIGGER_PERSON_NOT_IN_SOURCE_LINE`
+  `{userStableId}`, `TRIGGER_DAY_EXCLUDED_FROM_TARGET` `{userStableId,
+  weekday}`, `TRIGGER_PARTIALLY_COVERS_TARGET_BLOCK` `{userStableId,
+  blockName, blockWeekdays, triggeredWeekdays}` (un bloc étant atomique,
+  un seul jour déclenché exigera tout le bloc). Calculés à chaque lecture
+  contre l'état actuel (membres de la source, semaine type de la cible).
+- **API** : `GET/PUT /api/planning-lines/{id}/demand-policy`, droit
+  `PlanningVoter::MANAGE_LINE_STRUCTURE` (comme la semaine type ; un rôle
+  OWNER/ADMIN sur n'importe laquelle des adhésions suffit, D160). Corps :
+  `{schemaVersion: 1, mode, source: {lineStableId} | null, triggers:
+  [{userStableId, weekdays: ["MONDAY".."SUNDAY"], increment}]}`. Réponse :
+  de quoi dessiner la matrice « personnes de la source × jours » sans
+  reconstruire de règle côté client — `mode`, `policy` (`stableId`,
+  `version`, `createdAt`, `null` = indépendante), `source`, `triggers` (avec
+  noms), `weekdays`, `sourceOptions` (lignes éligibles comme source et leurs
+  personnes actuelles, une entrée par personne), `targetStructure`
+  (`configured`, `excludedWeekdays`, `blocks`), `warnings`.
+- **Codes de jour** : l'API utilise `MONDAY`..`SUNDAY` (`App\Demand\Weekday`) ;
+  la semaine type garde ses codes `LUN`..`DIM` (contrat D134 inchangé), la
+  correspondance est explicite (`Weekday::weekStructureCode()`).
+- **Rejeté** : un booléen `isDoubled` sur `Duty` ou sur la ligne ; un
+  déclencheur par stint (`PlanningTeamMember`) ; un statut DRAFT ; permettre
+  une chaîne conditionnelle ou une ligne principale conditionnelle en V1 ;
+  des avertissements en texte libre seul.

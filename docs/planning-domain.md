@@ -307,6 +307,12 @@ directement les concepts déjà actés en spécification (§5, §10, §21).
 jamais des dates locales — correct par construction y compris à travers
 un changement d'heure.
 
+> **Statut d'implémentation (D162)** : une `PlanningLine` peut porter une
+> politique de demande versionnée (`PlanningLineDemandPolicy` +
+> `DemandTrigger`, voir `docs/planning.md` §16). Elle ne modifie encore
+> aucune `Duty` : `DutyDemandType::CONDITIONAL` et `Duty.coverageSource`
+> arrivent au lot suivant du chantier.
+
 ## Portée exacte du contrôle d'intégrité base de données
 
 Contraintes ajoutées (deux migrations : schéma de base, puis
@@ -322,6 +328,8 @@ Contraintes ajoutées (deux migrations : schéma de base, puis
 | `TeamMemberParticipationPeriod` : pas de chevauchement par membre | `EXCLUDE USING gist`, **`DEFERRABLE INITIALLY DEFERRED`** (voir piège ci-dessous) |
 | Cohérence d'équipe cross-table (`PlanningPeriod`↔`FairnessPeriod`, `DutyGroupInstance`↔`PlanningPeriod`/`DutyPattern`, `DutyPatternComponent`↔`DutyPattern`/`DutyType`, `Duty`↔`PlanningPeriod`/`DutyType`) | **Clés étrangères composites** `(id, team_id)` — technique décrite ci-dessous |
 | `Duty` d'un groupe appartenant à une autre `PlanningPeriod` | Clé étrangère composite `(group_instance_id, planning_period_id) → duty_group_instances(id, planning_period_id)` |
+| Au plus une `PlanningLineDemandPolicy` `ACTIVE` par ligne (D162) | Index unique **partiel** `(target_line_id) WHERE status = 'ACTIVE'` |
+| Politique conditionnelle : source nommée (valeur), réelle tant qu'active, jamais la cible ; déclencheur : 1..127 jours, `increment` ≥ 1, une personne par version (D162) | `CHECK` + index unique `(policy_id, user_id)` |
 | `PlanningTeamMember.planning` cohérent avec `planningTeam.planning` (D081) | Clé étrangère composite `(planning_team_id, planning_id) → planning_teams(id, planning_id)` |
 | Dates non inversées, facteur/workload positifs | `CHECK` (défense en profondeur, déjà validé aussi dans les constructeurs) |
 

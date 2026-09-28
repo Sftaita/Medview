@@ -8,7 +8,9 @@ use App\Entity\Planning;
 use App\Entity\PlanningLine;
 use App\Entity\PlanningLineType;
 use App\Entity\PlanningTeam;
+use App\Exception\PlanningLineIsDemandSourceException;
 use App\Exception\PrimaryPlanningLineNotDeletableException;
+use App\Repository\PlanningLineDemandPolicyRepository;
 use App\Repository\PlanningLineRepository;
 use Doctrine\ORM\EntityManagerInterface;
 
@@ -34,6 +36,7 @@ final class PlanningLineService
         private readonly FairnessPeriodService $fairnessPeriodService,
         private readonly PlanningPeriodLifecycleService $planningPeriodLifecycleService,
         private readonly EntityManagerInterface $entityManager,
+        private readonly PlanningLineDemandPolicyRepository $demandPolicyRepository,
     ) {
     }
 
@@ -76,6 +79,13 @@ final class PlanningLineService
     {
         if ($line->isPrimary()) {
             throw new PrimaryPlanningLineNotDeletableException();
+        }
+
+        // docs/decisions.md D162: a conditional line in force must never be left depending on nothing. The line's
+        // own demand policies go with it (ON DELETE CASCADE); a RETIRED version of another line that named it as
+        // source keeps its stable id as a value (source_line_id is set to null).
+        if ([] !== $this->demandPolicyRepository->findActiveUsingSource($line)) {
+            throw new PlanningLineIsDemandSourceException();
         }
 
         // Deliberately does not delete the line's PlanningTeam/PlanningPeriod/

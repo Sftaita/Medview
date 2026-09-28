@@ -57,4 +57,14 @@ class DutyRepository extends ServiceEntityRepository
             'localDate' => $localDate,
         ]);
     }
+
+    /**
+     * Whether any Duty has been materialized for this period — once it is
+     * the case, the line's demand kind is fixed for those days
+     * (docs/decisions.md D162, `line_already_materialized`).
+     */
+    public function existsForPeriod(PlanningPeriod $planningPeriod): bool
+    {
+        return null !== $this->findOneBy(['planningPeriod' => $planningPeriod]);
+    }
 }
