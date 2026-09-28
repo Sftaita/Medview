@@ -242,7 +242,8 @@ describe('PlanningCalendar', () => {
     render(<PlanningCalendar planning={MANAGER} onRequestCompletion={vi.fn()} jobActive />)
 
     expect(await screen.findByRole('button', { name: 'Compléter automatiquement' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Republier les modifications' })).toBeDisabled()
+    // The publication state arrives on its own request: wait for it, never assume it came first.
+    expect(await screen.findByRole('button', { name: 'Republier les modifications' })).toBeDisabled()
   })
 
   it('disables "Compléter automatiquement" when nothing is uncovered', async () => {
