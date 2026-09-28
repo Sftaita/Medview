@@ -9,6 +9,7 @@ use App\Eligibility\EligibilityExclusion;
 use App\Eligibility\EligibilityResult;
 use App\Eligibility\ExclusionReason;
 use App\Entity\PlanningSnapshot;
+use App\Entity\PlanningSnapshotExternalCommitment;
 use App\Entity\PlanningSnapshotMember;
 use App\Entity\UserAvailabilityType;
 
@@ -27,11 +28,29 @@ use App\Entity\UserAvailabilityType;
  */
 final class EligibilityService
 {
-    public function evaluate(PlanningSnapshot $snapshot, DutyUnit $dutyUnit, PlanningSnapshotMember $member): EligibilityResult
+    public function __construct(private readonly PersonCommitmentChecker $commitmentChecker)
+    {
+    }
+
+    /**
+     * @param list<PlanningSnapshotExternalCommitment>|null $externalCommitments the duties this member's person holds on
+     *                                                                           the lines solved before this one
+     *                                                                           (docs/decisions.md D161); null = read
+     *                                                                           them from the snapshot. [] disables the
+     *                                                                           cross-line check — only for a caller that
+     *                                                                           re-checks it live instead
+     *                                                                           (PlanningCompletionService)
+     */
+    public function evaluate(PlanningSnapshot $snapshot, DutyUnit $dutyUnit, PlanningSnapshotMember $member, ?array $externalCommitments = null): EligibilityResult
     {
         if ($member->getSnapshot() !== $snapshot) {
             throw new \InvalidArgumentException('The given PlanningSnapshotMember does not belong to the given PlanningSnapshot.');
         }
+
+        $externalCommitments ??= array_values(array_filter(
+            $snapshot->getExternalCommitments()->toArray(),
+            static fn (PlanningSnapshotExternalCommitment $c): bool => $c->getSourceUserStableId()->equals($member->getSourceUserStableId()),
+        ));
 
         $structuralOpportunity = true;
         $preferred = false;
@@ -115,6 +134,24 @@ final class EligibilityService
                     unset($cause['reason']);
                     $exclusions[] = new EligibilityExclusion($reason, $cause);
                 }
+            }
+        }
+
+        // docs/decisions.md D161: the same person already holds a duty on a
+        // line solved before this one. Checked on the whole unit (a group is
+        // excluded as a whole, like CONFLICT between two units of one line),
+        // and never touches structuralOpportunity (ExclusionReason).
+        if ([] !== $externalCommitments) {
+            $violation = $this->commitmentChecker->firstViolation(
+                $dutyUnit->getDuties(),
+                array_map(static fn (PlanningSnapshotExternalCommitment $c) => $c->toInterval(), $externalCommitments),
+                $snapshot->getGeneration()->getRestPolicy(),
+            );
+            if (null !== $violation) {
+                $exclusions[] = new EligibilityExclusion($violation->reason, [
+                    'otherLineStableId' => $violation->commitment->lineStableId,
+                    'otherDutyStableId' => $violation->commitment->dutyStableId,
+                ]);
             }
         }
 

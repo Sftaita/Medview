@@ -25,7 +25,15 @@ final class EligibilityMatrixBuilder
     ) {
     }
 
-    public function build(PlanningSnapshot $snapshot): EligibilityMatrix
+    /**
+     * @param bool $withFrozenExternalCommitments false leaves out the duties frozen from other lines
+     *                                            (docs/decisions.md D161) — only for a caller that
+     *                                            re-checks cross-line compatibility against the live
+     *                                            calendar instead (PlanningCompletionService): a frozen
+     *                                            commitment may no longer hold, and must then never keep
+     *                                            excluding a person who is free today
+     */
+    public function build(PlanningSnapshot $snapshot, bool $withFrozenExternalCommitments = true): EligibilityMatrix
     {
         $planningPeriod = $snapshot->getGeneration()->getPlanningPeriod();
         $duties = $this->dutyRepository->findByPlanningPeriod($planningPeriod);
@@ -35,10 +43,23 @@ final class EligibilityMatrixBuilder
         $candidates = $snapshot->getMembers()->toArray();
         usort($candidates, static fn ($a, $b): int => (string) $a->getSourceTeamMemberStableId() <=> (string) $b->getSourceTeamMemberStableId());
 
+        // Grouped by person once, not filtered again for every (unit, candidate) pair.
+        $commitmentsByUser = [];
+        if ($withFrozenExternalCommitments) {
+            foreach ($snapshot->getExternalCommitments() as $commitment) {
+                $commitmentsByUser[(string) $commitment->getSourceUserStableId()][] = $commitment;
+            }
+        }
+
         $entries = [];
         foreach ($dutyUnits as $dutyUnit) {
             foreach ($candidates as $member) {
-                $entries[$dutyUnit->getStableKey()][(string) $member->getSourceTeamMemberStableId()] = $this->eligibilityService->evaluate($snapshot, $dutyUnit, $member);
+                $entries[$dutyUnit->getStableKey()][(string) $member->getSourceTeamMemberStableId()] = $this->eligibilityService->evaluate(
+                    $snapshot,
+                    $dutyUnit,
+                    $member,
+                    $commitmentsByUser[(string) $member->getSourceUserStableId()] ?? [],
+                );
             }
         }
 

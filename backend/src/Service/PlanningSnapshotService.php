@@ -8,12 +8,15 @@ use App\Entity\PlanningGeneration;
 use App\Entity\PlanningGenerationStatus;
 use App\Entity\PlanningSnapshot;
 use App\Entity\PlanningSnapshotAvailabilityPeriod;
+use App\Entity\PlanningSnapshotExternalCommitment;
 use App\Entity\PlanningSnapshotMember;
 use App\Entity\PlanningSnapshotNonParticipationPeriod;
 use App\Entity\PlanningSnapshotParticipationPeriod;
 use App\Entity\PlanningSnapshotRuleSet;
+use App\Entity\PlanningTeamMember;
 use App\Exception\NoActivePlanningRuleSetException;
 use App\Exception\PlanningGenerationAlreadySnapshottedException;
+use App\Repository\PlanningLineRepository;
 use App\Repository\PlanningRuleSetRepository;
 use App\Repository\PlanningTeamMemberRepository;
 use App\Repository\TeamMemberNonParticipationPeriodRepository;
@@ -39,6 +42,9 @@ final class PlanningSnapshotService
         private readonly TeamMemberNonParticipationPeriodRepository $nonParticipationPeriodRepository,
         private readonly PlanningRuleSetRepository $ruleSetRepository,
         private readonly EntityManagerInterface $entityManager,
+        private readonly PlanningLineRepository $lineRepository,
+        private readonly PlanningLineOrder $lineOrder,
+        private readonly PersonCommitmentReader $commitmentReader,
     ) {
     }
 
@@ -137,6 +143,8 @@ final class PlanningSnapshotService
             }
         }
 
+        $this->freezeExternalCommitments($snapshot, $relevantMembers);
+
         $this->entityManager->persist(new PlanningSnapshotRuleSet(
             $snapshot,
             $activeRuleSet->getStableId(),
@@ -153,5 +161,49 @@ final class PlanningSnapshotService
         }
 
         return $snapshot;
+    }
+
+    /**
+     * docs/decisions.md D161: the duties this snapshot's people already
+     * hold on the lines solved BEFORE this one (PlanningLineOrder) — their
+     * current assignments right now, frozen as values. A line solved later
+     * is never looked at: at a planning-level launch it is about to be
+     * regenerated itself, and it is that later line's own snapshot that
+     * will see this one's result.
+     *
+     * @param list<PlanningTeamMember> $members
+     */
+    private function freezeExternalCommitments(PlanningSnapshot $snapshot, array $members): void
+    {
+        $line = $this->lineRepository->findOneByPlanningPeriod($snapshot->getGeneration()->getPlanningPeriod());
+        if (null === $line) {
+            return;
+        }
+
+        $userStableIds = [];
+        foreach ($members as $member) {
+            $userStableIds[(string) $member->getUser()->getStableId()] = true;
+        }
+
+        foreach ($this->commitmentReader->byUserStableId($this->lineOrder->precedingActiveLines($line)) as $userStableId => $commitments) {
+            if (!isset($userStableIds[$userStableId])) {
+                continue;
+            }
+
+            foreach ($commitments as $commitment) {
+                $ownerPolicy = $commitment->generation->getRestPolicy();
+                $this->entityManager->persist(new PlanningSnapshotExternalCommitment(
+                    $snapshot,
+                    $commitment->teamMember->getUser()->getStableId(),
+                    $commitment->line->getStableId(),
+                    $commitment->generation->getStableId(),
+                    $commitment->duty->getStableId(),
+                    $commitment->duty->getStartsAt(),
+                    $commitment->duty->getEndsAt(),
+                    $ownerPolicy->legalMinRestEnabled ? $ownerPolicy->legalMinRestHours : null,
+                    $ownerPolicy->teamMinRestEnabled ? $ownerPolicy->teamMinRestHours : null,
+                ));
+            }
+        }
     }
 }

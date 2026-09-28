@@ -778,6 +778,15 @@ n'a exigé aucune réécriture pour l'accueillir, comme prévu.
 
 ## 30. Contraintes globales (Lot 6D)
 
+> **Mise à jour D161** : les incompatibilités d'une même personne **entre
+> deux lignes** ne sont pas des contraintes globales : la garde de l'autre
+> ligne est déjà décidée (lignes résolues l'une après l'autre), c'est donc
+> une exclusion locale produite par `EligibilityService`
+> (`CROSS_LINE_CONFLICT`/`CROSS_LINE_LEGAL_MIN_REST`/
+> `CROSS_LINE_TEAM_MIN_REST`) — aucune variable n'existe pour l'arête, rien
+> n'est ajouté au modèle CP-SAT ni à `cp_sat_solver.py`. Voir
+> `docs/planning-generation.md` §24.
+
 Première catégorie de contrainte qui **relie** deux `(DutyUnit,
 candidat)` autrement indépendants — distincte d'une exclusion locale
 (`EligibilityExclusion`, qui retire une seule arête) :

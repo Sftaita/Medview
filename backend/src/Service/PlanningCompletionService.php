@@ -54,6 +54,14 @@ use Doctrine\ORM\EntityManagerInterface;
  * manual reassignment uses): someone who declared an unavailability since
  * the generation, or whose current assignments now conflict, is excluded.
  *
+ * Several lines (docs/decisions.md D161): the lines are completed one
+ * after another in resolution order (PlanningLineOrder). The same person
+ * may belong to several lines (D160): the holes planned on an earlier line
+ * are virtual commitments for the later ones, checked with the same
+ * person-level rule as a manual reassignment. The cross-line commitments
+ * frozen in the generation's snapshot are NOT used here — the live
+ * calendar is the truth for a completion.
+ *
  * Concurrency: the same session lock as the generation launcher (never
  * both at once on a Planning), and the persistence step re-reads the
  * calendar under the CalendarWriteLock — if anything the solve relied on
@@ -80,6 +88,7 @@ final class PlanningCompletionService
         private readonly CalendarWriteLock $calendarWriteLock,
         private readonly EntityManagerInterface $entityManager,
         private readonly WorkHeartbeat $heartbeat,
+        private readonly PlanningLineOrder $lineOrder,
     ) {
     }
 
@@ -105,17 +114,19 @@ final class PlanningCompletionService
             /** @var list<array{line: PlanningLine, generation: PlanningGeneration, snapshot: PlanningSnapshot, problem: OptimizationProblem, holes: array<string, DutyUnit>, fixed: array<string, string>, result: OptimizationResult}> $plans */
             $plans = [];
             $results = [];
-            foreach ($this->lineRepository->findByPlanning($planning) as $line) {
-                if (!$line->isActive()) {
-                    continue;
-                }
-
-                $plan = $this->solveLine($line, $parameterSet);
+            // docs/decisions.md D161: one line after another, in resolution order (PlanningLineOrder). The holes
+            // a line is about to fill are not written yet, but the lines after it must already treat them as
+            // commitments of the people concerned — otherwise the same person could be picked on two lines at
+            // once, and the write-time revalidation would reject the whole completion.
+            $virtualCommitments = [];
+            foreach ($this->lineOrder->activeInResolutionOrder($planning) as $line) {
+                $plan = $this->solveLine($line, $parameterSet, $virtualCommitments);
                 if ($plan instanceof CompletionLineResult) {
                     $results[] = $plan;
                     continue;
                 }
                 $plans[] = $plan;
+                array_push($virtualCommitments, ...$this->plannedCommitments($plan));
             }
 
             if ([] !== $plans) {
@@ -131,7 +142,10 @@ final class PlanningCompletionService
     /**
      * @return CompletionLineResult|array{line: PlanningLine, generation: PlanningGeneration, snapshot: PlanningSnapshot, problem: OptimizationProblem, holes: array<string, DutyUnit>, fixed: array<string, string>, result: OptimizationResult}
      */
-    private function solveLine(PlanningLine $line, SolverParameterSet $parameterSet): CompletionLineResult|array
+    /**
+     * @param list<PersonCommitment> $virtualCommitments fills planned on the lines solved before this one
+     */
+    private function solveLine(PlanningLine $line, SolverParameterSet $parameterSet, array $virtualCommitments): CompletionLineResult|array
     {
         $this->heartbeat->beat();
         $generation = $this->generationRepository->findMostRecentCompletedByPlanningPeriod($line->getPlanningPeriod());
@@ -140,7 +154,10 @@ final class PlanningCompletionService
             return new CompletionLineResult($line, 'not_generated');
         }
 
-        $matrix = $this->matrixBuilder->build($snapshot);
+        // Without the cross-line commitments frozen at generation time (D161): they may no longer hold (a
+        // reassignment on another line since), and must never keep excluding someone who is free today. The
+        // live check below (assignabilityError) re-applies the cross-line rule against the current calendar.
+        $matrix = $this->matrixBuilder->build($snapshot, withFrozenExternalCommitments: false);
         $problem = $this->problemBuilder->build($this->contextBuilder->build($snapshot, $matrix), $parameterSet);
 
         [$fixed, $holes] = $this->splitUnits($problem, $this->currentByDutyId($generation));
@@ -155,7 +172,7 @@ final class PlanningCompletionService
                     continue;
                 }
                 $member = $this->teamMemberRepository->findOneByStableId((string) $stintStableId);
-                if (null === $member || null !== $this->candidateService->assignabilityError($generation, $unit->getDuties(), $member)) {
+                if (null === $member || null !== $this->candidateService->assignabilityError($generation, $unit->getDuties(), $member, $virtualCommitments)) {
                     $excluded[] = new DutyAssignmentEdge($unitKey, (string) $stintStableId);
                 }
             }
@@ -169,6 +186,31 @@ final class PlanningCompletionService
         }
 
         return ['line' => $line, 'generation' => $generation, 'snapshot' => $snapshot, 'problem' => $constrained, 'holes' => $holes, 'fixed' => $fixed, 'result' => $result];
+    }
+
+    /**
+     * The holes $plan is about to fill, as commitments of their future
+     * holders — for the lines solved after it (D161).
+     *
+     * @param array{line: PlanningLine, generation: PlanningGeneration, snapshot: PlanningSnapshot, problem: OptimizationProblem, holes: array<string, DutyUnit>, fixed: array<string, string>, result: OptimizationResult} $plan
+     *
+     * @return list<PersonCommitment>
+     */
+    private function plannedCommitments(array $plan): array
+    {
+        $commitments = [];
+        foreach ($plan['result']->assignments as $edge) {
+            $unit = $plan['holes'][$edge->dutyUnitStableKey] ?? null;
+            $member = null !== $unit ? $this->teamMemberRepository->findOneByStableId($edge->sourceTeamMemberStableId) : null;
+            if (null === $member) {
+                continue; // a fixed unit (already a real commitment, read live), or an unknown id rejected at write time
+            }
+            foreach ($unit->getDuties() as $duty) {
+                $commitments[] = new PersonCommitment($plan['line'], $plan['generation'], $duty, $member);
+            }
+        }
+
+        return $commitments;
     }
 
     /**

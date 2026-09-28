@@ -8,11 +8,13 @@ use App\Eligibility\ExclusionReason;
 use App\Entity\Duty;
 use App\Entity\DutyAssignment;
 use App\Entity\PlanningGeneration;
+use App\Entity\PlanningLine;
 use App\Entity\PlanningTeamMember;
 use App\Entity\UserAvailabilityType;
 use App\Exception\DutyNotGeneratedException;
 use App\Repository\DutyAssignmentRepository;
 use App\Repository\PlanningGenerationRepository;
+use App\Repository\PlanningLineRepository;
 use App\Repository\PlanningSnapshotMemberRepository;
 use App\Repository\PlanningSnapshotRepository;
 use App\Repository\PlanningTeamMemberRepository;
@@ -27,16 +29,18 @@ use App\Repository\UserAvailabilityPeriodRepository;
  * exactly wrong here. A manual reassignment must see the calendar as it
  * really is right now — today's UserAvailabilityPeriod/
  * TeamMemberNonParticipationPeriod rows, today's live PlanningTeamMember
- * set, and the candidate's other *current* DutyAssignment rows — never the
- * state frozen when the generation was first solved. The pure time
- * arithmetic (RestGapCalculator, Duty::overlapsWith) and the constraint
- * *thresholds* (RestPolicyOptions, read from the generation being edited —
- * never re-guessed) are the only things shared with the solver's own
- * snapshot-time analysis.
+ * set, and every duty the candidate's PERSON currently holds on any active
+ * line of the Planning (PersonCommitmentReader, docs/decisions.md D161) —
+ * never the state frozen when the generation was first solved. The
+ * incompatibility rule itself (PersonCommitmentChecker) and the constraint
+ * *thresholds* (RestPolicyOptions, read from the generations concerned —
+ * never re-guessed) are shared with the solver's snapshot-time analysis
+ * (EligibilityService), so the live and the frozen checks never disagree.
  *
  * Reasons are computed in the same precedence AssignmentConflictAnalyzer
  * uses (structural reasons first, then CONFLICT, then LEGAL_MIN_REST, then
- * TEAM_MIN_REST) — the first one found is reported.
+ * TEAM_MIN_REST, each same-line before cross-line) — the first one found is
+ * reported.
  *
  * The candidate list (docs/decisions.md D144) only ever contains members
  * with no blocking reason at all: an impossible candidate is absent, never
@@ -60,7 +64,10 @@ final class ReassignmentCandidateService
         private readonly TeamMemberNonParticipationPeriodRepository $nonParticipationRepository,
         private readonly PlanningSnapshotRepository $snapshotRepository,
         private readonly PlanningSnapshotMemberRepository $snapshotMemberRepository,
-        private readonly RestGapCalculator $restGapCalculator,
+        private readonly PersonCommitmentReader $commitmentReader,
+        private readonly PersonCommitmentChecker $commitmentChecker,
+        private readonly PlanningLineOrder $lineOrder,
+        private readonly PlanningLineRepository $lineRepository,
     ) {
     }
 
@@ -113,9 +120,11 @@ final class ReassignmentCandidateService
      * structural rules first (own line, generation snapshot), then every
      * live reason of firstBlockingReason().
      *
-     * @param list<Duty> $block
+     * @param list<Duty>             $block
+     * @param list<PersonCommitment> $virtualCommitments duties not written yet but about to be, on lines solved
+     *                                                   earlier in the same completion (docs/decisions.md D161)
      */
-    public function assignabilityError(PlanningGeneration $generation, array $block, PlanningTeamMember $member): ?string
+    public function assignabilityError(PlanningGeneration $generation, array $block, PlanningTeamMember $member, array $virtualCommitments = []): ?string
     {
         if ($member->getPlanningTeam() !== $block[0]->getTeam()) {
             return self::NOT_A_LINE_MEMBER;
@@ -126,7 +135,7 @@ final class ReassignmentCandidateService
             return self::NOT_IN_GENERATION_SNAPSHOT;
         }
 
-        return $this->firstBlockingReason($generation, $block, $member)?->value;
+        return $this->firstBlockingReason($generation, $block, $member, $virtualCommitments)?->value;
     }
 
     /**
@@ -183,9 +192,10 @@ final class ReassignmentCandidateService
      * time to revalidate for real, never trusting what the modal showed
      * when it opened (docs/decisions.md D131 §Revalidation).
      *
-     * @param list<Duty> $block
+     * @param list<Duty>             $block
+     * @param list<PersonCommitment> $virtualCommitments see assignabilityError()
      */
-    public function firstBlockingReason(PlanningGeneration $generation, array $block, PlanningTeamMember $member): ?ExclusionReason
+    public function firstBlockingReason(PlanningGeneration $generation, array $block, PlanningTeamMember $member, array $virtualCommitments = []): ?ExclusionReason
     {
         if (!$member->getUser()->isActive()) {
             return ExclusionReason::USER_INACTIVE;
@@ -211,49 +221,58 @@ final class ReassignmentCandidateService
             }
         }
 
-        return $this->conflictOrRestReason($generation, $block, $member);
+        return $this->conflictOrRestReason($generation, $block, $member, $virtualCommitments);
     }
 
     /**
-     * @param list<Duty> $block
+     * Everything the same PERSON currently holds, on every active line of
+     * the Planning (docs/decisions.md D161) — not only this member's stint
+     * on this line: since D160 the same User may have a stint on each line,
+     * and it is the person who cannot be in two places at once. Checked
+     * the same way whichever line is being edited (symmetric): a duty of
+     * the edited generation gives CONFLICT / LEGAL_MIN_REST / TEAM_MIN_REST
+     * with its own thresholds (D131), a duty of another line gives the
+     * CROSS_LINE_* reasons with the stricter of both generations'
+     * thresholds (PersonCommitmentChecker).
+     *
+     * @param list<Duty>             $block
+     * @param list<PersonCommitment> $virtualCommitments
      */
-    private function conflictOrRestReason(PlanningGeneration $generation, array $block, PlanningTeamMember $member): ?ExclusionReason
+    private function conflictOrRestReason(PlanningGeneration $generation, array $block, PlanningTeamMember $member, array $virtualCommitments): ?ExclusionReason
     {
-        $otherAssignments = $this->assignmentRepository->findCurrentForTeamMemberInGeneration($generation, $member, excludingDuties: $block);
-        if ([] === $otherAssignments) {
-            return null;
-        }
+        $user = $member->getUser();
+        $blockDutyIds = array_map(static fn (Duty $duty): int => (int) $duty->getId(), $block);
 
-        $restPolicy = $generation->getRestPolicy();
-        $minGapHours = null;
-
-        foreach ($block as $duty) {
-            foreach ($otherAssignments as $other) {
-                $otherDuty = $other->getDuty();
-
-                if ($duty->overlapsWith($otherDuty)) {
-                    return ExclusionReason::CONFLICT;
-                }
-
-                $gap = $this->restGapCalculator->gapHours($duty, $otherDuty);
-                if (null === $minGapHours || $gap < $minGapHours) {
-                    $minGapHours = $gap;
-                }
+        $intervals = [];
+        foreach ([...$this->commitmentReader->forUser($this->linesToRead($generation), $user), ...$virtualCommitments] as $commitment) {
+            if ($commitment->teamMember->getUser() !== $user || \in_array((int) $commitment->duty->getId(), $blockDutyIds, true)) {
+                continue;
             }
+            $intervals[] = $commitment->toIntervalFor($generation);
         }
 
-        if (null === $minGapHours) {
-            return null;
+        return $this->commitmentChecker->firstViolation($block, $intervals, $generation->getRestPolicy())?->reason;
+    }
+
+    /**
+     * Every active line of the Planning, plus the edited generation's own
+     * line even if it has been deactivated meanwhile — its own duties must
+     * always be checked.
+     *
+     * @return list<PlanningLine>
+     */
+    private function linesToRead(PlanningGeneration $generation): array
+    {
+        $line = $this->lineRepository->findOneByPlanningPeriod($generation->getPlanningPeriod());
+        if (null === $line) {
+            return [];
         }
 
-        if ($restPolicy->legalMinRestEnabled && $minGapHours < $restPolicy->legalMinRestHours) {
-            return ExclusionReason::LEGAL_MIN_REST;
+        $lines = $this->lineOrder->activeInResolutionOrder($line->getPlanning());
+        if (!\in_array($line, $lines, true)) {
+            $lines[] = $line;
         }
 
-        if ($restPolicy->teamMinRestEnabled && $minGapHours < $restPolicy->teamMinRestHours) {
-            return ExclusionReason::TEAM_MIN_REST;
-        }
-
-        return null;
+        return $lines;
     }
 }

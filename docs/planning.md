@@ -170,10 +170,25 @@ moteur lui-même.
 > mais une même *personne* peut désormais avoir un stint dans chacune de
 > deux lignes (§6). Elle est alors candidate sur les deux lignes, chaque
 > fois via son propre stint et dans le `FairnessContext` de la ligne —
-> jamais une fusion des populations. Tant que les contraintes entre lignes
-> (lot suivant du chantier « ligne secondaire conditionnelle ») ne sont pas
-> livrées, rien n'empêche encore de lui attribuer deux gardes simultanées
-> sur deux lignes.
+> jamais une fusion des populations. Les incompatibilités réelles de la
+> personne entre lignes (chevauchement, repos) sont contrôlées depuis D161 :
+> voir §7 bis.
+
+## 7 bis. Contraintes entre lignes, par personne (D161)
+
+Les lignes actives d'un Planning sont résolues **l'une après l'autre**, dans
+un ordre explicite (`PlanningLineOrder` : sources d'abord, puis `position`) ;
+une ligne résolue plus tôt est prioritaire, aucun optimum global entre
+lignes n'est recherché. Les affectations courantes des lignes précédentes
+sont figées dans le snapshot de chaque ligne
+(`PlanningSnapshotExternalCommitment`) et excluent localement, pour la
+**même personne**, les gardes incompatibles (`CROSS_LINE_CONFLICT`,
+`CROSS_LINE_LEGAL_MIN_REST`, `CROSS_LINE_TEAM_MIN_REST`). En live
+(réaffectation, retrait, complétion, préflight de publication), le même
+contrôle est appliqué dans les deux sens, sur tout ce que la personne tient
+sur toutes les lignes. Repos entre deux lignes : le plus strict des seuils
+des deux générations. Détail : `docs/planning-generation.md` §24,
+`docs/decisions.md` D161.
 
 ## 8. `PlanningGeneration` reste mono-ligne
 

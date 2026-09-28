@@ -4859,7 +4859,7 @@ l'ancienne (voir légende).
   (chevauchement, repos, « pas son propre renfort ») doit donc se faire sur
   le `User` / `sourceUserStableId`, jamais sur le stint — c'est l'objet du
   lot suivant (contraintes entre lignes), qui fait de cette décision une
-  condition nécessaire et non suffisante : **jusqu'à ce lot, rien
+  condition nécessaire et non suffisante (lot suivant : D161) : **jusqu'à ce lot, rien
   n'empêche encore la génération ou une réaffectation d'attribuer à une
   même personne deux gardes simultanées sur deux lignes.**
 - **Limite connue, acceptée** : la non-participation administrative reste
@@ -4873,3 +4873,113 @@ l'ancienne (voir légende).
   représenter sans casser l'isolation des lignes) ; garder
   `findOpenMembershipForUserInPlanning()` en renvoyant « la première »
   adhésion.
+
+## D161 — Contraintes entre lignes, par personne : engagements figés des lignes résolues avant, contrôle live symétrique
+
+- **Contexte** : depuis D160, un même `User` peut appartenir à plusieurs
+  lignes d'un Planning (un stint par ligne). Rien n'empêchait alors de lui
+  attribuer deux gardes simultanées sur deux lignes, ou deux gardes sans
+  repos suffisant : tous les contrôles existants (`AssignmentConflictAnalyzer`,
+  `ReassignmentCandidateService`) raisonnaient à l'intérieur d'**une**
+  génération, par stint.
+- **Décision — identité = la personne** : toute incompatibilité réelle est
+  évaluée sur le `User` (`sourceUserStableId` dans un snapshot), jamais sur
+  le `PlanningTeamMember`. Une seule règle, `PersonCommitmentChecker`,
+  partagée par le chemin figé (génération) et le chemin live (réaffectation,
+  retrait, complétion, préflight de publication) : les deux ne peuvent pas
+  diverger.
+- **Décision — pas de résolution globale** : les lignes actives sont
+  résolues **l'une après l'autre**, dans un ordre explicite et déterministe
+  (`PlanningLineOrder` : sources d'abord — sans objet tant qu'aucune ligne
+  conditionnelle n'existe —, puis `position`, puis id). Une ligne résolue
+  plus tôt est prioritaire : ses affectations deviennent des **engagements
+  fixes** de leurs titulaires pour les lignes suivantes. Aucun optimum
+  global entre lignes n'est recherché (validé explicitement).
+- **Génération — engagements figés dans le snapshot** : nouvelle entité
+  `PlanningSnapshotExternalCommitment` (table
+  `planning_snapshot_external_commitments`, migration
+  `Version20260928120000`). `PlanningSnapshotService::createSnapshot()` y
+  fige, pour chaque personne présente dans le snapshot, les affectations
+  courantes (`DutyAssignment.current` de la génération COMPLETED la plus
+  récente, D125/D131) des lignes actives **qui la précèdent** dans l'ordre
+  de résolution. Valeurs seulement : `sourceUserStableId`,
+  `sourceLineStableId`, `sourceGenerationStableId`, `sourceDutyStableId`,
+  `startsAt`/`endsAt`, et les seuils de repos de la génération propriétaire
+  (`sourceLegalMinRestHours`/`sourceTeamMinRestHours`, `null` = désactivé).
+  Une ligne résolue *après* n'est jamais lue : lors d'un lancement planning,
+  elle va elle-même être régénérée, et c'est son propre snapshot qui verra
+  le résultat de celle-ci. Le lanceur (D129/D149 — aucun second
+  orchestrateur) exécute les lignes dans cet ordre ; comme chaque snapshot
+  est pris juste avant le solve de sa ligne, une ligne voit le résultat
+  frais des précédentes.
+- **Exclusions locales, jamais une contrainte CP-SAT globale** :
+  `EligibilityService` retire l'arête (unité, stint) incompatible avec un
+  engagement de la même personne. L'autre garde étant déjà décidée, c'est
+  une exclusion locale exactement comme `UNAVAILABLE`, pas une paire
+  `x[A]+x[B] <= 1`. Nouvelles raisons : `CROSS_LINE_CONFLICT` (HARD),
+  `CROSS_LINE_LEGAL_MIN_REST` (HARD), `CROSS_LINE_TEAM_MIN_REST`
+  (POLICY_HARD), avec en contexte la ligne et la garde en cause.
+  `SELF_COVERAGE` (HARD, « ne peut pas être son propre renfort ») est
+  déclarée et libellée mais **non produite** : elle suppose les gardes
+  conditionnelles (`Duty.coverageSource`, lots suivants).
+- **Exposition inchangée** : ces raisons ne mettent jamais
+  `structuralOpportunity` à `false` — comme `CONFLICT` à l'intérieur d'une
+  ligne, une garde tenue ailleurs est une circonstance du calendrier, pas un
+  fait structurel. L'exposition et les cibles d'équité de chaque ligne
+  restent calculées sur sa seule population, sans fusion.
+- **Repos entre lignes** : pour un engagement de la **même** génération,
+  les seuils de cette génération (`CONFLICT`/`LEGAL_MIN_REST`/
+  `TEAM_MIN_REST`, inchangé, D131). Pour un engagement d'une **autre**
+  génération, le **plus strict des deux** : chaque règle est active dès
+  qu'une des deux générations l'a activée, au plus grand nombre d'heures.
+  Une règle de repos choisie pour une ligne protège donc aussi la personne
+  quand l'autre ligne est modifiée, et la réponse est la même quelle que
+  soit la ligne éditée. Arithmétique en instants absolus (DST-safe), écart
+  exactement égal au minimum autorisé (`<` strict), précédence :
+  chevauchement, puis repos légal, puis repos d'équipe, même ligne avant
+  autre ligne. Au lancement planning, toutes les lignes reçoivent la même
+  politique (D138) : les deux seuils coïncident dans le cas courant.
+- **Live — contrôle symétrique** : `ReassignmentCandidateService` lit, via
+  `PersonCommitmentReader`, tout ce que la **personne** tient sur toutes
+  les lignes actives (plus la ligne éditée elle-même) et applique la même
+  règle. Modifier la ligne A voit la ligne B et inversement ; la liste des
+  candidats (D144), l'écriture (revalidation serveur), le préflight de
+  publication (nouvelles raisons classées dans les conflits) et la
+  complétion en héritent sans code supplémentaire. Au passage, deux stints
+  successifs d'une même personne dans la même équipe sont désormais aussi
+  comparés entre eux (l'ancien contrôle, par stint, ne les voyait pas).
+  `DutyAssignmentRepository::findCurrentForTeamMemberInGeneration()`,
+  devenue sans appelant, est supprimée.
+- **Complétion séquentielle** (D145/D149) : les lignes sont complétées
+  dans l'ordre de résolution ; les trous qu'une ligne s'apprête à combler
+  sont des **engagements virtuels** pour les lignes suivantes (non encore
+  écrits). Sans eux, la même personne pouvait être choisie sur deux lignes
+  et la revalidation à l'écriture faisait échouer toute la complétion
+  (`calendar_changed`). La matrice de la complétion est construite **sans**
+  les engagements figés à la génération : ils peuvent ne plus tenir (une
+  réaffectation depuis) et ne doivent jamais exclure quelqu'un de libre
+  aujourd'hui ; le contrôle live les remplace.
+- **`snapshotHash`** : les engagements figés y entrent — uniquement
+  lorsqu'il y en a, afin que le hash de tout snapshot sans engagement
+  (antérieur à D161, ou planning à une seule ligne) reste exactement celui
+  qu'il a toujours eu. L'audit `GET /api/planning-generations/{id}/snapshot`
+  les expose (`externalCommitments`, `summary.externalCommitmentCount`).
+- **Limites connues, acceptées** :
+  1. un solve lancé par le point d'entrée technique par période
+     (`/planning-generations/{id}/solve`) sur une ligne ignore les
+     affectations courantes des lignes qui la **suivent** (règle « seules
+     les lignes précédentes ») ; une incompatibilité ainsi créée est
+     signalée par le préflight de publication, qui, lui, est symétrique ;
+  2. `CROSS_LINE_TEAM_MIN_REST` n'est jamais proposée comme relaxation
+     dans un diagnostic UNSAT (`diagnosticRelaxations` ne porte que sur les
+     `AssignmentConflict`, D103) ;
+  3. deux Plannings *différents* restent indépendants : une personne membre
+     de deux Plannings n'est pas contrôlée d'un Planning à l'autre (hors
+     périmètre, inchangé).
+- **Rejeté** : une résolution CP-SAT conjointe de toutes les lignes (casse
+  l'isolation des populations et de l'équité, complexité) ; des contraintes
+  globales CP-SAT pour des gardes déjà décidées ; réutiliser `CONFLICT`/
+  `TEAM_MIN_REST` pour le cas inter-lignes (perte d'explicabilité : la
+  raison doit dire que l'autre garde est sur une autre ligne) ; relire les
+  affectations *live* des autres lignes pendant un solve (casserait
+  l'immuabilité de l'entrée du solve et l'explication historique).

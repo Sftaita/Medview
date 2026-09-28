@@ -7,6 +7,7 @@ namespace App\Service;
 use App\Entity\Duty;
 use App\Entity\PlanningSnapshot;
 use App\Entity\PlanningSnapshotAvailabilityPeriod;
+use App\Entity\PlanningSnapshotExternalCommitment;
 use App\Entity\PlanningSnapshotMember;
 use App\Entity\PlanningSnapshotNonParticipationPeriod;
 use App\Entity\PlanningSnapshotParticipationPeriod;
@@ -40,6 +41,11 @@ use App\Repository\DutyRepository;
  *   fields `overlapsWith()` actually compares) — each entity's own
  *   `$sourceCreatedAt`/`$sourceUpdatedAt` are excluded as the "technical
  *   timestamps without business value" §14 already rules out.
+ * - The snapshot's `externalCommitments` (docs/decisions.md D161) — the
+ *   duties its people hold on the lines solved before this one, read by
+ *   `EligibilityService` for the cross-line exclusions: every field the
+ *   check uses (person, interval, the owning generation's rest thresholds)
+ *   plus the stable ids that identify the commitment.
  * - The **live** `Duty` list of the `PlanningPeriod` (never duplicated
  *   into the snapshot, docs/planning-generation.md §4 — this is the one
  *   genuinely mutable input a synchronous solve can still see drift:
@@ -86,6 +92,13 @@ final class SnapshotHasher
             'duties' => array_map($this->canonicalizeDuty(...), $duties),
         ];
 
+        // Only when there is something to hash: a snapshot without any cross-line commitment (every
+        // snapshot taken before D161, every single-line Planning) keeps exactly the hash it always had.
+        $externalCommitments = $this->canonicalizeExternalCommitments($snapshot);
+        if ([] !== $externalCommitments) {
+            $canonical['externalCommitments'] = $externalCommitments;
+        }
+
         return hash('sha256', json_encode($canonical, \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES));
     }
 
@@ -126,6 +139,26 @@ final class SnapshotHasher
                 'endsAt' => $p->getEndsAt()->format(\DATE_ATOM),
             ], $nonParticipationPeriods),
         ];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function canonicalizeExternalCommitments(PlanningSnapshot $snapshot): array
+    {
+        $commitments = $snapshot->getExternalCommitments()->toArray();
+        usort($commitments, static fn (PlanningSnapshotExternalCommitment $a, PlanningSnapshotExternalCommitment $b): int => [(string) $a->getSourceUserStableId(), (string) $a->getSourceDutyStableId()] <=> [(string) $b->getSourceUserStableId(), (string) $b->getSourceDutyStableId()]);
+
+        return array_map(static fn (PlanningSnapshotExternalCommitment $c): array => [
+            'sourceUserStableId' => (string) $c->getSourceUserStableId(),
+            'sourceLineStableId' => (string) $c->getSourceLineStableId(),
+            'sourceGenerationStableId' => (string) $c->getSourceGenerationStableId(),
+            'sourceDutyStableId' => (string) $c->getSourceDutyStableId(),
+            'startsAt' => $c->getStartsAt()->format(\DATE_ATOM),
+            'endsAt' => $c->getEndsAt()->format(\DATE_ATOM),
+            'sourceLegalMinRestHours' => $c->getSourceLegalMinRestHours(),
+            'sourceTeamMinRestHours' => $c->getSourceTeamMinRestHours(),
+        ], $commitments);
     }
 
     /**

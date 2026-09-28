@@ -102,6 +102,7 @@ lacune dans `docs/planning-domain.md` §17 reste donc toujours ouverte.
 | `PlanningSnapshotAvailabilityPeriod` | `sourceAvailabilityStableId`, `type` (UNAVAILABLE/PREFER_DUTY), `startsAt`/`endsAt`, `sourceCreatedAt`/`sourceUpdatedAt` |
 | `PlanningSnapshotNonParticipationPeriod` | `sourceNonParticipationStableId`, `startsAt`/`endsAt`, `sourceCreatedAt`/`sourceUpdatedAt` |
 | `PlanningSnapshotRuleSet` | `sourcePlanningRuleSetStableId`, `sourceVersion`, `configuration` (copie complète du JSON) |
+| `PlanningSnapshotExternalCommitment` (D161, §24) | gardes que les personnes du snapshot tiennent déjà sur les lignes résolues avant celle-ci : `sourceUserStableId`, `sourceLineStableId`, `sourceGenerationStableId`, `sourceDutyStableId`, `startsAt`/`endsAt`, seuils de repos de la génération propriétaire |
 
 **Pas de FK vers les entités vivantes pour l'identité des membres** —
 `PlanningSnapshotMember` ne référence `TeamMember`/`User` que par la
@@ -763,3 +764,45 @@ plus récent, jamais le détail technique d'un échec. Travaux abandonnés :
 
 Tables : `planning_jobs` (index unique partiel « un job actif par
 planning »), `messenger_messages` — migration `Version20260927170000`.
+
+## 24. Contraintes entre lignes, par personne (docs/decisions.md D161)
+
+Depuis D160, un même `User` peut appartenir à plusieurs lignes. Les
+incompatibilités réelles se raisonnent sur la **personne**, jamais sur le
+stint, avec une seule règle (`PersonCommitmentChecker`) pour le chemin figé
+et le chemin live.
+
+**Ordre de résolution** — `PlanningLineOrder::activeInResolutionOrder()` :
+sources d'abord (sans objet tant qu'aucune ligne conditionnelle n'existe),
+puis `position`, puis id. Le lanceur (`PlanningGenerationLauncher`, exécuté
+par le worker D149) suit cet ordre ; la complétion aussi.
+
+**Génération** — `PlanningSnapshotService::createSnapshot()` fige, pour
+chaque personne du snapshot, les affectations courantes des lignes actives
+qui **précèdent** la ligne (`PlanningSnapshotExternalCommitment`, valeurs
+seulement). `EligibilityService` en déduit des exclusions locales
+(`CROSS_LINE_CONFLICT` HARD, `CROSS_LINE_LEGAL_MIN_REST` HARD,
+`CROSS_LINE_TEAM_MIN_REST` POLICY_HARD) sur toute l'unité, sans toucher à
+`structuralOpportunity`. Les engagements entrent dans le `snapshotHash`
+(uniquement s'il y en a) et sont exposés par
+`GET /api/planning-generations/{id}/snapshot`. Une ancienne génération ne
+change jamais : une modification ultérieure de l'autre ligne ne touche pas
+ses engagements figés.
+
+**Repos entre lignes** — même génération : ses propres seuils (inchangé).
+Autre génération : le plus strict des deux (règle active dès qu'une des
+deux l'a activée, au plus grand nombre d'heures). Écart égal au minimum
+autorisé ; instants absolus.
+
+**Live** — `ReassignmentCandidateService` lit via `PersonCommitmentReader`
+tout ce que la personne tient sur toutes les lignes actives : la liste des
+candidats, la revalidation à l'écriture et le préflight de publication sont
+symétriques (modifier la ligne A voit la ligne B, et inversement).
+
+**Complétion** — ligne après ligne dans l'ordre de résolution ; les trous
+qu'une ligne va combler sont des engagements virtuels pour les suivantes ;
+la matrice est construite sans les engagements figés, remplacés par le
+contrôle live.
+
+Table : `planning_snapshot_external_commitments` — migration
+`Version20260928120000`.

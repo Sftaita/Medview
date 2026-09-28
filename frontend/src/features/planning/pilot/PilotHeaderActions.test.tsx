@@ -592,6 +592,43 @@ describe('GenerationModal', () => {
       screen.getByText(/Relâcher le repos minimum d’équipe permettrait de couvrir 1 garde de plus\./),
     ).toBeInTheDocument()
   })
+
+  it('names a cross-line exclusion in French, never by its raw code (docs/decisions.md D161)', async () => {
+    renderResult({
+      lines: [
+        {
+          ...SUCCESS.lines[0],
+          coverageStatus: 'INCOMPLETE',
+          assignmentCount: 27,
+          unassignedDutyCount: 1,
+          diagnostics: {
+            strictSolverStatus: 'UNSATISFIABLE',
+            partialSolverStatus: 'OPTIMAL',
+            requiredDutyCount: 28,
+            assignedDutyCount: 27,
+            unassignedDuties: [
+              {
+                dutyUnitStableKey: 'duty-1',
+                critical: false,
+                candidateExclusions: [
+                  { candidateId: 'user-1', exclusions: [{ reason: 'CROSS_LINE_CONFLICT', context: {} }] },
+                  { candidateId: 'user-2', exclusions: [{ reason: 'CROSS_LINE_TEAM_MIN_REST', context: {} }] },
+                ],
+              },
+            ],
+            structuralDiagnostics: [{ code: 'NO_ELIGIBLE_CANDIDATE', dutyUnitStableKey: 'duty-1' }],
+            solverAnalysis: { available: true },
+            diagnosticRelaxations: [],
+            existingDataConflict: null,
+          },
+        },
+      ],
+    })
+
+    expect(await screen.findByText('Déjà de garde au même moment sur une autre ligne (1)')).toBeInTheDocument()
+    expect(screen.getByText('Repos minimum d’équipe avec une garde sur une autre ligne (1)')).toBeInTheDocument()
+    expect(screen.queryByText(/CROSS_LINE/)).not.toBeInTheDocument()
+  })
 })
 
 describe('Règles de génération (docs/decisions.md D137)', () => {

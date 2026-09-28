@@ -7,6 +7,7 @@ namespace App\Controller;
 use App\Entity\PlanningGeneration;
 use App\Entity\PlanningPeriod;
 use App\Entity\PlanningSnapshot;
+use App\Entity\PlanningSnapshotExternalCommitment;
 use App\Entity\PlanningTeam;
 use App\Entity\User;
 use App\Entity\UserAvailabilityType;
@@ -345,11 +346,23 @@ final class PlanningGenerationController
                 'sourceVersion' => $ruleSet->getSourceVersion(),
                 'configuration' => $ruleSet->getConfiguration(),
             ],
+            // docs/decisions.md D161: duties the snapshot's people already held on the lines solved before this one.
+            'externalCommitments' => array_map(static fn (PlanningSnapshotExternalCommitment $c): array => [
+                'sourceUserStableId' => (string) $c->getSourceUserStableId(),
+                'sourceLineStableId' => (string) $c->getSourceLineStableId(),
+                'sourceGenerationStableId' => (string) $c->getSourceGenerationStableId(),
+                'sourceDutyStableId' => (string) $c->getSourceDutyStableId(),
+                'startsAt' => $c->getStartsAt()->format(\DATE_ATOM),
+                'endsAt' => $c->getEndsAt()->format(\DATE_ATOM),
+                'sourceLegalMinRestHours' => $c->getSourceLegalMinRestHours(),
+                'sourceTeamMinRestHours' => $c->getSourceTeamMinRestHours(),
+            ], $snapshot->getExternalCommitments()->toArray()),
             'summary' => [
                 'memberCount' => \count($members),
                 'unavailableCount' => $unavailableCount,
                 'preferDutyCount' => $preferDutyCount,
                 'nonParticipationCount' => $nonParticipationCount,
+                'externalCommitmentCount' => $snapshot->getExternalCommitments()->count(),
             ],
         ];
     }

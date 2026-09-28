@@ -168,6 +168,14 @@ confondues — voir `docs/decisions.md` D084 pour la justification textuelle
   silencieusement traitée comme facteur nul — un snapshot valide doit
   toujours couvrir la fenêtre de membership qu'il fige.
 
+> **Contraintes entre lignes (D161)** : une exclusion `CROSS_LINE_*` (la
+> même personne tient déjà une garde sur une autre ligne) ne met jamais
+> `structuralOpportunity` à `false` — comme `CONFLICT` à l'intérieur d'une
+> ligne, c'est une circonstance du calendrier, pas un fait structurel.
+> L'exposition, les cibles et la charge forcée de chaque ligne restent
+> calculées sur sa seule population (testé :
+> `EligibilityServiceTest::testACrossLineCommitmentExcludesButNeverZeroesStructuralOpportunity`).
+
 **Deux invariants de résistance au gaming, testés explicitement**
 (`EffectiveExposureServiceTest`) :
 

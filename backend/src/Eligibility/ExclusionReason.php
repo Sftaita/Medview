@@ -21,6 +21,18 @@ enum ExclusionReason: string
     case NON_PARTICIPATION = 'NON_PARTICIPATION';
     case CONFLICT = 'CONFLICT';
 
+    // Cross-line constraints on the same person (docs/decisions.md D161):
+    // the candidate's User already holds a duty on *another* line of the
+    // Planning. A local exclusion (the edge is removed), never a global
+    // CP-SAT constraint: the other line's duty is already decided.
+    case CROSS_LINE_CONFLICT = 'CROSS_LINE_CONFLICT';
+    case CROSS_LINE_LEGAL_MIN_REST = 'CROSS_LINE_LEGAL_MIN_REST';
+    case CROSS_LINE_TEAM_MIN_REST = 'CROSS_LINE_TEAM_MIN_REST';
+    // Prepared for conditional coverage (D161): the candidate would
+    // reinforce their own duty. Not produced until conditional duties
+    // (Duty.coverageSource) exist.
+    case SELF_COVERAGE = 'SELF_COVERAGE';
+
     // Declared per the spec's stable contract, not yet computed by
     // EligibilityService — see docs/eligibility.md for why each one is
     // deferred (missing data, or a rule not yet modeled).
@@ -52,9 +64,13 @@ enum ExclusionReason: string
             self::LEGAL_MIN_REST,
             self::LOCK_CONFLICT,
             self::GROUP_UNAVAILABLE,
+            self::CROSS_LINE_CONFLICT,
+            self::CROSS_LINE_LEGAL_MIN_REST,
+            self::SELF_COVERAGE,
             self::NON_PARTICIPATION => ConstraintTier::HARD,
 
             self::TEAM_MIN_REST,
+            self::CROSS_LINE_TEAM_MIN_REST,
             self::MAX_DUTIES,
             self::MAX_WEEKENDS,
             self::MAX_CONSECUTIVE_NIGHTS,
@@ -94,6 +110,14 @@ enum ExclusionReason: string
             self::CONFLICT,
             self::LEGAL_MIN_REST,
             self::LOCK_CONFLICT,
+            // A duty held on another line is a circumstance of the current
+            // calendar, not a structural fact about this line: exactly like
+            // CONFLICT within a line, it never shrinks the person's exposure
+            // (docs/decisions.md D161).
+            self::CROSS_LINE_CONFLICT,
+            self::CROSS_LINE_LEGAL_MIN_REST,
+            self::CROSS_LINE_TEAM_MIN_REST,
+            self::SELF_COVERAGE,
             // Derived reason: its real structural effect is computed from
             // the wrapped root cause(s) before wrapping, never from this
             // method — see EligibilityService.

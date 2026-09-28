@@ -18,7 +18,6 @@ use App\Exception\PlanningGenerationInProgressException;
 use App\Exception\PlanningNotLaunchableException;
 use App\Exception\StalePlanningGenerationDataException;
 use App\Repository\DutyRepository;
-use App\Repository\PlanningLineRepository;
 use App\Repository\PlanningRuleSetRepository;
 use App\Repository\PlanningTeamMemberRepository;
 use App\Repository\SolverParameterSetRepository;
@@ -71,7 +70,6 @@ final class PlanningGenerationLauncher
 
     public function __construct(
         private readonly PlanningCollectionStatusService $statusService,
-        private readonly PlanningLineRepository $lineRepository,
         private readonly PlanningTeamMemberRepository $teamMemberRepository,
         private readonly DutyRepository $dutyRepository,
         private readonly PlanningRuleSetRepository $ruleSetRepository,
@@ -82,6 +80,7 @@ final class PlanningGenerationLauncher
         private readonly DutyUnitFactory $dutyUnitFactory,
         private readonly EntityManagerInterface $entityManager,
         private readonly WorkHeartbeat $heartbeat,
+        private readonly PlanningLineOrder $lineOrder,
     ) {
     }
 
@@ -97,11 +96,9 @@ final class PlanningGenerationLauncher
             $blockers[] = new PreflightIssue(PreflightIssueCode::NO_SOLVER_PARAMETER_SET);
         }
 
-        foreach ($this->lineRepository->findByPlanning($planning) as $line) {
-            if (!$line->isActive()) {
-                continue;
-            }
-
+        // The resolution order (docs/decisions.md D161): launch() runs the lines in exactly this order,
+        // and each line's snapshot freezes the assignments of the lines before it as fixed commitments.
+        foreach ($this->lineOrder->activeInResolutionOrder($planning) as $line) {
             $period = $line->getPlanningPeriod();
             $this->weeklyDutyCalendarService->ensureMaterialized($period, $period->getEndsAt());
 
@@ -160,6 +157,8 @@ final class PlanningGenerationLauncher
                 throw new PlanningNotLaunchableException($preflight);
             }
 
+            // One line after another, in resolution order (PlanningLineOrder): a line's snapshot is taken
+            // only once the lines before it are solved, so it sees their fresh assignments as commitments.
             $results = [];
             foreach ($preflight->lines as $readiness) {
                 $results[] = $this->runLine($readiness->line, $launchedBy, $restPolicy ?? RestPolicyOptions::none());

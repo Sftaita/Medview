@@ -8,6 +8,7 @@ use App\Entity\PlanningGeneration;
 use App\Entity\PlanningPeriod;
 use App\Entity\PlanningSnapshot;
 use App\Entity\PlanningSnapshotAvailabilityPeriod;
+use App\Entity\PlanningSnapshotExternalCommitment;
 use App\Entity\PlanningSnapshotMember;
 use App\Entity\RestPolicyOptions;
 use App\Entity\TeamMemberRole;
@@ -69,6 +70,36 @@ final class SnapshotHasherTest extends KernelTestCase
         $snapshot2 = $this->buildSnapshot($em, [$this->syntheticMember('2027-06-01T00:00:00+00:00')]);
 
         self::assertNotSame($hasher->hash($snapshot1), $hasher->hash($snapshot2));
+    }
+
+    /**
+     * docs/decisions.md D161: the cross-line commitments frozen in a
+     * snapshot are read by EligibilityService, so they are part of what
+     * the solve depends on — and of its hash.
+     */
+    public function testAFrozenExternalCommitmentEntersTheHash(): void
+    {
+        self::bootKernel();
+        $em = self::getContainer()->get(EntityManagerInterface::class);
+        $hasher = self::getContainer()->get(SnapshotHasher::class);
+        $member = $this->syntheticMember('2027-01-01T00:00:00+00:00');
+        $snapshot = $this->buildSnapshot($em, [$member]);
+        $withoutCommitment = $hasher->hash($snapshot);
+
+        $em->persist(new PlanningSnapshotExternalCommitment(
+            $snapshot,
+            $member['user'],
+            Uuid::v4(),
+            Uuid::v4(),
+            Uuid::v4(),
+            new \DateTimeImmutable('2027-01-05T00:00:00+01:00'),
+            new \DateTimeImmutable('2027-01-06T00:00:00+01:00'),
+            null,
+            12,
+        ));
+        $em->flush();
+
+        self::assertNotSame($withoutCommitment, $hasher->hash($snapshot));
     }
 
     public function testDifferentSourceTimestampsOnAvailabilityNeverAffectTheHash(): void

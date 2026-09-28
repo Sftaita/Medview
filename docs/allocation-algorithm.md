@@ -141,6 +141,10 @@ LEGAL_MIN_REST                         HARD   (minimum réglementaire, jamais n�
 LOCK_CONFLICT                            HARD
 GROUP_UNAVAILABLE                          HARD  (dérivée : un membre du DutyGroupInstance exclu exclut le groupe entier)
 TEAM_MIN_REST                                POLICY_HARD  (règle interne plus protectrice, jamais < LEGAL_MIN_REST)
+CROSS_LINE_CONFLICT           HARD         (même personne, garde déjà tenue sur une ligne résolue avant — D161)
+CROSS_LINE_LEGAL_MIN_REST     HARD         (idem, repos légal : le plus strict des deux générations)
+CROSS_LINE_TEAM_MIN_REST      POLICY_HARD  (idem, repos d'équipe : le plus strict des deux générations)
+SELF_COVERAGE                 HARD         (déclarée, pas encore produite : ne pas être son propre renfort)
 MAX_DUTIES                                     POLICY_HARD
 MAX_WEEKENDS                                     POLICY_HARD
 MAX_CONSECUTIVE_NIGHTS                             POLICY_HARD

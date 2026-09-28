@@ -14,6 +14,7 @@ use App\Entity\PlanningGeneration;
 use App\Entity\PlanningPeriod;
 use App\Entity\PlanningSnapshot;
 use App\Entity\PlanningSnapshotAvailabilityPeriod;
+use App\Entity\PlanningSnapshotExternalCommitment;
 use App\Entity\PlanningSnapshotMember;
 use App\Entity\PlanningSnapshotNonParticipationPeriod;
 use App\Entity\PlanningTeam;
@@ -144,6 +145,79 @@ final class EligibilityServiceTest extends KernelTestCase
         $dutyType = $this->createDutyType($em, $team);
 
         return [$em, $eligibilityService, $team, $planningPeriod, $dutyType];
+    }
+
+    private function addExternalCommitment(EntityManagerInterface $em, PlanningSnapshot $snapshot, PlanningSnapshotMember $member, string $startsAt, string $endsAt, ?int $teamMinRestHours = null): void
+    {
+        $em->persist(new PlanningSnapshotExternalCommitment(
+            $snapshot,
+            $member->getSourceUserStableId(),
+            Uuid::v7(),
+            Uuid::v7(),
+            Uuid::v7(),
+            $this->localInstant($startsAt),
+            $this->localInstant($endsAt),
+            null,
+            $teamMinRestHours,
+        ));
+        $em->flush();
+    }
+
+    /**
+     * docs/decisions.md D161: a duty the same person holds on a line solved
+     * earlier excludes the edge (CROSS_LINE_CONFLICT, HARD) and names the
+     * commitment — but never touches structuralOpportunity: like CONFLICT
+     * within a line, it is a circumstance of the calendar, not a structural
+     * fact, so exposure and targets are unchanged.
+     */
+    public function testACrossLineCommitmentExcludesButNeverZeroesStructuralOpportunity(): void
+    {
+        [$em, $service, , $planningPeriod, $dutyType] = $this->boot();
+        $dutyMaterialization = self::getContainer()->get(DutyMaterializationService::class);
+        $duty = $this->createDuty($dutyMaterialization, $planningPeriod, $dutyType, '2027-02-01 08:00', '2027-02-01 20:00');
+        $snapshot = $this->newSnapshot($em, $planningPeriod);
+        $member = $this->snapshotMember($em, $snapshot);
+        $this->addExternalCommitment($em, $snapshot, $member, '2027-02-01 19:00', '2027-02-02 07:00');
+
+        $result = $service->evaluate($snapshot, new SingleDutyUnit($duty), $member);
+
+        self::assertFalse($result->eligible);
+        self::assertCount(1, $result->exclusions);
+        self::assertSame(ExclusionReason::CROSS_LINE_CONFLICT, $result->exclusions[0]->reason);
+        self::assertSame(ConstraintTier::HARD, $result->exclusions[0]->tier);
+        self::assertArrayHasKey('otherDutyStableId', $result->exclusions[0]->context);
+        self::assertTrue($result->structuralOpportunity);
+    }
+
+    public function testACrossLineRestExclusionUsesTheCommitmentsOwnThresholdAsPolicyHard(): void
+    {
+        [$em, $service, , $planningPeriod, $dutyType] = $this->boot();
+        $dutyMaterialization = self::getContainer()->get(DutyMaterializationService::class);
+        $duty = $this->createDuty($dutyMaterialization, $planningPeriod, $dutyType, '2027-02-01 08:00', '2027-02-01 20:00');
+        $snapshot = $this->newSnapshot($em, $planningPeriod);
+        $member = $this->snapshotMember($em, $snapshot);
+        // 10 h after the duty ends; the other line's generation asked for 12 h of team rest, this one for none.
+        $this->addExternalCommitment($em, $snapshot, $member, '2027-02-02 06:00', '2027-02-02 18:00', teamMinRestHours: 12);
+
+        $result = $service->evaluate($snapshot, new SingleDutyUnit($duty), $member);
+
+        self::assertSame(ExclusionReason::CROSS_LINE_TEAM_MIN_REST, $result->exclusions[0]->reason);
+        self::assertSame(ConstraintTier::POLICY_HARD, $result->exclusions[0]->tier);
+        self::assertTrue($result->structuralOpportunity);
+    }
+
+    public function testAnotherPersonsCommitmentIsIgnored(): void
+    {
+        [$em, $service, , $planningPeriod, $dutyType] = $this->boot();
+        $dutyMaterialization = self::getContainer()->get(DutyMaterializationService::class);
+        $duty = $this->createDuty($dutyMaterialization, $planningPeriod, $dutyType, '2027-02-01 08:00', '2027-02-01 20:00');
+        $snapshot = $this->newSnapshot($em, $planningPeriod);
+        $member = $this->snapshotMember($em, $snapshot);
+        $someoneElse = $this->snapshotMember($em, $snapshot);
+        $this->addExternalCommitment($em, $snapshot, $someoneElse, '2027-02-01 08:00', '2027-02-01 20:00');
+
+        self::assertTrue($service->evaluate($snapshot, new SingleDutyUnit($duty), $member)->eligible);
+        self::assertFalse($service->evaluate($snapshot, new SingleDutyUnit($duty), $someoneElse)->eligible);
     }
 
     public function testActiveMemberValidMembershipNoAbsenceIsEligible(): void

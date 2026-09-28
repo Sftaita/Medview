@@ -163,7 +163,8 @@ final class PlanningPublicationPreflightService
     ): void {
         $label = $this->reasonLabeler->label($reason);
         match ($reason) {
-            ExclusionReason::CONFLICT, ExclusionReason::LEGAL_MIN_REST, ExclusionReason::TEAM_MIN_REST => $conflicts[] = new PublicationConflict($duty, $member, $label),
+            ExclusionReason::CONFLICT, ExclusionReason::LEGAL_MIN_REST, ExclusionReason::TEAM_MIN_REST,
+            ExclusionReason::CROSS_LINE_CONFLICT, ExclusionReason::CROSS_LINE_LEGAL_MIN_REST, ExclusionReason::CROSS_LINE_TEAM_MIN_REST => $conflicts[] = new PublicationConflict($duty, $member, $label),
             default => $invalidAssignments[] = new InvalidPublicationAssignment($duty, $member, $label),
         };
     }

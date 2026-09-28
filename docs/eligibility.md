@@ -85,6 +85,20 @@ spécification, mais `EligibilityService` ne **produit** aujourd'hui que :
 | `UNAVAILABLE` | `PlanningSnapshotAvailabilityPeriod` (type `UNAVAILABLE`) vs instants réels de la `Duty` | HARD |
 | `NON_PARTICIPATION` | `PlanningSnapshotNonParticipationPeriod` vs instants réels de la `Duty` | HARD |
 | `GROUP_UNAVAILABLE` | dérivée — un composant du groupe exclu par `UNAVAILABLE`/`NON_PARTICIPATION` | HARD |
+| `CROSS_LINE_CONFLICT` | `PlanningSnapshotExternalCommitment` de la même personne qui chevauche une garde de l'unité (D161) | HARD |
+| `CROSS_LINE_LEGAL_MIN_REST` | idem, écart inférieur au repos légal le plus strict des deux générations (D161) | HARD |
+| `CROSS_LINE_TEAM_MIN_REST` | idem, écart inférieur au repos d'équipe le plus strict des deux générations (D161) | POLICY_HARD |
+
+> **Contraintes entre lignes (D161)** : les trois raisons `CROSS_LINE_*`
+> sont des exclusions **locales** — la garde de l'autre ligne est déjà
+> décidée (ligne résolue plus tôt, engagement figé dans le snapshot) —,
+> évaluées par personne (`sourceUserStableId`) sur toute l'unité (un bloc
+> est exclu en entier) par `PersonCommitmentChecker`, la règle partagée
+> avec le contrôle live des réaffectations. Elles ne touchent jamais
+> `structuralOpportunity`. `SELF_COVERAGE` (HARD) est déclarée mais pas
+> encore produite (gardes conditionnelles, lots suivants).
+> `EligibilityMatrixBuilder::build($snapshot, withFrozenExternalCommitments:
+> false)` les omet, pour la seule complétion qui les revérifie en live.
 
 Toutes les autres valeurs de `ExclusionReason` (`NOT_TEAM_MEMBER`,
 `CONFLICT`, `SITE_NOT_ALLOWED`, `MISSING_SKILL`, `LEGAL_MIN_REST`,

@@ -7,7 +7,6 @@ namespace App\Repository;
 use App\Entity\Duty;
 use App\Entity\DutyAssignment;
 use App\Entity\PlanningGeneration;
-use App\Entity\PlanningTeamMember;
 use App\Entity\User;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
@@ -128,36 +127,5 @@ class DutyAssignmentRepository extends ServiceEntityRepository
         }
 
         return $byDutyId;
-    }
-
-    /**
-     * A candidate's other current assignments within the same generation
-     * (i.e. the same PlanningPeriod/line) — the live equivalent of what
-     * AssignmentConflictAnalyzer computes from the frozen snapshot, but
-     * read from the actual current calendar (docs/decisions.md D131).
-     * Excludes the duties currently being reassigned themselves, so a
-     * candidate is never reported as conflicting with the very duty they
-     * are being considered for.
-     *
-     * @param list<Duty> $excludingDuties
-     *
-     * @return list<DutyAssignment>
-     */
-    public function findCurrentForTeamMemberInGeneration(PlanningGeneration $generation, PlanningTeamMember $teamMember, array $excludingDuties = []): array
-    {
-        $qb = $this->createQueryBuilder('a')
-            ->addSelect('d')
-            ->join('a.duty', 'd')
-            ->andWhere('a.generation = :generation')
-            ->andWhere('a.teamMember = :teamMember')
-            ->andWhere('a.current = true')
-            ->setParameter('generation', $generation)
-            ->setParameter('teamMember', $teamMember);
-
-        if ([] !== $excludingDuties) {
-            $qb->andWhere('a.duty NOT IN (:excluding)')->setParameter('excluding', $excludingDuties);
-        }
-
-        return $qb->getQuery()->getResult();
     }
 }

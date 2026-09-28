@@ -19,8 +19,9 @@ use Doctrine\ORM\Mapping as ORM;
  *
  * Genuinely immutable after construction: no setter exists anywhere on
  * this entity or any of its children (PlanningSnapshotMember and its own
- * children, PlanningSnapshotRuleSet) — a new generation gets a new
- * snapshot, the old one is never edited (CLAUDE.md).
+ * children, PlanningSnapshotRuleSet, PlanningSnapshotExternalCommitment)
+ * — a new generation gets a new snapshot, the old one is never edited
+ * (CLAUDE.md).
  */
 #[ORM\Entity(repositoryClass: PlanningSnapshotRepository::class)]
 #[ORM\Table(name: 'planning_snapshots')]
@@ -42,6 +43,15 @@ class PlanningSnapshot
     #[ORM\OneToMany(targetEntity: PlanningSnapshotMember::class, mappedBy: 'snapshot')]
     private Collection $members;
 
+    /**
+     * Duties the snapshot's people already hold on other lines of the
+     * Planning (docs/decisions.md D161).
+     *
+     * @var Collection<int, PlanningSnapshotExternalCommitment>
+     */
+    #[ORM\OneToMany(targetEntity: PlanningSnapshotExternalCommitment::class, mappedBy: 'snapshot')]
+    private Collection $externalCommitments;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -49,6 +59,7 @@ class PlanningSnapshot
     {
         $this->generation = $generation;
         $this->members = new ArrayCollection();
+        $this->externalCommitments = new ArrayCollection();
         $this->createdAt = new \DateTimeImmutable();
     }
 
@@ -80,6 +91,26 @@ class PlanningSnapshot
     {
         if (!$this->members->contains($member)) {
             $this->members->add($member);
+        }
+    }
+
+    /**
+     * @return Collection<int, PlanningSnapshotExternalCommitment>
+     */
+    public function getExternalCommitments(): Collection
+    {
+        return $this->externalCommitments;
+    }
+
+    /**
+     * Keeps the inverse side in sync in-memory, same as addMember().
+     *
+     * @internal
+     */
+    public function addExternalCommitment(PlanningSnapshotExternalCommitment $commitment): void
+    {
+        if (!$this->externalCommitments->contains($commitment)) {
+            $this->externalCommitments->add($commitment);
         }
     }
 

@@ -439,6 +439,14 @@ function reasonText(reason: string): string {
       return 'Repos légal minimum'
     case 'TEAM_MIN_REST':
       return 'Repos minimum d’équipe'
+    case 'CROSS_LINE_CONFLICT':
+      return 'Déjà de garde au même moment sur une autre ligne'
+    case 'CROSS_LINE_LEGAL_MIN_REST':
+      return 'Repos légal minimum avec une garde sur une autre ligne'
+    case 'CROSS_LINE_TEAM_MIN_REST':
+      return 'Repos minimum d’équipe avec une garde sur une autre ligne'
+    case 'SELF_COVERAGE':
+      return 'Ne peut pas être son propre renfort'
     case 'MAX_DUTIES':
       return 'Nombre maximum de gardes atteint'
     case 'MAX_WEEKENDS':
