@@ -25,7 +25,7 @@ class PlanningTeamMemberRepository extends ServiceEntityRepository
     /**
      * The at-most-one open membership for this (team, user) pair — the
      * invariant of the partial unique index on (planning_team_id, user_id)
-     * WHERE membership_end IS NULL (docs/decisions.md D150).
+     * WHERE membership_end IS NULL (docs/decisions.md D160).
      */
     public function findOpenMembership(PlanningTeam $planningTeam, User $user): ?PlanningTeamMember
     {
@@ -38,7 +38,7 @@ class PlanningTeamMemberRepository extends ServiceEntityRepository
 
     /**
      * Every open membership of this User within this Planning — one per
-     * team (line) they currently belong to. Since docs/decisions.md D150
+     * team (line) they currently belong to. Since docs/decisions.md D160
      * (relaxing D080) there can be several: never pick "the" membership of
      * a User in a Planning with findOneBy(), the result would depend on row
      * order. Ordered by id so callers iterate deterministically.

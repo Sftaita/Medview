@@ -71,7 +71,7 @@ final class PlanningTeamMemberControllerTest extends WebTestCase
     }
 
     /**
-     * Scenario 3 through the HTTP layer (docs/decisions.md D150, relaxing
+     * Scenario 3 through the HTTP layer (docs/decisions.md D160, relaxing
      * D080): a User already open in one PlanningTeam of a Planning can be
      * added to a second PlanningTeam of the SAME Planning — but adding them
      * a second time to the same team is still refused.
@@ -123,7 +123,7 @@ final class PlanningTeamMemberControllerTest extends WebTestCase
     }
 
     /**
-     * docs/decisions.md D150: a member of two lines — MEMBER on the main
+     * docs/decisions.md D160: a member of two lines — MEMBER on the main
      * line, ADMIN ("Gestionnaire", D147) on the secondary one — is
      * `participating` and holds the planning-wide management rights, but
      * never the creator's structural MANAGE right.

@@ -6,7 +6,7 @@ namespace App\Exception;
 
 /**
  * A User may have at most one open (unended) PlanningTeamMember stint at a
- * time in the same PlanningTeam (docs/decisions.md D150). Since D150
+ * time in the same PlanningTeam (docs/decisions.md D160). Since D160
  * relaxed D080 they may hold open memberships in several teams (lines) of
  * the same Planning at once, as well as in teams of other Plannings; they
  * may also rejoin a team they left — just never two open stints in one

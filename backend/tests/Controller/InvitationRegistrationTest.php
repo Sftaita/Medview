@@ -243,7 +243,7 @@ final class InvitationRegistrationTest extends WebTestCase
     }
 
     /**
-     * docs/decisions.md D150 (relaxing D080): two invitations to two teams
+     * docs/decisions.md D160 (relaxing D080): two invitations to two teams
      * of the same Planning are both consumed by one registration — one
      * User, two memberships.
      */

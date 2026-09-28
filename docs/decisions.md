@@ -1757,7 +1757,7 @@ l'ancienne (voir légende).
   supprimées par la migration elle-même — voir le rapport de ce lot pour
   la liste exacte à recréer manuellement. Détail : `docs/planning.md`.
 
-## D080 — Adhésion unique par Planning (et non par application), remplace D072 🔴 Remplacé par [D150](#d150--une-adhésion-ouverte-par-équipe-plus-par-planning-remplace-d080)
+## D080 — Adhésion unique par Planning (et non par application), remplace D072 🔴 Remplacé par [D160](#d160--une-adhésion-ouverte-par-équipe-plus-par-planning-remplace-d080)
 
 - **Contexte** : D072 imposait qu'un User n'ait au plus qu'une seule
   adhésion (`TeamMember`) ouverte dans **toute l'application**. Une fois
@@ -4797,7 +4797,7 @@ l'ancienne (voir légende).
   WebSocket/SSE (aucune infrastructure existante, le polling suffit) ;
   échouer un job sur sa durée.
 
-## D150 — Une adhésion ouverte par équipe, plus par Planning (remplace D080)
+## D160 — Une adhésion ouverte par équipe, plus par Planning (remplace D080)
 
 - **Contexte** : chantier « ligne secondaire conditionnelle » (renfort
   déclenché par le titulaire de la ligne principale). Décision métier : un

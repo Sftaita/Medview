@@ -112,7 +112,7 @@ détaillé (encore conceptuel, rien d'implémenté) :
   populations par ligne (mono-équipe, moteur inchangé), autorisations
   creator-only, `PlanningTeam` propriété exclusive d'un Planning et créée
   inline par sa ligne, règle "une adhésion ouverte par équipe" — un même
-  User peut appartenir à plusieurs lignes d'un Planning (D150, remplace
+  User peut appartenir à plusieurs lignes d'un Planning (D160, remplace
   D080), endpoints et UI du lot Planning + restructuration Team.
 - **`docs/availability-collection.md`** — collecte des disponibilités par
   fenêtre : "répondu" = événement explicite distinct de

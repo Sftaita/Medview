@@ -137,7 +137,7 @@ final class TeamInvitationService
      *
      * Invitations to several teams of the same Planning are all consumed —
      * a User may belong to several lines of one Planning (docs/decisions.md
-     * D150). An invitation is only left PENDING when its membership could
+     * D160). An invitation is only left PENDING when its membership could
      * not be opened because a concurrent request opened the very same
      * (team, user) membership first; lapsed ones are flipped to EXPIRED.
      *
@@ -187,7 +187,7 @@ final class TeamInvitationService
         } catch (UniqueConstraintViolationException) {
             // Lost a race against another request adding the same user to
             // this team: the partial unique index on (planning_team_id,
-            // user_id) is the real guard (docs/decisions.md D150).
+            // user_id) is the real guard (docs/decisions.md D160).
             throw new PlanningTeamMembershipConflictException();
         }
 

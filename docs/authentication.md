@@ -595,7 +595,7 @@ compte ». Un seul email « Bienvenue » liste les équipes rejointes.
 | Situation | Résultat |
 |---|---|
 | Plusieurs invitations (équipes A, B, C) pour la même adresse | 1 `User`, 3 memberships, 3 × `ACCEPTED`, **1** email |
-| Deux invitations de deux équipes **du même planning** | Les deux sont consommées : 1 `User`, 2 memberships (une adhésion ouverte par équipe, D150 — remplace D080) |
+| Deux invitations de deux équipes **du même planning** | Les deux sont consommées : 1 `User`, 2 memberships (une adhésion ouverte par équipe, D160 — remplace D080) |
 | Deux soumissions simultanées du même lien | L'une `201`, l'autre `410 invitation_already_used` (vérifié en vrai parallèle, UAT) |
 | Inscription classique concurrente sur la même adresse | Index unique ; la perdante reçoit `409` ; invitation intacte |
 | Email différent de celui de l'invitation | `422` (`email`), invitation **non** consommée |

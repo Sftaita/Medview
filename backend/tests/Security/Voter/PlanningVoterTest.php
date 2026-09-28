@@ -19,7 +19,7 @@ use Symfony\Component\Security\Core\Authorization\Voter\Voter;
 
 /**
  * PlanningVoter once a User may hold several open memberships in one
- * Planning (docs/decisions.md D150, relaxing D080): the day-to-day
+ * Planning (docs/decisions.md D160, relaxing D080): the day-to-day
  * management rights come from *any* OWNER/ADMIN membership, and the
  * decision never depends on which membership row a lookup returns first.
  */

@@ -20,7 +20,7 @@ use Symfony\Component\Security\Core\Authorization\Voter\Voter;
  * the creator and any open OWNER/ADMIN of one of the Planning's teams: ADMIN
  * *is* the "gestionnaire du planning", a right the creator grants or
  * withdraws (PUT .../members/{id}/role, docs/decisions.md D147). A User with
- * several open memberships in the Planning (D150) holds the right as soon
+ * several open memberships in the Planning (D160) holds the right as soon
  * as one of them is OWNER/ADMIN.
  */
 final class PlanningVoter extends Voter
@@ -105,7 +105,7 @@ final class PlanningVoter extends Voter
                 return true;
             }
 
-            // A User may hold open memberships in several teams of the Planning at once (docs/decisions.md D150):
+            // A User may hold open memberships in several teams of the Planning at once (docs/decisions.md D160):
             // an OWNER/ADMIN role in *any* of them grants the right — never whichever row a single lookup
             // happens to return, which would make the decision depend on row order.
             foreach ($this->teamMemberRepository->findOpenMembershipsForUserInPlanning($subject, $user) as $membership) {

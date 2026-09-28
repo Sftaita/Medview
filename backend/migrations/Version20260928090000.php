@@ -9,7 +9,7 @@ use Doctrine\Migrations\AbstractMigration;
 
 /**
  * One open membership per (PlanningTeam, User), no longer per (Planning,
- * User) — docs/decisions.md D150, relaxing D080.
+ * User) — docs/decisions.md D160, relaxing D080.
  *
  * A surgeon may now be a member of several lines of the same Planning at
  * once (e.g. holder on the main line, reinforcement on a secondary line).
@@ -28,7 +28,7 @@ final class Version20260928090000 extends AbstractMigration
 {
     public function getDescription(): string
     {
-        return 'One open membership per (planning team, user) instead of per (planning, user) (D150)';
+        return 'One open membership per (planning team, user) instead of per (planning, user) (D160)';
     }
 
     public function up(Schema $schema): void

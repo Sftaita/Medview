@@ -25,7 +25,7 @@ use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 use Symfony\Component\Validator\Validator\ValidatorInterface;
 
 /**
- * Membership management for one PlanningTeam (docs/decisions.md D079/D150).
+ * Membership management for one PlanningTeam (docs/decisions.md D079/D160).
  * Every write here is reserved to the Planning's creator
  * (PlanningVoter::MANAGE) — same restriction as PlanningLineController.
  * These endpoints deliberately have no team-level OWNER/ADMIN write path:

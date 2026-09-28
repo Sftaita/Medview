@@ -66,7 +66,7 @@ final class PlanningTeamMembershipServiceTest extends KernelTestCase
     /**
      * New scenario 2: a User may simultaneously hold an open membership in
      * PlanningTeams of two *different* Plannings — membership uniqueness is
-     * scoped per team, never app-wide (docs/decisions.md D150, after D080
+     * scoped per team, never app-wide (docs/decisions.md D160, after D080
      * and the abandoned app-wide D072 rule). createTeam() with no explicit
      * $planning attaches each team to its own fresh Planning by default
      * (see PlanningDomainTestHelpers), so teamA/teamB below already belong
@@ -91,7 +91,7 @@ final class PlanningTeamMembershipServiceTest extends KernelTestCase
     }
 
     /**
-     * Scenario 3 (docs/decisions.md D150, relaxing D080): within the SAME
+     * Scenario 3 (docs/decisions.md D160, relaxing D080): within the SAME
      * Planning, a User may hold open memberships in two different
      * PlanningTeams at once — e.g. holder on the main line, reinforcement
      * on a secondary line. Two distinct stints, one per team.
@@ -120,7 +120,7 @@ final class PlanningTeamMembershipServiceTest extends KernelTestCase
     }
 
     /**
-     * The remaining invariant (D150) is enforced by the database itself,
+     * The remaining invariant (D160) is enforced by the database itself,
      * not only by the service: two open stints of one User in one team are
      * refused by the partial unique index on (planning_team_id, user_id),
      * while one open stint in each of two teams of one Planning is accepted.
@@ -207,7 +207,7 @@ final class PlanningTeamMembershipServiceTest extends KernelTestCase
 
     /**
      * Control case for the two tests above: someone whose only membership
-     * ends before the window is withdrawn, exactly as before D150.
+     * ends before the window is withdrawn, exactly as before D160.
      */
     public function testLeavingTheOnlyLineBeforeTheWindowStillWithdraws(): void
     {

@@ -110,9 +110,9 @@ plus jamais se produire en pratique : une `PlanningTeam` fraîchement créée
 ne peut par construction avoir aucun `FairnessPeriod` préexistant. Conservé
 uniquement parce que `FairnessPeriodService::create()` peut le lever.
 
-## 6. Une adhésion ouverte par équipe (D150, remplace D080 qui remplaçait D072)
+## 6. Une adhésion ouverte par équipe (D160, remplace D080 qui remplaçait D072)
 
-Règle en vigueur depuis 2026-09-28 (docs/decisions.md D150) : au plus
+Règle en vigueur depuis 2026-09-28 (docs/decisions.md D160) : au plus
 **une adhésion ouverte par (PlanningTeam, User)**. Un même User peut donc
 tenir des adhésions ouvertes **simultanées** dans plusieurs PlanningTeams
 d'un **même** Planning — par exemple titulaire sur la ligne principale et
@@ -129,7 +129,7 @@ composite `(planning_team_id, planning_id)` (même technique que D051,
 voir D081) : elle ne porte plus l'unicité, mais sert toujours les lectures
 « ce User est-il membre de ce Planning ? » sans énumérer les lignes.
 
-Conséquences (détail : D150) :
+Conséquences (détail : D160) :
 
 - `PlanningTeamMembershipService::addMember()` ne refuse (409
   `membership_conflict`) qu'une seconde adhésion ouverte **dans la même
@@ -148,7 +148,7 @@ Conséquences (détail : D150) :
 
 Historique de la règle : une adhésion ouverte par (Team, User) avant D072 ;
 une seule dans toute l'application (D072) ; une par Planning (D080,
-2026-09-18) ; une par équipe à nouveau depuis D150, cette fois avec une
+2026-09-18) ; une par équipe à nouveau depuis D160, cette fois avec une
 équipe toujours propriété exclusive d'un Planning (D079). L'historique par
 stints est inchangé.
 
@@ -165,7 +165,7 @@ d'autre chose qu'une seule PlanningTeam à la fois. C'est le niveau
 `Planning`/`PlanningLine` qui organise ces contextes séparés, jamais le
 moteur lui-même.
 
-> **Mise à jour D150** : les populations restent distinctes **par stint**
+> **Mise à jour D160** : les populations restent distinctes **par stint**
 > (une ligne ne voit que les `PlanningTeamMember` de sa propre équipe),
 > mais une même *personne* peut désormais avoir un stint dans chacune de
 > deux lignes (§6). Elle est alors candidate sur les deux lignes, chaque
@@ -353,7 +353,7 @@ car le frontend ne peut pas le déduire.
 propre table ; le `PlanningTeamMember` (avec sa `TeamMemberParticipationPeriod`
 initiale) n'est créé que lorsque la personne existe réellement, via le même
 `PlanningTeamMembershipService::addMember()` que tout le reste — la règle
-« une adhésion ouverte par équipe » (§6, D150) s'applique donc telle quelle :
+« une adhésion ouverte par équipe » (§6, D160) s'applique donc telle quelle :
 inviter quelqu'un qui est déjà dans une *autre* équipe du même Planning
 l'ajoute aussi à celle-ci (`USER_ADDED`) ; l'inviter dans une équipe dont il
 est déjà membre donne `ALREADY_MEMBER` ; deux invitations pour deux équipes

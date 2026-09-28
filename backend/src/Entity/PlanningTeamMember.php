@@ -33,8 +33,8 @@ use Symfony\Component\Uid\Uuid;
  * this one, so the membership history stays a true append-only record.
  * At most one row per (planning team, user) may have a null $membershipEnd
  * at a time — enforced by a partial unique index on (planning_team_id,
- * user_id), docs/decisions.md D150. The same User MAY hold open memberships
- * in several teams (lines) of one Planning at once — D150 relaxed the
+ * user_id), docs/decisions.md D160. The same User MAY hold open memberships
+ * in several teams (lines) of one Planning at once — D160 relaxed the
  * earlier "one open membership per Planning" rule (D080), itself the
  * successor of the app-wide rule (D072). Code that needs "the person"
  * rather than "the stint" must therefore reason on the User, never assume

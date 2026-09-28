@@ -124,7 +124,7 @@ jamais réécrite.
   membre ouvert de plusieurs Teams à la fois), puis sur `user_id` seul au
   Lot Planning (D072 : une seule Team active dans toute l'application),
   puis sur `(planning_id, user_id)` (D080, 2026-09-18 : jamais deux
-  adhésions ouvertes dans un même Planning) ; depuis D150 (2026-09-28), il
+  adhésions ouvertes dans un même Planning) ; depuis D160 (2026-09-28), il
   porte sur `(planning_team_id, user_id)` — un User peut tenir des
   adhésions ouvertes simultanées dans plusieurs équipes (lignes) d'un
   **même** Planning, jamais deux dans la même équipe
@@ -316,7 +316,7 @@ Contraintes ajoutées (deux migrations : schéma de base, puis
 |---|---|
 | `*.stableId` uniques | Index unique classique |
 | `DutyType.code` / `DutyPattern.code` unique par équipe | Index unique composite `(team_id, code)` |
-| Au plus un membership ouvert par `(planning team, user)` (D150) | Index unique **partiel** sur `planning_team_members(planning_team_id, user_id)` (`WHERE membership_end IS NULL`) — historique de cette règle : `docs/planning.md` §6 |
+| Au plus un membership ouvert par `(planning team, user)` (D160) | Index unique **partiel** sur `planning_team_members(planning_team_id, user_id)` (`WHERE membership_end IS NULL`) — historique de cette règle : `docs/planning.md` §6 |
 | Au plus un `PlanningRuleSet` `ACTIVE` par équipe | Index unique **partiel** (`WHERE status = 'ACTIVE'`) |
 | `FairnessPeriod` : pas de chevauchement par équipe | `EXCLUDE USING gist` (extension `btree_gist`) |
 | `TeamMemberParticipationPeriod` : pas de chevauchement par membre | `EXCLUDE USING gist`, **`DEFERRABLE INITIALLY DEFERRED`** (voir piège ci-dessous) |

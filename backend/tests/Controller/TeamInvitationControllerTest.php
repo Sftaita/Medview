@@ -190,7 +190,7 @@ final class TeamInvitationControllerTest extends WebTestCase
     }
 
     /**
-     * docs/decisions.md D150 (relaxing D080): a User already in one team of
+     * docs/decisions.md D160 (relaxing D080): a User already in one team of
      * the Planning can be added to another team of the same Planning — two
      * open memberships, one per team.
      */

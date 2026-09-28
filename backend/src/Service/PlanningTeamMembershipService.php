@@ -19,7 +19,7 @@ use Doctrine\ORM\EntityManagerInterface;
  * Owns the invariants CLAUDE.md and docs/planning-domain.md require around
  * team membership: a User may join a PlanningTeam again after leaving it,
  * but never has two open (unended) memberships in the SAME team at once.
- * Since docs/decisions.md D150 (relaxing D080) a User may hold open
+ * Since docs/decisions.md D160 (relaxing D080) a User may hold open
  * memberships in several teams of the same Planning — a surgeon can be a
  * holder on the main line and a reinforcement on a secondary line — as
  * well as in teams of different Plannings. Leaving closes a membership
@@ -46,7 +46,7 @@ final class PlanningTeamMembershipService
      *                                                 membership in this
      *                                                 team (another team
      *                                                 of the same Planning
-     *                                                 is fine, D150)
+     *                                                 is fine, D160)
      */
     public function addMember(
         PlanningTeam $team,
@@ -118,7 +118,7 @@ final class PlanningTeamMembershipService
 
         // No longer expected in the open collections that start once they are gone (docs/availability-collection.md §2)
         // — but availability is collected per person and per Planning: someone who still belongs to another line of
-        // this Planning (D150) keeps being expected for as long as that other membership lasts.
+        // this Planning (D160) keeps being expected for as long as that other membership lasts.
         $participationEnd = $this->participationEndInPlanning($teamMember);
         if (null !== $participationEnd) {
             $this->collectionService->withdrawMember($teamMember->getPlanning(), $teamMember->getUser(), $participationEnd);
