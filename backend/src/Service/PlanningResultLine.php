@@ -28,6 +28,10 @@ final readonly class PlanningResultLine
         public int $coveredRequiredDutyCount,
         public int $uncoveredRequiredDutyCount,
         public array $duties,
+        /** docs/decisions.md D165 — conditional duties whose live demand cannot be evaluated (never counted as covered nor as not required). */
+        public int $undeterminedDutyCount = 0,
+        /** docs/decisions.md D165 — conditional duties not required any more but still held (kept on purpose, warned about). */
+        public int $superfluousDutyCount = 0,
     ) {
     }
 }

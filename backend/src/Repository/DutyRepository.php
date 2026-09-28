@@ -80,4 +80,28 @@ class DutyRepository extends ServiceEntityRepository
     {
         return $this->findBy(['planningPeriod' => $planningPeriod, 'localDate' => $localDate], ['id' => 'ASC']);
     }
+
+    /**
+     * The conditional duties whose coverage source is one of $sources — the
+     * reinforcements a change on those source duties may affect
+     * (docs/decisions.md D165).
+     *
+     * @param list<Duty> $sources
+     *
+     * @return list<Duty>
+     */
+    public function findByCoverageSources(array $sources): array
+    {
+        if ([] === $sources) {
+            return [];
+        }
+
+        return $this->createQueryBuilder('d')
+            ->where('d.coverageSource IN (:sources)')
+            ->setParameter('sources', $sources)
+            ->orderBy('d.localDate', 'ASC')
+            ->addOrderBy('d.id', 'ASC')
+            ->getQuery()
+            ->getResult();
+    }
 }

@@ -870,3 +870,30 @@ déjà généré.
 
 Tables : migration `Version20260929090000`. Tests :
 `ConditionalGenerationTest`.
+
+## 26. Calendrier live d'une ligne conditionnelle (docs/decisions.md D165)
+
+Règle : les règles de demande sont celles **figées par la génération
+courante** de la ligne (D164), les titulaires source ceux de
+`DutyAssignment.current`. L'historique de la génération ne bouge jamais.
+
+| Opération | Effet sur la ligne conditionnelle |
+|---|---|
+| Réaffectation / retrait sur la ligne source | Rien n'est écrit ; la réponse porte `dependentImpacts` (état avant/après de chaque bloc dépendant) |
+| Nouvelle affectation sur un renfort non requis (réaffectation, remplacement d'un titulaire superflu, endpoint bas niveau) | 409 `coverage_not_required` |
+| Idem, demande indéterminée | 409 `coverage_undetermined` |
+| « Retirer l'affectation » sur un renfort | Retrait append-only (D144), aucun nouvel endpoint |
+| « Compléter automatiquement » | Unités = demande **live** requise (titulaires que la source va recevoir dans la même opération compris) ; renforts superflus tenus = unités *load-only* fixées ; indéterminés jamais complétés |
+
+États live (`LiveCoverageState`) : `REQUIRED_ASSIGNED`,
+`REQUIRED_UNASSIGNED`, `NOT_REQUIRED_UNASSIGNED`, `NOT_REQUIRED_ASSIGNED`,
+`UNDETERMINED` — exposés par `/result` (`demand` par garde conditionnelle,
+`undeterminedDutyCount`/`superfluousDutyCount` par ligne), par la liste des
+candidats (`assignable`, `notAssignableReason`, `demand`) et par
+`dependentImpacts`.
+
+Préflight de publication : non requis + couvert → `superfluousCoverages`
+(avertissement) ; indéterminé → `undeterminedDuties` (bloque publication et
+republication, et la transition `PUBLISHED`).
+
+Tests : `ConditionalCalendarTest`.

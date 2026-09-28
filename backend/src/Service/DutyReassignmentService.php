@@ -10,6 +10,8 @@ use App\Entity\DutyAssignmentEvent;
 use App\Entity\PlanningGeneration;
 use App\Entity\PlanningTeamMember;
 use App\Entity\User;
+use App\Exception\CoverageNotRequiredException;
+use App\Exception\CoverageUndeterminedException;
 use App\Exception\DutyAlreadyUncoveredException;
 use App\Exception\DutyNotGeneratedException;
 use App\Exception\InvalidReassignmentCandidateException;
@@ -57,6 +59,7 @@ final class DutyReassignmentService
         private readonly DutyAssignmentService $dutyAssignmentService,
         private readonly CalendarWriteLock $calendarWriteLock,
         private readonly EntityManagerInterface $entityManager,
+        private readonly ConditionalCoverageService $conditionalCoverage,
     ) {
     }
 
@@ -65,6 +68,10 @@ final class DutyReassignmentService
      * @throws StaleReassignmentException
      * @throws InvalidReassignmentCandidateException
      * @throws PlanningGenerationNotSnapshottedException
+     * @throws CoverageNotRequiredException            a new assignment on a reinforcement the live demand does not require (D165)
+     * @throws CoverageUndeterminedException           a new assignment on a reinforcement whose demand cannot be evaluated (D165)
+     *
+     * @return list<DependentImpact> what the change did to the reinforcements depending on this block (D165) — reported, never acted on
      */
     public function reassign(
         Duty $representativeDuty,
@@ -72,9 +79,13 @@ final class DutyReassignmentService
         ?string $expectedCurrentTeamMemberStableId,
         User $author,
         bool $wasPublished,
-    ): void {
-        $this->inLockedTransaction($representativeDuty, function () use ($representativeDuty, $chosenMember, $expectedCurrentTeamMemberStableId, $author, $wasPublished): void {
+    ): array {
+        return $this->inLockedTransaction($representativeDuty, function () use ($representativeDuty, $chosenMember, $expectedCurrentTeamMemberStableId, $author, $wasPublished): array {
             [$generation, $block, $currentByDuty] = $this->resolveCurrentState($representativeDuty, $expectedCurrentTeamMemberStableId);
+
+            // docs/decisions.md D165: a conditional block takes a NEW holder only while the live demand requires it —
+            // replacing the holder of a superfluous reinforcement is a new assignment too, and is refused alike.
+            $this->conditionalCoverage->assertCanBeNewlyCovered($block);
 
             $error = $this->candidateService->assignabilityError($generation, $block, $chosenMember);
             if (null !== $error) {
@@ -85,6 +96,8 @@ final class DutyReassignmentService
             if (null === $snapshot) {
                 throw new PlanningGenerationNotSnapshottedException();
             }
+
+            $dependents = $this->conditionalCoverage->captureDependents($block);
 
             // Phase 1 — supersede every current row of the block (UPDATE only), flushed on its own
             // so the INSERTs below never race the partial unique index (see class docblock).
@@ -99,6 +112,8 @@ final class DutyReassignmentService
                 $this->entityManager->persist(new DutyAssignmentEvent($planning, $generation, $duty, $previous, $new, $author, $wasPublished, $occurredAt));
             }
             $this->entityManager->flush();
+
+            return $this->conditionalCoverage->impactsSince($dependents);
         });
     }
 
@@ -111,16 +126,19 @@ final class DutyReassignmentService
      * @throws DutyNotGeneratedException
      * @throws StaleReassignmentException    the block no longer has the holder the editor showed
      * @throws DutyAlreadyUncoveredException there is nobody to remove
+     *
+     * @return list<DependentImpact> docs/decisions.md D165 — removing a source holder may leave its reinforcements undetermined
      */
-    public function unassign(Duty $representativeDuty, ?string $expectedCurrentTeamMemberStableId, User $author, bool $wasPublished): void
+    public function unassign(Duty $representativeDuty, ?string $expectedCurrentTeamMemberStableId, User $author, bool $wasPublished): array
     {
-        $this->inLockedTransaction($representativeDuty, function () use ($representativeDuty, $expectedCurrentTeamMemberStableId, $author, $wasPublished): void {
+        return $this->inLockedTransaction($representativeDuty, function () use ($representativeDuty, $expectedCurrentTeamMemberStableId, $author, $wasPublished): array {
             [$generation, $block, $currentByDuty] = $this->resolveCurrentState($representativeDuty, $expectedCurrentTeamMemberStableId);
 
             if ([] === $currentByDuty) {
                 throw new DutyAlreadyUncoveredException();
             }
 
+            $dependents = $this->conditionalCoverage->captureDependents($block);
             $this->supersede($block, $currentByDuty);
 
             $occurredAt = new \DateTimeImmutable();
@@ -132,6 +150,8 @@ final class DutyReassignmentService
                 }
             }
             $this->entityManager->flush();
+
+            return $this->conditionalCoverage->impactsSince($dependents);
         });
     }
 
@@ -176,14 +196,23 @@ final class DutyReassignmentService
         $this->entityManager->flush();
     }
 
-    private function inLockedTransaction(Duty $representativeDuty, callable $work): void
+    /**
+     * @template T
+     *
+     * @param callable(): T $work
+     *
+     * @return T
+     */
+    private function inLockedTransaction(Duty $representativeDuty, callable $work): mixed
     {
         $connection = $this->entityManager->getConnection();
         $connection->beginTransaction();
         try {
             $this->calendarWriteLock->acquire($representativeDuty->getPlanningPeriod()->getTeam()->getPlanning());
-            $work();
+            $result = $work();
             $connection->commit();
+
+            return $result;
         } catch (UniqueConstraintViolationException) {
             // Last line of defense: the lock makes this unreachable through the application, but a
             // concurrent writer outside it must still surface as "the calendar changed", never a 500.

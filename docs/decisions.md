@@ -5330,3 +5330,121 @@ l'ancienne (voir légende).
   ancienne génération ; appliquer une nouvelle politique au calendrier déjà
   généré ; fusionner l'équité de la cible avec celle de la source.
 - **Migration** : `Version20260929090000`.
+
+## D165 — Calendrier live d'une ligne conditionnelle : impacts signalés jamais appliqués, `coverage_not_required`, renforts superflus conservés, complétion sur la demande live
+
+- **Contexte** : L6 du chantier « ligne secondaire conditionnelle ». Après
+  génération (D164), le calendrier est modifié à la main : une réaffectation
+  de la ligne source peut créer, supprimer ou rendre indéterminé un besoin de
+  renfort. Principe : **les règles restent celles figées par la génération
+  courante (D164), les titulaires source viennent de
+  `DutyAssignment.current`** — jamais d'écriture automatique silencieuse,
+  jamais de modification de l'historique.
+- **Décision — états live** (`App\Demand\LiveCoverageState`, calculé par le
+  backend, jamais par le frontend) : `REQUIRED_ASSIGNED` (OK),
+  `REQUIRED_UNASSIGNED` (action nécessaire), `NOT_REQUIRED_UNASSIGNED`
+  (normal), `NOT_REQUIRED_ASSIGNED` (renfort superflu, avertissement),
+  `UNDETERMINED` (garde source sans titulaire : jamais lu « non requis »,
+  qu'il y ait un titulaire ou non — le champ `assigned` le précise).
+- **Décision — `dependentImpacts`** : `POST .../reassign` et
+  `POST .../unassign` renvoient, pour chaque bloc conditionnel dont la
+  source est un des jours du bloc modifié (`Duty.coverageSource`, bloc
+  entier une fois), son état **avant** (capturé sous le verrou, avant
+  l'écriture) et **après** (vue live rechargée dans la même transaction,
+  après l'écriture) : `lineStableId`, `lineName`, `unitStableKey`,
+  `groupInstanceStableId`, `dutyStableIds`, `dates`, `previousState`,
+  `newState`, `changed`, `required` (`null` = indéterminé), `assigned`,
+  `assignee`, `reason` (celle de l'unité : `TRIGGERED` si requise, sinon le
+  premier jour non évaluable ou le premier jour), `triggeringDates`. Tous
+  les blocs dépendants sont listés, même inchangés (`changed: false`). Le
+  frontend n'a aucune logique conditionnelle à refaire.
+- **Décision — aucune écriture automatique** : un besoin créé reste
+  `REQUIRED_UNASSIGNED` (personne n'est choisi, aucune `DutyAssignment`) ;
+  un renfort devenu inutile garde son titulaire (`NOT_REQUIRED_ASSIGNED`,
+  charge réelle, visible). Seul « Retirer l'affectation » ou « Compléter
+  automatiquement », demandés explicitement, écrivent sur la ligne
+  conditionnelle.
+- **Décision — `coverage_not_required` / `coverage_undetermined` (409)** :
+  une **nouvelle** affectation sur une garde conditionnelle n'est écrite que
+  si la demande live dit « requise ». Contrôlé à l'écriture
+  (`ConditionalCoverageService::assertCanBeNewlyCovered`) sur les deux
+  chemins qui créent une affectation manuelle : réaffectation (sous le
+  verrou du calendrier) et l'endpoint bas niveau
+  `POST /api/planning-generations/{id}/assignments` — aucune requête ne
+  contourne la règle. Remplacer le titulaire d'un renfort superflu est une
+  nouvelle affectation : refusé de même. Demande indéterminée → 409
+  `coverage_undetermined` (la source doit d'abord avoir un titulaire).
+- **Décision — liste des candidats** : pour une garde conditionnelle, la
+  réponse porte `assignable`, `notAssignableReason`
+  (`coverage_not_required` / `coverage_undetermined` / `null`) et `demand`
+  (état, `required`, raison, jours déclencheurs). Non requise ou
+  indéterminée → `candidates: []` **avec** la raison, jamais une liste vide
+  ambiguë. Requise → les règles habituelles, dont `SELF_COVERAGE`,
+  `CROSS_LINE_CONFLICT`, `CROSS_LINE_LEGAL_MIN_REST`,
+  `CROSS_LINE_TEAM_MIN_REST` (vérifiées de bout en bout).
+- **Décision — retrait explicite** : l'action existante « Retirer
+  l'affectation » (`POST .../unassign`, D144) suffit — aucun nouvel
+  endpoint : lignes remplacées (`current = false`), jamais supprimées, un
+  `DutyAssignmentEvent` par garde (`newAssignment = null`), état live
+  recalculé à la lecture suivante. Elle renvoie aussi `dependentImpacts`
+  (retirer le titulaire d'une source rend ses renforts indéterminés).
+- **Décision — complétion sur la demande live** : « Compléter
+  automatiquement » construit les unités d'une ligne conditionnelle depuis
+  la `LiveDemandView` (`EligibilityMatrixBuilder::build(..., demand:)`),
+  jamais depuis les décisions de la génération : un renfort devenu requis
+  après la génération (y compris une ligne générée à zéro unité) est
+  complété ; un renfort non requis ou indéterminé ne l'est jamais. Les
+  lignes restent traitées dans l'ordre de résolution (D161) : les titulaires
+  qu'une ligne source va recevoir dans la même opération sont vus par sa
+  cible (`LiveDemandView::withSourceHoldings`), en plus des engagements
+  virtuels de personne (`SELF_COVERAGE` compris). À l'écriture, sous le
+  verrou, la demande live est relue : un renfort qui n'est plus requis n'est
+  jamais écrit (`PlanningCompletionStaleException`). Pas de solve global.
+- **Décision — équité de la complétion** : population, facteurs de
+  participation et éligibilité restent ceux du snapshot ; la demande à
+  couvrir, l'exposition et les cibles sont calculées sur la **demande live
+  requise** (D3). Les affectations existantes restent fixes. Un renfort
+  superflu (ou indéterminé) encore tenu entre dans le problème comme unité
+  **load-only** (`OptimizationProblem::withLoadOnlyUnits`) : optionnelle,
+  fixée à son titulaire, absente de `requiredDemand`/exposition/cibles, mais
+  comptée dans la charge de son titulaire par les phases d'équité — le
+  prochain renfort va à celui qui en a le moins. Ce n'est jamais une
+  décision du solve, jamais une demande.
+- **Décision — indétermination** : jamais complétée (seules les unités
+  `required === true` et non couvertes le sont), comptée
+  (`undeterminedUnitCount` par ligne de complétion, couverture du job
+  `INCOMPLETE`), signalée dans le résultat calendrier
+  (`undeterminedDutyCount`) et **bloquante** au préflight de publication
+  comme de republication (`undeterminedDuties`), et pour la transition
+  `PUBLISHED`.
+- **Décision — préflight** : requis + couvert → OK ; requis + non couvert →
+  `uncoveredDuties` (bloquant) ; non requis + non couvert → OK ; non requis
+  + couvert → `superfluousCoverages` (avertissement, jamais bloquant ; la
+  présentation revient à L7) ; indéterminé → `undeterminedDuties`
+  (bloquant).
+- **Décision — résultat calendrier** : `GET /api/plannings/{id}/result`
+  porte, par garde conditionnelle, `demand` : état, `required`
+  (`null` = indéterminé), raison de l'unité, `superfluous`, jours
+  déclencheurs, et l'explication du jour : `dayReason`, `weekday`, garde
+  source (`sourceDutyStableId`, `sourceDate`), titulaire source
+  (`sourceHolder`), déclencheur (`trigger` : jours, incrément) ; par ligne,
+  `undeterminedDutyCount` et `superfluousDutyCount`. Le rafraîchissement
+  existant (relecture de tout `/result` après chaque écriture) met à jour la
+  ligne cible après une réaffectation de sa source — aucun second mécanisme.
+- **Décision — historique intouché** : aucune opération live ne modifie
+  `PlanningSnapshotDemandPolicy`/`Trigger`/`Decision`, le `snapshotHash`, ni
+  le résultat de la génération (testé : empreinte complète identique avant
+  et après réaffectation, retrait, complétion, publication).
+- **Tests** : `ConditionalCalendarTest` (10 tests bout en bout, OR-Tools et
+  worker réels, 24 scénarios du lot) ; scaffolding partagé extrait dans
+  `ConditionalLineTestHelpers`. Mutations toutes détectées : affectation
+  automatique après réaffectation source, suppression automatique d'un
+  renfort superflu, nouvelle affectation autorisée sur un renfort non
+  requis, complétion sur la demande du snapshot, unités load-only absentes,
+  `SELF_COVERAGE` oublié, décisions du snapshot modifiées.
+- **Rejeté** : créer ou supprimer automatiquement une affectation de renfort
+  après une réaffectation de la source ; détourner la réaffectation vers
+  `null` pour retirer ; compter un renfort superflu comme demande ; traiter
+  l'indéterminé comme « non requis » (ou comme « requis ») ; un solve global
+  multi-lignes ; un second mécanisme de synchronisation frontend.
+- **Aucune migration.**

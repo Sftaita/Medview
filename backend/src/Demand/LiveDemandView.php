@@ -27,9 +27,22 @@ final class LiveDemandView implements DemandView
     ) {
     }
 
+    /**
+     * The same view, with some source duties held by someone who is not
+     * written yet (docs/decisions.md D165): "Compléter automatiquement"
+     * reads a conditional line with the holders its source line is about to
+     * receive in the same operation — never a stale "nobody holds it".
+     *
+     * @param array<int, SourceHolding> $holdingBySourceDuty keyed by source duty id, overriding the loaded ones
+     */
+    public function withSourceHoldings(array $holdingBySourceDuty): self
+    {
+        return new self($this->calculator, $this->rulesByPeriodId, array_replace($this->holdingBySourceDuty, $holdingBySourceDuty));
+    }
+
     public function forDuty(Duty $duty): DutyDemand
     {
-        return $this->unitOf($duty)->forDuty($duty);
+        return $this->forUnitOf($duty)->forDuty($duty);
     }
 
     public function forUnit(DutyUnit $unit): UnitDemand
@@ -37,7 +50,8 @@ final class LiveDemandView implements DemandView
         return $this->compute($unit->getDuties());
     }
 
-    private function unitOf(Duty $duty): UnitDemand
+    /** The demand of $duty's whole unit (its block, or itself). */
+    public function forUnitOf(Duty $duty): UnitDemand
     {
         $group = $duty->getGroupInstance();
 

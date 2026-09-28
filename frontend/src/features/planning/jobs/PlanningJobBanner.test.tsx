@@ -95,6 +95,20 @@ describe('PlanningJobBanner (docs/decisions.md D149)', () => {
     )
   })
 
+  it('says when a completion left a reinforcement alone because its demand cannot be evaluated (D165)', () => {
+    const done = job({
+      kind: 'COMPLETE',
+      status: 'SUCCEEDED',
+      outcome: {
+        lines: [{ filledUnitCount: 0, remainingUncoveredRequiredUnitCount: 0, undeterminedUnitCount: 1 }],
+        coverage: 'INCOMPLETE',
+      },
+    })
+    renderBanner(done, done)
+    expect(screen.getByRole('status')).toHaveTextContent('1 renfort non évalué')
+    expect(screen.getByRole('status')).not.toHaveTextContent('rien à compléter')
+  })
+
   it('claims nothing about the coverage when the detail is not visible to this person (a member)', () => {
     const done = job({ status: 'SUCCEEDED', outcome: null })
     renderBanner(done, done, false)

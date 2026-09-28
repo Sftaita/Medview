@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Demand\LiveCoverageState;
+use App\Demand\UnitDemand;
 use App\Entity\PlanningTeamMember;
 
 /**
@@ -26,6 +28,11 @@ final readonly class ReassignmentCandidatesView
         /** Who holds this block now, or null — its stableId is the concurrency identity a save must echo back as `expectedCurrentTeamMemberStableId` (docs/decisions.md D131 §Concurrence). */
         public ?PlanningTeamMember $currentTeamMember,
         public array $candidates,
+        /** docs/decisions.md D165 — the live demand of a conditional block, null for an intrinsic one. */
+        public ?UnitDemand $demand = null,
+        public ?LiveCoverageState $coverageState = null,
+        /** `coverage_not_required` / `coverage_undetermined`: no new holder can be written, the candidate list is empty on purpose. */
+        public ?string $notAssignableReason = null,
     ) {
     }
 }

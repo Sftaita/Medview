@@ -320,6 +320,12 @@ directement les concepts déjà actés en spécification (§5, §10, §21).
 > valeurs, `LiveDemandView` les titulaires d'aujourd'hui avec la politique
 > figée par la génération courante de la ligne. La `Duty` n'est jamais
 > modifiée.
+>
+> **Statut d'implémentation (D165)** : l'état live d'une garde
+> conditionnelle (`LiveCoverageState` : requise/non requise/indéterminée ×
+> couverte ou non) est calculé par le backend. Une nouvelle affectation n'est
+> acceptée que sur une garde requise (`coverage_not_required`) ; une
+> affectation devenue superflue est conservée jusqu'à un retrait explicite.
 
 `overlapsWith()` compare des **instants absolus** (`startsAt`/`endsAt`),
 jamais des dates locales — correct par construction y compris à travers

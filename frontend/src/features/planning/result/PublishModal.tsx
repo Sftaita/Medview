@@ -155,7 +155,8 @@ function PreflightBody({ preflight }: { preflight: PublicationPreflight }) {
     preflight.uncoveredDuties.length +
     preflight.inconsistentGroups.length +
     preflight.invalidAssignments.length +
-    preflight.conflicts.length
+    preflight.conflicts.length +
+    preflight.undeterminedDuties.length
 
   return (
     <>
@@ -182,6 +183,16 @@ function PreflightBody({ preflight }: { preflight: PublicationPreflight }) {
                 'gardes obligatoires restent',
               )}{' '}
               non couverte{preflight.uncoveredDuties.length > 1 ? 's' : ''}.
+            </span>
+          </li>
+        )}
+        {preflight.undeterminedDuties.length > 0 && (
+          <li className="alert alert--warning">
+            <Icon name="alert" size={18} strokeWidth={2} />
+            <span>
+              {plural(preflight.undeterminedDuties.length, 'renfort ne peut', 'renforts ne peuvent')} pas être
+              évalué{preflight.undeterminedDuties.length > 1 ? 's' : ''} : la garde dont{' '}
+              {preflight.undeterminedDuties.length > 1 ? 'ils dépendent' : 'il dépend'} n’a pas de titulaire.
             </span>
           </li>
         )}

@@ -18,6 +18,7 @@ use App\Repository\PlanningPublicationDeliveryRepository;
 use App\Repository\PlanningPublicationRepository;
 use App\Repository\PlanningRepository;
 use App\Security\Voter\PlanningVoter;
+use App\Service\ConditionalPublicationDuty;
 use App\Service\InconsistentPublicationGroup;
 use App\Service\InvalidPublicationAssignment;
 use App\Service\PlanningPdfRenderer;
@@ -243,6 +244,20 @@ final class PlanningPublicationController
             'inconsistentGroups' => array_map($this->inconsistentGroupToArray(...), $preflight->inconsistentGroups),
             'invalidAssignments' => array_map($this->invalidAssignmentToArray(...), $preflight->invalidAssignments),
             'conflicts' => array_map($this->conflictToArray(...), $preflight->conflicts),
+            // docs/decisions.md D165: blockers (demand unknown) and warnings (superfluous reinforcement still held).
+            'undeterminedDuties' => array_map($this->conditionalDutyToArray(...), $preflight->undeterminedDuties),
+            'superfluousCoverages' => array_map($this->conditionalDutyToArray(...), $preflight->superfluousCoverages),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function conditionalDutyToArray(ConditionalPublicationDuty $item): array
+    {
+        return [
+            'duty' => $this->dutyToArray($item->duty),
+            'member' => null !== $item->holder ? $this->memberToArray($item->holder) : null,
         ];
     }
 

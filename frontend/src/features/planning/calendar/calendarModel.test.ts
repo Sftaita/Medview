@@ -18,6 +18,7 @@ function duty(date: string, overrides: Partial<PlanningResultDuty> = {}): Planni
     covered: true,
     assignment: null,
     reasons: [],
+    demand: null,
     ...overrides,
   }
 }
@@ -33,6 +34,8 @@ function line(name: string, duties: PlanningResultDuty[], generated = true): Pla
     requiredDutyCount: duties.length,
     coveredRequiredDutyCount: duties.length,
     uncoveredRequiredDutyCount: 0,
+    undeterminedDutyCount: 0,
+    superfluousDutyCount: 0,
     duties,
   }
 }

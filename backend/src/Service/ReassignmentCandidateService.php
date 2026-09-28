@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Demand\LiveCoverageState;
 use App\Eligibility\ExclusionReason;
 use App\Entity\Duty;
 use App\Entity\DutyAssignment;
@@ -55,6 +56,9 @@ final class ReassignmentCandidateService
 {
     public const NOT_A_LINE_MEMBER = 'NOT_A_LINE_MEMBER';
     public const NOT_IN_GENERATION_SNAPSHOT = 'NOT_IN_GENERATION_SNAPSHOT';
+    /** docs/decisions.md D165 — why a conditional block offers no candidate at all. */
+    public const COVERAGE_NOT_REQUIRED = 'coverage_not_required';
+    public const COVERAGE_UNDETERMINED = 'coverage_undetermined';
 
     public function __construct(
         private readonly PlanningGenerationRepository $generationRepository,
@@ -68,6 +72,7 @@ final class ReassignmentCandidateService
         private readonly PersonCommitmentChecker $commitmentChecker,
         private readonly PlanningLineOrder $lineOrder,
         private readonly PlanningLineRepository $lineRepository,
+        private readonly LiveDemandViewFactory $demandViewFactory,
     ) {
     }
 
@@ -90,8 +95,23 @@ final class ReassignmentCandidateService
         $blockStart = min(array_map(static fn (Duty $d): \DateTimeImmutable => $d->getStartsAt(), $block));
         $blockEnd = max(array_map(static fn (Duty $d): \DateTimeImmutable => $d->getEndsAt(), $block));
 
+        // docs/decisions.md D165: a conditional block the live demand does not require (or cannot evaluate) takes
+        // no new holder — the list is then empty ON PURPOSE and says why, never an ambiguous empty list.
+        $demand = null;
+        $coverageState = null;
+        $notAssignableReason = null;
+        if ($duty->isConditional()) {
+            $demand = $this->demandViewFactory->forPlanning($duty->getPlanningPeriod()->getTeam()->getPlanning())->forUnitOf($duty);
+            $coverageState = LiveCoverageState::of($demand, null !== $currentTeamMember);
+            if (LiveCoverageState::UNDETERMINED === $coverageState) {
+                $notAssignableReason = self::COVERAGE_UNDETERMINED;
+            } elseif (!$coverageState->isRequired()) {
+                $notAssignableReason = self::COVERAGE_NOT_REQUIRED;
+            }
+        }
+
         $candidates = [];
-        foreach ($this->teamMemberRepository->findIntersecting($team, $blockStart, $blockEnd) as $member) {
+        foreach (null === $notAssignableReason ? $this->teamMemberRepository->findIntersecting($team, $blockStart, $blockEnd) : [] as $member) {
             if ($member === $currentTeamMember) {
                 continue;
             }
@@ -110,6 +130,9 @@ final class ReassignmentCandidateService
             (string) $generation->getStableId(),
             $currentTeamMember,
             $candidates,
+            $demand,
+            $coverageState,
+            $notAssignableReason,
         );
     }
 

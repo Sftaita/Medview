@@ -57,8 +57,17 @@ function successText(job: PlanningJob): string {
     const lines = (job.outcome?.lines ?? []) as CompletionLineResult[]
     const filled = lines.reduce((sum, line) => sum + line.filledUnitCount, 0)
     const remaining = lines.reduce((sum, line) => sum + line.remainingUncoveredRequiredUnitCount, 0)
+    const undetermined = lines.reduce((sum, line) => sum + (line.undeterminedUnitCount ?? 0), 0)
+    // docs/decisions.md D165: a reinforcement whose demand cannot be evaluated is never completed — said, not hidden.
+    const undeterminedText =
+      undetermined > 0
+        ? ` ${undetermined} renfort${undetermined > 1 ? 's' : ''} non évalué${undetermined > 1 ? 's' : ''} : la garde dont ${undetermined > 1 ? 'ils dépendent' : 'il dépend'} n’a pas de titulaire.`
+        : ''
+    if (filled === 0 && remaining === 0 && undetermined > 0) {
+      return `Aucune garde attribuée.${undeterminedText}`
+    }
     if (filled === 0 && remaining > 0) {
-      return `Aucune garde n’a pu être attribuée : ${remaining} reste${remaining > 1 ? 'nt' : ''} non attribuée${remaining > 1 ? 's' : ''} (personne n’est disponible).`
+      return `Aucune garde n’a pu être attribuée : ${remaining} reste${remaining > 1 ? 'nt' : ''} non attribuée${remaining > 1 ? 's' : ''} (personne n’est disponible).${undeterminedText}`
     }
     if (filled === 0) {
       return 'Aucune garde non attribuée : rien à compléter.'
@@ -67,7 +76,8 @@ function successText(job: PlanningJob): string {
       `${filled} garde${filled > 1 ? 's' : ''} ou bloc${filled > 1 ? 's' : ''} attribué${filled > 1 ? 's' : ''} automatiquement, sans toucher aux affectations existantes.` +
       (remaining > 0
         ? ` ${remaining} reste${remaining > 1 ? 'nt' : ''} non attribuée${remaining > 1 ? 's' : ''}.`
-        : '')
+        : '') +
+      undeterminedText
     )
   }
 

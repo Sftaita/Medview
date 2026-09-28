@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 namespace App\Service;
 
-use App\Demand\DemandView;
+use App\Demand\LiveCoverageState;
+use App\Demand\LiveDemandView;
 use App\Eligibility\ExclusionReason;
 use App\Entity\Duty;
 use App\Entity\DutyAssignment;
@@ -61,7 +62,7 @@ final class PlanningResultService
         return new PlanningResultView($planning, $lines);
     }
 
-    private function forLine(PlanningLine $line, ?\DateTimeImmutable $from, ?\DateTimeImmutable $toExclusive, DemandView $demand): PlanningResultLine
+    private function forLine(PlanningLine $line, ?\DateTimeImmutable $from, ?\DateTimeImmutable $toExclusive, LiveDemandView $demand): PlanningResultLine
     {
         $generation = $this->generationRepository->findMostRecentCompletedByPlanningPeriod($line->getPlanningPeriod());
         if (null === $generation) {
@@ -80,10 +81,26 @@ final class PlanningResultService
         $coveredCount = 0;
         $resultDuties = [];
 
+        $undeterminedCount = 0;
+        $superfluousCount = 0;
         foreach ($this->dutyRepository->findByPlanningPeriod($line->getPlanningPeriod()) as $duty) {
-            $required = $demand->forDuty($duty)->required;
+            $dutyDemand = $demand->forDuty($duty);
+            $required = $dutyDemand->required;
             $assignment = $assignmentByDutyId[(int) $duty->getId()] ?? null;
             $covered = null !== $assignment;
+
+            // docs/decisions.md D165: a conditional duty carries its live state and explanation, computed here once.
+            $unitDemand = null;
+            $coverageState = null;
+            if ($duty->isConditional()) {
+                $unitDemand = $demand->forUnitOf($duty);
+                $coverageState = LiveCoverageState::of($dutyDemand, $covered);
+                if (LiveCoverageState::UNDETERMINED === $coverageState) {
+                    ++$undeterminedCount;
+                } elseif ($coverageState->isSuperfluous()) {
+                    ++$superfluousCount;
+                }
+            }
 
             if ($required) {
                 ++$requiredCount;
@@ -101,7 +118,7 @@ final class PlanningResultService
                 continue;
             }
 
-            $resultDuties[] = new PlanningResultDuty($duty, $assignment, $covered, $reasons, $required);
+            $resultDuties[] = new PlanningResultDuty($duty, $assignment, $covered, $reasons, $required, $unitDemand, $duty->isConditional() ? $dutyDemand : null, $coverageState);
         }
 
         return new PlanningResultLine(
@@ -112,6 +129,8 @@ final class PlanningResultService
             $coveredCount,
             $requiredCount - $coveredCount,
             $resultDuties,
+            $undeterminedCount,
+            $superfluousCount,
         );
     }
 

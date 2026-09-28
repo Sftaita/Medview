@@ -24,6 +24,9 @@ function view(overrides: Partial<ReassignmentCandidatesView> = {}): Reassignment
       { teamMemberStableId: 'm-bob', firstName: 'Bob', lastName: 'Durand' },
       { teamMemberStableId: 'm-dan', firstName: 'Dan', lastName: 'Roux' },
     ],
+    assignable: true,
+    notAssignableReason: null,
+    demand: null,
     ...overrides,
   }
 }
@@ -146,6 +149,47 @@ describe('ReassignmentModal (assignment editor)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Remplacer' }))
 
     expect(await screen.findByText(/Cette attribution n.est plus possible/)).toBeInTheDocument()
+  })
+
+  it('says why a reinforcement nobody needs offers nobody (docs/decisions.md D165)', async () => {
+    stubCandidates(
+      view({
+        currentTeamMemberStableId: null,
+        currentAssignee: null,
+        candidates: [],
+        assignable: false,
+        notAssignableReason: 'coverage_not_required',
+      }),
+    )
+    renderModal()
+
+    expect(await screen.findByText(/Ce renfort n.est pas requis actuellement/)).toBeInTheDocument()
+    expect(screen.queryByText(/Personne de cette ligne/)).not.toBeInTheDocument()
+  })
+
+  it('says why a reinforcement whose demand is unknown offers nobody (D165)', async () => {
+    stubCandidates(
+      view({
+        currentTeamMemberStableId: null,
+        currentAssignee: null,
+        candidates: [],
+        assignable: false,
+        notAssignableReason: 'coverage_undetermined',
+      }),
+    )
+    renderModal()
+
+    expect(await screen.findByText(/la garde dont il dépend n.a pas de titulaire/)).toBeInTheDocument()
+  })
+
+  it('explains a save refused because the reinforcement is not required any more (409 coverage_not_required)', async () => {
+    stubCandidates(view(), status(409, { error: 'coverage_not_required' }))
+    renderModal()
+
+    await chooseBob()
+    fireEvent.click(screen.getByRole('button', { name: 'Remplacer' }))
+
+    expect(await screen.findByText(/Ce renfort n.est plus requis/)).toBeInTheDocument()
   })
 
   it('works on the whole atomic block, named by its pattern and date range', async () => {

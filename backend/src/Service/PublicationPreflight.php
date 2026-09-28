@@ -19,6 +19,8 @@ final readonly class PublicationPreflight
      * @param list<InconsistentPublicationGroup> $inconsistentGroups
      * @param list<InvalidPublicationAssignment> $invalidAssignments
      * @param list<PublicationConflict>          $conflicts
+     * @param list<ConditionalPublicationDuty>   $undeterminedDuties  docs/decisions.md D165 — blocks publication AND republication
+     * @param list<ConditionalPublicationDuty>   $superfluousCoverages docs/decisions.md D165 — a warning, never a blocker
      */
     public function __construct(
         public bool $publishable,
@@ -29,6 +31,8 @@ final readonly class PublicationPreflight
         public array $conflicts,
         /** docs/decisions.md D143 — same checks as $publishable, except an uncovered duty on an already-published line (a removal being announced) does not block. */
         public bool $republishable = false,
+        public array $undeterminedDuties = [],
+        public array $superfluousCoverages = [],
     ) {
     }
 }

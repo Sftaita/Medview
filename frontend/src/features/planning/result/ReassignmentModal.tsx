@@ -185,7 +185,15 @@ export function ReassignmentModal({ planningStableId, dutyStableId, onClose, onC
               <h3 className="reassignment-heading">
                 {view.currentAssignee ? 'Remplacer par' : 'Attribuer à'}
               </h3>
-              {view.candidates.length === 0 ? (
+              {view.notAssignableReason === 'coverage_not_required' ? (
+                <p className="muted">
+                  Ce renfort n’est pas requis actuellement : personne ne peut y être attribué.
+                </p>
+              ) : view.notAssignableReason === 'coverage_undetermined' ? (
+                <p className="muted">
+                  Impossible de savoir si ce renfort est requis : la garde dont il dépend n’a pas de titulaire.
+                </p>
+              ) : view.candidates.length === 0 ? (
                 <p className="muted">
                   Personne de cette ligne ne peut prendre {isBlock ? 'ce bloc' : 'cette garde'} actuellement.
                 </p>
@@ -280,6 +288,12 @@ function saveErrorMessage(err: unknown): string {
     }
     if (code === 'invalid_candidate') {
       return 'Cette attribution n’est plus possible : ce candidat ne remplit plus les conditions.'
+    }
+    if (code === 'coverage_not_required') {
+      return 'Ce renfort n’est plus requis : personne ne peut y être attribué.'
+    }
+    if (code === 'coverage_undetermined') {
+      return 'Impossible de savoir si ce renfort est requis : la garde dont il dépend n’a pas de titulaire.'
     }
   }
   return 'L’enregistrement a échoué.'

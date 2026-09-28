@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Demand\LiveDemandView;
+use App\Demand\SourceHolding;
 use App\Eligibility\DutyUnit;
 use App\Entity\DutyAssignment;
 use App\Entity\DutyAssignmentEvent;
@@ -19,11 +21,13 @@ use App\Exception\NoSolverParameterSetException;
 use App\Exception\PlanningCompletionStaleException;
 use App\Exception\PlanningGenerationInProgressException;
 use App\Fairness\DutyAssignmentEdge;
+use App\Fairness\FairnessDimensionValues;
 use App\Fairness\OptimizationProblem;
 use App\Fairness\OptimizationResult;
 use App\Fairness\PlanningSolver;
 use App\Fairness\SolverStatus;
 use App\Repository\DutyAssignmentRepository;
+use App\Repository\DutyRepository;
 use App\Repository\PlanningGenerationRepository;
 use App\Repository\PlanningLineRepository;
 use App\Repository\PlanningSnapshotRepository;
@@ -62,6 +66,18 @@ use Doctrine\ORM\EntityManagerInterface;
  * frozen in the generation's snapshot are NOT used here — the live
  * calendar is the truth for a completion.
  *
+ * Conditional lines (docs/decisions.md D165): what a line must cover is
+ * its LIVE demand — the rules its current generation froze, the source
+ * holders of the current calendar, plus the holders its source line is
+ * about to receive in this very completion (SourceHolding overrides) —
+ * never the demand the generation had. A reinforcement that became
+ * required after the generation is therefore completed; one that is not
+ * required, or whose demand cannot be evaluated, never is. A superfluous
+ * reinforcement somebody still holds enters the solve as a LOAD-ONLY
+ * unit, fixed to its holder: not demand (targets are computed on the live
+ * demand only), but a real load the fairness phases count. The population,
+ * participation factors and eligibility stay the snapshot's.
+ *
  * Concurrency: the same session lock as the generation launcher (never
  * both at once on a Planning), and the persistence step re-reads the
  * calendar under the CalendarWriteLock — if anything the solve relied on
@@ -89,6 +105,10 @@ final class PlanningCompletionService
         private readonly EntityManagerInterface $entityManager,
         private readonly WorkHeartbeat $heartbeat,
         private readonly PlanningLineOrder $lineOrder,
+        private readonly LiveDemandViewFactory $demandViewFactory,
+        private readonly DutyUnitFactory $dutyUnitFactory,
+        private readonly DutyRepository $dutyRepository,
+        private readonly DimensionMembershipCalculator $dimensionMembershipCalculator,
     ) {
     }
 
@@ -111,7 +131,7 @@ final class PlanningCompletionService
                 throw new NoSolverParameterSetException();
             }
 
-            /** @var list<array{line: PlanningLine, generation: PlanningGeneration, snapshot: PlanningSnapshot, problem: OptimizationProblem, holes: array<string, DutyUnit>, fixed: array<string, string>, result: OptimizationResult}> $plans */
+            /** @var list<array{line: PlanningLine, generation: PlanningGeneration, snapshot: PlanningSnapshot, problem: OptimizationProblem, holes: array<string, DutyUnit>, fixed: array<string, string>, result: OptimizationResult, undetermined: int}> $plans */
             $plans = [];
             $results = [];
             // docs/decisions.md D161: one line after another, in resolution order (PlanningLineOrder). The holes
@@ -119,14 +139,21 @@ final class PlanningCompletionService
             // commitments of the people concerned — otherwise the same person could be picked on two lines at
             // once, and the write-time revalidation would reject the whole completion.
             $virtualCommitments = [];
+            // docs/decisions.md D165: the live demand, seeing the holders the lines solved earlier are about to get.
+            $liveDemand = $this->demandViewFactory->forPlanning($planning);
+            $virtualHoldings = [];
             foreach ($this->lineOrder->activeInResolutionOrder($planning) as $line) {
-                $plan = $this->solveLine($line, $parameterSet, $virtualCommitments);
+                $plan = $this->solveLine($line, $parameterSet, $virtualCommitments, $liveDemand->withSourceHoldings($virtualHoldings));
                 if ($plan instanceof CompletionLineResult) {
                     $results[] = $plan;
                     continue;
                 }
                 $plans[] = $plan;
-                array_push($virtualCommitments, ...$this->plannedCommitments($plan));
+                $planned = $this->plannedCommitments($plan);
+                array_push($virtualCommitments, ...$planned);
+                foreach ($planned as $commitment) {
+                    $virtualHoldings[(int) $commitment->duty->getId()] = new SourceHolding(true, (string) $commitment->teamMember->getUser()->getStableId());
+                }
             }
 
             if ([] !== $plans) {
@@ -140,12 +167,13 @@ final class PlanningCompletionService
     }
 
     /**
-     * @return CompletionLineResult|array{line: PlanningLine, generation: PlanningGeneration, snapshot: PlanningSnapshot, problem: OptimizationProblem, holes: array<string, DutyUnit>, fixed: array<string, string>, result: OptimizationResult}
+     * @return CompletionLineResult|array{line: PlanningLine, generation: PlanningGeneration, snapshot: PlanningSnapshot, problem: OptimizationProblem, holes: array<string, DutyUnit>, fixed: array<string, string>, result: OptimizationResult, undetermined: int}
      */
     /**
      * @param list<PersonCommitment> $virtualCommitments fills planned on the lines solved before this one
+     * @param LiveDemandView         $demand             the live demand, holders planned on earlier lines included
      */
-    private function solveLine(PlanningLine $line, SolverParameterSet $parameterSet, array $virtualCommitments): CompletionLineResult|array
+    private function solveLine(PlanningLine $line, SolverParameterSet $parameterSet, array $virtualCommitments, LiveDemandView $demand): CompletionLineResult|array
     {
         $this->heartbeat->beat();
         $generation = $this->generationRepository->findMostRecentCompletedByPlanningPeriod($line->getPlanningPeriod());
@@ -157,12 +185,17 @@ final class PlanningCompletionService
         // Without the cross-line commitments frozen at generation time (D161): they may no longer hold (a
         // reassignment on another line since), and must never keep excluding someone who is free today. The
         // live check below (assignabilityError) re-applies the cross-line rule against the current calendar.
-        $matrix = $this->matrixBuilder->build($snapshot, withFrozenExternalCommitments: false);
-        $problem = $this->problemBuilder->build($this->contextBuilder->build($snapshot, $matrix), $parameterSet);
+        // D165: the units are the LIVE demand's (a conditional unit only when it is required today); demand, exposure
+        // and targets are computed on them alone. Population, participation and eligibility stay the snapshot's.
+        $matrix = $this->matrixBuilder->build($snapshot, withFrozenExternalCommitments: false, demand: $demand);
+        $currentByDutyId = $this->currentByDutyId($generation);
+        [$loadOnly, $undeterminedUnitCount] = $this->conditionalLeftovers($line, $demand, $matrix->getDutyUnits(), $currentByDutyId);
+        $problem = $this->problemBuilder->build($this->contextBuilder->build($snapshot, $matrix), $parameterSet)
+            ->withLoadOnlyUnits($loadOnly, $this->membershipOf($loadOnly));
 
-        [$fixed, $holes] = $this->splitUnits($problem, $this->currentByDutyId($generation));
+        [$fixed, $holes] = $this->splitUnits($problem, $currentByDutyId);
         if ([] === $holes) {
-            return new CompletionLineResult($line, 'nothing_to_complete');
+            return new CompletionLineResult($line, 'nothing_to_complete', undeterminedUnitCount: $undeterminedUnitCount);
         }
 
         $excluded = [];
@@ -182,17 +215,76 @@ final class PlanningCompletionService
         $result = $this->solver->solve($constrained);
 
         if (!$this->isUsable($result)) {
-            return new CompletionLineResult($line, 'solver_failed', \count($holes), 0, $this->countRequired($holes), $result->strictSolverStatus, $result->partialSolverStatus);
+            return new CompletionLineResult($line, 'solver_failed', \count($holes), 0, $this->countRequired($holes), $result->strictSolverStatus, $result->partialSolverStatus, $undeterminedUnitCount);
         }
 
-        return ['line' => $line, 'generation' => $generation, 'snapshot' => $snapshot, 'problem' => $constrained, 'holes' => $holes, 'fixed' => $fixed, 'result' => $result];
+        return ['line' => $line, 'generation' => $generation, 'snapshot' => $snapshot, 'problem' => $constrained, 'holes' => $holes, 'fixed' => $fixed, 'result' => $result, 'undetermined' => $undeterminedUnitCount];
+    }
+
+    /**
+     * The conditional units the live demand left out of the matrix
+     * (docs/decisions.md D165): those somebody still holds coherently
+     * (superfluous, or undetermined) become LOAD-ONLY units — their holder's
+     * real load, fixed, never a decision; those nobody holds are simply not
+     * completed, and the undetermined ones among them are counted so the
+     * result never reads as complete.
+     *
+     * @param list<DutyUnit>             $demandUnits     the units of the matrix
+     * @param array<int, DutyAssignment> $currentByDutyId
+     *
+     * @return array{0: list<DutyUnit>, 1: int}
+     */
+    private function conditionalLeftovers(PlanningLine $line, LiveDemandView $demand, array $demandUnits, array $currentByDutyId): array
+    {
+        $inMatrix = [];
+        foreach ($demandUnits as $unit) {
+            $inMatrix[$unit->getStableKey()] = true;
+        }
+
+        $loadOnly = [];
+        $undetermined = 0;
+        foreach ($this->dutyUnitFactory->fromDuties($this->dutyRepository->findByPlanningPeriod($line->getPlanningPeriod())) as $unit) {
+            if (!$unit->getDuties()[0]->isConditional() || isset($inMatrix[$unit->getStableKey()])) {
+                continue;
+            }
+
+            $holders = [];
+            foreach ($unit->getDuties() as $duty) {
+                $assignment = $currentByDutyId[(int) $duty->getId()] ?? null;
+                $holders[] = null !== $assignment ? (string) $assignment->getTeamMember()->getStableId() : null;
+            }
+            $coherentlyHeld = !\in_array(null, $holders, true) && 1 === \count(array_unique($holders));
+
+            if ($coherentlyHeld) {
+                $loadOnly[] = DutyUnitFactory::withDemandDecision($unit, false);
+            } elseif ([] === array_filter($holders) && !$demand->forUnit($unit)->determined) {
+                ++$undetermined;
+            }
+        }
+
+        return [$loadOnly, $undetermined];
+    }
+
+    /**
+     * @param list<DutyUnit> $units
+     *
+     * @return array<string, FairnessDimensionValues>
+     */
+    private function membershipOf(array $units): array
+    {
+        $membership = [];
+        foreach ($units as $unit) {
+            $membership[$unit->getStableKey()] = $this->dimensionMembershipCalculator->forDutyUnit($unit);
+        }
+
+        return $membership;
     }
 
     /**
      * The holes $plan is about to fill, as commitments of their future
      * holders — for the lines solved after it (D161).
      *
-     * @param array{line: PlanningLine, generation: PlanningGeneration, snapshot: PlanningSnapshot, problem: OptimizationProblem, holes: array<string, DutyUnit>, fixed: array<string, string>, result: OptimizationResult} $plan
+     * @param array{line: PlanningLine, generation: PlanningGeneration, snapshot: PlanningSnapshot, problem: OptimizationProblem, holes: array<string, DutyUnit>, fixed: array<string, string>, result: OptimizationResult, undetermined: int} $plan
      *
      * @return list<PersonCommitment>
      */
@@ -254,7 +346,7 @@ final class PlanningCompletionService
      * One transaction for every line: either the whole completion is
      * written, or nothing is.
      *
-     * @param non-empty-list<array{line: PlanningLine, generation: PlanningGeneration, snapshot: PlanningSnapshot, problem: OptimizationProblem, holes: array<string, DutyUnit>, fixed: array<string, string>, result: OptimizationResult}> $plans
+     * @param non-empty-list<array{line: PlanningLine, generation: PlanningGeneration, snapshot: PlanningSnapshot, problem: OptimizationProblem, holes: array<string, DutyUnit>, fixed: array<string, string>, result: OptimizationResult, undetermined: int}> $plans
      *
      * @return list<CompletionLineResult>
      *
@@ -278,6 +370,9 @@ final class PlanningCompletionService
                 }
 
                 $wasPublished = PlanningPeriodStatus::PUBLISHED === $generation->getPlanningPeriod()->getStatus();
+                // D165: the live demand again, under the lock — what the lines written just before in this
+                // transaction now hold included. A reinforcement the calendar no longer requires is never written.
+                $demandNow = $this->demandViewFactory->forPlanning($planning);
                 $filled = [];
                 foreach ($plan['result']->assignments as $edge) {
                     $this->heartbeat->beat();
@@ -292,6 +387,9 @@ final class PlanningCompletionService
                     }
                     // Live revalidation at write time, against everything written so far in this transaction too.
                     if (null !== $this->candidateService->assignabilityError($generation, $unit->getDuties(), $member)) {
+                        throw new PlanningCompletionStaleException();
+                    }
+                    if ($unit->getDuties()[0]->isConditional() && !$demandNow->forUnit($unit)->required) {
                         throw new PlanningCompletionStaleException();
                     }
 
@@ -312,6 +410,7 @@ final class PlanningCompletionService
                     $this->countRequired($remaining),
                     $plan['result']->strictSolverStatus,
                     $plan['result']->partialSolverStatus,
+                    $plan['undetermined'],
                 );
             }
 

@@ -63,6 +63,7 @@ function duty(
         }
       : null,
     reasons: [],
+    demand: null,
     ...overrides,
   }
 }
@@ -85,6 +86,8 @@ function line(id: string, name: string, duties: PlanningResultDuty[]): PlanningR
     requiredDutyCount: duties.length,
     coveredRequiredDutyCount: duties.filter((d) => d.covered).length,
     uncoveredRequiredDutyCount: duties.filter((d) => !d.covered).length,
+    undeterminedDutyCount: 0,
+    superfluousDutyCount: 0,
     duties,
   }
 }

@@ -19,6 +19,8 @@ function preflight(overrides: Partial<PublicationPreflight> = {}): PublicationPr
     inconsistentGroups: [],
     invalidAssignments: [],
     conflicts: [],
+    undeterminedDuties: [],
+    superfluousCoverages: [],
     ...overrides,
   }
 }
@@ -71,6 +73,22 @@ describe('PublishModal', () => {
     expect(await screen.findByText('Publication impossible.')).toBeInTheDocument()
     expect(screen.getByText(/1 garde obligatoire reste.*non couverte/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Publier' })).not.toBeInTheDocument()
+  })
+
+  it('names a reinforcement whose demand cannot be evaluated as a blocker (docs/decisions.md D165)', async () => {
+    stubPreflight(
+      preflight({
+        publishable: false,
+        republishable: false,
+        undeterminedDuties: [
+          { duty: { dutyStableId: 'r1', date: '2027-01-05', dutyTypeName: 'Renfort' }, member: null },
+        ] as PublicationPreflight['undeterminedDuties'],
+      }),
+    )
+    renderModal()
+
+    expect(await screen.findByText('Publication impossible.')).toBeInTheDocument()
+    expect(screen.getByText(/1 renfort ne peut pas être évalué/)).toBeInTheDocument()
   })
 
   it('never calls POST /publish before the final "Publier" click', async () => {

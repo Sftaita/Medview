@@ -111,6 +111,44 @@ final readonly class OptimizationProblem
         );
     }
 
+    /**
+     * The same problem, plus LOAD-ONLY units (docs/decisions.md D165): a
+     * superfluous reinforcement still held by someone during "Compléter
+     * automatiquement". Such a unit is not demand — it stays out of
+     * `requiredDemand`, exposure and targets, which were computed before —
+     * but its holder really carries it: added as an optional unit and then
+     * fixed to that holder (withFixedAssignments), its load counts in the
+     * fairness phases of the people it belongs to, and it is never a
+     * decision of the solve.
+     *
+     * @param list<DutyUnit>                         $units
+     * @param array<string, FairnessDimensionValues> $dimensionMembership keyed by DutyUnit::getStableKey()
+     */
+    public function withLoadOnlyUnits(array $units, array $dimensionMembership): self
+    {
+        if ([] === $units) {
+            return $this;
+        }
+
+        return new self(
+            $this->mode,
+            $this->requiredDutyUnits,
+            [...$this->optionalDutyUnits, ...$units],
+            $this->requiredDemand,
+            $this->eligibilityMatrix,
+            $this->structurallyForcedLoad,
+            $this->fairnessTargets,
+            [...$this->dimensionMembership, ...$dimensionMembership],
+            $this->coveragePolicy,
+            $this->objectivePhases,
+            $this->assignmentConflicts,
+            $this->timeoutSeconds,
+            $this->numWorkers,
+            $this->fixedAssignments,
+            $this->excludedEdges,
+        );
+    }
+
     /** The candidate a unit is fixed to, or null when the unit is a real decision of this solve. */
     public function getFixedAssignee(string $dutyUnitStableKey): ?string
     {

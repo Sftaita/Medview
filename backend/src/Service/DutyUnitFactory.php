@@ -87,11 +87,23 @@ final class DutyUnitFactory
             if (!$demand->forUnit($unit)->required) {
                 continue;
             }
-            $kept[] = $unit instanceof DutyGroupUnit
-                ? new DutyGroupUnit($unit->getGroupInstance(), $unit->getDuties(), true)
-                : new SingleDutyUnit($unit->getDuties()[0], true);
+            $kept[] = self::withDemandDecision($unit, true);
         }
 
         return $kept;
+    }
+
+    /**
+     * The same conditional unit, carrying the demand decision it was built
+     * with. `false` only ever marks a LOAD-ONLY unit of a completion
+     * (docs/decisions.md D165): a superfluous reinforcement somebody still
+     * holds, given to the solver fixed to that holder so their real load
+     * counts — never a decision, never a demand.
+     */
+    public static function withDemandDecision(DutyUnit $unit, bool $required): DutyUnit
+    {
+        return $unit instanceof DutyGroupUnit
+            ? new DutyGroupUnit($unit->getGroupInstance(), $unit->getDuties(), $required)
+            : new SingleDutyUnit($unit->getDuties()[0], $required);
     }
 }

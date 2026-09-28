@@ -10,6 +10,8 @@ use App\Entity\DutyAssignmentSource;
 use App\Entity\PlanningGeneration;
 use App\Entity\PlanningSnapshot;
 use App\Entity\PlanningTeamMember;
+use App\Exception\CoverageNotRequiredException;
+use App\Exception\CoverageUndeterminedException;
 use App\Exception\DuplicateDutyAssignmentException;
 use App\Exception\InvalidDutyAssignmentException;
 use App\Exception\PlanningGenerationNotSnapshottedException;
@@ -45,6 +47,7 @@ final class DutyAssignmentService
         private readonly PlanningSnapshotRepository $snapshotRepository,
         private readonly PlanningSnapshotMemberRepository $snapshotMemberRepository,
         private readonly EntityManagerInterface $entityManager,
+        private readonly ConditionalCoverageService $conditionalCoverage,
     ) {
     }
 
@@ -52,6 +55,8 @@ final class DutyAssignmentService
      * @throws PlanningGenerationNotSnapshottedException
      * @throws InvalidDutyAssignmentException
      * @throws DuplicateDutyAssignmentException
+     * @throws CoverageNotRequiredException              docs/decisions.md D165 — the same write-time rule as a reassignment
+     * @throws CoverageUndeterminedException
      */
     public function createManual(PlanningGeneration $generation, Duty $duty, PlanningTeamMember $teamMember, bool $locked): DutyAssignment
     {
@@ -59,6 +64,10 @@ final class DutyAssignmentService
         if (null === $snapshot) {
             throw new PlanningGenerationNotSnapshottedException();
         }
+
+        // docs/decisions.md D165: this low-level path must not be a way around the rule a reassignment enforces —
+        // a conditional duty takes a new holder only while the live demand requires it.
+        $this->conditionalCoverage->assertCanBeNewlyCovered([$duty]);
 
         $assignment = $this->buildAssignment($generation, $snapshot, $duty, $teamMember, DutyAssignmentSource::MANUAL, $locked);
         $this->entityManager->persist($assignment);

@@ -286,6 +286,11 @@ signal d'équité du solve en cours.
 > absente du problème — ni `requiredDemand`, ni `effectiveExposure`, ni
 > variable CP-SAT — et n'est jamais convertie en OPTIONAL. Pour une ligne
 > indépendante, rien ne change (D084).
+>
+> **Complétion sur la demande live (D165)** : « Compléter automatiquement »
+> recalcule ces formules sur la demande live requise d'une ligne
+> conditionnelle ; un renfort superflu encore tenu n'est pas demande mais sa
+> charge est comptée (unité load-only fixée).
 
 ```
 structuralOpportunity(user, duty) ∈ {0,1}
@@ -1234,3 +1239,4 @@ pourvues.
 | v0.1 | 2026-09-15 | Première version : design conceptuel complet, rien d'implémenté. |
 | v2.0 | 2026-09-15 | Spécification finale v1 à l'issue d'un audit critique en trois passes. Remplace la recommandation greedy (§14 v0.1) par une architecture d'optimisation globale par contraintes (CP-SAT/OR-Tools) derrière l'abstraction `PlanningSolver`. Tranche l'ambiguïté poids-pondérés/lexicographique en faveur de l'optimisation lexicographique par phases. Spécifie entièrement le modèle UNSAT (quatre couches, strict/partial diagnostic solve, `coverageStatus`). Ajoute : exposition structurelle par garde, `requiredDemand` fixé avant solve, forced load à deux niveaux (structural/global), taxonomie HARD/POLICY_HARD/SOFT, snapshot hybride versionné, `DutyAssignment`/`DutyAssignmentEvent`, tie-break déterministe stable, taxonomie des absences. Décisions actées dans `docs/decisions.md` D031-D045.
 | — | 2026-09-28 | D164 : génération d'une ligne conditionnelle — source avant cible, demande figée par génération, unités non déclenchées absentes du problème, `effectiveExposure` conditionnelle sur la demande déclenchée (D084 inchangée pour INDEPENDENT). |
+| — | 2026-09-28 | D165 : calendrier live d'une ligne conditionnelle — impacts signalés jamais appliqués, `coverage_not_required`, complétion sur la demande live, renforts superflus comptés comme charge (load-only), indéterminé jamais complété et bloquant à la publication. |

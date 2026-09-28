@@ -120,7 +120,8 @@ final class RunPlanningJobHandler
     {
         $results = $this->completionService->complete($job->getPlanning(), $job->getRequestedBy());
 
-        $remaining = array_sum(array_map(static fn (CompletionLineResult $r): int => $r->remainingUncoveredRequiredUnitCount, $results));
+        // An undetermined reinforcement (docs/decisions.md D165) is never completed — and never reported as complete either.
+        $remaining = array_sum(array_map(static fn (CompletionLineResult $r): int => $r->remainingUncoveredRequiredUnitCount + $r->undeterminedUnitCount, $results));
         $failed = array_filter($results, static fn (CompletionLineResult $r): bool => 'solver_failed' === $r->status);
 
         return [

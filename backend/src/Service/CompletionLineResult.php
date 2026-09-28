@@ -26,6 +26,8 @@ final readonly class CompletionLineResult
         public int $remainingUncoveredRequiredUnitCount = 0,
         public ?SolverStatus $strictSolverStatus = null,
         public ?SolverStatus $partialSolverStatus = null,
+        /** docs/decisions.md D165 — conditional units left alone because their live demand cannot be evaluated (never completed). */
+        public int $undeterminedUnitCount = 0,
     ) {
     }
 
@@ -43,6 +45,7 @@ final readonly class CompletionLineResult
             'remainingUncoveredRequiredUnitCount' => $this->remainingUncoveredRequiredUnitCount,
             'strictSolverStatus' => $this->strictSolverStatus?->value,
             'partialSolverStatus' => $this->partialSolverStatus?->value,
+            'undeterminedUnitCount' => $this->undeterminedUnitCount,
         ];
     }
 }

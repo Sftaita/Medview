@@ -7,6 +7,8 @@ namespace App\Controller;
 use App\Dto\CreateDutyAssignmentRequest;
 use App\Entity\DutyAssignment;
 use App\Entity\PlanningGeneration;
+use App\Exception\CoverageNotRequiredException;
+use App\Exception\CoverageUndeterminedException;
 use App\Exception\DuplicateDutyAssignmentException;
 use App\Exception\InvalidDutyAssignmentException;
 use App\Exception\PlanningGenerationNotSnapshottedException;
@@ -75,6 +77,10 @@ final class DutyAssignmentController
             return new JsonResponse(['error' => 'invalid_assignment', 'message' => $exception->getMessage()], 422);
         } catch (DuplicateDutyAssignmentException $exception) {
             return new JsonResponse(['error' => 'duplicate_assignment', 'message' => $exception->getMessage()], 409);
+        } catch (CoverageNotRequiredException $exception) {
+            return new JsonResponse(['error' => 'coverage_not_required', 'message' => $exception->getMessage()], 409);
+        } catch (CoverageUndeterminedException $exception) {
+            return new JsonResponse(['error' => 'coverage_undetermined', 'message' => $exception->getMessage()], 409);
         }
 
         return new JsonResponse($this->toArray($assignment), 201);

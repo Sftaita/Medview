@@ -16,6 +16,57 @@ export type PlanningResultAssignment = {
   user: { stableId: string; firstName: string; lastName: string }
 }
 
+/**
+ * Where a conditional duty stands in the current calendar (docs/decisions.md
+ * D165): its live demand crossed with its coverage — computed by the
+ * backend, never re-derived here.
+ */
+export type LiveCoverageState =
+  | 'REQUIRED_ASSIGNED'
+  | 'REQUIRED_UNASSIGNED'
+  | 'NOT_REQUIRED_UNASSIGNED'
+  | 'NOT_REQUIRED_ASSIGNED'
+  | 'UNDETERMINED'
+
+/** The live demand of a conditional unit (docs/decisions.md D165). `required: null` = cannot be evaluated. */
+export type LiveUnitDemand = {
+  state: LiveCoverageState
+  required: boolean | null
+  reason: string
+  /** Not required any more but still held: kept on purpose, warned about. */
+  superfluous: boolean
+  triggeringDutyStableIds: string[]
+  triggeringDates: string[]
+}
+
+/** The same, plus the explanation of the duty's own day: its source duty, who holds it, the trigger. */
+export type LiveDutyDemand = LiveUnitDemand & {
+  dayReason: string
+  weekday: string
+  sourceDutyStableId: string
+  sourceDate: string
+  sourceHolder: { userStableId: string; firstName: string; lastName: string } | null
+  trigger: { triggerStableId: string | null; weekdays: string[]; increment: number } | null
+}
+
+/** What a change on a source line did to a reinforcement depending on it — reported, never acted on (D165). */
+export type DependentImpact = {
+  lineStableId: string
+  lineName: string
+  unitStableKey: string
+  groupInstanceStableId: string | null
+  dutyStableIds: string[]
+  dates: string[]
+  previousState: LiveCoverageState
+  newState: LiveCoverageState
+  changed: boolean
+  required: boolean | null
+  assigned: boolean
+  assignee: { teamMemberStableId: string; userStableId: string; firstName: string; lastName: string } | null
+  reason: string
+  triggeringDates: string[]
+}
+
 export type PlanningResultDuty = {
   dutyStableId: string
   /** "YYYY-MM-DD", local date. */
@@ -37,6 +88,8 @@ export type PlanningResultDuty = {
   assignment: PlanningResultAssignment | null
   /** Only ever populated for an uncovered REQUIRED duty; empty when no cause is known — never invented. */
   reasons: PlanningResultCandidateReason[]
+  /** A conditional duty's live demand (docs/decisions.md D165); null for an intrinsic duty. */
+  demand: LiveDutyDemand | null
 }
 
 export type PlanningLineType = 'PRIMARY' | 'SECONDARY'
@@ -57,6 +110,10 @@ export type PlanningResultLine = {
   requiredDutyCount: number
   coveredRequiredDutyCount: number
   uncoveredRequiredDutyCount: number
+  /** Conditional duties whose demand cannot be evaluated (D165). */
+  undeterminedDutyCount: number
+  /** Conditional duties not required any more but still held (D165). */
+  superfluousDutyCount: number
   duties: PlanningResultDuty[]
 }
 
@@ -99,6 +156,11 @@ export type ReassignmentCandidatesView = {
   currentAssignee: ReassignmentCandidate | null
   /** Replacements only — the current holder is never among them. */
   candidates: ReassignmentCandidate[]
+  /** false when no new holder can be written (D165): the empty candidate list is then on purpose. */
+  assignable: boolean
+  notAssignableReason: 'coverage_not_required' | 'coverage_undetermined' | null
+  /** The live demand of a conditional block; null for an intrinsic one. */
+  demand: LiveUnitDemand | null
 }
 
 /** POST /api/plannings/{id}/complete — one entry per active line (docs/decisions.md D145). */
@@ -109,6 +171,8 @@ export type CompletionLineResult = {
   holeCount: number
   filledUnitCount: number
   remainingUncoveredRequiredUnitCount: number
+  /** Conditional units never completed because their demand cannot be evaluated (D165). */
+  undeterminedUnitCount: number
 }
 
 // --- Publication state (docs/decisions.md D143) -------------------------------------
@@ -235,6 +299,10 @@ export type PublicationPreflight = {
   inconsistentGroups: { groupInstanceStableId: string }[]
   invalidAssignments: InvalidPublicationAssignment[]
   conflicts: PublicationConflict[]
+  /** Reinforcements whose demand cannot be evaluated — block publication and republication (D165). */
+  undeterminedDuties: { duty: PublicationDutyRef; member: PublicationMemberRef | null }[]
+  /** Reinforcements not required any more but still held — a warning, never a blocker (D165). */
+  superfluousCoverages: { duty: PublicationDutyRef; member: PublicationMemberRef | null }[]
 }
 
 export type PublicationLineResult = {

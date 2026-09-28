@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Demand\DemandView;
 use App\Eligibility\EligibilityMatrix;
 use App\Entity\PlanningSnapshot;
 use App\Repository\DutyRepository;
@@ -33,8 +34,11 @@ final class EligibilityMatrixBuilder
      *                                            calendar instead (PlanningCompletionService): a frozen
      *                                            commitment may no longer hold, and must then never keep
      *                                            excluding a person who is free today
+     * @param DemandView|null $demand             the demand deciding which conditional units exist: the generation's
+     *                                            own frozen one by default (D164); the LIVE one for a completion
+     *                                            (D165), which fills what the current calendar requires today
      */
-    public function build(PlanningSnapshot $snapshot, bool $withFrozenExternalCommitments = true): EligibilityMatrix
+    public function build(PlanningSnapshot $snapshot, bool $withFrozenExternalCommitments = true, ?DemandView $demand = null): EligibilityMatrix
     {
         $planningPeriod = $snapshot->getGeneration()->getPlanningPeriod();
         $duties = $this->dutyRepository->findByPlanningPeriod($planningPeriod);
@@ -43,7 +47,7 @@ final class EligibilityMatrixBuilder
         // always; a conditional unit only when its frozen decision is "required" (absent otherwise, never optional).
         // Everything built from the matrix (eligibility, exposure, forced load, targets, conflicts, the problem)
         // therefore only ever sees the demand this generation really has.
-        $dutyUnits = $this->dutyUnitFactory->fromDuties($duties, $this->demandViewFactory->forSnapshot($snapshot));
+        $dutyUnits = $this->dutyUnitFactory->fromDuties($duties, $demand ?? $this->demandViewFactory->forSnapshot($snapshot));
 
         $candidates = $snapshot->getMembers()->toArray();
         usort($candidates, static fn ($a, $b): int => (string) $a->getSourceTeamMemberStableId() <=> (string) $b->getSourceTeamMemberStableId());

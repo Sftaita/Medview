@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Demand\LiveCoverageState;
 use App\Demand\DemandView;
 use App\Eligibility\ExclusionReason;
 use App\Entity\Duty;
@@ -47,6 +48,8 @@ final class PlanningPublicationPreflightService
         $inconsistentGroups = [];
         $invalidAssignments = [];
         $conflicts = [];
+        $undeterminedDuties = [];
+        $superfluousCoverages = [];
         $allReady = true;
         $demand = $this->demandViewFactory->forPlanning($planning);
 
@@ -65,13 +68,16 @@ final class PlanningPublicationPreflightService
                 continue;
             }
 
-            $this->checkLine($line, $generation, $demand, $uncoveredDuties, $inconsistentGroups, $invalidAssignments, $conflicts);
+            $this->checkLine($line, $generation, $demand, $uncoveredDuties, $inconsistentGroups, $invalidAssignments, $conflicts, $undeterminedDuties, $superfluousCoverages);
         }
 
         $coherent = $allReady
             && [] === $inconsistentGroups
             && [] === $invalidAssignments
             && [] === $conflicts
+            // docs/decisions.md D165: a reinforcement whose demand cannot be evaluated is never "fine" — it blocks a
+            // publication and a republication alike, until its source duty has a holder again.
+            && [] === $undeterminedDuties
             && [] !== $lineReadiness;
 
         $publishable = $coherent && [] === $uncoveredDuties;
@@ -85,7 +91,7 @@ final class PlanningPublicationPreflightService
             static fn (UncoveredPublicationDuty $item): bool => PlanningPeriodStatus::PUBLISHED !== $item->duty->getPlanningPeriod()->getStatus(),
         );
 
-        return new PublicationPreflight($publishable, $lineReadiness, $uncoveredDuties, $inconsistentGroups, $invalidAssignments, $conflicts, $republishable);
+        return new PublicationPreflight($publishable, $lineReadiness, $uncoveredDuties, $inconsistentGroups, $invalidAssignments, $conflicts, $republishable, $undeterminedDuties, $superfluousCoverages);
     }
 
     /**
@@ -93,6 +99,8 @@ final class PlanningPublicationPreflightService
      * @param list<InconsistentPublicationGroup> $inconsistentGroups
      * @param list<InvalidPublicationAssignment> $invalidAssignments
      * @param list<PublicationConflict>          $conflicts
+     * @param list<ConditionalPublicationDuty>   $undeterminedDuties
+     * @param list<ConditionalPublicationDuty>   $superfluousCoverages
      */
     private function checkLine(
         PlanningLine $line,
@@ -102,6 +110,8 @@ final class PlanningPublicationPreflightService
         array &$inconsistentGroups,
         array &$invalidAssignments,
         array &$conflicts,
+        array &$undeterminedDuties,
+        array &$superfluousCoverages,
     ): void {
         $duties = $this->dutyRepository->findByPlanningPeriod($line->getPlanningPeriod());
 
@@ -114,8 +124,20 @@ final class PlanningPublicationPreflightService
         $seenGroupIds = [];
         foreach ($duties as $duty) {
             // The live demand (D164): a conditional duty only counts when its source holder triggers it.
-            if ($demand->forDuty($duty)->required && !isset($currentByDutyId[(int) $duty->getId()])) {
+            $dutyDemand = $demand->forDuty($duty);
+            $current = $currentByDutyId[(int) $duty->getId()] ?? null;
+            if ($dutyDemand->required && null === $current) {
                 $uncoveredDuties[] = new UncoveredPublicationDuty($duty);
+            }
+            // D165: required + assigned → OK; required + unassigned → uncovered (above); not required + unassigned → OK;
+            // not required + assigned → warning; undetermined → blocker.
+            if ($duty->isConditional()) {
+                $state = LiveCoverageState::of($dutyDemand, null !== $current);
+                if (LiveCoverageState::UNDETERMINED === $state) {
+                    $undeterminedDuties[] = new ConditionalPublicationDuty($duty, $current?->getTeamMember());
+                } elseif ($state->isSuperfluous()) {
+                    $superfluousCoverages[] = new ConditionalPublicationDuty($duty, $current?->getTeamMember());
+                }
             }
 
             $group = $duty->getGroupInstance();

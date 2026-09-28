@@ -102,7 +102,12 @@ final class PlanningPeriodLifecycleService
         // source holder triggers it), never Duty::isRequired() alone.
         $demand = $this->demandViewFactory->forPlanning($planningPeriod->getTeam()->getPlanning());
         foreach ($this->dutyRepository->findByPlanningPeriod($planningPeriod) as $duty) {
-            if ($demand->forDuty($duty)->required && !isset($assignedDutyIds[(int) $duty->getId()])) {
+            $dutyDemand = $demand->forDuty($duty);
+            if ($dutyDemand->required && !isset($assignedDutyIds[(int) $duty->getId()])) {
+                return false;
+            }
+            // docs/decisions.md D165: a reinforcement whose demand cannot be evaluated is never "covered".
+            if (!$dutyDemand->determined) {
                 return false;
             }
         }

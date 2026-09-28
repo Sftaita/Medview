@@ -450,3 +450,11 @@ source, déclencheur, raison), et une ligne sans aucun renfort déclenché
 termine `COMPLETED` à zéro affectation. Une nouvelle politique s'applique à
 la prochaine génération, jamais au calendrier déjà généré. Détail :
 `docs/planning-generation.md` §25.
+
+**Calendrier live (D165)** : remplacer le titulaire de la ligne source peut
+créer ou supprimer un besoin de renfort — c'est signalé
+(`dependentImpacts`), jamais appliqué automatiquement. Un renfort non requis
+ne reçoit personne (`coverage_not_required`) ; un renfort devenu inutile
+garde son titulaire jusqu'à « Retirer l'affectation » ; « Compléter
+automatiquement » couvre la demande live. Détail :
+`docs/planning-generation.md` §26.

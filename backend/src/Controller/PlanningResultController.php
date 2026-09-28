@@ -9,6 +9,7 @@ use App\Entity\DutyAssignment;
 use App\Entity\Planning;
 use App\Repository\PlanningRepository;
 use App\Security\Voter\PlanningVoter;
+use App\Service\LiveDemandPresenter;
 use App\Service\PlanningResultCandidateReason;
 use App\Service\PlanningResultDuty;
 use App\Service\PlanningResultLine;
@@ -38,6 +39,7 @@ final class PlanningResultController
         private readonly PlanningRepository $planningRepository,
         private readonly PlanningResultService $resultService,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
+        private readonly LiveDemandPresenter $demandPresenter,
     ) {
     }
 
@@ -120,6 +122,8 @@ final class PlanningResultController
             'requiredDutyCount' => $result->requiredDutyCount,
             'coveredRequiredDutyCount' => $result->coveredRequiredDutyCount,
             'uncoveredRequiredDutyCount' => $result->uncoveredRequiredDutyCount,
+            'undeterminedDutyCount' => $result->undeterminedDutyCount,
+            'superfluousDutyCount' => $result->superfluousDutyCount,
             'duties' => array_map($this->dutyToArray(...), $result->duties),
         ];
     }
@@ -156,6 +160,11 @@ final class PlanningResultController
             'covered' => $result->covered,
             'assignment' => null === $assignment ? null : $this->assignmentToArray($assignment),
             'reasons' => array_map($this->reasonToArray(...), $result->reasons),
+            // docs/decisions.md D165: a conditional duty's live demand — state, explanation, source and its holder —
+            // so the calendar never re-derives it; null for an intrinsic duty.
+            'demand' => null !== $result->unitDemand && null !== $result->dutyDemand && null !== $result->coverageState
+                ? $this->demandPresenter->dutyToArray($result->unitDemand, $result->dutyDemand, $result->coverageState)
+                : null,
         ];
     }
 

@@ -1102,3 +1102,17 @@ dans le domaine :
 Les phases lexicographiques, la bascule STRICT → PARTIAL et `UnsatReport`
 sont inchangés. Test : `FaultInjectingPlanningSolver::$errorWhen` simule un
 résultat ERROR (source en échec) sans exception.
+
+## 39. Complétion d'une ligne conditionnelle : unités load-only (docs/decisions.md D165)
+
+« Compléter automatiquement » donne au solveur, pour une ligne
+conditionnelle, les unités de la **demande live** requise (holes et unités
+déjà couvertes, fixées), plus des unités **load-only** : un renfort superflu
+(ou indéterminé) qu'une personne tient encore, ajouté par
+`OptimizationProblem::withLoadOnlyUnits()` comme unité optionnelle puis fixé
+à son titulaire (`fixedCandidateId`). Le solveur ne le décide jamais ; il
+entre seulement dans les termes de charge des phases d'équité de son
+titulaire. `requiredDemand`, exposition et cibles sont calculées avant, sur
+la seule demande live requise — l'unité load-only n'y figure pas. Aucune
+modification du payload CP-SAT ni du script Python : une unité optionnelle
+fixée était déjà prise en charge (D145).

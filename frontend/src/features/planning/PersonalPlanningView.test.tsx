@@ -169,6 +169,7 @@ function resultDuty(
       user: { stableId: 'u-alice', firstName: 'Alice', lastName: 'Martin' },
     },
     reasons: [],
+    demand: null,
     ...overrides,
   }
 }
@@ -194,6 +195,8 @@ function makeLine(overrides: Partial<PlanningResultLine> = {}): PlanningResultLi
     requiredDutyCount: 0,
     coveredRequiredDutyCount: 0,
     uncoveredRequiredDutyCount: 0,
+    undeterminedDutyCount: 0,
+    superfluousDutyCount: 0,
     duties: [],
     ...overrides,
   }

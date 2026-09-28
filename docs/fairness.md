@@ -202,6 +202,15 @@ confondues — voir `docs/decisions.md` D084 pour la justification textuelle
 > Le filtre est posé au seul endroit où les unités sont construites
 > (`DutyUnitFactory`), pas par des exceptions dans chaque calcul.
 
+> **Complétion d'une ligne conditionnelle (D165)** : population, facteurs
+> de participation et éligibilité restent ceux du snapshot ; la demande à
+> couvrir, l'exposition et les cibles sont recalculées sur la **demande live
+> requise** (les titulaires source actuels, avec la politique figée par la
+> génération). Un renfort superflu encore tenu n'est **pas** demande (hors
+> `requiredDemand`, exposition, cibles) mais reste une **charge** : il entre
+> dans le problème comme unité load-only fixée à son titulaire, comptée dans
+> les phases d'équité — testé : le nouveau renfort va à l'autre personne.
+
 **Deux invariants de résistance au gaming, testés explicitement**
 (`EffectiveExposureServiceTest`) :
 

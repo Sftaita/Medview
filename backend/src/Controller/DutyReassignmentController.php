@@ -8,6 +8,8 @@ use App\Dto\ReassignDutyRequest;
 use App\Entity\Duty;
 use App\Entity\PlanningPeriodStatus;
 use App\Entity\User;
+use App\Exception\CoverageNotRequiredException;
+use App\Exception\CoverageUndeterminedException;
 use App\Exception\DutyAlreadyUncoveredException;
 use App\Exception\DutyNotGeneratedException;
 use App\Exception\InvalidReassignmentCandidateException;
@@ -16,7 +18,9 @@ use App\Exception\StaleReassignmentException;
 use App\Repository\DutyRepository;
 use App\Repository\PlanningTeamMemberRepository;
 use App\Security\Voter\PlanningVoter;
+use App\Service\DependentImpact;
 use App\Service\DutyReassignmentService;
+use App\Service\LiveDemandPresenter;
 use App\Service\ReassignmentBlockDuty;
 use App\Service\ReassignmentCandidate;
 use App\Service\ReassignmentCandidateService;
@@ -45,6 +49,7 @@ final class DutyReassignmentController
         private readonly ReassignmentCandidateService $candidateService,
         private readonly DutyReassignmentService $reassignmentService,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
+        private readonly LiveDemandPresenter $demandPresenter,
     ) {
     }
 
@@ -73,6 +78,11 @@ final class DutyReassignmentController
                 'lastName' => $current->getUser()->getLastName(),
             ],
             'candidates' => array_map($this->candidateToArray(...), $view->candidates),
+            // docs/decisions.md D165: false with a reason when the block takes no new holder (its candidate list is
+            // then empty on purpose); `demand` is the live demand of a conditional block, null for an intrinsic one.
+            'assignable' => null === $view->notAssignableReason,
+            'notAssignableReason' => $view->notAssignableReason,
+            'demand' => null !== $view->demand && null !== $view->coverageState ? $this->demandPresenter->unitToArray($view->demand, $view->coverageState) : null,
         ]);
     }
 
@@ -100,7 +110,7 @@ final class DutyReassignmentController
         $wasPublished = PlanningPeriodStatus::PUBLISHED === $duty->getPlanningPeriod()->getStatus();
 
         try {
-            $this->reassignmentService->unassign($duty, $expected, $user, $wasPublished);
+            $impacts = $this->reassignmentService->unassign($duty, $expected, $user, $wasPublished);
         } catch (DutyNotGeneratedException $exception) {
             return new JsonResponse(['error' => 'duty_not_generated', 'message' => $exception->getMessage()], 409);
         } catch (StaleReassignmentException $exception) {
@@ -109,7 +119,7 @@ final class DutyReassignmentController
             return new JsonResponse(['error' => 'already_uncovered', 'message' => $exception->getMessage()], 409);
         }
 
-        return new JsonResponse(['status' => 'unassigned'], 200);
+        return new JsonResponse(['status' => 'unassigned', 'dependentImpacts' => $this->impactsToArray($impacts)], 200);
     }
 
     #[Route('/api/plannings/{planningStableId}/duties/{dutyStableId}/reassign', name: 'api_duty_reassign', methods: ['POST'])]
@@ -130,7 +140,7 @@ final class DutyReassignmentController
         $wasPublished = PlanningPeriodStatus::PUBLISHED === $duty->getPlanningPeriod()->getStatus();
 
         try {
-            $this->reassignmentService->reassign($duty, $teamMember, $dto->expectedCurrentTeamMemberStableId, $user, $wasPublished);
+            $impacts = $this->reassignmentService->reassign($duty, $teamMember, $dto->expectedCurrentTeamMemberStableId, $user, $wasPublished);
         } catch (DutyNotGeneratedException $exception) {
             return new JsonResponse(['error' => 'duty_not_generated', 'message' => $exception->getMessage()], 409);
         } catch (StaleReassignmentException $exception) {
@@ -139,9 +149,26 @@ final class DutyReassignmentController
             return new JsonResponse(['error' => 'invalid_candidate', 'message' => $exception->getMessage()], 409);
         } catch (PlanningGenerationNotSnapshottedException $exception) {
             return new JsonResponse(['error' => 'generation_not_snapshotted', 'message' => $exception->getMessage()], 409);
+        } catch (CoverageNotRequiredException $exception) {
+            return new JsonResponse(['error' => 'coverage_not_required', 'message' => $exception->getMessage()], 409);
+        } catch (CoverageUndeterminedException $exception) {
+            return new JsonResponse(['error' => 'coverage_undetermined', 'message' => $exception->getMessage()], 409);
         }
 
-        return new JsonResponse(['status' => 'reassigned'], 200);
+        return new JsonResponse(['status' => 'reassigned', 'dependentImpacts' => $this->impactsToArray($impacts)], 200);
+    }
+
+    /**
+     * docs/decisions.md D165: every conditional block depending on the changed block, its live state before and
+     * after — computed by the backend, reported only (nothing was written on the conditional line).
+     *
+     * @param list<DependentImpact> $impacts
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function impactsToArray(array $impacts): array
+    {
+        return array_map($this->demandPresenter->impactToArray(...), $impacts);
     }
 
     private function resolveDuty(string $planningStableId, string $dutyStableId): Duty

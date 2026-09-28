@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Demand\UnitDemand;
+use App\Demand\LiveCoverageState;
+use App\Demand\DutyDemand;
 use App\Entity\Duty;
 use App\Entity\DutyAssignment;
 
@@ -26,6 +29,10 @@ final readonly class PlanningResultDuty
         public bool $covered,
         public array $reasons = [],
         public bool $required = true,
+        /** docs/decisions.md D165 — a conditional duty's live demand (its unit's, and its own day's), null for an intrinsic one. */
+        public ?UnitDemand $unitDemand = null,
+        public ?DutyDemand $dutyDemand = null,
+        public ?LiveCoverageState $coverageState = null,
     ) {
     }
 }
