@@ -4,14 +4,17 @@ declare(strict_types=1);
 
 namespace App\Tests\Controller;
 
+use App\Entity\PlanningPeriodStatus;
 use App\Entity\PlanningTeam;
 use App\Entity\TeamMemberRole;
+use App\Repository\PlanningLineRepository;
 use App\Repository\PlanningRepository;
 use App\Repository\PlanningTeamRepository;
 use App\Repository\UserRepository;
 use App\Service\PlanningTeamMembershipService;
 use App\Tests\AuthenticationTestHelpers;
 use App\Tests\PlanningDomainTestHelpers;
+use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 
@@ -180,6 +183,60 @@ final class PlanningControllerTest extends WebTestCase
         $client->request('GET', '/api/plannings', server: $this->authHeader($outsiderToken));
         $outsiderList = json_decode((string) $client->getResponse()->getContent(), true);
         self::assertEmpty(array_filter($outsiderList, static fn ($p) => 'Visible Planning' === $p['name']), 'an outsider must not see the Planning in their list');
+    }
+
+    public function testListCarriesTheDashboardSummaryOfEachPlanning(): void
+    {
+        $client = static::createClient();
+
+        $this->registerUser($client, 'plan.summary.creator@example.com', 'correct-horse-battery');
+        $creatorToken = $this->loginUser($client, 'plan.summary.creator@example.com', 'correct-horse-battery');
+        $this->registerUser($client, 'plan.summary.member@example.com', 'correct-horse-battery');
+        $memberToken = $this->loginUser($client, 'plan.summary.member@example.com', 'correct-horse-battery');
+        $this->registerUser($client, 'plan.summary.second@example.com', 'correct-horse-battery');
+
+        $planningStableId = $this->createPlanningViaApi($client, $creatorToken, 'Seniors', 'Summary Planning')['stableId'];
+        $client->request('POST', '/api/plannings/'.$planningStableId.'/lines', server: $this->authHeader($creatorToken), content: json_encode(['name' => 'Seconde ligne']));
+        self::assertResponseStatusCodeSame(201);
+
+        $container = static::getContainer();
+        $userRepository = $container->get(UserRepository::class);
+        $membershipService = $container->get(PlanningTeamMembershipService::class);
+        $planning = $container->get(PlanningRepository::class)->findOneByStableId($planningStableId);
+        $lines = $container->get(PlanningLineRepository::class)->findByPlanning($planning);
+        $member = $userRepository->findOneByEmail('plan.summary.member@example.com');
+        // Members of every active line count, the caller's own line is named.
+        $membershipService->addMember($lines[0]->getPlanningTeam(), $member, TeamMemberRole::MEMBER, $this->date('2026-01-01'));
+        $membershipService->addMember($lines[1]->getPlanningTeam(), $userRepository->findOneByEmail('plan.summary.second@example.com'), TeamMemberRole::MEMBER, $this->date('2026-01-01'));
+        $primaryLineName = $lines[0]->getName();
+
+        $summaryFor = function (string $token) use ($client): array {
+            $client->request('GET', '/api/plannings', server: $this->authHeader($token));
+            self::assertResponseStatusCodeSame(200);
+            $list = json_decode((string) $client->getResponse()->getContent(), true);
+
+            return array_values(array_filter($list, static fn ($p) => 'Summary Planning' === $p['name']))[0];
+        };
+
+        $asMember = $summaryFor($memberToken);
+        self::assertSame($primaryLineName, $asMember['myLineName']);
+        self::assertSame(2, $asMember['memberCount']);
+        self::assertFalse($asMember['published']);
+
+        // The creator does not take part: no line of their own.
+        $asCreator = $summaryFor($creatorToken);
+        self::assertNull($asCreator['myLineName']);
+        self::assertSame(2, $asCreator['memberCount']);
+
+        $container = static::getContainer();
+        $period = $container->get(PlanningLineRepository::class)->findByPlanning($container->get(PlanningRepository::class)->findOneByStableId($planningStableId))[0]->getPlanningPeriod();
+        $container->get(EntityManagerInterface::class)->getConnection()->executeStatement(
+            'UPDATE planning_periods SET status = :status WHERE id = :id',
+            ['status' => PlanningPeriodStatus::PUBLISHED->value, 'id' => $period->getId()],
+        );
+        $container->get(EntityManagerInterface::class)->clear();
+
+        self::assertTrue($summaryFor($memberToken)['published']);
     }
 
     public function testCreatorIsNeverAcceptedFromTheClient(): void

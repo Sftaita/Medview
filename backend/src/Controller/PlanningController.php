@@ -8,6 +8,8 @@ use App\Dto\CreatePlanningRequest;
 use App\Dto\UpdatePlanningRequest;
 use App\Entity\Planning;
 use App\Entity\PlanningLine;
+use App\Entity\PlanningPeriodStatus;
+use App\Entity\PlanningTeamMember;
 use App\Entity\User;
 use App\Exception\OverlappingFairnessPeriodException;
 use App\Repository\PlanningLineRepository;
@@ -219,13 +221,20 @@ final class PlanningController
         $currentUser = $this->security->getUser();
         $currentUser = $currentUser instanceof User ? $currentUser : null;
 
+        $membership = null !== $currentUser ? $this->teamMemberRepository->findOpenMembershipForUserInPlanning($planning, $currentUser) : null;
+        $lines = $this->planningLineRepository->findByPlanning($planning);
+
         $data = [
             'stableId' => (string) $planning->getStableId(),
             'name' => $planning->getName(),
             'creatorStableId' => (string) $planning->getCreator()->getStableId(),
             'canManage' => $this->authorizationChecker->isGranted(PlanningVoter::MANAGE, $planning),
             // Whether the caller is themself in the candidate pool (an open membership) — independent of canManage (D123).
-            'participating' => null !== $currentUser && null !== $this->teamMemberRepository->findOpenMembershipForUserInPlanning($planning, $currentUser),
+            'participating' => null !== $membership,
+            // Dashboard summary: the caller's own line, the planning's head count, its publication.
+            'myLineName' => $this->lineNameOf($lines, $membership),
+            'memberCount' => $this->distinctMemberCount($lines),
+            'published' => [] !== array_filter($lines, static fn (PlanningLine $line) => $line->isActive() && PlanningPeriodStatus::PUBLISHED === $line->getPlanningPeriod()->getStatus()),
             'canManageAvailability' => $this->authorizationChecker->isGranted(PlanningVoter::MANAGE_AVAILABILITY, $planning),
             'canGenerate' => $this->authorizationChecker->isGranted(PlanningVoter::GENERATE, $planning),
             'canManageCalendar' => $this->authorizationChecker->isGranted(PlanningVoter::MANAGE_CALENDAR, $planning),
@@ -240,11 +249,50 @@ final class PlanningController
         if ($withLines) {
             $data['lines'] = array_map(
                 fn (PlanningLine $line) => $this->lineToArray($line),
-                $this->planningLineRepository->findByPlanning($planning),
+                $lines,
             );
         }
 
         return $data;
+    }
+
+    /**
+     * @param list<PlanningLine> $lines
+     */
+    private function lineNameOf(array $lines, ?PlanningTeamMember $membership): ?string
+    {
+        if (null === $membership) {
+            return null;
+        }
+        foreach ($lines as $line) {
+            if ($line->getPlanningTeam() === $membership->getPlanningTeam()) {
+                return $line->getName();
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * People with a membership over an active line's period, each counted once
+     * even when they belong to several lines.
+     *
+     * @param list<PlanningLine> $lines
+     */
+    private function distinctMemberCount(array $lines): int
+    {
+        $users = [];
+        foreach ($lines as $line) {
+            if (!$line->isActive()) {
+                continue;
+            }
+            $period = $line->getPlanningPeriod();
+            foreach ($this->teamMemberRepository->findIntersecting($line->getPlanningTeam(), $period->getStartsAt(), $period->getEndsAt()) as $member) {
+                $users[(string) $member->getUser()->getStableId()] = true;
+            }
+        }
+
+        return \count($users);
     }
 
     /**
