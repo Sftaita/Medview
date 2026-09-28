@@ -10,6 +10,12 @@ type Props = {
   variant?: 'modal' | 'drawer'
   /** When false, Escape and a click on the backdrop do nothing (an operation is in progress). */
   dismissible?: boolean
+  /**
+   * The content changes size while being edited (e.g. the week structure):
+   * anchor the panel to the top instead of re-centring it on every change,
+   * and reserve the scrollbar's gutter so its appearance never narrows the body.
+   */
+  stableLayout?: boolean
   children: ReactNode
   footer?: ReactNode
   /** A wider modal (e.g. to show a document preview beside the form). */
@@ -29,6 +35,7 @@ export function Overlay({
   onClose,
   variant = 'modal',
   dismissible = true,
+  stableLayout = false,
   children,
   footer,
   wide = false,
@@ -86,7 +93,7 @@ export function Overlay({
 
   return createPortal(
     <div
-      className={`overlay overlay--${variant}`}
+      className={`overlay overlay--${variant}${stableLayout ? ' overlay--stable' : ''}`}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && dismissible) {
           onClose()

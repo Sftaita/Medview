@@ -120,4 +120,137 @@ describe('WeekStructureEditor', () => {
     render(<WeekStructureEditor value={none} onChange={() => {}} />)
     expect(screen.getByRole('alert')).toHaveTextContent('Aucune garde ne sera générée')
   })
+
+  describe('zone d’actions stable (aucun saut de mise en page)', () => {
+    const ACTIONS = ['Créer un bloc', 'Garde isolée', 'Pas de garde', 'Annuler']
+    const noneWeek = () => {
+      const w = allSolo()
+      return { ...w, days: w.days.map(() => ({ mode: 'none' as const })) } as WeekStructure
+    }
+    const actionButtons = (container: HTMLElement) =>
+      Array.from(container.querySelectorAll('.wse__actions button')).map((b) => b.textContent)
+    const hint = (container: HTMLElement) => container.querySelector('.wse__hint')!
+    const summary = (container: HTMLElement) => container.querySelector('.wse__sel-summary')!
+    const pressed = () =>
+      screen.getByRole('group', { name: 'Jours de la semaine' }).querySelectorAll('[aria-pressed="true"]')
+
+    it('sans sélection : aide visible, mêmes boutons présents mais désactivés', () => {
+      const { container } = render(<WeekStructureEditor value={noneWeek()} onChange={() => {}} />)
+      expect(actionButtons(container)).toEqual(ACTIONS)
+      for (const name of ACTIONS) expect(screen.getByRole('button', { name })).toBeDisabled()
+      expect(hint(container)).toHaveAttribute('data-shown', 'true')
+      expect(summary(container)).toHaveAttribute('data-shown', 'false')
+    })
+
+    it('un jour sélectionné : même structure, résumé affiché, bloc impossible', () => {
+      const { container } = render(<WeekStructureEditor value={noneWeek()} onChange={() => {}} />)
+      fireEvent.click(day('Mardi'))
+      expect(actionButtons(container)).toEqual(ACTIONS)
+      expect(hint(container)).toHaveAttribute('data-shown', 'false')
+      expect(summary(container)).toHaveAttribute('data-shown', 'true')
+      expect(summary(container)).toHaveTextContent('1 jour sélectionné')
+      expect(summary(container)).toHaveTextContent('Mar · un bloc réunit au moins deux jours')
+      expect(screen.getByRole('button', { name: 'Créer un bloc' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Garde isolée' })).toBeEnabled()
+      expect(screen.getByRole('button', { name: 'Pas de garde' })).toBeEnabled()
+      expect(screen.getByRole('button', { name: 'Annuler' })).toBeEnabled()
+    })
+
+    it('plusieurs jours contigus puis non contigus : résumé mis à jour, structure inchangée', () => {
+      const { container } = render(<WeekStructureEditor value={noneWeek()} onChange={() => {}} />)
+      fireEvent.click(day('Lundi'))
+      fireEvent.click(day('Mardi'))
+      expect(summary(container)).toHaveTextContent('2 jours sélectionnés')
+      expect(summary(container)).toHaveTextContent('Lun · Mar')
+      fireEvent.click(day('Jeudi'))
+      expect(summary(container)).toHaveTextContent('3 jours sélectionnés')
+      expect(summary(container)).toHaveTextContent('Lun · Mar · Jeu')
+      expect(screen.getByRole('button', { name: 'Créer un bloc' })).toBeEnabled()
+      expect(actionButtons(container)).toEqual(ACTIONS)
+
+      fireEvent.click(day('Mardi'))
+      expect(day('Mardi')).toHaveAttribute('aria-pressed', 'false')
+      expect(summary(container)).toHaveTextContent('Lun · Jeu')
+    })
+
+    it('Annuler vide la sélection et revient à l’aide, boutons toujours en place', () => {
+      const onChange = vi.fn()
+      const { container } = render(<WeekStructureEditor value={noneWeek()} onChange={onChange} />)
+      fireEvent.click(day('Lundi'))
+      fireEvent.click(day('Mercredi'))
+      fireEvent.click(screen.getByRole('button', { name: 'Annuler' }))
+      expect(onChange).not.toHaveBeenCalled()
+      expect(pressed()).toHaveLength(0)
+      expect(hint(container)).toHaveAttribute('data-shown', 'true')
+      expect(actionButtons(container)).toEqual(ACTIONS)
+      for (const name of ACTIONS) expect(screen.getByRole('button', { name })).toBeDisabled()
+    })
+
+    it('Garde isolée depuis une semaine vide : payload solo et sélection vidée', () => {
+      const onPayload = vi.fn()
+      const { container } = render(<Harness initial={noneWeek()} onPayload={onPayload} />)
+      fireEvent.click(day('Lundi'))
+      fireEvent.click(day('Mercredi'))
+      fireEvent.click(screen.getByRole('button', { name: 'Garde isolée' }))
+      expect(onPayload).toHaveBeenLastCalledWith({
+        blocks: [],
+        solo: ['LUN', 'MER'],
+        soloFamily: '',
+        excluded: ['MAR', 'JEU', 'VEN', 'SAM', 'DIM'],
+      })
+      expect(pressed()).toHaveLength(0)
+      expect(screen.getByRole('button', { name: 'Lundi, garde isolée' })).toBeInTheDocument()
+      expect(hint(container)).toHaveAttribute('data-shown', 'true')
+      expect(actionButtons(container)).toEqual(ACTIONS)
+    })
+
+    it('Créer un bloc depuis une semaine vide, puis Pas de garde sur un jour du bloc', () => {
+      const onPayload = vi.fn()
+      render(<Harness initial={noneWeek()} onPayload={onPayload} />)
+      fireEvent.click(day('Vendredi'))
+      fireEvent.click(day('Dimanche'))
+      fireEvent.click(screen.getByRole('button', { name: 'Créer un bloc' }))
+      expect(onPayload.mock.calls.at(-1)?.[0].blocks).toEqual([
+        { id: 'A', name: 'Ven · Dim', family: '', days: ['VEN', 'DIM'] },
+      ])
+      expect(pressed()).toHaveLength(0)
+
+      fireEvent.click(day('Vendredi'))
+      fireEvent.click(screen.getByRole('button', { name: 'Pas de garde' }))
+      expect(onPayload.mock.calls.at(-1)?.[0].excluded).toContain('VEN')
+      expect(screen.getByRole('button', { name: 'Vendredi, pas de garde' })).toBeInTheDocument()
+    })
+  })
+
+  describe('accessibilité des jours', () => {
+    it('aucun attribut title (pas d’infobulle native), libellé accessible conservé', () => {
+      const { container } = render(<WeekStructureEditor value={preset('vsd')} onChange={() => {}} />)
+      expect(container.querySelectorAll('[title]')).toHaveLength(0)
+      const tiles = screen.getByRole('group', { name: 'Jours de la semaine' }).querySelectorAll('button')
+      tiles.forEach((tile) => {
+        expect(tile).not.toHaveAttribute('title')
+        expect(tile.getAttribute('aria-label')).toMatch(
+          /^(Lundi|Mardi|Mercredi|Jeudi|Vendredi|Samedi|Dimanche), /,
+        )
+      })
+    })
+
+    it('les libellés décrivent le rôle de chaque jour', () => {
+      render(<Harness initial={allSolo()} onPayload={() => {}} />)
+      fireEvent.click(day('Mardi'))
+      fireEvent.click(screen.getByRole('button', { name: 'Pas de garde' }))
+      expect(screen.getByRole('button', { name: 'Mardi, pas de garde' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Lundi, garde isolée' })).toBeInTheDocument()
+    })
+
+    it('les jours restent des boutons natifs, focusables, à état pressé', () => {
+      render(<WeekStructureEditor value={allSolo()} onChange={() => {}} />)
+      const monday = day('Lundi')
+      expect(monday.tagName).toBe('BUTTON')
+      expect(monday).toHaveAttribute('type', 'button')
+      monday.focus()
+      expect(monday).toHaveFocus()
+      expect(monday).toHaveAttribute('aria-pressed', 'false')
+    })
+  })
 })
