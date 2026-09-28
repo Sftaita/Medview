@@ -4900,3 +4900,39 @@ l'ancienne (voir légende).
   mobiles n'affichent pas un PDF dans une `<iframe>`). (4) En-tête/pied
   Excel : 80 caractères par section avant doublement des `&` (limite Excel
   de 255).
+
+## D151 — Tableau de bord refondu (maquette `react_dashboard`) et cadre applicatif aligné
+
+- **Maquette** : `docs/Design/react_dashboard` reproduite au pixel près
+  (vérifié dans Chrome, positions et tailles mesurées identiques à 0,1 px
+  près en 1 600 px et en 390 px). Styles `db-` dans
+  `frontend/src/features/dashboard/dashboard.css`, libellés de dates portés
+  de la maquette (`features/dashboard/dates.ts`).
+- **Cadre (`AppShell`) aligné sur la même maquette, pour toutes les pages** :
+  bascule menu latéral ↔ barres mobiles à **760 px** (était 900 px), bloc
+  utilisateur avec bouton de déconnexion en icône, avatar « Mon compte »
+  dans la barre du haut, barre du bas à **4 entrées** (Accueil, Plannings,
+  Gardes, Indispos — l'onglet « Compte » disparaît au profit de l'avatar),
+  indicateur d'état du service retiré du menu (il reste sur les pages
+  publiques). Le tableau de bord gère ses propres marges
+  (`shell__content--bare`) ; les autres pages gardent les leurs. Entre 760 et
+  899 px, la barre d'actions du calendrier se pose en bas de page à droite du
+  menu (plus de barre du bas sur laquelle s'appuyer).
+- **Écart assumé** : la marque reste le logo MedVue (`Logo`, kit PWA) et
+  non l'icône « pouls » de la maquette, qui en tient lieu.
+- **Données** : `GET /api/plannings` expose `myLineName` (ligne de
+  l'appelant, `null` s'il ne participe pas), `memberCount` (personnes
+  distinctes ayant une adhésion sur la période d'une ligne active) et
+  `published` (au moins une ligne active publiée — même règle que le
+  détail). La fin d'un planning étant exclusive côté API, le tableau de bord
+  affiche le dernier jour inclus.
+- **Indisponibilités** : seules les `UNAVAILABLE` à venir sont listées (la
+  carte s'intitule « Mes indisponibilités » ; les préférences de garde
+  restent visibles dans le calendrier). Chaque ligne, « Calendrier » et
+  « Déclarer une indisponibilité » mènent au calendrier : il n'existe pas de
+  page par période.
+- **Conservé hors maquette** : encarts de collecte de disponibilités et
+  message « équipes rejointes » après inscription, entre le bonjour et les
+  cartes. Les règles de liens de la maquette (`.db a`) ont été restreintes
+  aux liens du tableau de bord : appliquées telles quelles, elles effaçaient
+  le texte du bouton de l'encart de collecte.
