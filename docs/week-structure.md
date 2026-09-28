@@ -239,7 +239,11 @@ largeurs — les tests tournent au palier `s`).
    (atomiques : un seul jour déclenché exigera tout le bloc) et ses familles
    d'équité. La politique de demande signale ces cas par des avertissements
    (`TRIGGER_DAY_EXCLUDED_FROM_TARGET`,
-   `TRIGGER_PARTIALLY_COVERS_TARGET_BLOCK`). **Dette confirmée (D136/D162)** :
+   `TRIGGER_PARTIALLY_COVERS_TARGET_BLOCK`). Depuis D163, chaque jour
+   matérialisé d'une ligne conditionnelle est une garde `CONDITIONAL`
+   reliée à la garde de la ligne source du même jour ; un bloc dont un jour
+   n'a pas de source unique n'est pas matérialisé du tout (atomicité).
+   **Dette confirmée (D136/D162)** :
    `WeeklyDutyCalendarService` matérialise toute la période au premier
    préflight ; une fois les gardes d'une ligne matérialisées, une
    modification de la semaine type n'a plus d'effet sur cette période, et un

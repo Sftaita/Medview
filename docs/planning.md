@@ -417,7 +417,7 @@ correspondante de la **ligne source** la déclenche ce jour-là
 - V1 : la source est une autre ligne active du même Planning, elle-même
   indépendante ; la cible est une ligne secondaire qui n'est la source de
   personne (profondeur 1, ni chaîne ni cycle). La ligne principale n'est
-  jamais conditionnelle.
+  jamais conditionnelle — **contrainte V1**, pas un invariant du domaine.
 - Qui **déclenche** (les personnes de la ligne source) et qui **assure** le
   renfort (la population de la ligne cible) restent deux notions distinctes.
 - Une ligne source en vigueur ne peut pas être supprimée
@@ -434,6 +434,13 @@ PUT /api/planning-lines/{lineStableId}/demand-policy
 ```
 
 Droit : `PlanningVoter::MANAGE_LINE_STRUCTURE`. Contrat complet, codes
-d'erreur et avertissements : `docs/decisions.md` D162. La génération
-conditionnelle elle-même (gardes `CONDITIONAL`, `coverageSource`, demande
-effective) arrive dans les lots suivants du chantier.
+d'erreur et avertissements : `docs/decisions.md` D162.
+
+**Gardes conditionnelles (D163)** : une ligne conditionnelle matérialise des
+gardes `CONDITIONAL`, chacune reliée explicitement à la garde de la ligne
+source du même jour (`coverageSource`). Qu'elle soit requise se lit dans une
+`DemandView` (LIVE : titulaire courant de la source ; un bloc est requis en
+entier dès qu'un de ses jours est déclenché), jamais dans la garde.
+`SELF_COVERAGE` empêche d'être son propre renfort. La **génération** d'une
+ligne conditionnelle arrive au lot suivant : d'ici là le préflight la
+refuse explicitement (`CONDITIONAL_GENERATION_NOT_YET_AVAILABLE`).

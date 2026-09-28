@@ -28,6 +28,22 @@ enum PreflightIssueCode: string
     /** The system was never seeded with a SolverParameterSet. */
     case NO_SOLVER_PARAMETER_SET = 'NO_SOLVER_PARAMETER_SET';
 
+    /**
+     * docs/decisions.md D163 — TEMPORARY, removed by the next lot of the
+     * conditional secondary line project: a conditional line's duties
+     * exist, but generating them (source first, demand decided by the
+     * source's holders) is not built yet. Refusing is the only honest
+     * answer until then — never a generation that treats them as required.
+     */
+    case CONDITIONAL_GENERATION_NOT_YET_AVAILABLE = 'CONDITIONAL_GENERATION_NOT_YET_AVAILABLE';
+
+    /**
+     * docs/decisions.md D163: a day of a conditional line matches several
+     * duties of its source line on that calendar day — no coverage source
+     * is ever chosen arbitrarily, the day is left unmaterialized.
+     */
+    case AMBIGUOUS_COVERAGE_SOURCE = 'AMBIGUOUS_COVERAGE_SOURCE';
+
     // --- warnings -------------------------------------------------------
     /** Some participants have not confirmed their availabilities. */
     case PENDING_MEMBERS = 'PENDING_MEMBERS';
@@ -41,8 +57,15 @@ enum PreflightIssueCode: string
     /** The line has no participant for the period: its duties cannot be covered. */
     case LINE_WITHOUT_MEMBERS = 'LINE_WITHOUT_MEMBERS';
 
+    /**
+     * docs/decisions.md D163: some days (or whole blocks) of a conditional
+     * line have no duty on the source line that day — no reinforcement can
+     * exist then, those days are not materialized.
+     */
+    case COVERAGE_SOURCE_MISSING = 'COVERAGE_SOURCE_MISSING';
+
     public function isBlocker(): bool
     {
-        return \in_array($this, [self::NO_ACTIVE_RULE_SET, self::NO_DUTIES, self::PERIOD_LOCKED, self::NO_SOLVER_PARAMETER_SET], true);
+        return \in_array($this, [self::NO_ACTIVE_RULE_SET, self::NO_DUTIES, self::PERIOD_LOCKED, self::NO_SOLVER_PARAMETER_SET, self::CONDITIONAL_GENERATION_NOT_YET_AVAILABLE, self::AMBIGUOUS_COVERAGE_SOURCE], true);
     }
 }

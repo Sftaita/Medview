@@ -18,6 +18,7 @@ use App\Exception\PlanningGenerationInProgressException;
 use App\Exception\PlanningNotLaunchableException;
 use App\Exception\StalePlanningGenerationDataException;
 use App\Repository\DutyRepository;
+use App\Repository\PlanningLineDemandPolicyRepository;
 use App\Repository\PlanningRuleSetRepository;
 use App\Repository\PlanningTeamMemberRepository;
 use App\Repository\SolverParameterSetRepository;
@@ -81,6 +82,7 @@ final class PlanningGenerationLauncher
         private readonly EntityManagerInterface $entityManager,
         private readonly WorkHeartbeat $heartbeat,
         private readonly PlanningLineOrder $lineOrder,
+        private readonly PlanningLineDemandPolicyRepository $policyRepository,
     ) {
     }
 
@@ -100,7 +102,9 @@ final class PlanningGenerationLauncher
         // and each line's snapshot freezes the assignments of the lines before it as fixed commitments.
         foreach ($this->lineOrder->activeInResolutionOrder($planning) as $line) {
             $period = $line->getPlanningPeriod();
-            $this->weeklyDutyCalendarService->ensureMaterialized($period, $period->getEndsAt());
+            // Sources first (PlanningLineOrder): a conditional line's source calendar already exists here (D163).
+            $anomalies = $this->weeklyDutyCalendarService->ensureMaterialized($period, $period->getEndsAt());
+            $conditional = true === $this->policyRepository->findActiveForLine($line)?->getMode()->isConditional();
 
             $readiness = new LaunchLineReadiness(
                 $line,
@@ -126,6 +130,16 @@ final class PlanningGenerationLauncher
             }
             if (0 === $readiness->memberCount) {
                 $warnings[] = new PreflightIssue(PreflightIssueCode::LINE_WITHOUT_MEMBERS, $line);
+            }
+            if ($conditional) {
+                // Temporary (D163): generating a conditional line arrives with the next lot.
+                $blockers[] = new PreflightIssue(PreflightIssueCode::CONDITIONAL_GENERATION_NOT_YET_AVAILABLE, $line);
+            }
+            if ([] !== array_filter($anomalies, static fn (CoverageSourceAnomaly $a): bool => CoverageSourceAnomaly::AMBIGUOUS === $a->kind)) {
+                $blockers[] = new PreflightIssue(PreflightIssueCode::AMBIGUOUS_COVERAGE_SOURCE, $line);
+            }
+            if ([] !== array_filter($anomalies, static fn (CoverageSourceAnomaly $a): bool => CoverageSourceAnomaly::MISSING === $a->kind)) {
+                $warnings[] = new PreflightIssue(PreflightIssueCode::COVERAGE_SOURCE_MISSING, $line);
             }
         }
 
@@ -187,7 +201,8 @@ final class PlanningGenerationLauncher
 
         $counts = [];
         foreach ($units as $unit) {
-            if (!$unit->isRequired()) {
+            // A conditional unit has no intrinsic demand (D163): it is never counted as REQUIRED structure here.
+            if ($unit->getDuties()[0]->isConditional() || !$unit->isRequired()) {
                 continue;
             }
             $familyName = $unit->getDuties()[0]->getAllocationFamily()?->getName() ?? '';

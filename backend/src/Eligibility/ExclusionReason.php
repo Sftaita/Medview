@@ -28,9 +28,9 @@ enum ExclusionReason: string
     case CROSS_LINE_CONFLICT = 'CROSS_LINE_CONFLICT';
     case CROSS_LINE_LEGAL_MIN_REST = 'CROSS_LINE_LEGAL_MIN_REST';
     case CROSS_LINE_TEAM_MIN_REST = 'CROSS_LINE_TEAM_MIN_REST';
-    // Prepared for conditional coverage (D161): the candidate would
-    // reinforce their own duty. Not produced until conditional duties
-    // (Duty.coverageSource) exist.
+    // Conditional coverage (D161, produced since D163): the candidate holds
+    // the coverage source of the conditional duty — they would be their own
+    // reinforcement, whatever the timing (PersonCommitmentChecker).
     case SELF_COVERAGE = 'SELF_COVERAGE';
 
     // Declared per the spec's stable contract, not yet computed by

@@ -12,6 +12,9 @@ use App\Entity\DutyPattern;
 use App\Entity\DutyType;
 use App\Entity\PlanningPeriod;
 use App\Exception\DutyPatternMismatchException;
+use App\Exception\InvalidConditionalDutyException;
+use App\Repository\PlanningLineDemandPolicyRepository;
+use App\Repository\PlanningLineRepository;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
@@ -28,8 +31,11 @@ use Doctrine\ORM\EntityManagerInterface;
  */
 final class DutyMaterializationService
 {
-    public function __construct(private readonly EntityManagerInterface $entityManager)
-    {
+    public function __construct(
+        private readonly EntityManagerInterface $entityManager,
+        private readonly PlanningLineRepository $lineRepository,
+        private readonly PlanningLineDemandPolicyRepository $policyRepository,
+    ) {
     }
 
     /**
@@ -50,7 +56,9 @@ final class DutyMaterializationService
         DutyDemandType $demandType = DutyDemandType::REQUIRED,
         DutyCriticality $criticality = DutyCriticality::STANDARD,
         ?DutyPattern $pattern = null,
+        ?Duty $coverageSource = null,
     ): Duty {
+        $this->assertMatchesDemandPolicy($planningPeriod, $demandType, null === $coverageSource ? [] : [$coverageSource]);
         $timezone = $planningPeriod->getTeam()->getTimezone();
 
         $duty = new Duty(
@@ -63,6 +71,7 @@ final class DutyMaterializationService
             $criticality,
             null,
             $pattern,
+            $coverageSource,
         );
 
         $this->entityManager->persist($duty);
@@ -90,6 +99,7 @@ final class DutyMaterializationService
         array $componentLocalTimes,
         DutyDemandType $demandType = DutyDemandType::REQUIRED,
         DutyCriticality $criticality = DutyCriticality::STANDARD,
+        array $coverageSourcesByOffset = [],
     ): DutyGroupInstance {
         $components = $pattern->getComponents();
 
@@ -110,6 +120,15 @@ final class DutyMaterializationService
             throw new DutyPatternMismatchException(sprintf('componentLocalTimes must provide exactly the offsets defined by the pattern (expected [%s], got [%s]).', implode(',', $patternOffsets), implode(',', $providedOffsets)));
         }
 
+        if ([] !== $coverageSourcesByOffset) {
+            $sourceOffsets = array_keys($coverageSourcesByOffset);
+            sort($sourceOffsets);
+            if ($sourceOffsets !== $patternOffsets) {
+                throw new InvalidConditionalDutyException('A conditional block needs exactly one coverage source per day of the block.');
+            }
+        }
+        $this->assertMatchesDemandPolicy($planningPeriod, $demandType, array_values($coverageSourcesByOffset));
+
         $timezone = $planningPeriod->getTeam()->getTimezone();
         $groupInstance = new DutyGroupInstance($planningPeriod, $pattern, $anchorDate);
         $this->entityManager->persist($groupInstance);
@@ -127,6 +146,8 @@ final class DutyMaterializationService
                 $demandType,
                 $criticality,
                 $groupInstance,
+                null,
+                $coverageSourcesByOffset[$offset] ?? null,
             );
             $this->entityManager->persist($duty);
         }
@@ -142,6 +163,42 @@ final class DutyMaterializationService
      * from the formatted wall-clock string with an explicit DateTimeZone
      * lets PHP apply that zone's own DST rules for that specific date.
      */
+    /**
+     * docs/decisions.md D163 — the rules only the line's demand policy
+     * knows (the Duty constructor already guarantees same Planning, another
+     * line, same day, source not conditional):
+     *
+     * - on a conditional line, every duty is CONDITIONAL and each coverage
+     *   source is a duty of the policy's source line;
+     * - on any other line (or a period with no line at all), never a
+     *   CONDITIONAL duty.
+     *
+     * @param list<Duty> $coverageSources
+     */
+    private function assertMatchesDemandPolicy(PlanningPeriod $planningPeriod, DutyDemandType $demandType, array $coverageSources): void
+    {
+        $line = $this->lineRepository->findOneByPlanningPeriod($planningPeriod);
+        $policy = null !== $line ? $this->policyRepository->findActiveForLine($line) : null;
+        $sourceLine = null !== $policy && $policy->getMode()->isConditional() ? $policy->getSourceLine() : null;
+
+        if (null === $sourceLine) {
+            if (DutyDemandType::CONDITIONAL === $demandType) {
+                throw new InvalidConditionalDutyException('A CONDITIONAL duty can only be created on a conditional line.');
+            }
+
+            return;
+        }
+
+        if (DutyDemandType::CONDITIONAL !== $demandType) {
+            throw new InvalidConditionalDutyException('Every duty of a conditional line is CONDITIONAL: its demand depends on the source line.');
+        }
+        foreach ($coverageSources as $source) {
+            if ($source->getPlanningPeriod() !== $sourceLine->getPlanningPeriod()) {
+                throw new InvalidConditionalDutyException('A coverage source must be a duty of the source line of this line.');
+            }
+        }
+    }
+
     private function resolveInstant(\DateTimeImmutable $wallClock, string $timezone): \DateTimeImmutable
     {
         return new \DateTimeImmutable($wallClock->format('Y-m-d H:i:s'), new \DateTimeZone($timezone));

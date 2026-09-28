@@ -80,6 +80,17 @@ class Duty
     #[ORM\JoinColumn(nullable: true, onDelete: 'RESTRICT')]
     private ?DutyPattern $pattern;
 
+    /**
+     * docs/decisions.md D163: for a CONDITIONAL duty only (and always for
+     * one), the duty of the source line whose holder decides whether this
+     * one is needed. Explicit and immutable — never re-derived from dates
+     * later. Same Planning, another line, same calendar day, and never a
+     * conditional duty itself (V1, depth 1).
+     */
+    #[ORM\ManyToOne(targetEntity: self::class)]
+    #[ORM\JoinColumn(nullable: true, onDelete: 'RESTRICT')]
+    private ?Duty $coverageSource;
+
     #[ORM\Column(type: 'date_immutable')]
     private \DateTimeImmutable $localDate;
 
@@ -119,6 +130,7 @@ class Duty
         DutyCriticality $criticality = DutyCriticality::STANDARD,
         ?DutyGroupInstance $groupInstance = null,
         ?DutyPattern $pattern = null,
+        ?Duty $coverageSource = null,
     ) {
         if ($endsAt <= $startsAt) {
             throw new \InvalidArgumentException('endsAt must be strictly after startsAt.');
@@ -155,6 +167,8 @@ class Duty
             }
         }
 
+        self::assertCoverageSource($planningPeriod, $startsAt, $timezone, $demandType, $coverageSource);
+
         $this->stableId = Uuid::v7();
         $this->team = $planningPeriod->getTeam();
         $this->planningPeriod = $planningPeriod;
@@ -178,11 +192,40 @@ class Duty
         $localWallClockDate = (clone $startsAt)->setTimezone(new \DateTimeZone($timezone));
         $this->localDate = new \DateTimeImmutable($localWallClockDate->format('Y-m-d'));
         $this->demandType = $demandType;
+        $this->coverageSource = $coverageSource;
         $this->criticality = $criticality;
         $this->createdAt = new \DateTimeImmutable();
         $this->updatedAt = new \DateTimeImmutable();
 
         $groupInstance?->addDuty($this);
+    }
+
+    /**
+     * docs/decisions.md D163 — what the entity itself can guarantee about a
+     * coverage source; the policy-level rules (the line is conditional, the
+     * source is its policy's source line) are DutyMaterializationService's.
+     */
+    private static function assertCoverageSource(PlanningPeriod $planningPeriod, \DateTimeImmutable $startsAt, string $timezone, DutyDemandType $demandType, ?Duty $coverageSource): void
+    {
+        if ((DutyDemandType::CONDITIONAL === $demandType) !== (null !== $coverageSource)) {
+            throw new \InvalidArgumentException('A CONDITIONAL Duty always has a coverage source, and only a CONDITIONAL Duty has one.');
+        }
+        if (null === $coverageSource) {
+            return;
+        }
+        if ($coverageSource->isConditional()) {
+            throw new \InvalidArgumentException('The coverage source of a conditional Duty can never be conditional itself (depth 1).');
+        }
+        if ($coverageSource->getTeam()->getPlanning() !== $planningPeriod->getTeam()->getPlanning()) {
+            throw new \InvalidArgumentException('The coverage source must belong to the same Planning.');
+        }
+        if ($coverageSource->getPlanningPeriod() === $planningPeriod) {
+            throw new \InvalidArgumentException('The coverage source must belong to another line (it can never be the Duty itself, nor a Duty of the same line).');
+        }
+        $localDay = (clone $startsAt)->setTimezone(new \DateTimeZone($timezone))->format('Y-m-d');
+        if ($coverageSource->getLocalDate()->format('Y-m-d') !== $localDay) {
+            throw new \InvalidArgumentException('A conditional Duty and its coverage source are on the same calendar day.');
+        }
     }
 
     public function getId(): ?int
@@ -255,9 +298,29 @@ class Duty
         return $this->demandType;
     }
 
+    /**
+     * Only for a duty whose demand is intrinsic (REQUIRED/OPTIONAL). A
+     * CONDITIONAL duty has no intrinsic answer — asking it here is a bug
+     * the caller must fix by going through a DemandView (docs/decisions.md
+     * D163), so it fails loudly instead of silently answering false.
+     */
     public function isRequired(): bool
     {
+        if (DutyDemandType::CONDITIONAL === $this->demandType) {
+            throw new \LogicException(\sprintf('Duty %s is CONDITIONAL: whether it is required is a DemandView answer, never a property of the duty.', $this->stableId));
+        }
+
         return DutyDemandType::REQUIRED === $this->demandType;
+    }
+
+    public function isConditional(): bool
+    {
+        return DutyDemandType::CONDITIONAL === $this->demandType;
+    }
+
+    public function getCoverageSource(): ?Duty
+    {
+        return $this->coverageSource;
     }
 
     public function getCriticality(): DutyCriticality

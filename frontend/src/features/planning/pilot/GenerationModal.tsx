@@ -488,6 +488,10 @@ function blockerText(issue: PreflightIssue): string {
       return `${line}la période est publiée ou archivée : une nouvelle génération est impossible.`
     case 'NO_SOLVER_PARAMETER_SET':
       return 'Le moteur de génération n’est pas configuré.'
+    case 'CONDITIONAL_GENERATION_NOT_YET_AVAILABLE':
+      return `${line}la génération d’une ligne de renfort conditionnelle n’est pas encore disponible.`
+    case 'AMBIGUOUS_COVERAGE_SOURCE':
+      return `${line}certains jours correspondent à plusieurs gardes de la ligne source : impossible de savoir laquelle déclenche le renfort.`
     default:
       return `${line}génération impossible.`
   }
@@ -504,6 +508,8 @@ function warningText(issue: PreflightIssue, preflight: GenerationPreflight): str
       return `${line}le planning est validé : générer à nouveau l’invalidera, il faudra le valider de nouveau.`
     case 'LINE_WITHOUT_MEMBERS':
       return `${line}aucun participant : ses gardes ne pourront pas être pourvues.`
+    case 'COVERAGE_SOURCE_MISSING':
+      return `${line}certains jours n’ont aucune garde sur la ligne source : aucun renfort n’y est possible.`
     default:
       return issue.code
   }

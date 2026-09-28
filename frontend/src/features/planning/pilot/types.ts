@@ -123,6 +123,9 @@ export type PreflightIssueCode =
   | 'DEADLINE_PASSED'
   | 'VALIDATION_WILL_BE_INVALIDATED'
   | 'LINE_WITHOUT_MEMBERS'
+  | 'CONDITIONAL_GENERATION_NOT_YET_AVAILABLE'
+  | 'AMBIGUOUS_COVERAGE_SOURCE'
+  | 'COVERAGE_SOURCE_MISSING'
 
 export type PreflightIssue = {
   code: PreflightIssueCode

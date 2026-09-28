@@ -453,6 +453,34 @@ describe('GenerationModal', () => {
     expect(within(dialog).getByRole('button', { name: 'Générer quand même' })).toBeDisabled()
   })
 
+  it('explains the conditional-line states in words, never by their raw code (docs/decisions.md D163)', async () => {
+    stubApi({
+      [preflightUrl]: () =>
+        makePreflight({
+          canGenerate: false,
+          blockers: [
+            { code: 'CONDITIONAL_GENERATION_NOT_YET_AVAILABLE', lineStableId: 'line-2', lineName: 'Renfort' },
+            { code: 'AMBIGUOUS_COVERAGE_SOURCE', lineStableId: 'line-2', lineName: 'Renfort' },
+          ],
+          warnings: [{ code: 'COVERAGE_SOURCE_MISSING', lineStableId: 'line-2', lineName: 'Renfort' }],
+        }),
+    })
+    renderActions()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+
+    const dialog = await screen.findByRole('dialog')
+    const blockers = await within(dialog).findByRole('list', { name: 'Points bloquants' })
+    expect(
+      within(blockers).getByText(/Ligne « Renfort » : la génération d’une ligne de renfort conditionnelle/),
+    ).toBeInTheDocument()
+    expect(within(blockers).getByText(/plusieurs gardes de la ligne source/)).toBeInTheDocument()
+    expect(
+      within(dialog).getByText(/aucune garde sur la ligne source : aucun renfort n’y est possible/),
+    ).toBeInTheDocument()
+    expect(within(dialog).queryByText(/COVERAGE_SOURCE|CONDITIONAL_GENERATION/)).not.toBeInTheDocument()
+  })
+
   it('tells when another generation is already running', async () => {
     stubApi({
       [preflightUrl]: () => makePreflight(),
@@ -612,7 +640,10 @@ describe('GenerationModal', () => {
                 critical: false,
                 candidateExclusions: [
                   { candidateId: 'user-1', exclusions: [{ reason: 'CROSS_LINE_CONFLICT', context: {} }] },
-                  { candidateId: 'user-2', exclusions: [{ reason: 'CROSS_LINE_TEAM_MIN_REST', context: {} }] },
+                  {
+                    candidateId: 'user-2',
+                    exclusions: [{ reason: 'CROSS_LINE_TEAM_MIN_REST', context: {} }],
+                  },
                 ],
               },
             ],
@@ -625,8 +656,12 @@ describe('GenerationModal', () => {
       ],
     })
 
-    expect(await screen.findByText('Déjà de garde au même moment sur une autre ligne (1)')).toBeInTheDocument()
-    expect(screen.getByText('Repos minimum d’équipe avec une garde sur une autre ligne (1)')).toBeInTheDocument()
+    expect(
+      await screen.findByText('Déjà de garde au même moment sur une autre ligne (1)'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('Repos minimum d’équipe avec une garde sur une autre ligne (1)'),
+    ).toBeInTheDocument()
     expect(screen.queryByText(/CROSS_LINE/)).not.toBeInTheDocument()
   })
 })

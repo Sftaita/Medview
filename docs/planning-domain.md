@@ -303,6 +303,15 @@ directement les concepts déjà actés en spécification (§5, §10, §21).
 > `Duty::getAllocationFamily()` (= `pattern?->getFamily()`) est le point
 > d'entrée unique, identique que la `Duty` soit groupée ou isolée.
 
+> **Statut d'implémentation (D163)** : `demandType` peut aussi valoir
+> `CONDITIONAL` — une garde de ligne conditionnelle, dont le caractère requis
+> n'est jamais une propriété de la garde mais une réponse de `DemandView`
+> (`Duty::isRequired()` lève une exception pour elle). Elle porte toujours
+> `coverageSource` : la garde de la ligne source du même jour calendaire,
+> relation explicite et immuable (même Planning, autre ligne, jamais
+> conditionnelle elle-même), posée à la matérialisation. Détail :
+> `docs/decisions.md` D163.
+
 `overlapsWith()` compare des **instants absolus** (`startsAt`/`endsAt`),
 jamais des dates locales — correct par construction y compris à travers
 un changement d'heure.
@@ -328,6 +337,7 @@ Contraintes ajoutées (deux migrations : schéma de base, puis
 | `TeamMemberParticipationPeriod` : pas de chevauchement par membre | `EXCLUDE USING gist`, **`DEFERRABLE INITIALLY DEFERRED`** (voir piège ci-dessous) |
 | Cohérence d'équipe cross-table (`PlanningPeriod`↔`FairnessPeriod`, `DutyGroupInstance`↔`PlanningPeriod`/`DutyPattern`, `DutyPatternComponent`↔`DutyPattern`/`DutyType`, `Duty`↔`PlanningPeriod`/`DutyType`) | **Clés étrangères composites** `(id, team_id)` — technique décrite ci-dessous |
 | `Duty` d'un groupe appartenant à une autre `PlanningPeriod` | Clé étrangère composite `(group_instance_id, planning_period_id) → duty_group_instances(id, planning_period_id)` |
+| `duties.demand_type` ∈ {REQUIRED, OPTIONAL, CONDITIONAL} ; `coverage_source_id` présent ssi CONDITIONAL, jamais soi-même (D163) | `CHECK` (le reste — même Planning, autre ligne, même jour, source non conditionnelle, ligne source de la politique — est garanti par le constructeur de `Duty` et `DutyMaterializationService`) |
 | Au plus une `PlanningLineDemandPolicy` `ACTIVE` par ligne (D162) | Index unique **partiel** `(target_line_id) WHERE status = 'ACTIVE'` |
 | Politique conditionnelle : source nommée (valeur), réelle tant qu'active, jamais la cible ; déclencheur : 1..127 jours, `increment` ≥ 1, une personne par version (D162) | `CHECK` + index unique `(policy_id, user_id)` |
 | `PlanningTeamMember.planning` cohérent avec `planningTeam.planning` (D081) | Clé étrangère composite `(planning_team_id, planning_id) → planning_teams(id, planning_id)` |

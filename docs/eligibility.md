@@ -95,8 +95,10 @@ spécification, mais `EligibilityService` ne **produit** aujourd'hui que :
 > évaluées par personne (`sourceUserStableId`) sur toute l'unité (un bloc
 > est exclu en entier) par `PersonCommitmentChecker`, la règle partagée
 > avec le contrôle live des réaffectations. Elles ne touchent jamais
-> `structuralOpportunity`. `SELF_COVERAGE` (HARD) est déclarée mais pas
-> encore produite (gardes conditionnelles, lots suivants).
+> `structuralOpportunity`. `SELF_COVERAGE` (HARD, produite depuis D163) :
+> la personne tient déjà la garde source (`coverageSource`) d'une des gardes
+> conditionnelles de l'unité — refusée avant tout autre motif, même sans
+> chevauchement horaire.
 > `EligibilityMatrixBuilder::build($snapshot, withFrozenExternalCommitments:
 > false)` les omet, pour la seule complétion qui les revérifie en live.
 

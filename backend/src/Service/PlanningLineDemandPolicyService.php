@@ -163,6 +163,7 @@ final class PlanningLineDemandPolicyService
             return [$mode, null, []];
         }
 
+        // A V1 constraint (docs/decisions.md D162), not an invariant of the domain: nothing else in the model assumes it.
         if ($line->isPrimary()) {
             throw new InvalidDemandPolicyException('PRIMARY_LINE_CANNOT_BE_CONDITIONAL', 'mode', 'The main line always has its own demand: only a secondary line can be conditional.');
         }

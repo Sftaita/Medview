@@ -67,4 +67,17 @@ class DutyRepository extends ServiceEntityRepository
     {
         return null !== $this->findOneBy(['planningPeriod' => $planningPeriod]);
     }
+
+    /**
+     * The duties of a period on one calendar day — how a conditional line
+     * finds the coverage source of each of its days (docs/decisions.md
+     * D163). A list, never "the" duty: several would be an ambiguity to
+     * report, not to resolve by picking one.
+     *
+     * @return list<Duty>
+     */
+    public function findByPeriodAndLocalDate(PlanningPeriod $planningPeriod, \DateTimeImmutable $localDate): array
+    {
+        return $this->findBy(['planningPeriod' => $planningPeriod, 'localDate' => $localDate], ['id' => 'ASC']);
+    }
 }

@@ -196,6 +196,33 @@ final class DemandPolicyControllerTest extends WebTestCase
         self::assertSame([Weekday::SATURDAY, Weekday::SUNDAY], $history[1]->getTriggers()->first()->getWeekdays());
     }
 
+    public function testAFailedReplacementLeavesThePolicyInForceActiveAndIntact(): void
+    {
+        $client = static::createClient();
+        $s = $this->scenario($client);
+        $v1 = $this->put($client, $s['creator'], $s['lines']['Renfort'], $this->conditional($s['primaryLineId'], [['bob@example.com', self::WEEKEND]]));
+        $connection = static::getContainer()->get(Connection::class);
+
+        // 1. Refused by validation: nothing is retired, nothing is created.
+        $this->put($client, $s['creator'], $s['lines']['Renfort'], $this->conditional($s['primaryLineId'], [['bob@example.com', ['SATURDAY']]], increment: 2));
+        self::assertResponseStatusCodeSame(422);
+
+        // 2. Refused while being written (a database failure after the retirement of version 1): all or nothing.
+        $connection->executeStatement(<<<'SQL'
+            CREATE FUNCTION test_refuse_demand_triggers() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'simulated failure'; END $$ LANGUAGE plpgsql
+            SQL);
+        $connection->executeStatement('CREATE TRIGGER test_refuse_demand_triggers BEFORE INSERT ON planning_line_demand_triggers FOR EACH ROW EXECUTE FUNCTION test_refuse_demand_triggers()');
+        $client->catchExceptions(true);
+        $this->put($client, $s['creator'], $s['lines']['Renfort'], $this->conditional($s['primaryLineId'], [['bob@example.com', ['SUNDAY']]]));
+        self::assertResponseStatusCodeSame(500);
+        $connection->executeStatement('DROP TRIGGER test_refuse_demand_triggers ON planning_line_demand_triggers');
+
+        $view = $this->get($client, $s['creator'], $s['lines']['Renfort']);
+        self::assertSame($v1['policy'], $view['policy'], 'Version 1 is still the one in force.');
+        self::assertSame(self::WEEKEND, $view['triggers'][0]['weekdays']);
+        self::assertSame([['ACTIVE', 1]], array_map(static fn (array $r): array => [$r['status'], (int) $r['version']], $connection->fetchAllAssociative('SELECT status, version FROM planning_line_demand_policies')));
+    }
+
     public function testASavedVersionCanNeverBeEditedInPlace(): void
     {
         $client = static::createClient();
@@ -412,10 +439,19 @@ final class DemandPolicyControllerTest extends WebTestCase
         self::assertResponseStatusCodeSame(409);
         self::assertSame('line_already_materialized', $error['error']);
 
-        // "Renfort" is made conditional first, then its duties exist: only its triggers may still change.
+        // "Renfort" is made conditional first, then its duties exist — materialized the real way (D163: weekly
+        // structure + preflight, each one CONDITIONAL and linked to the main line's duty that day): only its
+        // triggers may still change.
         $this->put($client, $s['creator'], $s['lines']['Renfort'], $this->conditional($s['primaryLineId'], [['bob@example.com', self::WEEKEND]]));
         self::assertResponseIsSuccessful();
-        $this->prepareLine($s['planningId'], [['2027-01-08', '2027-01-09']], lineIndex: 1);
+        $this->prepareLine($s['planningId'], [['2027-01-08', '2027-01-09']]);
+        $this->api($client, 'PUT', "/api/planning-lines/{$s['lines']['Renfort']}/week-structure", [
+            'blocks' => [], 'solo' => ['VEN'], 'soloFamily' => '', 'excluded' => ['LUN', 'MAR', 'MER', 'JEU', 'SAM', 'DIM'],
+        ], $s['creator']);
+        self::assertResponseIsSuccessful();
+        $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/generation-preflight", token: $s['creator']);
+        self::assertResponseIsSuccessful();
+        self::assertTrue($this->dutyEntityOn($s['planningId'], '2027-01-08', 1)->isConditional(), 'Precondition: the line now has its (conditional) duty.');
 
         $view = $this->put($client, $s['creator'], $s['lines']['Renfort'], $this->conditional($s['primaryLineId'], [['bob@example.com', ['SATURDAY']]]));
         self::assertResponseIsSuccessful();

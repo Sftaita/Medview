@@ -5036,7 +5036,11 @@ l'ancienne (voir légende).
   **secondaire** active (`PRIMARY_LINE_CANNOT_BE_CONDITIONAL`,
   `TARGET_INACTIVE`) qui n'est la source d'aucune ligne conditionnelle en
   vigueur (`TARGET_IS_A_SOURCE`). D'où profondeur 1, ni chaîne ni cycle, par
-  construction. Plus : `UNSUPPORTED_SCHEMA_VERSION`, `UNKNOWN_MODE`,
+  construction. « La ligne principale est toujours indépendante » est une
+  **contrainte V1** (validée lors de la revue de L3), pas un invariant
+  conceptuel du domaine : le modèle (politique par ligne, `sourceLine`
+  quelconque) ne l'impose nulle part ailleurs que dans cette validation, et
+  la lever resterait un changement de règle, pas de structure. Plus : `UNSUPPORTED_SCHEMA_VERSION`, `UNKNOWN_MODE`,
   `INDEPENDENT_WITH_SOURCE`, `INDEPENDENT_WITH_TRIGGERS`, `SOURCE_REQUIRED`,
   `UNKNOWN_USER`, `DUPLICATE_TRIGGER_PERSON`, `NO_WEEKDAY`,
   `UNKNOWN_WEEKDAY`, `DUPLICATE_WEEKDAY`, `UNSUPPORTED_INCREMENT`. Un
@@ -5096,3 +5100,92 @@ l'ancienne (voir légende).
   déclencheur par stint (`PlanningTeamMember`) ; un statut DRAFT ; permettre
   une chaîne conditionnelle ou une ligne principale conditionnelle en V1 ;
   des avertissements en texte libre seul.
+
+## D163 — Garde conditionnelle : `DutyDemandType::CONDITIONAL`, `Duty.coverageSource` explicite, `DemandView` LIVE/SNAPSHOT
+
+- **Contexte** : L4 du chantier « ligne secondaire conditionnelle ». Faire
+  passer la politique de demande (D162) dans le modèle réel des gardes et
+  centraliser la réponse à « cette garde conditionnelle correspond à quelle
+  garde source, et est-elle requise ? » — sans encore l'orchestration, le
+  snapshot des décisions ni l'équité (lot suivant).
+- **Décision — `DutyDemandType::CONDITIONAL`, immuable** : toute garde d'une
+  ligne conditionnelle est `CONDITIONAL` pour toujours ; son caractère requis
+  n'est **jamais** écrit dans la garde (jamais `CONDITIONAL → REQUIRED/
+  OPTIONAL`) : c'est une réponse de `DemandView`. `Duty::isRequired()` lève
+  une exception pour une garde conditionnelle — un consommateur non encore
+  migré échoue bruyamment au lieu de répondre faux en silence. `REQUIRED` et
+  `OPTIONAL` gardent exactement leur sémantique (OPTIONAL n'est pas redéfini).
+- **Décision — `Duty.coverageSource`** (colonne `coverage_source_id`, FK
+  `duties` RESTRICT, migration `Version20260928180000`) : relation explicite,
+  immuable, posée à la matérialisation et jamais re-déduite ensuite.
+  Garanties : en base — `demand_type` ∈ {REQUIRED, OPTIONAL, CONDITIONAL},
+  `coverage_source` présent **si et seulement si** CONDITIONAL, jamais
+  lui-même (CHECK) ; dans le constructeur de `Duty` — même Planning, autre
+  ligne, même jour calendaire, source jamais conditionnelle elle-même
+  (profondeur 1) ; dans `DutyMaterializationService` (seul chemin de création)
+  — sur une ligne dont la politique en vigueur est conditionnelle, toute garde
+  est CONDITIONAL et sa source est une garde de **la** ligne source de cette
+  politique ; ailleurs, jamais de garde CONDITIONAL
+  (`InvalidConditionalDutyException`).
+- **Règle de correspondance** : la ligne conditionnelle garde sa propre
+  semaine type (jours où un renfort **peut** exister, blocs, exclusions,
+  familles). Pour chaque jour qu'elle matérialise, la source est **la**
+  garde de la ligne source de la politique ce même jour calendaire — issue
+  des deux calendriers et de la relation de lignes, jamais des affectations
+  courantes. Aucune → pas de renfort possible ce jour ; plusieurs →
+  ambiguïté : dans les deux cas le jour (pour un bloc, toute l'occurrence —
+  un bloc est atomique) n'est **pas** matérialisé et est signalé
+  (`CoverageSourceAnomaly`), jamais résolu en choisissant. Au préflight :
+  `AMBIGUOUS_COVERAGE_SOURCE` (bloquant), `COVERAGE_SOURCE_MISSING`
+  (avertissement). Un jour exclu de la semaine type cible n'est jamais
+  matérialisé : un déclencheur sur ce jour ne crée donc jamais de demande.
+- **Ordre** : `PlanningLineOrder` applique enfin « sources d'abord » (ordre
+  topologique, `position` puis id pour départager) ; le préflight matérialise
+  dans cet ordre, donc la ligne source existe avant sa ligne conditionnelle.
+- **Décision — `DemandView`** (`App\Demand`) : l'unique façon de demander
+  « cette garde est-elle requise, et pourquoi ? ». La règle elle-même vit une
+  seule fois dans `DemandCalculator` (pur, valeurs en entrée : règles de la
+  ligne + qui tient chaque garde source) :
+  - intrinsèque → `INTRINSIC_REQUIRED` / `INTRINSIC_OPTIONAL` ;
+  - conditionnelle → source → titulaire → `DemandTriggerEvaluator` (D162) sur
+    le jour de la garde : `TRIGGERED`, `SOURCE_LINE_NOT_GENERATED`,
+    `SOURCE_UNASSIGNED`, `HOLDER_HAS_NO_TRIGGER`, `WEEKDAY_NOT_TRIGGERED`,
+    `LINE_NOT_CONDITIONAL` ;
+  - bloc conditionnel → requis dès qu'**un** jour est déclenché, alors en
+    entier : les autres jours sont `TRIGGERED_BY_BLOCK`, gardent l'explication
+    de leur propre jour (`ownDay`), et chaque garde du bloc porte la même
+    réponse et la liste des jours déclencheurs (`triggeringDuties`).
+  Résultat : `DutyDemand` {duty, required, reason, ownDay (`DayDemand` :
+  garde source, jour, titulaire évalué, déclencheur, raison), triggeringDuties}
+  et `UnitDemand` pour une unité entière.
+- **LIVE vs SNAPSHOT** : `LiveDemandView` (via `LiveDemandViewFactory`) lit
+  qui tient chaque garde source **maintenant** — génération COMPLETED la plus
+  récente de la ligne source (D125), `DutyAssignment.current` (D131) — et les
+  règles de la politique en vigueur ; une réaffectation de la source est vue
+  par la vue suivante, immédiatement, sans jamais toucher la garde. La vue
+  SNAPSHOT (lot suivant) fournira au même calculateur les décisions figées
+  d'une génération — jamais reconstruites en relisant le live.
+  `LiveDemandViewFactory` est `public` dans `services.yaml` (exception
+  documentée, comme au Lot 5) tant qu'aucun service ne la consomme.
+- **`SELF_COVERAGE`, réellement produit** : `PersonCommitmentChecker` (règle
+  commune D161) refuse, avant tout autre motif et quelle que soit la
+  temporalité, une personne qui tient déjà la garde source d'une des gardes
+  conditionnelles du bloc. Chemin figé : l'engagement externe figé de la
+  ligne source porte la garde source (`sourceDutyStableId`) ; chemin live :
+  `PersonCommitmentReader` lit la ligne source ; complétion : les engagements
+  virtuels aussi.
+- **Frontière avec le lot suivant, assumée** : tant que la génération
+  conditionnelle n'existe pas, le préflight bloque tout planning ayant une
+  ligne conditionnelle (`CONDITIONAL_GENERATION_NOT_YET_AVAILABLE`, code
+  **temporaire**) — jamais une génération qui traiterait ces gardes comme
+  requises. `familyUnitCounts` ne compte jamais une unité conditionnelle
+  comme structure REQUIRED. Restent au lot suivant : orchestration source →
+  cible, décisions figées dans le snapshot et `snapshotHash`, équité et
+  `effectiveExposure` conditionnelles, génération COMPLETED à zéro unité,
+  choix des règles (en vigueur ou figées par la génération) pour la vue
+  LIVE.
+- **Rejeté** : écrire le caractère requis dans la garde ; supprimer/recréer
+  des gardes selon le titulaire source ; retrouver la source par la seule
+  date au moment de l'évaluation ; choisir une source parmi plusieurs ;
+  matérialiser un bloc partiellement ; dupliquer la règle de bloc dans
+  chaque consommateur.

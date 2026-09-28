@@ -17,9 +17,14 @@ use App\Entity\RestPolicyOptions;
  * or read live (ReassignmentCandidateService: manual reassignment,
  * completion, publication preflight).
  *
- * Precedence, one reason reported (same order as AssignmentConflictAnalyzer,
- * D105): an overlap first, then LEGAL rest, then TEAM rest; within each, a
- * duty of the same generation (same line) before one of another line.
+ * SELF_COVERAGE first (docs/decisions.md D163): when the person already
+ * holds the coverage source of one of the block's conditional duties, they
+ * would be their own reinforcement — refused whatever the timing (even if
+ * the two duties did not overlap).
+ *
+ * Then (same order as AssignmentConflictAnalyzer, D105): an overlap, then
+ * LEGAL rest, then TEAM rest; within each, a duty of the same generation
+ * (same line) before one of another line.
  *
  *   same generation  → CONFLICT, LEGAL_MIN_REST, TEAM_MIN_REST — with the
  *                      edited/solved generation's own thresholds (D131);
@@ -51,7 +56,18 @@ final class PersonCommitmentChecker
         /** @var array<string, CommitmentViolation> $found keyed by reason, first commitment found per reason */
         $found = [];
 
+        $coverageSourceIds = [];
+        foreach ($block as $duty) {
+            if (null !== $duty->getCoverageSource()) {
+                $coverageSourceIds[(string) $duty->getCoverageSource()->getStableId()] = true;
+            }
+        }
+
         foreach ($commitments as $commitment) {
+            if (isset($coverageSourceIds[$commitment->dutyStableId])) {
+                return new CommitmentViolation(ExclusionReason::SELF_COVERAGE, $commitment);
+            }
+
             $reason = $this->reasonFor($block, $commitment, $own);
             if (null !== $reason && !isset($found[$reason->value])) {
                 $found[$reason->value] = new CommitmentViolation($reason, $commitment);

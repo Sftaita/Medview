@@ -6,6 +6,7 @@ namespace App\Service;
 
 use App\Entity\Planning;
 use App\Entity\PlanningLine;
+use App\Repository\PlanningLineDemandPolicyRepository;
 use App\Repository\PlanningLineRepository;
 
 /**
@@ -15,9 +16,14 @@ use App\Repository\PlanningLineRepository;
  * must respect. No global optimum across lines is sought — an earlier line
  * has priority over a later one, deliberately.
  *
- * Rule: sources first, then `position`, then id (never ambiguous). Until
- * conditional lines exist (a later lot of the conditional secondary line
- * project), no line is anyone's source and the order is simply `position`.
+ * Rule: sources first, then `position`, then id (never ambiguous) — a
+ * topological order: among the lines whose source (if any) is already
+ * placed, the smallest position comes next. A conditional line
+ * (docs/decisions.md D162/D163) therefore always comes after its source
+ * line, whose assignments decide its demand. A policy's source is always an
+ * active line (D162); were it ever inactive, it would not be solved and the
+ * conditional line would simply follow the order of positions. V1 depth is
+ * 1, so no cycle can exist (D162).
  *
  * The single place this order is decided — generation, snapshot
  * commitments and completion all read it here, so they can never
@@ -25,8 +31,10 @@ use App\Repository\PlanningLineRepository;
  */
 final class PlanningLineOrder
 {
-    public function __construct(private readonly PlanningLineRepository $lineRepository)
-    {
+    public function __construct(
+        private readonly PlanningLineRepository $lineRepository,
+        private readonly PlanningLineDemandPolicyRepository $policyRepository,
+    ) {
     }
 
     /**
@@ -41,7 +49,31 @@ final class PlanningLineOrder
 
         usort($lines, static fn (PlanningLine $a, PlanningLine $b): int => [$a->getPosition(), $a->getId()] <=> [$b->getPosition(), $b->getId()]);
 
-        return $lines;
+        /** @var array<int, PlanningLine> $sourceOf active source line, keyed by the conditional line's id */
+        $sourceOf = [];
+        foreach ($lines as $line) {
+            $source = $this->policyRepository->findActiveForLine($line)?->getSourceLine();
+            if (null !== $source && \in_array($source, $lines, true)) {
+                $sourceOf[(int) $line->getId()] = $source;
+            }
+        }
+
+        $ordered = [];
+        $remaining = $lines;
+        while ([] !== $remaining) {
+            foreach ($remaining as $index => $line) {
+                $source = $sourceOf[(int) $line->getId()] ?? null;
+                if (null === $source || \in_array($source, $ordered, true)) {
+                    $ordered[] = $line;
+                    unset($remaining[$index]);
+                    continue 2;
+                }
+            }
+
+            throw new \LogicException('Circular demand dependency between lines — impossible with V1 depth 1 (docs/decisions.md D162).');
+        }
+
+        return $ordered;
     }
 
     /**

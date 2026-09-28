@@ -51,6 +51,23 @@ final class PlanningLineOrderTest extends KernelTestCase
         self::assertSame([$primary, $a], $order->precedingActiveLines($b));
     }
 
+    public function testASourceIsAlwaysSolvedBeforeItsConditionalLineThenPosition(): void
+    {
+        [$planning, $primary, $a, $b] = $this->planningWithThreeLines();
+        $order = self::getContainer()->get(PlanningLineOrder::class);
+
+        // "Renfort A" (position 1) depends on "Renfort B" (position 2): B must come first, then A.
+        self::getContainer()->get(\App\Service\PlanningLineDemandPolicyService::class)->replace(
+            $a,
+            new \App\Dto\DemandPolicyUpdateRequest(1, 'CONDITIONAL_ON_SOURCE_ASSIGNMENT', (string) $b->getStableId(), []),
+            null,
+        );
+
+        self::assertSame([$primary, $b, $a], $order->activeInResolutionOrder($planning));
+        self::assertSame([$primary, $b], $order->precedingActiveLines($a));
+        self::assertSame([$primary], $order->precedingActiveLines($b));
+    }
+
     public function testAnInactiveLineIsNeitherSolvedNorAnyonesPredecessor(): void
     {
         [$planning, $primary, $a, $b] = $this->planningWithThreeLines();

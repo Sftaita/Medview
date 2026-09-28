@@ -635,6 +635,16 @@ récurrent. Corrigé par un champ dédié `DutyPattern.recurring`
 `findActiveByTeam()`) — détail complet et scénarios de régression :
 `docs/decisions.md` D136.
 
+> **Mise à jour D163** : les lignes sont matérialisées dans l'ordre de
+> résolution (`PlanningLineOrder`, sources d'abord). Une ligne
+> conditionnelle matérialise des gardes `CONDITIONAL` reliées à la garde de
+> sa ligne source du même jour ; un jour sans source unique n'est pas
+> matérialisé et remonte au préflight (`COVERAGE_SOURCE_MISSING`
+> avertissement, `AMBIGUOUS_COVERAGE_SOURCE` bloquant). Tant que la
+> génération conditionnelle n'existe pas, un planning ayant une ligne
+> conditionnelle est bloqué (`CONDITIONAL_GENERATION_NOT_YET_AVAILABLE`,
+> temporaire). Détail : `docs/decisions.md` D163.
+
 Point d'accroche choisi après audit des alternatives :
 `PlanningGenerationService::create()` (Lot 3) était trop tard — le blocage
 `NO_DUTIES` du préflight intervient avant tout appel à `create()` — et son

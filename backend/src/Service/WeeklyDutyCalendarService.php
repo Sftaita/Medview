@@ -4,10 +4,14 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Entity\Duty;
+use App\Entity\DutyDemandType;
 use App\Entity\DutyPattern;
 use App\Entity\PlanningPeriod;
 use App\Repository\DutyPatternRepository;
 use App\Repository\DutyRepository;
+use App\Repository\PlanningLineDemandPolicyRepository;
+use App\Repository\PlanningLineRepository;
 
 /**
  * Materializes a PlanningPeriod's Duty calendar from its team's active
@@ -51,6 +55,19 @@ use App\Repository\DutyRepository;
  * week — a DutyGroupInstance is atomic (docs/allocation-algorithm.md §9),
  * so a partial block is never materialized; a solo day simply checks its
  * own single date.
+ *
+ * **Conditional line** (docs/decisions.md D163): the line keeps its own
+ * weekly structure (days where a reinforcement may exist, blocks,
+ * exclusions); every duty it materializes is CONDITIONAL and linked,
+ * explicitly and for good, to its coverage source — THE duty of the
+ * policy's source line on the same calendar day. That correspondence comes
+ * from the two lines' calendars and the policy's source line, never from
+ * the current assignments. No such duty → no reinforcement possible that
+ * day; several → ambiguous: in both cases the day (for a block, the whole
+ * occurrence) is not materialized and reported (CoverageSourceAnomaly),
+ * never resolved by guessing. The source line must therefore be
+ * materialized first — PlanningLineOrder puts sources first, and the
+ * generation preflight follows that order.
  */
 final class WeeklyDutyCalendarService
 {
@@ -58,6 +75,8 @@ final class WeeklyDutyCalendarService
         private readonly DutyPatternRepository $patternRepository,
         private readonly DutyMaterializationService $materializationService,
         private readonly DutyRepository $dutyRepository,
+        private readonly PlanningLineRepository $lineRepository,
+        private readonly PlanningLineDemandPolicyRepository $policyRepository,
     ) {
     }
 
@@ -65,58 +84,83 @@ final class WeeklyDutyCalendarService
      * Materializes every missing week from the period's own start up to
      * $until (clamped to the period's own end — never beyond what the
      * period actually covers).
+     *
+     * @return list<CoverageSourceAnomaly> the days of a conditional line left unmaterialized because their coverage
+     *                                     source is missing or ambiguous (always empty for any other line)
      */
-    public function ensureMaterialized(PlanningPeriod $planningPeriod, \DateTimeImmutable $until): void
+    public function ensureMaterialized(PlanningPeriod $planningPeriod, \DateTimeImmutable $until): array
     {
         $patterns = $this->patternRepository->findActiveRecurringByTeam($planningPeriod->getTeam());
         if ([] === $patterns) {
-            // No weekly structure configured for this line yet — never
-            // guess one (docs/decisions.md D136); nothing to materialize.
-            return;
+            return [];
         }
 
         $periodEnd = min($until, $planningPeriod->getEndsAt());
         if ($periodEnd <= $planningPeriod->getStartsAt()) {
-            return;
+            return [];
         }
 
+        $sourcePeriod = $this->sourcePeriodOf($planningPeriod);
+        $anomalies = [];
         $monday = $this->mondayOnOrBefore($planningPeriod->getStartsAt());
         while ($monday < $periodEnd) {
             foreach ($patterns as $pattern) {
-                $this->materializeOccurrence($planningPeriod, $pattern, $monday);
+                array_push($anomalies, ...$this->materializeOccurrence($planningPeriod, $pattern, $monday, $sourcePeriod));
             }
             $monday = $monday->modify('+7 days');
         }
+
+        usort($anomalies, static fn (CoverageSourceAnomaly $a, CoverageSourceAnomaly $b): int => $a->localDate <=> $b->localDate);
+
+        return $anomalies;
     }
 
-    private function materializeOccurrence(PlanningPeriod $period, DutyPattern $pattern, \DateTimeImmutable $monday): void
+    /** The source line's period when $period's line is conditional (D163), null otherwise. */
+    private function sourcePeriodOf(PlanningPeriod $period): ?PlanningPeriod
+    {
+        $line = $this->lineRepository->findOneByPlanningPeriod($period);
+        $policy = null !== $line ? $this->policyRepository->findActiveForLine($line) : null;
+
+        return null !== $policy && $policy->getMode()->isConditional() ? $policy->getSourceLine()?->getPlanningPeriod() : null;
+    }
+
+    /**
+     * @return list<CoverageSourceAnomaly>
+     */
+    private function materializeOccurrence(PlanningPeriod $period, DutyPattern $pattern, \DateTimeImmutable $monday, ?PlanningPeriod $sourcePeriod): array
     {
         if (1 === \count($pattern->getComponents())) {
-            $this->materializeSolo($period, $pattern, $monday);
-
-            return;
+            return $this->materializeSolo($period, $pattern, $monday, $sourcePeriod);
         }
 
-        $this->materializeBlock($period, $pattern, $monday);
+        return $this->materializeBlock($period, $pattern, $monday, $sourcePeriod);
     }
 
-    private function materializeSolo(PlanningPeriod $period, DutyPattern $pattern, \DateTimeImmutable $monday): void
+    /**
+     * @return list<CoverageSourceAnomaly>
+     */
+    private function materializeSolo(PlanningPeriod $period, DutyPattern $pattern, \DateTimeImmutable $monday, ?PlanningPeriod $sourcePeriod): array
     {
         $component = $pattern->getComponents()->first();
         if (false === $component) {
-            // A pattern always has at least one component once it is
-            // usable (WeekStructureService::replace() never persists an
-            // empty one) — defense-in-depth, never reachable in practice.
-            return;
+            return [];
         }
 
         $day = $monday->modify(sprintf('+%d days', $component->getDayOffset()));
         if ($day < $period->getStartsAt() || $day >= $period->getEndsAt()) {
-            return;
+            return [];
         }
 
         if ($this->dutyRepository->existsForPeriodAndLocalDate($period, $day)) {
-            return;
+            return [];
+        }
+
+        $coverageSource = null;
+        if (null !== $sourcePeriod) {
+            $coverageSource = $this->coverageSourceOn($sourcePeriod, $day);
+            if ($coverageSource instanceof CoverageSourceAnomaly) {
+                return [$coverageSource];
+            }
         }
 
         $this->materializationService->createStandaloneDuty(
@@ -124,29 +168,71 @@ final class WeeklyDutyCalendarService
             $component->getDutyType(),
             $day,
             $day->modify('+1 day'),
+            null !== $coverageSource ? DutyDemandType::CONDITIONAL : DutyDemandType::REQUIRED,
             pattern: $pattern,
+            coverageSource: $coverageSource,
         );
+
+        return [];
     }
 
-    private function materializeBlock(PlanningPeriod $period, DutyPattern $pattern, \DateTimeImmutable $monday): void
+    /**
+     * @return list<CoverageSourceAnomaly>
+     */
+    private function materializeBlock(PlanningPeriod $period, DutyPattern $pattern, \DateTimeImmutable $monday, ?PlanningPeriod $sourcePeriod): array
     {
         $componentLocalTimes = [];
+        $coverageSources = [];
+        $anomalies = [];
         foreach ($pattern->getComponents() as $component) {
             $day = $monday->modify(sprintf('+%d days', $component->getDayOffset()));
             if ($day < $period->getStartsAt() || $day >= $period->getEndsAt()) {
-                return;
+                return [];
             }
 
             if ($this->dutyRepository->existsForPeriodAndLocalDate($period, $day)) {
-                // Atomic: even one already-claimed day cancels the whole
-                // occurrence for this week — never a partial block.
-                return;
+                return [];
             }
 
             $componentLocalTimes[$component->getDayOffset()] = [$day, $day->modify('+1 day')];
+
+            if (null !== $sourcePeriod) {
+                $source = $this->coverageSourceOn($sourcePeriod, $day);
+                if ($source instanceof CoverageSourceAnomaly) {
+                    $anomalies[] = $source;
+                } else {
+                    $coverageSources[$component->getDayOffset()] = $source;
+                }
+            }
         }
 
-        $this->materializationService->materializeGroup($period, $pattern, $monday, $componentLocalTimes);
+        // A block is atomic: one day without a unique coverage source leaves the whole occurrence unmaterialized.
+        if ([] !== $anomalies) {
+            return $anomalies;
+        }
+
+        $this->materializationService->materializeGroup(
+            $period,
+            $pattern,
+            $monday,
+            $componentLocalTimes,
+            null !== $sourcePeriod ? DutyDemandType::CONDITIONAL : DutyDemandType::REQUIRED,
+            coverageSourcesByOffset: $coverageSources,
+        );
+
+        return [];
+    }
+
+    /** THE duty of the source line that calendar day — or why there is none to pick. */
+    private function coverageSourceOn(PlanningPeriod $sourcePeriod, \DateTimeImmutable $day): Duty|CoverageSourceAnomaly
+    {
+        $candidates = $this->dutyRepository->findByPeriodAndLocalDate($sourcePeriod, $day);
+
+        return match (\count($candidates)) {
+            0 => new CoverageSourceAnomaly($day, CoverageSourceAnomaly::MISSING),
+            1 => $candidates[0],
+            default => new CoverageSourceAnomaly($day, CoverageSourceAnomaly::AMBIGUOUS),
+        };
     }
 
     private function mondayOnOrBefore(\DateTimeImmutable $date): \DateTimeImmutable

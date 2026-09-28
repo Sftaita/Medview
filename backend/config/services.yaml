@@ -49,6 +49,12 @@ services:
         public: true
     App\Service\DutyMaterializationService:
         public: true
+    # docs/decisions.md D163: the LIVE DemandView factory ships before its
+    # consumers (calendar, reassignment, completion, publication — later
+    # lots of the conditional secondary line project). Same documented,
+    # temporary exception: drop once a real service depends on it.
+    App\Service\LiveDemandViewFactory:
+        public: true
     # Lot 5 (docs/fairness.md): FairnessContextBuilder and
     # OptimizationProblemBuilder are the two leaves of the fairness
     # pipeline — nothing else in the app constructs them as a dependency
