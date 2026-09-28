@@ -735,6 +735,7 @@ personnes concernées par les dates modifiées) → rappel du samedi.
 | `POST /api/plannings/{id}/republish` | PUBLISH | diffuse les changements depuis la dernière diffusion |
 | `GET /api/plannings/{id}/publication-state` | VIEW (détails : PUBLISH) | publié ?, dates, changements non diffusés, historique |
 | `GET /api/plannings/{id}/publication.pdf` | VIEW | PDF de la dernière diffusion |
+| `POST /api/plannings/{id}/export` | VIEW (planning publié) | PDF ou Excel du **calendrier courant** — lignes, ordre, noms, titre, période choisis (`docs/planning-export.md`, D150) |
 | `PUT /api/plannings/{id}/teams/{t}/members/{m}/role` | MANAGE (créateur) | accorde/retire « Gestionnaire » (ADMIN, D147) |
 
 Commande : `app:duty-reminders:weekly` (D146, cron du samedi).

@@ -1,0 +1,92 @@
+{# ------------------------------------------------------------------
+   MedVue — export PDF du calendrier courant (docs/planning-export.md)
+   Contexte : PlanningExportPdfRenderer::view() — title, periodLabel,
+   generatedAtLabel, lines[label], months[{label, weeks[[7 × {number,
+   inRange, weekend, cells[ligne][{name, dutyType}]}]]}].
+   Rendu par dompdf (A4 paysage) : CSS 2.1 simple, police DejaVu Sans.
+   Un mois commence toujours une page ; chaque semaine est un bloc qui
+   n'est jamais coupé (dompdf ignore page-break-inside sur un <tbody>, d'où
+   une table par semaine, aux colonnes identiques) et porte son mois et ses
+   jours, lisible seul en haut d'une page de suite. « Page n / N » est posé
+   par le renderer.
+   ------------------------------------------------------------------ #}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>{{ title }}</title>
+<style>
+  @page { margin: 10mm 10mm 14mm 10mm; }
+  body { font-family: 'DejaVu Sans', sans-serif; font-size: 7.5pt; color: #16202B; }
+  .footer { position: fixed; bottom: -9mm; left: 0; right: 0; height: 6mm; font-size: 6.5pt; color: #727E8C; }
+  .footer .left { position: absolute; left: 0; top: 0; }
+  .footer .right { position: absolute; right: 0; top: 0; }
+  .month { page-break-before: always; }
+  .month.first { page-break-before: auto; }
+  .head { margin: 0 0 4pt 0; }
+  .head .doc { font-size: 8pt; color: #52606D; }
+  .head .doc strong { color: #2C7D5F; }
+  h2 { font-size: 14pt; margin: 1pt 0 0 0; color: #16202B; }
+  .week { page-break-inside: avoid; margin-top: 4pt; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  td.label { width: 27mm; }
+  tr.days td { background: #EEF3F6; color: #3A4754; font-weight: bold; padding: 1.5pt 4pt; text-align: right; }
+  tr.days td.we { background: #E2EBE6; }
+  tr.days td.out { background: #F6F7F9; color: #C3C9D0; }
+  tr.days td.label { background: #fff; color: #727E8C; font-weight: normal; font-size: 6.5pt; }
+  tr.days .wd { font-weight: normal; color: #52606D; }
+  tr.days td.out .wd { color: #C3C9D0; }
+  td { padding: 1.5pt 3pt; border-bottom: 0.5pt solid #E1E6EB; border-left: 0.5pt solid #E1E6EB; vertical-align: top; word-wrap: break-word; line-height: 1.2; }
+  td.label { border-left: none; font-weight: bold; color: #2C7D5F; text-align: left; }
+  td.we { background: #FAFBFC; }
+  td.out { background: #F6F7F9; }
+  .who { display: block; }
+  .type { color: #727E8C; font-size: 6.5pt; }
+  .none { color: #C3C9D0; }
+  .uncovered { color: #B42318; font-weight: bold; }
+</style>
+</head>
+<body>
+  <div class="footer">
+    <span class="left">{{ title }} · {{ periodLabel }}</span>
+    <span class="right">Document généré le {{ generatedAtLabel }} — état du planning à cette date</span>
+  </div>
+
+  {% for month in months %}
+    <div class="month{{ loop.first ? ' first' : '' }}">
+      <div class="head">
+        <div class="doc"><strong>{{ title }}</strong> · {{ periodLabel }}</div>
+        <h2>{{ month.label }}</h2>
+      </div>
+
+      {% for week in month.weeks %}
+        <div class="week">
+          <table>
+            <tr class="days">
+              <td class="label month-of-week">{{ month.label }}</td>
+              {% for day in week %}<td class="{{ day.weekend ? 'we' : '' }}{{ day.inRange ? '' : ' out' }}"><span class="wd">{{ ['lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.', 'dim.'][loop.index0] }}</span> {{ day.number }}</td>{% endfor %}
+            </tr>
+            {% for label in lines %}
+              {% set column = loop.index0 %}
+              <tr>
+                <td class="label">{{ label }}</td>
+                {% for day in week %}
+                  <td class="{{ day.weekend ? 'we' : '' }}{{ day.inRange ? '' : ' out' }}">
+                    {%- if day.inRange -%}
+                      {%- for item in day.cells[column] -%}
+                        <span class="who">{% if item.name %}{{ item.name }}{% else %}<span class="uncovered">Non attribué</span>{% endif %}{% if item.dutyType %}<span class="type"> · {{ item.dutyType }}</span>{% endif %}</span>
+                      {%- else -%}
+                        <span class="none">—</span>
+                      {%- endfor -%}
+                    {%- endif -%}
+                  </td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </table>
+        </div>
+      {% endfor %}
+    </div>
+  {% endfor %}
+</body>
+</html>

@@ -4797,6 +4797,110 @@ l'ancienne (voir légende).
   WebSocket/SSE (aucune infrastructure existante, le polling suffit) ;
   échouer un job sur sa durée.
 
+## D150 — Export du planning publié : calendrier courant, un modèle intermédiaire, PDF (dompdf) et XLSX (OpenSpout)
+
+- **Audit préalable** :
+  1. Il n'existait qu'un PDF, « Télécharger le PDF » (`GET /publication.pdf`,
+     D143) : il imprime **la dernière diffusion figée**
+     (`PlanningPublicationEntry`), jamais les modifications faites depuis.
+     Il reste inchangé.
+  2. Le calendrier affiché (`/result`, D130/D148) et tous les usages
+     « état courant » (préflight, diff « Modifications non publiées »,
+     audience, rappel du samedi) lisent `DutyAssignment.current` de la
+     génération COMPLETED la plus récente de chaque ligne active —
+     `CurrentCalendarReader` (D143) est la lecture partagée.
+  3. « Publié » n'est pas un statut de `Planning` : c'est l'existence d'une
+     `PlanningPublication` (D143) ; `PlanningPeriodStatus`
+     (`DRAFT → GENERATED → VALIDATED → PUBLISHED → ARCHIVED`) est par ligne.
+     Un planning publié reste éditable (réaffectation/retrait, D144).
+  4. Droits : un membre lit le calendrier courant (`/result`, VIEW) et
+     télécharge le PDF (VIEW, D148).
+  5. `dompdf/dompdf` était déjà installé ; aucun writer XLSX ; ni `gd` ni
+     aucune extension d'image dans les images Docker (dev et prod).
+- **Décision — source de vérité** : l'export lit `CurrentCalendarReader`,
+  rien d'autre — jamais `OptimizationResult`, le snapshot, le
+  `coverageStatus` figé d'une génération ni les entrées d'une publication.
+  Une réaffectation après publication apparaît dans l'export suivant, qu'elle
+  ait été republiée ou non (le dialogue le dit). Exporter n'écrit rien :
+  ni publication, ni génération, ni nom de ligne ou de planning.
+- **Exportable** = au moins une `PlanningPublication` (409
+  `not_yet_published` sinon). **Droit** = `PlanningVoter::VIEW`, sans nouvel
+  attribut : l'export ne montre rien que la personne ne lise déjà sur
+  l'écran du calendrier.
+- **Contrat** : `POST /api/plannings/{id}/export`
+  `{format: pdf|xlsx, title, from?, to?, lines: [{stableId, label}]}` —
+  l'ordre du tableau `lines` **est** l'ordre du document (pas de `position`
+  redondant, refusé comme champ inconnu) ; `to` exclusif comme partout
+  (`Planning::$endsAt`, `/result`), bornes par défaut = celles du planning,
+  toujours revalidées côté serveur ; chaque ligne doit être une ligne
+  **active de ce planning** (cherchée parmi ses seules lignes) ; titre et
+  alias : caractères de contrôle retirés, espaces normalisés, 120/80
+  caractères au plus. Champs inconnus refusés (D116).
+- **Modèle intermédiaire** : `PlanningExportRequestParser` →
+  `PlanningExportDataBuilder` → `PlanningExportData` (jours × lignes dans
+  l'ordre choisi, titulaire affiché exactement comme le calendrier :
+  prénom + nom du `User` via `PlanningTeamMember`, type de garde seulement
+  quand une cellule en compte plusieurs) → `PlanningExportPdfRenderer` |
+  `PlanningExportXlsxRenderer`. Les deux renderers ne lisent jamais la base.
+- **PDF** : dompdf, A4 paysage, un mois commence toujours une page ; grille
+  lundi → dimanche, une ligne par ligne exportée sous chaque rangée de
+  dates. dompdf ignore `page-break-inside` sur un `<tbody>` : chaque semaine
+  est une table dans un bloc insécable, qui porte son mois et ses jours pour
+  rester lisible en haut d'une page de suite. `counter(pages)` vaut toujours
+  0 dans dompdf : « Page n / N » est posé par `Canvas::page_text()`. Date et
+  heure de génération (fuseau du planning) sur chaque page.
+- **XLSX — `openspout/openspout` (^5.3)** plutôt que
+  `phpoffice/phpspreadsheet` : écriture en flux, dépendances limitées à des
+  extensions déjà présentes (`zip`, `xmlwriter`, `dom`…), alors que
+  PhpSpreadsheet exige `ext-gd` (absente des deux images) et embarque un
+  moteur de calcul inutile ici. Onglets `Planning` (Date réelle Excel, Jour,
+  une colonne par ligne) et `Par personne` (Personne, Date, Jour, Ligne ;
+  tri personne (collation française) → date → ordre des lignes), en-tête
+  figé, filtres, largeurs, impression paysage ajustée à la largeur.
+- **Injection de formule** : `Cell::fromValue()` d'OpenSpout transforme une
+  chaîne commençant par `=` en **formule** ; toutes les cellules texte sont
+  donc des `StringCell` explicites, et une valeur commençant par `=`, `+`,
+  `-`, `@`, tabulation ou retour chariot reçoit en plus une apostrophe
+  (recommandation OWASP), pour qu'une réédition de la cellule ne l'évalue
+  jamais. Les noms de personnes sont concernés au même titre que les alias.
+- **Écueil trouvé en test** : OpenSpout écrit l'en-tête/pied de page et les
+  propriétés du document **sans échappement XML** — un titre contenant `&`
+  ou `<` produisait un classeur corrompu (ou du balisage injecté). Le
+  renderer les échappe lui-même ; test dédié.
+- **Nom de fichier** : `Gardes_<titre translittéré ASCII>_<AAAA-MM>[_<AAAA-MM>].<ext>`,
+  lettres/chiffres/`-` seulement, 60 caractères de titre au plus,
+  « Gardes_ » non répété ; jamais un chemin. `Content-Disposition` exposé
+  par CORS pour que le navigateur lise ce nom.
+- **Aperçu** : le même endpoint en `pdf`, affiché dans le dialogue
+  (`<iframe>` sur l'objet `Blob`) — aucun second rendu HTML du calendrier ;
+  un changement de paramètre retire l'aperçu devenu faux.
+- **Préférences d'export : option A, non persistées.** Lignes, ordre, alias
+  et titre vivent dans le dialogue et repartent des valeurs du planning à
+  chaque ouverture. Une entité `(User, Planning)` de préférences serait une
+  table et un endpoint de plus pour un confort non encore demandé à l'usage ;
+  à reconsidérer si le besoin se confirme (la période, ponctuelle, ne serait
+  de toute façon pas conservée).
+- **Réordonner** : boutons Monter/Descendre accessibles ; aucune
+  bibliothèque de glisser-déposer n'existe dans le frontend et le besoin
+  (quelques lignes) ne justifie pas d'en ajouter une.
+- **Rejeté** : génération dans le navigateur (deuxième interprétation du
+  calendrier) ; `GET` avec les paramètres en query (liste ordonnée d'alias
+  libres) ; réutiliser `PlanningPdfRenderer` (il imprime une publication
+  figée, par semaine et en portrait — un autre document, pour un autre
+  usage) ; un nouvel attribut de voter.
+- **Revue avant merge (même lot)** : (1) une année de 6 lignes faisait
+  dépasser les 128 Mo de PHP à dompdf (500) — le coût suit les rangées du
+  tableau, pas les gardes : le PDF est limité à 800 rangées, comptées par
+  `PlanningExportPdfRenderer::rowCount()` (la règle de la mise en page
+  elle-même), refus `422 size` d'emblée, `memory_limit` 512 Mo et 90 s
+  pour le rendu ; Excel, en flux, n'est pas limité. (2) Les deux PDF sont
+  nommés sans ambiguïté : « PDF de la dernière diffusion » (figé) et
+  « Exporter » (calendrier actuel), avec infobulles. (3) Sur téléphone et
+  écran tactile, l'aperçu est un lien vers le même PDF (les navigateurs
+  mobiles n'affichent pas un PDF dans une `<iframe>`). (4) En-tête/pied
+  Excel : 80 caractères par section avant doublement des `&` (limite Excel
+  de 255).
+
 ## D160 — Une adhésion ouverte par équipe, plus par Planning (remplace D080)
 
 - **Contexte** : chantier « ligne secondaire conditionnelle » (renfort

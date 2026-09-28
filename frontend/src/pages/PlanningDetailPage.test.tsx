@@ -513,7 +513,8 @@ describe('PlanningDetailPage — engine jobs (docs/decisions.md D149)', () => {
 
     fireEvent.click(await screen.findByRole('tab', { name: 'Planning' }))
     const complete = await screen.findByRole('button', { name: 'Compléter automatiquement' })
-    expect(screen.getByRole('button', { name: 'Republier les modifications' })).toBeDisabled()
+    // The publication state arrives on its own request: wait for it, never assume it came first.
+    expect(await screen.findByRole('button', { name: 'Republier les modifications' })).toBeDisabled()
     await waitFor(() => expect(complete).toBeEnabled())
     fireEvent.click(complete)
 

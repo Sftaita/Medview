@@ -70,7 +70,8 @@ détaillé (encore conceptuel, rien d'implémenté) :
 | Mot de passe oublié / réinitialisation (`PasswordResetToken`, lien à usage unique dans le fragment d'URL, rate limiting IP+email, invalidation de toutes les sessions + des JWT déjà émis via `credentialsVersion`) | ✅ Livré (2026-09-26) — tests backend (55 nouveaux + 859 suite complète) + frontend (351) + UAT navigateur complète (Mailpit réel, ancien mot de passe refusé, nouveau accepté, lien réutilisé rejeté, email inconnu indistinguable) | `docs/authentication.md` §16, `docs/decisions.md` D141-D142 |
 | Workflow proposition → diffusion : calendrier vertical multi-lignes, remplacer/retirer (bloc entier, candidats impossibles absents), « Compléter automatiquement » (`fixedAssignments` réels, trous uniquement — pas REPAIR), statistiques (charge pondérée, types), publication enregistrée garde par garde + email/PDF, « Modifications non publiées » + republication à l'audience par date, rappel du samedi, droit « Gestionnaire » accordé par le créateur | ✅ Livré (2026-09-27) — tests backend (901) + frontend (367) + UAT navigateur/API sur la stack dev (génération réelle, retrait, complétion, publication, republication, rappel via Mailpit) ; vérification mobile non faite (outil navigateur) | `docs/planning-generation.md` §22, `docs/decisions.md` D143-D148, `docs/deployment.md` §5 bis |
 | Génération et complétion **asynchrones** : `PlanningJob` (QUEUED/RUNNING/SUCCEEDED/FAILED), Symfony Messenger (transport Doctrine), conteneur `worker`, battement pendant la résolution, récupération des jobs abandonnés (jamais de SOLVING éternel), un seul calcul actif par planning (index partiel), suivi par polling et reprise après retour sur la page ; « Générer » masqué après publication | ✅ Livré (2026-09-27) — tests backend/frontend + recette navigateur avec OR-Tools réel (> 30 s) | `docs/planning-generation.md` §23, `docs/decisions.md` D149, `docs/deployment.md` §5 ter |
-| Échanges de garde, notifications (in-app), export calendrier | ⏳ Pas commencé | — |
+| Export du planning publié (PDF / Excel `.xlsx`) : calendrier **courant** (`CurrentCalendarReader`, jamais le solveur ni le snapshot), lignes/ordre/noms d'export/titre/période choisis dans un dialogue, un modèle intermédiaire unique pour les deux formats, aperçu PDF, protection contre l'injection de formule, préférences non persistées | ✅ Livré et déployé en production (`v2026.09.28-prod`, 2026-09-28, `docs/deployment.md` §6 ; aucun planning publié en production à cette date, export de bout en bout sur données réelles à vérifier au premier) — tests backend (946, dont 21 nouveaux) + frontend (412) ; revue avant merge : PDF limité à 800 rangées (dépassement mémoire corrigé), « PDF de la dernière diffusion » vs « Exporter », aperçu en lien sur téléphone ; vérifié dans Chrome (téléchargements réels, 1 600 / 817 / 387 px) | `docs/planning-export.md`, `docs/decisions.md` D150 |
+| Échanges de garde, notifications (in-app), export calendrier (ICS) | ⏳ Pas commencé | — |
 
 ## Où trouver quoi
 
@@ -175,6 +176,12 @@ détaillé (encore conceptuel, rien d'implémenté) :
   `credentialsVersion` invalidant immédiatement tout JWT déjà émis (D142),
   révocation de toutes les familles de refresh tokens, token dans le
   fragment d'URL côté frontend.
+- **`docs/planning-export.md`** — export PDF/Excel du calendrier courant
+  d'un planning publié (D150) : source de vérité (`CurrentCalendarReader`),
+  contrat `POST /api/plannings/{id}/export` (ordre = tableau `lines`, `to`
+  exclusif), modèle intermédiaire `PlanningExportData` partagé par les deux
+  renderers (dompdf, `openspout/openspout`), injection de formule, nom de
+  fichier, dialogue, limites.
 - **`docs/allocation-algorithm.md`** — design du moteur de répartition des
   gardes (équité multidimensionnelle, contraintes, pipeline de
   génération). **Document vivant** : encore conceptuel, à corriger et
