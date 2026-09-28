@@ -23,7 +23,9 @@ class PlanningTeamMemberRepository extends ServiceEntityRepository
     }
 
     /**
-     * The at-most-one open membership for this (team, user) pair.
+     * The at-most-one open membership for this (team, user) pair — the
+     * invariant of the partial unique index on (planning_team_id, user_id)
+     * WHERE membership_end IS NULL (docs/decisions.md D150).
      */
     public function findOpenMembership(PlanningTeam $planningTeam, User $user): ?PlanningTeamMember
     {
@@ -35,21 +37,28 @@ class PlanningTeamMemberRepository extends ServiceEntityRepository
     }
 
     /**
-     * The at-most-one open membership for this User within this Planning,
-     * across whichever of its PlanningTeams they belong to
-     * (docs/decisions.md D080) — the same invariant the database's partial
-     * unique index on (planning_id, user_id) WHERE membership_end IS NULL
-     * enforces. Replaces the abandoned app-wide findOpenMembershipForUser()
-     * (docs/decisions.md D072, replaced): the same User may simultaneously
-     * hold an open membership in a *different* Planning.
+     * Every open membership of this User within this Planning — one per
+     * team (line) they currently belong to. Since docs/decisions.md D150
+     * (relaxing D080) there can be several: never pick "the" membership of
+     * a User in a Planning with findOneBy(), the result would depend on row
+     * order. Ordered by id so callers iterate deterministically.
+     *
+     * @return list<PlanningTeamMember>
      */
-    public function findOpenMembershipForUserInPlanning(Planning $planning, User $user): ?PlanningTeamMember
+    public function findOpenMembershipsForUserInPlanning(Planning $planning, User $user): array
     {
-        return $this->findOneBy([
-            'planning' => $planning,
-            'user' => $user,
-            'membershipEnd' => null,
-        ]);
+        return $this->findBy(
+            ['planning' => $planning, 'user' => $user, 'membershipEnd' => null],
+            ['id' => 'ASC'],
+        );
+    }
+
+    /**
+     * Whether this User currently belongs to at least one team of this Planning.
+     */
+    public function hasOpenMembershipInPlanning(Planning $planning, User $user): bool
+    {
+        return [] !== $this->findOpenMembershipsForUserInPlanning($planning, $user);
     }
 
     /**

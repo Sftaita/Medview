@@ -117,17 +117,18 @@ jamais réécrite.
 - `role` (`OWNER`/`ADMIN`/`MEMBER`) — **jamais** intégré à
   `User::getRoles()` (D012, rappelé explicitement dans le code).
 - Au plus un stint **ouvert** (`membershipEnd IS NULL`) par
-  `(planning, user)` — enforced par un **index unique partiel** PostgreSQL
-  (`uniq_planning_team_members_open_membership`), pas seulement une
-  vérification applicative. **Historique de la règle** : l'index portait
-  d'abord sur `(team_id, user_id)` (un User pouvait être membre ouvert de
-  plusieurs Teams à la fois), puis sur `user_id` seul au Lot Planning
-  (D072 : un User n'avait plus jamais qu'une seule Team active dans toute
-  l'application) ; depuis D079/D080 (2026-09-18), il porte sur
-  `(planning_id, user_id)` — un User peut de nouveau tenir des adhésions
-  ouvertes simultanées, mais seulement dans des PlanningTeams de
-  **Plannings différents**, jamais deux dans le même Planning
-  (`docs/planning.md` §6). `planning_id` est une dénormalisation de
+  `(planning team, user)` — enforced par un **index unique partiel**
+  PostgreSQL (`uniq_planning_team_members_open_team_membership`), pas
+  seulement une vérification applicative. **Historique de la règle** :
+  l'index portait d'abord sur `(team_id, user_id)` (un User pouvait être
+  membre ouvert de plusieurs Teams à la fois), puis sur `user_id` seul au
+  Lot Planning (D072 : une seule Team active dans toute l'application),
+  puis sur `(planning_id, user_id)` (D080, 2026-09-18 : jamais deux
+  adhésions ouvertes dans un même Planning) ; depuis D150 (2026-09-28), il
+  porte sur `(planning_team_id, user_id)` — un User peut tenir des
+  adhésions ouvertes simultanées dans plusieurs équipes (lignes) d'un
+  **même** Planning, jamais deux dans la même équipe
+  (`docs/planning.md` §6). `planning_id` reste une dénormalisation de
   `planningTeam.planning`, garantie cohérente par une clé étrangère
   composite `(planning_team_id, planning_id)` — même technique que le
   §"Portée exacte du contrôle d'intégrité" ci-dessous.
@@ -315,7 +316,7 @@ Contraintes ajoutées (deux migrations : schéma de base, puis
 |---|---|
 | `*.stableId` uniques | Index unique classique |
 | `DutyType.code` / `DutyPattern.code` unique par équipe | Index unique composite `(team_id, code)` |
-| Au plus un membership ouvert par `(planning, user)` | Index unique **partiel** sur `planning_team_members(planning_id, user_id)` (`WHERE membership_end IS NULL`) — historique de cette règle : `docs/planning.md` §6 |
+| Au plus un membership ouvert par `(planning team, user)` (D150) | Index unique **partiel** sur `planning_team_members(planning_team_id, user_id)` (`WHERE membership_end IS NULL`) — historique de cette règle : `docs/planning.md` §6 |
 | Au plus un `PlanningRuleSet` `ACTIVE` par équipe | Index unique **partiel** (`WHERE status = 'ACTIVE'`) |
 | `FairnessPeriod` : pas de chevauchement par équipe | `EXCLUDE USING gist` (extension `btree_gist`) |
 | `TeamMemberParticipationPeriod` : pas de chevauchement par membre | `EXCLUDE USING gist`, **`DEFERRABLE INITIALLY DEFERRED`** (voir piège ci-dessous) |

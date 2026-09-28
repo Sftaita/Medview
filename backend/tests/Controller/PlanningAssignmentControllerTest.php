@@ -65,8 +65,8 @@ final class PlanningAssignmentControllerTest extends WebTestCase
 
         $users = $container->get(UserRepository::class);
         $members = $container->get(PlanningTeamMemberRepository::class);
-        $aliceMember = $members->findOpenMembershipForUserInPlanning($planning, $users->findOneByEmail('alice@example.com'));
-        $bobMember = $members->findOpenMembershipForUserInPlanning($planning, $users->findOneByEmail('bob@example.com'));
+        $aliceMember = $members->findOpenMembershipsForUserInPlanning($planning, $users->findOneByEmail('alice@example.com'))[0];
+        $bobMember = $members->findOpenMembershipsForUserInPlanning($planning, $users->findOneByEmail('bob@example.com'))[0];
 
         $materialization = $container->get(DutyMaterializationService::class);
         $generation = new PlanningGeneration($period);

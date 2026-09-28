@@ -224,8 +224,9 @@ final class PlanningController
             'name' => $planning->getName(),
             'creatorStableId' => (string) $planning->getCreator()->getStableId(),
             'canManage' => $this->authorizationChecker->isGranted(PlanningVoter::MANAGE, $planning),
-            // Whether the caller is themself in the candidate pool (an open membership) — independent of canManage (D123).
-            'participating' => null !== $currentUser && null !== $this->teamMemberRepository->findOpenMembershipForUserInPlanning($planning, $currentUser),
+            // Whether the caller is themself in the candidate pool (an open membership in any line — several are
+            // possible since D150) — independent of canManage (D123).
+            'participating' => null !== $currentUser && $this->teamMemberRepository->hasOpenMembershipInPlanning($planning, $currentUser),
             'canManageAvailability' => $this->authorizationChecker->isGranted(PlanningVoter::MANAGE_AVAILABILITY, $planning),
             'canGenerate' => $this->authorizationChecker->isGranted(PlanningVoter::GENERATE, $planning),
             'canManageCalendar' => $this->authorizationChecker->isGranted(PlanningVoter::MANAGE_CALENDAR, $planning),

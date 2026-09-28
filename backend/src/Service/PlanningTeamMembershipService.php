@@ -17,12 +17,13 @@ use Doctrine\ORM\EntityManagerInterface;
 
 /**
  * Owns the invariants CLAUDE.md and docs/planning-domain.md require around
- * team membership: a User may join a PlanningTeam again after leaving one,
- * but never has two open (unended) memberships within the SAME Planning at
- * once (docs/decisions.md D080, replacing the app-wide D072 rule). A User
- * may however hold simultaneous open memberships in PlanningTeams of
- * *different* Plannings — each Planning is its own self-contained
- * scheduling exercise. Leaving closes a membership rather than deleting it.
+ * team membership: a User may join a PlanningTeam again after leaving it,
+ * but never has two open (unended) memberships in the SAME team at once.
+ * Since docs/decisions.md D150 (relaxing D080) a User may hold open
+ * memberships in several teams of the same Planning — a surgeon can be a
+ * holder on the main line and a reinforcement on a secondary line — as
+ * well as in teams of different Plannings. Leaving closes a membership
+ * rather than deleting it.
  */
 final class PlanningTeamMembershipService
 {
@@ -43,8 +44,9 @@ final class PlanningTeamMembershipService
      * @throws PlanningTeamMembershipConflictException if the User already
      *                                                 has an open
      *                                                 membership in this
-     *                                                 Planning, in this
-     *                                                 team or another one
+     *                                                 team (another team
+     *                                                 of the same Planning
+     *                                                 is fine, D150)
      */
     public function addMember(
         PlanningTeam $team,
@@ -53,7 +55,7 @@ final class PlanningTeamMembershipService
         \DateTimeImmutable $membershipStart,
         float $initialParticipationFactor = 1.0,
     ): PlanningTeamMember {
-        if (null !== $this->teamMemberRepository->findOpenMembershipForUserInPlanning($team->getPlanning(), $user)) {
+        if (null !== $this->teamMemberRepository->findOpenMembership($team, $user)) {
             throw new PlanningTeamMembershipConflictException();
         }
 
@@ -114,7 +116,33 @@ final class PlanningTeamMembershipService
 
         $this->entityManager->flush();
 
-        // No longer expected in the open collections that start once they are gone (docs/availability-collection.md §7).
-        $this->collectionService->withdrawMember($teamMember->getPlanning(), $teamMember->getUser(), $membershipEnd);
+        // No longer expected in the open collections that start once they are gone (docs/availability-collection.md §2)
+        // — but availability is collected per person and per Planning: someone who still belongs to another line of
+        // this Planning (D150) keeps being expected for as long as that other membership lasts.
+        $participationEnd = $this->participationEndInPlanning($teamMember);
+        if (null !== $participationEnd) {
+            $this->collectionService->withdrawMember($teamMember->getPlanning(), $teamMember->getUser(), $participationEnd);
+        }
+    }
+
+    /**
+     * When the person stops taking part in this Planning altogether: the
+     * latest end among all their memberships in it, or null while one of
+     * them is still open-ended.
+     */
+    private function participationEndInPlanning(PlanningTeamMember $teamMember): ?\DateTimeImmutable
+    {
+        $end = $teamMember->getMembershipEnd();
+        foreach ($this->teamMemberRepository->findBy(['planning' => $teamMember->getPlanning(), 'user' => $teamMember->getUser()]) as $membership) {
+            $membershipEnd = $membership->getMembershipEnd();
+            if (null === $membershipEnd) {
+                return null;
+            }
+            if (null === $end || $membershipEnd > $end) {
+                $end = $membershipEnd;
+            }
+        }
+
+        return $end;
     }
 }

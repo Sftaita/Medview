@@ -1757,7 +1757,7 @@ l'ancienne (voir légende).
   supprimées par la migration elle-même — voir le rapport de ce lot pour
   la liste exacte à recréer manuellement. Détail : `docs/planning.md`.
 
-## D080 — Adhésion unique par Planning (et non par application), remplace D072
+## D080 — Adhésion unique par Planning (et non par application), remplace D072 🔴 Remplacé par [D150](#d150--une-adhésion-ouverte-par-équipe-plus-par-planning-remplace-d080)
 
 - **Contexte** : D072 imposait qu'un User n'ait au plus qu'une seule
   adhésion (`TeamMember`) ouverte dans **toute l'application**. Une fois
@@ -4796,3 +4796,80 @@ l'ancienne (voir légende).
   planning est un ensemble de lignes, et la complétion n'en crée aucune) ;
   WebSocket/SSE (aucune infrastructure existante, le polling suffit) ;
   échouer un job sur sa durée.
+
+## D150 — Une adhésion ouverte par équipe, plus par Planning (remplace D080)
+
+- **Contexte** : chantier « ligne secondaire conditionnelle » (renfort
+  déclenché par le titulaire de la ligne principale). Décision métier : un
+  même chirurgien doit pouvoir être titulaire sur la ligne principale
+  certains jours et renfort sur la ligne secondaire à d'autres dates, donc
+  appartenir aux deux populations d'un même Planning. D080 l'interdisait
+  (index unique partiel `(planning_id, user_id) WHERE membership_end IS
+  NULL`), au motif — explicitement rejeté aujourd'hui — qu'« un membre ne
+  peut pas occuper deux lignes de garde différentes du même exercice de
+  planification ».
+- **Audit préalable** — ce qui supposait « une seule adhésion par
+  (Planning, User) » :
+  1. `PlanningTeamMembershipService::addMember()` (refus 409
+     `membership_conflict` pour une autre équipe du Planning) ;
+  2. `PlanningVoter` : les droits de gestion (MANAGE_AVAILABILITY,
+     GENERATE, MANAGE_CALENDAR, PUBLISH, MANAGE_LINE_STRUCTURE,
+     MANAGE_RULE_SET) lisaient **une** adhésion par `findOneBy(planning,
+     user)` — avec deux adhésions (MEMBER sur une ligne, ADMIN sur l'autre)
+     la décision aurait dépendu de l'ordre des lignes en base ;
+  3. `TeamInvitationService` : la seconde invitation d'un même Planning
+     restait volontairement `PENDING` ;
+  4. `PlanningController.participating` ;
+  5. `endMembership()` retirait la personne des collectes ouvertes du
+     Planning (`withdrawMember`) même si elle restait membre d'une autre
+     ligne.
+  Déjà correct, vérifié : toute diffusion (emails de publication, rappel du
+  samedi, collectes, statut de collecte D127) dédoublonne par `User` ; les
+  lectures par personne (`/assignments`) filtrent par `User`.
+- **Décision** : au plus **une adhésion ouverte par (équipe, User)** —
+  index unique partiel `uniq_planning_team_members_open_team_membership`
+  sur `(planning_team_id, user_id) WHERE membership_end IS NULL` (migration
+  `Version20260928090000`, sans reprise de données : toute ligne existante
+  respecte déjà la règle plus faible). La colonne dénormalisée
+  `planning_id` et sa FK composite (D081) sont conservées : elles servent
+  toujours les lectures « membre de ce Planning ? » sans énumérer les
+  lignes. `down()` rétablit l'index D080 et échoue si quelqu'un appartient
+  depuis à deux équipes d'un même Planning — voulu : un retour arrière ne
+  doit jamais fermer silencieusement une adhésion.
+- **Conséquences dans le code** :
+  - `PlanningTeamMemberRepository::findOpenMembershipForUserInPlanning()`
+    (un résultat) est **supprimée** — la conserver aurait laissé un piège
+    non déterministe — et remplacée par
+    `findOpenMembershipsForUserInPlanning()` (liste, ordonnée par id) et
+    `hasOpenMembershipInPlanning()` ;
+  - `PlanningVoter` : un rôle OWNER/ADMIN sur **n'importe laquelle** des
+    adhésions ouvertes accorde les droits de gestion ; MANAGE (structure)
+    reste au seul créateur (D071) ;
+  - invitations : toutes les invitations d'une même adresse vers plusieurs
+    équipes du Planning sont consommées (un `User`, N adhésions) ; ne reste
+    `PENDING` qu'une invitation dont l'adhésion *de la même équipe* a été
+    ouverte par une requête concurrente ;
+  - `endMembership()` ne retire la personne des collectes qu'une fois
+    qu'elle ne participe plus du tout au Planning, à la date de fin la plus
+    tardive de ses adhésions ;
+  - libellés frontend des 409 adaptés (le conflit ne signifie plus « déjà
+    dans une autre équipe du planning » mais « déjà dans cette équipe »).
+- **Identité** : deux `PlanningTeamMember` d'un même `User` sont la même
+  personne. Tout raisonnement sur les incompatibilités réelles
+  (chevauchement, repos, « pas son propre renfort ») doit donc se faire sur
+  le `User` / `sourceUserStableId`, jamais sur le stint — c'est l'objet du
+  lot suivant (contraintes entre lignes), qui fait de cette décision une
+  condition nécessaire et non suffisante : **jusqu'à ce lot, rien
+  n'empêche encore la génération ou une réaffectation d'attribuer à une
+  même personne deux gardes simultanées sur deux lignes.**
+- **Limite connue, acceptée** : la non-participation administrative reste
+  attachée à une adhésion (D059) — une personne en congé administratif sur
+  deux lignes doit être déclarée sur chacune ; le détail d'un membre dans
+  le statut de collecte (D127) montre les périodes de participation d'un
+  seul de ses stints.
+- **Rejeté** : conserver D080 et modéliser le renfort par une adhésion
+  virtuelle ou un rôle supplémentaire sur une seule adhésion (deux
+  populations de candidats distinctes resteraient impossibles à
+  représenter sans casser l'isolation des lignes) ; garder
+  `findOpenMembershipForUserInPlanning()` en renvoyant « la première »
+  adhésion.

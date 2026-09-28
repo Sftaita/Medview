@@ -19,7 +19,9 @@ use Symfony\Component\Security\Core\Authorization\Voter\Voter;
  * generation, calendar, publication, line structure, rules) is shared by
  * the creator and any open OWNER/ADMIN of one of the Planning's teams: ADMIN
  * *is* the "gestionnaire du planning", a right the creator grants or
- * withdraws (PUT .../members/{id}/role, docs/decisions.md D147).
+ * withdraws (PUT .../members/{id}/role, docs/decisions.md D147). A User with
+ * several open memberships in the Planning (D150) holds the right as soon
+ * as one of them is OWNER/ADMIN.
  */
 final class PlanningVoter extends Voter
 {
@@ -103,19 +105,24 @@ final class PlanningVoter extends Voter
                 return true;
             }
 
-            $membership = $this->teamMemberRepository->findOpenMembershipForUserInPlanning($subject, $user);
+            // A User may hold open memberships in several teams of the Planning at once (docs/decisions.md D150):
+            // an OWNER/ADMIN role in *any* of them grants the right — never whichever row a single lookup
+            // happens to return, which would make the decision depend on row order.
+            foreach ($this->teamMemberRepository->findOpenMembershipsForUserInPlanning($subject, $user) as $membership) {
+                if (\in_array($membership->getRole(), [TeamMemberRole::OWNER, TeamMemberRole::ADMIN], true)) {
+                    return true;
+                }
+            }
 
-            return null !== $membership && \in_array($membership->getRole(), [TeamMemberRole::OWNER, TeamMemberRole::ADMIN], true);
+            return false;
         }
 
         if ($subject->getCreator() === $user) {
             return true;
         }
 
-        // Membership is Planning-scoped (docs/decisions.md D079/D080): a
-        // single lookup on the denormalized planning_id column tells us
-        // whether $user has an open membership in *any* of this Planning's
-        // PlanningTeams, with no need to enumerate its PlanningLines first.
-        return null !== $this->teamMemberRepository->findOpenMembershipForUserInPlanning($subject, $user);
+        // Membership lookups use the denormalized planning_id column (docs/decisions.md D079/D081): whether $user
+        // has an open membership in *any* of this Planning's PlanningTeams, with no need to enumerate its lines.
+        return $this->teamMemberRepository->hasOpenMembershipInPlanning($subject, $user);
     }
 }

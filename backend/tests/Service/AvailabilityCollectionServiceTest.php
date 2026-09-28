@@ -158,7 +158,7 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
         $creator = $this->createUser($this->em);
         $planning = $this->planning(creator: $creator);
 
-        self::assertNull(self::getContainer()->get(PlanningTeamMemberRepository::class)->findOpenMembershipForUserInPlanning($planning, $creator));
+        self::assertFalse(self::getContainer()->get(PlanningTeamMemberRepository::class)->hasOpenMembershipInPlanning($planning, $creator));
         self::assertNull($this->responseRepository->findOneForUser($this->firstCollection($planning), $creator));
     }
 
@@ -168,7 +168,7 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
 
         $planning = $this->planning(includeCreator: true, creator: $creator);
 
-        $membership = self::getContainer()->get(PlanningTeamMemberRepository::class)->findOpenMembershipForUserInPlanning($planning, $creator);
+        $membership = self::getContainer()->get(PlanningTeamMemberRepository::class)->findOpenMembershipsForUserInPlanning($planning, $creator)[0];
         self::assertNotNull($membership, 'ticking "M\'inclure" must create a real membership — there is no separate flag');
         self::assertSame($this->primaryTeam($planning), $membership->getPlanningTeam());
         self::assertSame(TeamMemberRole::OWNER, $membership->getRole());
@@ -553,7 +553,7 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
         $leaver = $this->join($planning);
         $stayer = $this->join($planning);
         $collection = $this->firstCollection($planning);
-        $membership = self::getContainer()->get(PlanningTeamMemberRepository::class)->findOpenMembershipForUserInPlanning($planning, $leaver);
+        $membership = self::getContainer()->get(PlanningTeamMemberRepository::class)->findOpenMembershipsForUserInPlanning($planning, $leaver)[0];
 
         // Leaves before the window even starts (membership ends 2026-08-30, window starts 2026-09-01).
         $this->membershipService->endMembership($membership, $this->date('2026-08-30'));
@@ -568,7 +568,7 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
         $planning = $this->planning();
         $leaver = $this->join($planning);
         $collection = $this->firstCollection($planning);
-        $membership = self::getContainer()->get(PlanningTeamMemberRepository::class)->findOpenMembershipForUserInPlanning($planning, $leaver);
+        $membership = self::getContainer()->get(PlanningTeamMemberRepository::class)->findOpenMembershipsForUserInPlanning($planning, $leaver)[0];
 
         $this->membershipService->endMembership($membership, $this->date('2026-10-15'));
 
@@ -581,7 +581,7 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
         $leaver = $this->join($planning);
         $collection = $this->firstCollection($planning);
         $this->collectionService->acknowledge($collection, $leaver, AvailabilityAcknowledgementKind::CONFIRMED);
-        $membership = self::getContainer()->get(PlanningTeamMemberRepository::class)->findOpenMembershipForUserInPlanning($planning, $leaver);
+        $membership = self::getContainer()->get(PlanningTeamMemberRepository::class)->findOpenMembershipsForUserInPlanning($planning, $leaver)[0];
 
         $this->membershipService->endMembership($membership, $this->date('2026-08-30'));
 
@@ -594,7 +594,7 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
         $planning = $this->planning();
         $x = $this->join($planning);
         $collection = $this->firstCollection($planning);
-        $membership = self::getContainer()->get(PlanningTeamMemberRepository::class)->findOpenMembershipForUserInPlanning($planning, $x);
+        $membership = self::getContainer()->get(PlanningTeamMemberRepository::class)->findOpenMembershipsForUserInPlanning($planning, $x)[0];
         $this->membershipService->endMembership($membership, $this->date('2026-08-30'));
         self::assertSame(AvailabilityResponseStatus::WITHDRAWN, $this->statusOf($collection, $x));
 
@@ -687,7 +687,7 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
         $planning = $this->planning('2026-09-01', '2027-01-01');
         $stays = $this->join($planning);
         $left = $this->join($planning);
-        $membership = self::getContainer()->get(PlanningTeamMemberRepository::class)->findOpenMembershipForUserInPlanning($planning, $left);
+        $membership = self::getContainer()->get(PlanningTeamMemberRepository::class)->findOpenMembershipsForUserInPlanning($planning, $left)[0];
         $this->membershipService->endMembership($membership, $this->date('2026-11-30'));
 
         self::mockTime('2026-12-10 09:00:00 Europe/Brussels');

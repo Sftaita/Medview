@@ -151,14 +151,14 @@ describe('TeamInvitePanel', () => {
     expect(await screen.findByRole('status')).toHaveTextContent("l'email n'a pas pu être envoyé")
   })
 
-  it('explains a membership conflict in another team of the planning', async () => {
+  it('explains a membership conflict in the same team (a concurrent add)', async () => {
     stubFetch({ post: () => jsonResponse({ error: 'membership_conflict' }, 409) })
     renderPanel()
 
     await submit()
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      "déjà partie d'une autre équipe de ce planning",
+      "ajoutée à cette équipe par une autre action",
     )
   })
 

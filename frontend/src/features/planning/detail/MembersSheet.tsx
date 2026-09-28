@@ -96,7 +96,7 @@ export function MembersSheet({ planningStableId, line, canManage, onClose, onCha
       if (err instanceof ApiError && err.status === 404) {
         setError('Utilisateur introuvable — vérifiez son identifiant.')
       } else if (err instanceof ApiError && err.status === 409) {
-        setError('Cet utilisateur a déjà une adhésion ouverte dans ce planning.')
+        setError('Cet utilisateur fait déjà partie de cette équipe.')
       } else {
         setError("Impossible d'ajouter ce membre.")
       }

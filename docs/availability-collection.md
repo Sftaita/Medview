@@ -50,7 +50,10 @@ du planning**, une adhésion qui recoupe la fenêtre. Ensuite, dans une collecte
   avait été retiré) — hook dans `PlanningTeamMembershipService::addMember` ;
 - **membre retiré** → `WITHDRAWN` s'il n'avait pas répondu **et** que la fenêtre
   commence à/après la fin de son adhésion ; s'il a participé à une partie de la
-  fenêtre, il reste attendu ; une réponse déjà donnée n'est jamais effacée ;
+  fenêtre, il reste attendu ; une réponse déjà donnée n'est jamais effacée.
+  Depuis D150, la personne peut appartenir à plusieurs lignes : elle n'est
+  retirée qu'une fois qu'elle n'a plus aucune adhésion ouverte dans le planning,
+  et la date prise en compte est la fin la plus tardive de ses adhésions ;
 - une collecte **fermée** est de l'historique figé : elle ne gagne aucun
   répondant et n'enregistre plus aucune modification.
 
@@ -154,9 +157,12 @@ L'UI propose la case « M'inclure dans le planning » (cochée par défaut) à l
 création ; sur la page d'un planning déjà créé, un créateur non participant
 dispose de « M'inclure dans ce planning » (adhésion via l'endpoint existant,
 avec son propre `stableId`, désormais exposé par `/api/me`). Le planning
-expose `participating` et `canManage` séparément. Un utilisateur n'a qu'une
-adhésion ouverte par planning (D080) : l'option concerne donc la ligne
-principale.
+expose `participating` et `canManage` séparément. L'option concerne la
+ligne principale ; depuis D150 un utilisateur peut aussi appartenir à
+d'autres lignes du même planning (une adhésion ouverte par équipe), et
+`participating` est vrai dès qu'il appartient à l'une d'elles. Quitter une
+ligne ne retire la personne des collectes (§2) que si elle n'appartient
+plus à aucune autre ligne du planning.
 
 ## 9. Autorisations (D124)
 

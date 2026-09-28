@@ -71,11 +71,12 @@ final class PlanningTeamMemberControllerTest extends WebTestCase
     }
 
     /**
-     * New scenario 3, exercised through the HTTP layer: adding a User to a
-     * second PlanningTeam of the SAME Planning while they already have an
-     * open membership there is refused.
+     * Scenario 3 through the HTTP layer (docs/decisions.md D150, relaxing
+     * D080): a User already open in one PlanningTeam of a Planning can be
+     * added to a second PlanningTeam of the SAME Planning — but adding them
+     * a second time to the same team is still refused.
      */
-    public function testAddingAMemberAlreadyOpenInThisPlanningIsRefused(): void
+    public function testAddingAMemberToASecondTeamOfThePlanningIsAllowedButNotTwiceToTheSameTeam(): void
     {
         $client = static::createClient();
         $this->registerUser($client, 'ptm.conflict.creator@example.com', 'correct-horse-battery');
@@ -103,8 +104,62 @@ final class PlanningTeamMemberControllerTest extends WebTestCase
             'role' => 'MEMBER',
             'membershipStart' => '2027-01-01',
         ]));
+        self::assertResponseStatusCodeSame(201);
+
+        $client->request('POST', "/api/plannings/{$planningStableId}/teams/{$teamAStableId}/members", server: $this->authHeader($creatorToken), content: json_encode([
+            'userStableId' => (string) $candidate->getStableId(),
+            'role' => 'ADMIN',
+            'membershipStart' => '2027-02-01',
+        ]));
         self::assertResponseStatusCodeSame(409);
         self::assertSame('membership_conflict', json_decode((string) $client->getResponse()->getContent(), true)['error']);
+
+        foreach ([$teamAStableId, $teamBStableId] as $teamStableId) {
+            $client->request('GET', "/api/plannings/{$planningStableId}/teams/{$teamStableId}/members", server: $this->authHeader($creatorToken));
+            self::assertResponseIsSuccessful();
+            $userIds = array_column(json_decode((string) $client->getResponse()->getContent(), true), 'userStableId');
+            self::assertSame([(string) $candidate->getStableId()], $userIds, 'Listed once in each team.');
+        }
+    }
+
+    /**
+     * docs/decisions.md D150: a member of two lines — MEMBER on the main
+     * line, ADMIN ("Gestionnaire", D147) on the secondary one — is
+     * `participating` and holds the planning-wide management rights, but
+     * never the creator's structural MANAGE right.
+     */
+    public function testAMemberOfTwoLinesIsParticipatingAndManagesThroughTheirAdminRole(): void
+    {
+        $client = static::createClient();
+        $this->registerUser($client, 'ptm.twolines.creator@example.com', 'correct-horse-battery');
+        $creatorToken = $this->loginUser($client, 'ptm.twolines.creator@example.com', 'correct-horse-battery');
+        $this->registerUser($client, 'ptm.twolines.surgeon@example.com', 'correct-horse-battery');
+
+        $planningStableId = $this->createPlanningViaApi($client, $creatorToken, 'Seniors')['stableId'];
+        $teamAStableId = $this->primaryTeamStableId($client, $creatorToken, $planningStableId);
+        $client->request('POST', "/api/plannings/{$planningStableId}/lines", server: $this->authHeader($creatorToken), content: json_encode(['name' => 'Renfort']));
+        $teamBStableId = json_decode((string) $client->getResponse()->getContent(), true)['team']['stableId'];
+
+        $surgeon = static::getContainer()->get(UserRepository::class)->findOneByEmail('ptm.twolines.surgeon@example.com');
+        foreach ([[$teamAStableId, 'MEMBER'], [$teamBStableId, 'ADMIN']] as [$teamStableId, $role]) {
+            $client->request('POST', "/api/plannings/{$planningStableId}/teams/{$teamStableId}/members", server: $this->authHeader($creatorToken), content: json_encode([
+                'userStableId' => (string) $surgeon->getStableId(),
+                'role' => $role,
+                'membershipStart' => '2027-01-01',
+            ]));
+            self::assertResponseStatusCodeSame(201);
+        }
+
+        $surgeonToken = $this->loginUser($client, 'ptm.twolines.surgeon@example.com', 'correct-horse-battery');
+        $client->request('GET', "/api/plannings/{$planningStableId}", server: $this->authHeader($surgeonToken));
+        self::assertResponseIsSuccessful();
+        $planning = json_decode((string) $client->getResponse()->getContent(), true);
+
+        self::assertTrue($planning['participating']);
+        self::assertTrue($planning['canManageCalendar']);
+        self::assertTrue($planning['canGenerate']);
+        self::assertTrue($planning['canPublish']);
+        self::assertFalse($planning['canManage'], 'Structure stays with the creator alone (D071).');
     }
 
     public function testOnlyCreatorCanAddOrEndMembers(): void

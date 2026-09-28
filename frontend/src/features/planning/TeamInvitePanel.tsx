@@ -195,7 +195,7 @@ export function TeamInvitePanel({ planningStableId, teamStableId, onMembersChang
 function messageFor(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.status === 409) {
-      return "Cette personne fait déjà partie d'une autre équipe de ce planning."
+      return "Cette personne vient d'être ajoutée à cette équipe par une autre action."
     }
     if (err.status === 403) {
       return "Vous n'avez pas le droit d'ajouter des personnes à cette équipe."

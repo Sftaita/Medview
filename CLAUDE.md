@@ -111,9 +111,9 @@ détaillé (encore conceptuel, rien d'implémenté) :
   côté utilisateur, ligne PRIMARY/SECONDARY, isolation stricte des
   populations par ligne (mono-équipe, moteur inchangé), autorisations
   creator-only, `PlanningTeam` propriété exclusive d'un Planning et créée
-  inline par sa ligne, règle "une adhésion ouverte par Planning, jamais
-  par Team seule" (D079/D080), endpoints et UI du lot Planning +
-  restructuration Team.
+  inline par sa ligne, règle "une adhésion ouverte par équipe" — un même
+  User peut appartenir à plusieurs lignes d'un Planning (D150, remplace
+  D080), endpoints et UI du lot Planning + restructuration Team.
 - **`docs/availability-collection.md`** — collecte des disponibilités par
   fenêtre : "répondu" = événement explicite distinct de
   `UserAvailabilityPeriod` (D120), extension d'un planning (D122), participation

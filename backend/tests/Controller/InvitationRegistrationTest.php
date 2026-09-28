@@ -242,7 +242,12 @@ final class InvitationRegistrationTest extends WebTestCase
         self::assertResponseStatusCodeSame(410);
     }
 
-    public function testTwoInvitationsFromTheSamePlanningJoinOnlyTheFirstAndLeaveTheOtherPending(): void
+    /**
+     * docs/decisions.md D150 (relaxing D080): two invitations to two teams
+     * of the same Planning are both consumed by one registration — one
+     * User, two memberships.
+     */
+    public function testTwoInvitationsFromTheSamePlanningJoinBothTeams(): void
     {
         $client = static::createClient();
         $creator = $this->userToken($client, 'reg11.creator@example.com');
@@ -256,9 +261,14 @@ final class InvitationRegistrationTest extends WebTestCase
         $data = $this->registerWithToken($client, $token, 'marie@example.com');
 
         self::assertResponseStatusCodeSame(201);
-        self::assertSame(['Team A'], array_column($data['joinedTeams'], 'teamName'));
+        $joined = array_column($data['joinedTeams'], 'teamName');
+        sort($joined);
+        self::assertSame(['Team A', 'Team B'], $joined);
         $statuses = $this->connection()->fetchFirstColumn('SELECT status FROM team_invitations ORDER BY id');
-        self::assertSame(['ACCEPTED', 'PENDING'], $statuses, 'Never two open memberships in one planning.');
+        self::assertSame(['ACCEPTED', 'ACCEPTED'], $statuses);
+        self::assertSame(2, (int) $this->connection()->fetchOne(
+            "SELECT COUNT(*) FROM planning_team_members m JOIN users u ON u.id = m.user_id WHERE u.email = 'marie@example.com' AND m.membership_end IS NULL",
+        ));
     }
 
     public function testAccountCreatedBetweenInvitationAndAcceptanceNeverDuplicatesTheUser(): void

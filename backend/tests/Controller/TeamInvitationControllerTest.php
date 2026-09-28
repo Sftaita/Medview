@@ -189,7 +189,12 @@ final class TeamInvitationControllerTest extends WebTestCase
         self::assertSame(1, (int) $open, 'Never two open memberships.');
     }
 
-    public function testInvitingAnExistingUserAlreadyInAnotherTeamOfThePlanningIsAConflict(): void
+    /**
+     * docs/decisions.md D150 (relaxing D080): a User already in one team of
+     * the Planning can be added to another team of the same Planning — two
+     * open memberships, one per team.
+     */
+    public function testInvitingAnExistingUserAlreadyInAnotherTeamOfThePlanningAddsThemToThatTeamToo(): void
     {
         $client = static::createClient();
         $s = $this->scenario($client, 'inv9');
@@ -201,8 +206,19 @@ final class TeamInvitationControllerTest extends WebTestCase
         self::assertResponseStatusCodeSame(201);
 
         $data = $this->invite($client, $s['creator'], $s['planning'], $teamB, 'inv9.existing@example.com');
-        self::assertResponseStatusCodeSame(409);
-        self::assertSame('membership_conflict', $data['error']);
+        self::assertResponseStatusCodeSame(201);
+        self::assertSame('USER_ADDED', $data['status']);
+
+        $open = static::getContainer()->get(Connection::class)->fetchOne(
+            'SELECT COUNT(*) FROM planning_team_members m JOIN users u ON u.id = m.user_id WHERE u.email = ? AND m.membership_end IS NULL',
+            ['inv9.existing@example.com'],
+        );
+        self::assertSame(2, (int) $open, 'One open membership per team.');
+
+        // Inviting them again to a team they already belong to stays ALREADY_MEMBER, never a second stint.
+        $again = $this->invite($client, $s['creator'], $s['planning'], $teamB, 'inv9.existing@example.com');
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('ALREADY_MEMBER', $again['status']);
     }
 
     public function testInvitingTheSameNewEmailTwiceKeepsASinglePendingInvitation(): void

@@ -17,11 +17,10 @@ use Symfony\Component\Uid\Uuid;
  * and history, see CLAUDE.md/D012).
  *
  * $planning is a deliberate denormalization of $planningTeam->getPlanning()
- * (docs/decisions.md D079/D080): the "at most one open membership per
- * (Planning, User)" invariant needs to be a DB constraint on this table
- * directly, but $planning is only reachable through $planningTeam in a
- * naive model, which a CHECK/UNIQUE constraint cannot traverse. A
- * composite foreign key (planning_team_id, planning_id) referencing
+ * (docs/decisions.md D079/D081): it lets "is this User a member of this
+ * Planning" be a single lookup on this table (PlanningVoter,
+ * findIntersectingForPlanning()) without enumerating the Planning's lines.
+ * A composite foreign key (planning_team_id, planning_id) referencing
  * planning_teams(id, planning_id) — same technique as D051 — guarantees
  * $planning can never drift from $planningTeam->getPlanning() even though
  * it is stored redundantly; it is hand-added in the migration and is not
@@ -32,11 +31,14 @@ use Symfony\Component\Uid\Uuid;
  * removal of anything with history) — it sets $membershipEnd. Rejoining
  * later creates a brand new PlanningTeamMember row rather than reopening
  * this one, so the membership history stays a true append-only record.
- * At most one row per (planning, user) may have a null $membershipEnd at
- * a time — enforced by a partial unique index on (planning_id, user_id),
- * see migrations and docs/decisions.md D080. This replaces the earlier,
- * now-abandoned global "one open membership in the whole app" rule
- * (docs/decisions.md D072, marked replaced).
+ * At most one row per (planning team, user) may have a null $membershipEnd
+ * at a time — enforced by a partial unique index on (planning_team_id,
+ * user_id), docs/decisions.md D150. The same User MAY hold open memberships
+ * in several teams (lines) of one Planning at once — D150 relaxed the
+ * earlier "one open membership per Planning" rule (D080), itself the
+ * successor of the app-wide rule (D072). Code that needs "the person"
+ * rather than "the stint" must therefore reason on the User, never assume
+ * a single PlanningTeamMember per (Planning, User).
  *
  * $role is intentionally never folded into User::getRoles() (D012):
  * "who can do what in this specific team" is a Voter's job, not a claim

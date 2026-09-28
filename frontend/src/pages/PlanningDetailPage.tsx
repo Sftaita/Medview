@@ -166,7 +166,7 @@ export function PlanningDetailPage() {
       void pilot.reload()
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
-        setActionError('Vous participez déjà à ce planning.')
+        setActionError('Vous faites déjà partie de la ligne principale.')
       } else {
         setActionError('Impossible de vous inclure dans ce planning.')
       }

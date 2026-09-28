@@ -135,9 +135,11 @@ final class TeamInvitationService
      * on that single proof is what lets one registration join several
      * teams (docs/decisions.md D113).
      *
-     * An invitation is left PENDING (not consumed) when its membership is
-     * impossible — the user already has an open membership in another team
-     * of the same Planning — and lapsed ones are flipped to EXPIRED.
+     * Invitations to several teams of the same Planning are all consumed —
+     * a User may belong to several lines of one Planning (docs/decisions.md
+     * D150). An invitation is only left PENDING when its membership could
+     * not be opened because a concurrent request opened the very same
+     * (team, user) membership first; lapsed ones are flipped to EXPIRED.
      *
      * @return list<ConsumedInvitation>
      */
@@ -159,7 +161,7 @@ final class TeamInvitationService
                 try {
                     $member = $this->membershipService->addMember($team, $user, $invitation->getRole(), $this->today());
                 } catch (PlanningTeamMembershipConflictException) {
-                    $this->logger->notice('Invitation {id} left pending: the user already has an open membership in another team of the same planning.', ['id' => (string) $invitation->getStableId()]);
+                    $this->logger->notice('Invitation {id} left pending: an open membership in this team was opened concurrently.', ['id' => (string) $invitation->getStableId()]);
                     continue;
                 }
             }
@@ -184,7 +186,8 @@ final class TeamInvitationService
             $member = $this->membershipService->addMember($team, $user, TeamMemberRole::MEMBER, $this->today());
         } catch (UniqueConstraintViolationException) {
             // Lost a race against another request adding the same user to
-            // this Planning: the partial unique index is the real guard.
+            // this team: the partial unique index on (planning_team_id,
+            // user_id) is the real guard (docs/decisions.md D150).
             throw new PlanningTeamMembershipConflictException();
         }
 

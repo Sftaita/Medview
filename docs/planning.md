@@ -110,30 +110,47 @@ plus jamais se produire en pratique : une `PlanningTeam` fraîchement créée
 ne peut par construction avoir aucun `FairnessPeriod` préexistant. Conservé
 uniquement parce que `FairnessPeriodService::create()` peut le lever.
 
-## 6. Adhésion unique par Planning, pas par application (D080, remplace D072)
+## 6. Une adhésion ouverte par équipe (D150, remplace D080 qui remplaçait D072)
 
-Changement de règle métier : `PlanningTeamMember` n'autorise plus qu'**une
-seule adhésion ouverte par (Planning, User)** — et non plus une seule dans
-toute l'application (ancienne règle D072, abandonnée : elle n'avait plus
-de sens dès qu'une Team appartient à un seul Planning). Un User peut donc
-tenir des adhésions ouvertes **simultanées** dans des PlanningTeams de
-Plannings *différents* — mais jamais deux adhésions ouvertes dans deux
-PlanningTeams du **même** Planning à la fois.
+Règle en vigueur depuis 2026-09-28 (docs/decisions.md D150) : au plus
+**une adhésion ouverte par (PlanningTeam, User)**. Un même User peut donc
+tenir des adhésions ouvertes **simultanées** dans plusieurs PlanningTeams
+d'un **même** Planning — par exemple titulaire sur la ligne principale et
+renfort sur une ligne secondaire — comme dans des PlanningTeams de
+Plannings différents. Ce qui reste interdit : deux stints ouverts dans la
+même équipe.
 
-Contrainte DB : `UNIQUE(planning_id, user_id) WHERE membership_end IS
-NULL` sur `planning_team_members` (migration `Version20260917091305`).
-`planning_id` y est une dénormalisation de
+Contrainte DB : `UNIQUE(planning_team_id, user_id) WHERE membership_end IS
+NULL` sur `planning_team_members` (index
+`uniq_planning_team_members_open_team_membership`, migration
+`Version20260928090000`). `planning_id` reste une dénormalisation de
 `planningTeam.planning`, garantie cohérente par une clé étrangère
-composite `(planning_team_id, planning_id)` (même technique que D051) —
-voir D081. Historique préservé par stints (inchangé) : un User peut avoir
-appartenu à la PlanningTeam A du Planning X en 2025 puis à la PlanningTeam
-B du Planning Y en 2026, ou aux deux **simultanément** si X ≠ Y — jamais à
-deux PlanningTeams d'un même Planning en même temps.
-`PlanningTeamMembershipService::addMember()` vérifie désormais
-`PlanningTeamMemberRepository::findOpenMembershipForUserInPlanning(Planning,
-User)` (ce Planning précis) au lieu de `findOpenMembershipForUser()`
-(toute l'application) ; exception renommée
-`PlanningTeamMembershipConflictException`, message adapté.
+composite `(planning_team_id, planning_id)` (même technique que D051,
+voir D081) : elle ne porte plus l'unicité, mais sert toujours les lectures
+« ce User est-il membre de ce Planning ? » sans énumérer les lignes.
+
+Conséquences (détail : D150) :
+
+- `PlanningTeamMembershipService::addMember()` ne refuse (409
+  `membership_conflict`) qu'une seconde adhésion ouverte **dans la même
+  équipe** ;
+- il n'existe plus « l'adhésion » d'un User dans un Planning :
+  `PlanningTeamMemberRepository::findOpenMembershipsForUserInPlanning()`
+  renvoie une liste, `hasOpenMembershipInPlanning()` répond à « membre ou
+  non » ;
+- `PlanningVoter` : un rôle OWNER/ADMIN sur n'importe laquelle de ces
+  adhésions accorde les droits de gestion quotidiens (§10) ;
+- quitter une ligne ne retire la personne des collectes de disponibilités
+  du Planning que si elle n'appartient plus à aucune autre ligne ;
+- deux `PlanningTeamMember` d'un même User sont **la même personne** : les
+  incompatibilités réelles (chevauchement, repos, « pas son propre
+  renfort ») se raisonnent sur le User, jamais sur le stint.
+
+Historique de la règle : une adhésion ouverte par (Team, User) avant D072 ;
+une seule dans toute l'application (D072) ; une par Planning (D080,
+2026-09-18) ; une par équipe à nouveau depuis D150, cette fois avec une
+équipe toujours propriété exclusive d'un Planning (D079). L'historique par
+stints est inchangé.
 
 ## 7. Populations distinctes par ligne
 
@@ -147,6 +164,16 @@ que rien dans la chaîne snapshot/eligibility n'a jamais eu connaissance
 d'autre chose qu'une seule PlanningTeam à la fois. C'est le niveau
 `Planning`/`PlanningLine` qui organise ces contextes séparés, jamais le
 moteur lui-même.
+
+> **Mise à jour D150** : les populations restent distinctes **par stint**
+> (une ligne ne voit que les `PlanningTeamMember` de sa propre équipe),
+> mais une même *personne* peut désormais avoir un stint dans chacune de
+> deux lignes (§6). Elle est alors candidate sur les deux lignes, chaque
+> fois via son propre stint et dans le `FairnessContext` de la ligne —
+> jamais une fusion des populations. Tant que les contraintes entre lignes
+> (lot suivant du chantier « ligne secondaire conditionnelle ») ne sont pas
+> livrées, rien n'empêche encore de lui attribuer deux gardes simultanées
+> sur deux lignes.
 
 ## 8. `PlanningGeneration` reste mono-ligne
 
@@ -326,10 +353,11 @@ car le frontend ne peut pas le déduire.
 propre table ; le `PlanningTeamMember` (avec sa `TeamMemberParticipationPeriod`
 initiale) n'est créé que lorsque la personne existe réellement, via le même
 `PlanningTeamMembershipService::addMember()` que tout le reste — la règle
-« une adhésion ouverte par Planning » (§6, D080) s'applique donc telle quelle :
-inviter quelqu'un qui est déjà dans une *autre* équipe du même Planning donne
-`409 membership_conflict` ; deux invitations pour deux équipes d'un même
-Planning laissent la seconde `PENDING` à la consommation.
+« une adhésion ouverte par équipe » (§6, D150) s'applique donc telle quelle :
+inviter quelqu'un qui est déjà dans une *autre* équipe du même Planning
+l'ajoute aussi à celle-ci (`USER_ADDED`) ; l'inviter dans une équipe dont il
+est déjà membre donne `ALREADY_MEMBER` ; deux invitations pour deux équipes
+d'un même Planning sont toutes deux consommées à l'inscription.
 
 **Endpoints** (sous `/api/plannings/{planningStableId}/teams/{teamStableId}`) :
 
