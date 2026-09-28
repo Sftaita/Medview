@@ -64,6 +64,7 @@ export function WeekStructureModal({ lineStableId, lineName, onClose, onSaved }:
       title={`Semaine type — ${lineName}`}
       onClose={onClose}
       dismissible={!saving}
+      stableLayout
       footer={
         <>
           <button type="button" className="btn btn--secondary" onClick={onClose} disabled={saving}>

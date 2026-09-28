@@ -89,7 +89,6 @@ export function WeekStructureEditor({
               data-block={block}
               aria-pressed={picked}
               disabled={readOnly}
-              title={`${DAY_NAMES[i]} · ${long.toLowerCase()}${blockName ? ` (${blockName})` : ''}`}
               aria-label={`${DAY_NAMES[i]}, ${block ? `bloc ${block}` : long.toLowerCase()}${blockName ? ` (${blockName})` : ''}`}
               onClick={() => toggle(i)}
             >
@@ -134,52 +133,59 @@ export function WeekStructureEditor({
       })}
 
       {!readOnly && (
+        // Structure identique avec ou sans sélection : l'aide et le résumé partagent
+        // la même cellule (le plus haut des deux fixe la hauteur) et les boutons
+        // restent en place, désactivés — la zone ne change jamais de taille.
         <div className="wse__actions" data-active={sel.length > 0}>
-          {sel.length === 0 ? (
-            <span className="wse__hint">
+          <div className="wse__sel">
+            <span className="wse__hint" data-shown={sel.length === 0}>
               Touchez un ou plusieurs jours pour changer leur rôle. Un bloc peut réunir des jours non
               consécutifs — vendredi et dimanche sans le samedi, par exemple.
             </span>
-          ) : (
-            <>
-              <div className="wse__sel">
-                <div className="wse__sel-title">
-                  {plural(sel.length, 'jour sélectionné', 'jours sélectionnés')}
-                </div>
-                <div className="wse__sel-sub">
-                  {list(sel)}
-                  {sel.length === 1 ? ' · un bloc réunit au moins deux jours' : ''}
-                </div>
+            <div className="wse__sel-summary" data-shown={sel.length > 0}>
+              <div className="wse__sel-title">
+                {plural(sel.length, 'jour sélectionné', 'jours sélectionnés')}
               </div>
-              <div className="wse__buttons">
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  disabled={!canCreateBlock(value, sel)}
-                  onClick={() => commit(createBlock(value, sel))}
-                >
-                  Créer un bloc
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--secondary"
-                  onClick={() => commit(setSolo(value, sel))}
-                >
-                  Garde isolée
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--secondary"
-                  onClick={() => commit(setNone(value, sel))}
-                >
-                  Pas de garde
-                </button>
-                <button type="button" className="btn btn--ghost" onClick={() => setSelection([])}>
-                  Annuler
-                </button>
+              <div className="wse__sel-sub">
+                {list(sel)}
+                {sel.length === 1 ? ' · un bloc réunit au moins deux jours' : ''}
               </div>
-            </>
-          )}
+            </div>
+          </div>
+          <div className="wse__buttons">
+            <button
+              type="button"
+              className="btn btn--primary"
+              disabled={!canCreateBlock(value, sel)}
+              onClick={() => commit(createBlock(value, sel))}
+            >
+              Créer un bloc
+            </button>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              disabled={sel.length === 0}
+              onClick={() => commit(setSolo(value, sel))}
+            >
+              Garde isolée
+            </button>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              disabled={sel.length === 0}
+              onClick={() => commit(setNone(value, sel))}
+            >
+              Pas de garde
+            </button>
+            <button
+              type="button"
+              className="btn btn--ghost"
+              disabled={sel.length === 0}
+              onClick={() => setSelection([])}
+            >
+              Annuler
+            </button>
+          </div>
         </div>
       )}
 
