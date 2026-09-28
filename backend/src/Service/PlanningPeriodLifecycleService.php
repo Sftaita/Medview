@@ -40,6 +40,7 @@ final class PlanningPeriodLifecycleService
         private readonly PlanningGenerationRepository $generationRepository,
         private readonly DutyRepository $dutyRepository,
         private readonly DutyAssignmentRepository $assignmentRepository,
+        private readonly LiveDemandViewFactory $demandViewFactory,
     ) {
     }
 
@@ -97,8 +98,11 @@ final class PlanningPeriodLifecycleService
             $assignedDutyIds[(int) $assignment->getDuty()->getId()] = true;
         }
 
+        // docs/decisions.md D164: "required" is the live demand (a conditional duty is required only when its
+        // source holder triggers it), never Duty::isRequired() alone.
+        $demand = $this->demandViewFactory->forPlanning($planningPeriod->getTeam()->getPlanning());
         foreach ($this->dutyRepository->findByPlanningPeriod($planningPeriod) as $duty) {
-            if ($duty->isRequired() && !isset($assignedDutyIds[(int) $duty->getId()])) {
+            if ($demand->forDuty($duty)->required && !isset($assignedDutyIds[(int) $duty->getId()])) {
                 return false;
             }
         }

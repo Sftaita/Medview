@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Eligibility\DutyUnit;
 use App\Entity\PlanningPeriod;
 use App\Fairness\FairnessDimensionValues;
 use App\Repository\DutyRepository;
@@ -41,9 +42,20 @@ final class RequiredDemandBuilder
 
     public function build(PlanningPeriod $planningPeriod): FairnessDimensionValues
     {
-        $duties = $this->dutyRepository->findByPlanningPeriod($planningPeriod);
-        $dutyUnits = $this->dutyUnitFactory->fromDuties($duties);
+        return $this->buildFromUnits($this->dutyUnitFactory->fromDuties($this->dutyRepository->findByPlanningPeriod($planningPeriod)));
+    }
 
+    /**
+     * The same sum over given units — FairnessContextBuilder passes the
+     * units of the generation's matrix (docs/decisions.md D164), so a
+     * conditional line's demand is exactly the units its generation found
+     * required; for an independent line those units are all of its period's
+     * duties, as before.
+     *
+     * @param iterable<DutyUnit> $dutyUnits
+     */
+    public function buildFromUnits(iterable $dutyUnits): FairnessDimensionValues
+    {
         $total = FairnessDimensionValues::empty();
 
         foreach ($dutyUnits as $unit) {

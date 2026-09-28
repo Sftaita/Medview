@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Demand\DemandView;
 use App\Eligibility\ExclusionReason;
 use App\Entity\Duty;
 use App\Entity\DutyAssignment;
@@ -36,6 +37,7 @@ final class PlanningResultService
         private readonly DutyAssignmentRepository $assignmentRepository,
         private readonly PlanningTeamMemberRepository $teamMemberRepository,
         private readonly ExclusionReasonLabeler $reasonLabeler,
+        private readonly LiveDemandViewFactory $demandViewFactory,
     ) {
     }
 
@@ -48,15 +50,18 @@ final class PlanningResultService
      */
     public function forPlanning(Planning $planning, ?\DateTimeImmutable $from = null, ?\DateTimeImmutable $toExclusive = null): PlanningResultView
     {
+        // docs/decisions.md D164: whether a duty must be covered is the LIVE demand — intrinsic for an independent
+        // line, decided by the source line's current holders for a conditional one — never Duty::isRequired() alone.
+        $demand = $this->demandViewFactory->forPlanning($planning);
         $lines = [];
         foreach ($this->lineRepository->findByPlanning($planning) as $line) {
-            $lines[] = $this->forLine($line, $from, $toExclusive);
+            $lines[] = $this->forLine($line, $from, $toExclusive, $demand);
         }
 
         return new PlanningResultView($planning, $lines);
     }
 
-    private function forLine(PlanningLine $line, ?\DateTimeImmutable $from, ?\DateTimeImmutable $toExclusive): PlanningResultLine
+    private function forLine(PlanningLine $line, ?\DateTimeImmutable $from, ?\DateTimeImmutable $toExclusive, DemandView $demand): PlanningResultLine
     {
         $generation = $this->generationRepository->findMostRecentCompletedByPlanningPeriod($line->getPlanningPeriod());
         if (null === $generation) {
@@ -76,7 +81,7 @@ final class PlanningResultService
         $resultDuties = [];
 
         foreach ($this->dutyRepository->findByPlanningPeriod($line->getPlanningPeriod()) as $duty) {
-            $required = $duty->isRequired();
+            $required = $demand->forDuty($duty)->required;
             $assignment = $assignmentByDutyId[(int) $duty->getId()] ?? null;
             $covered = null !== $assignment;
 
@@ -96,7 +101,7 @@ final class PlanningResultService
                 continue;
             }
 
-            $resultDuties[] = new PlanningResultDuty($duty, $assignment, $covered, $reasons);
+            $resultDuties[] = new PlanningResultDuty($duty, $assignment, $covered, $reasons, $required);
         }
 
         return new PlanningResultLine(

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Demand\DemandView;
 use App\Eligibility\ExclusionReason;
 use App\Entity\Duty;
 use App\Entity\DutyAssignment;
@@ -35,6 +36,7 @@ final class PlanningPublicationPreflightService
         private readonly DutyAssignmentRepository $assignmentRepository,
         private readonly ReassignmentCandidateService $candidateService,
         private readonly ExclusionReasonLabeler $reasonLabeler,
+        private readonly LiveDemandViewFactory $demandViewFactory,
     ) {
     }
 
@@ -46,6 +48,7 @@ final class PlanningPublicationPreflightService
         $invalidAssignments = [];
         $conflicts = [];
         $allReady = true;
+        $demand = $this->demandViewFactory->forPlanning($planning);
 
         foreach ($this->lineRepository->findByPlanning($planning) as $line) {
             if (!$line->isActive()) {
@@ -62,7 +65,7 @@ final class PlanningPublicationPreflightService
                 continue;
             }
 
-            $this->checkLine($line, $generation, $uncoveredDuties, $inconsistentGroups, $invalidAssignments, $conflicts);
+            $this->checkLine($line, $generation, $demand, $uncoveredDuties, $inconsistentGroups, $invalidAssignments, $conflicts);
         }
 
         $coherent = $allReady
@@ -94,6 +97,7 @@ final class PlanningPublicationPreflightService
     private function checkLine(
         PlanningLine $line,
         PlanningGeneration $generation,
+        DemandView $demand,
         array &$uncoveredDuties,
         array &$inconsistentGroups,
         array &$invalidAssignments,
@@ -109,7 +113,8 @@ final class PlanningPublicationPreflightService
 
         $seenGroupIds = [];
         foreach ($duties as $duty) {
-            if ($duty->isRequired() && !isset($currentByDutyId[(int) $duty->getId()])) {
+            // The live demand (D164): a conditional duty only counts when its source holder triggers it.
+            if ($demand->forDuty($duty)->required && !isset($currentByDutyId[(int) $duty->getId()])) {
                 $uncoveredDuties[] = new UncoveredPublicationDuty($duty);
             }
 

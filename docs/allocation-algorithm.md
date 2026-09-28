@@ -278,6 +278,14 @@ signal d'équité du solve en cours.
 > `PlanningLine` classe elle-même ses `DutyPattern`s en familles d'équité
 > arbitraires (jamais un universel "week-end" en dur), comptées une fois
 > par unité (`DutyUnit`), jamais une fois par `Duty` constituante.
+>
+> **Statut d'implémentation (ligne conditionnelle, docs/decisions.md D164)** :
+> pour une ligne conditionnelle, les formules ci-dessous portent sur la
+> demande **réellement déclenchée** par la génération : une unité
+> conditionnelle non requise (ou indéterminée, source sans titulaire) est
+> absente du problème — ni `requiredDemand`, ni `effectiveExposure`, ni
+> variable CP-SAT — et n'est jamais convertie en OPTIONAL. Pour une ligne
+> indépendante, rien ne change (D084).
 
 ```
 structuralOpportunity(user, duty) ∈ {0,1}
@@ -688,6 +696,13 @@ donnée empirique démontrant un biais structurel — à réévaluer seulement s
 un audit d'exécution réelle en démontre un.
 
 ## 14. Snapshot et versioning
+
+> **Statut d'implémentation (D164)** : le snapshot d'une ligne
+> conditionnelle fige aussi sa demande — politique et déclencheurs utilisés,
+> une décision par garde conditionnelle (titulaire source, jour, déclencheur,
+> raison, `required` tri-état) — et le `snapshotHash` les inclut
+> (section `demand` absente pour une ligne indépendante, dont la forme
+> canonique est inchangée). Les instants du hash sont normalisés en UTC.
 
 > **Statut d'implémentation (Lot 3, `docs/planning-generation.md`)** :
 > `PlanningSnapshot` implémente le principe "snapshot hybride" ci-dessous
@@ -1218,3 +1233,4 @@ pourvues.
 |---|---|---|
 | v0.1 | 2026-09-15 | Première version : design conceptuel complet, rien d'implémenté. |
 | v2.0 | 2026-09-15 | Spécification finale v1 à l'issue d'un audit critique en trois passes. Remplace la recommandation greedy (§14 v0.1) par une architecture d'optimisation globale par contraintes (CP-SAT/OR-Tools) derrière l'abstraction `PlanningSolver`. Tranche l'ambiguïté poids-pondérés/lexicographique en faveur de l'optimisation lexicographique par phases. Spécifie entièrement le modèle UNSAT (quatre couches, strict/partial diagnostic solve, `coverageStatus`). Ajoute : exposition structurelle par garde, `requiredDemand` fixé avant solve, forced load à deux niveaux (structural/global), taxonomie HARD/POLICY_HARD/SOFT, snapshot hybride versionné, `DutyAssignment`/`DutyAssignmentEvent`, tie-break déterministe stable, taxonomie des absences. Décisions actées dans `docs/decisions.md` D031-D045.
+| — | 2026-09-28 | D164 : génération d'une ligne conditionnelle — source avant cible, demande figée par génération, unités non déclenchées absentes du problème, `effectiveExposure` conditionnelle sur la demande déclenchée (D084 inchangée pour INDEPENDENT). |

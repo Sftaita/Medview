@@ -123,7 +123,6 @@ export type PreflightIssueCode =
   | 'DEADLINE_PASSED'
   | 'VALIDATION_WILL_BE_INVALIDATED'
   | 'LINE_WITHOUT_MEMBERS'
-  | 'CONDITIONAL_GENERATION_NOT_YET_AVAILABLE'
   | 'AMBIGUOUS_COVERAGE_SOURCE'
   | 'COVERAGE_SOURCE_MISSING'
 
@@ -218,8 +217,9 @@ export type UnsatDiagnosticsPayload = {
 export type LaunchLineResult = {
   lineStableId: string
   lineName: string
-  generationStableId: string
-  status: string
+  /** Null only for a conditional line not resolved because its source line failed (docs/decisions.md D164). */
+  generationStableId: string | null
+  status: string | null
   error: string | null
   coverageStatus: 'COMPLETE' | 'INCOMPLETE' | null
   strictSolverStatus: string | null
@@ -231,6 +231,12 @@ export type LaunchLineResult = {
   optimality: Record<string, boolean> | null
   diagnostics: UnsatDiagnosticsPayload | null
   snapshot: { capturedAt: string; memberCount: number; unavailableCount: number } | null
+  /** A conditional line's demand, per unit (docs/decisions.md D164) — null for an independent line. */
+  demand: {
+    requiredUnitCount: number
+    notRequiredUnitCount: number
+    undeterminedUnitCount: number
+  } | null
 }
 
 /** A finished generation's per-line result — the `outcome` of a GENERATE job. */

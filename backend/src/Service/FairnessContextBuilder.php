@@ -64,7 +64,8 @@ final class FairnessContextBuilder
         $candidates = $this->buildCandidates($matrix);
         $supportedDimensions = $this->deriveSupportedDimensions($dutyUnits);
 
-        $requiredDemand = $this->requiredDemandBuilder->build($planningPeriod);
+        // Over the matrix's units — the generation's own demand (docs/decisions.md D164) — never re-read from the period.
+        $requiredDemand = $this->requiredDemandBuilder->buildFromUnits($dutyUnits);
         $effectiveExposure = $this->effectiveExposureService->build($matrix, $dutyUnits, $candidates);
 
         [$grossTargets, $applicableDimensions] = $this->fairnessTargetService->buildGrossTargets(

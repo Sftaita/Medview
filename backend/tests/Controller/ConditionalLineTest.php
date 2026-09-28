@@ -182,11 +182,8 @@ final class ConditionalLineTest extends WebTestCase
         self::assertNotNull($duties['2027-01-08']->getGroupInstance());
         self::assertSame($duties['2027-01-08']->getGroupInstance(), $duties['2027-01-10']->getGroupInstance(), 'The block is one atomic unit.');
 
-        // Explicit states in the preflight: generation of a conditional line is not available yet; the other weeks have
-        // no main-line duty to depend on.
-        self::assertContains(['code' => 'CONDITIONAL_GENERATION_NOT_YET_AVAILABLE', 'lineStableId' => $s['renfortLineId'], 'lineName' => 'Renfort'], $preflight['blockers']);
+        // Explicit state in the preflight: the other weeks have no main-line duty to depend on.
         self::assertContains(['code' => 'COVERAGE_SOURCE_MISSING', 'lineStableId' => $s['renfortLineId'], 'lineName' => 'Renfort'], $preflight['warnings']);
-        self::assertFalse($preflight['canGenerate']);
     }
 
     public function testMaterializationIsDeterministicAndIdempotent(): void

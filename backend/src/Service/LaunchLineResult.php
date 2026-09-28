@@ -14,11 +14,14 @@ final readonly class LaunchLineResult
 {
     public function __construct(
         public PlanningLine $line,
-        public PlanningGeneration $generation,
+        /** Null only for a conditional line not resolved because its source line failed (docs/decisions.md D164). */
+        public ?PlanningGeneration $generation,
         public ?PlanningSnapshot $snapshot,
         public ?OptimizationResult $result,
         /** A stable machine code (never a raw exception message) when the line could not be generated. */
         public ?string $error = null,
+        /** A conditional line's demand, per unit (D164) — null for an independent line. */
+        public ?LineDemandSummary $demand = null,
     ) {
     }
 }

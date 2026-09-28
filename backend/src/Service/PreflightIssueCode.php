@@ -29,15 +29,6 @@ enum PreflightIssueCode: string
     case NO_SOLVER_PARAMETER_SET = 'NO_SOLVER_PARAMETER_SET';
 
     /**
-     * docs/decisions.md D163 — TEMPORARY, removed by the next lot of the
-     * conditional secondary line project: a conditional line's duties
-     * exist, but generating them (source first, demand decided by the
-     * source's holders) is not built yet. Refusing is the only honest
-     * answer until then — never a generation that treats them as required.
-     */
-    case CONDITIONAL_GENERATION_NOT_YET_AVAILABLE = 'CONDITIONAL_GENERATION_NOT_YET_AVAILABLE';
-
-    /**
      * docs/decisions.md D163: a day of a conditional line matches several
      * duties of its source line on that calendar day — no coverage source
      * is ever chosen arbitrarily, the day is left unmaterialized.
@@ -66,6 +57,6 @@ enum PreflightIssueCode: string
 
     public function isBlocker(): bool
     {
-        return \in_array($this, [self::NO_ACTIVE_RULE_SET, self::NO_DUTIES, self::PERIOD_LOCKED, self::NO_SOLVER_PARAMETER_SET, self::CONDITIONAL_GENERATION_NOT_YET_AVAILABLE, self::AMBIGUOUS_COVERAGE_SOURCE], true);
+        return \in_array($this, [self::NO_ACTIVE_RULE_SET, self::NO_DUTIES, self::PERIOD_LOCKED, self::NO_SOLVER_PARAMETER_SET, self::AMBIGUOUS_COVERAGE_SOURCE], true);
     }
 }

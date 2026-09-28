@@ -7,6 +7,8 @@ namespace App\Service;
 use App\Entity\Duty;
 use App\Entity\PlanningSnapshot;
 use App\Entity\PlanningSnapshotAvailabilityPeriod;
+use App\Entity\PlanningSnapshotDemandDecision;
+use App\Entity\PlanningSnapshotDemandTrigger;
 use App\Entity\PlanningSnapshotExternalCommitment;
 use App\Entity\PlanningSnapshotMember;
 use App\Entity\PlanningSnapshotNonParticipationPeriod;
@@ -46,6 +48,12 @@ use App\Repository\DutyRepository;
  *   `EligibilityService` for the cross-line exclusions: every field the
  *   check uses (person, interval, the owning generation's rest thresholds)
  *   plus the stable ids that identify the commitment.
+ * - A conditional line's frozen demand (docs/decisions.md D164): the
+ *   frozen policy (stable id, version, source line, source generation,
+ *   every trigger) and every demand decision (duty, source duty, weekday,
+ *   source holder, trigger, day reason, required, reason), plus each
+ *   conditional duty's `coverageSource` — the whole reason the problem has
+ *   the units it has.
  * - The **live** `Duty` list of the `PlanningPeriod` (never duplicated
  *   into the snapshot, docs/planning-generation.md §4 — this is the one
  *   genuinely mutable input a synchronous solve can still see drift:
@@ -71,6 +79,18 @@ final class SnapshotHasher
     }
 
     public function hash(PlanningSnapshot $snapshot): string
+    {
+        return hash('sha256', json_encode($this->canonicalForm($snapshot), \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES));
+    }
+
+    /**
+     * Exactly what is hashed — public so its shape can be audited and
+     * tested (e.g. that a snapshot without conditional demand keeps its
+     * pre-D164 form, docs/decisions.md D164). Never persisted.
+     *
+     * @return array<string, mixed>
+     */
+    public function canonicalForm(PlanningSnapshot $snapshot): array
     {
         $generation = $snapshot->getGeneration();
         $restPolicy = $generation->getRestPolicy();
@@ -99,7 +119,13 @@ final class SnapshotHasher
             $canonical['externalCommitments'] = $externalCommitments;
         }
 
-        return hash('sha256', json_encode($canonical, \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES));
+        // Same rule (D164): only a conditional line's snapshot has a frozen demand; every other hash is unchanged.
+        $demandPolicy = $snapshot->getDemandPolicy();
+        if (null !== $demandPolicy) {
+            $canonical['demand'] = $this->canonicalizeDemand($snapshot);
+        }
+
+        return $canonical;
     }
 
     /**
@@ -130,13 +156,13 @@ final class SnapshotHasher
             'availabilityPeriods' => array_map(static fn (PlanningSnapshotAvailabilityPeriod $p): array => [
                 'sourceAvailabilityStableId' => (string) $p->getSourceAvailabilityStableId(),
                 'type' => $p->getType()->value,
-                'startsAt' => $p->getStartsAt()->format(\DATE_ATOM),
-                'endsAt' => $p->getEndsAt()->format(\DATE_ATOM),
+                'startsAt' => self::instant($p->getStartsAt()),
+                'endsAt' => self::instant($p->getEndsAt()),
             ], $availabilityPeriods),
             'nonParticipationPeriods' => array_map(static fn (PlanningSnapshotNonParticipationPeriod $p): array => [
                 'sourceNonParticipationStableId' => (string) $p->getSourceNonParticipationStableId(),
-                'startsAt' => $p->getStartsAt()->format(\DATE_ATOM),
-                'endsAt' => $p->getEndsAt()->format(\DATE_ATOM),
+                'startsAt' => self::instant($p->getStartsAt()),
+                'endsAt' => self::instant($p->getEndsAt()),
             ], $nonParticipationPeriods),
         ];
     }
@@ -154,11 +180,63 @@ final class SnapshotHasher
             'sourceLineStableId' => (string) $c->getSourceLineStableId(),
             'sourceGenerationStableId' => (string) $c->getSourceGenerationStableId(),
             'sourceDutyStableId' => (string) $c->getSourceDutyStableId(),
-            'startsAt' => $c->getStartsAt()->format(\DATE_ATOM),
-            'endsAt' => $c->getEndsAt()->format(\DATE_ATOM),
+            'startsAt' => self::instant($c->getStartsAt()),
+            'endsAt' => self::instant($c->getEndsAt()),
             'sourceLegalMinRestHours' => $c->getSourceLegalMinRestHours(),
             'sourceTeamMinRestHours' => $c->getSourceTeamMinRestHours(),
         ], $commitments);
+    }
+
+    /**
+     * One canonical text per instant, whatever the timezone of the PHP
+     * object carrying it: always UTC. A Duty materialized in the very
+     * process that solves carries its team's zone (+01:00), the same Duty
+     * reloaded from PostgreSQL carries the session's (UTC) — the same
+     * instant, which must never hash differently (a real bug found while
+     * building docs/decisions.md D164: a conditional line's duties are
+     * materialized by the worker's own preflight, so its stored hash did
+     * not match a recomputation). UTC is what a reloaded instant already
+     * formats to, so the hash of every snapshot computed from reloaded data
+     * is unchanged.
+     */
+    private static function instant(\DateTimeImmutable $instant): string
+    {
+        return $instant->setTimezone(new \DateTimeZone('UTC'))->format(\DATE_ATOM);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function canonicalizeDemand(PlanningSnapshot $snapshot): array
+    {
+        $policy = $snapshot->getDemandPolicy();
+        $triggers = $policy->getTriggers()->toArray();
+        usort($triggers, static fn (PlanningSnapshotDemandTrigger $a, PlanningSnapshotDemandTrigger $b): int => (string) $a->getUserStableId() <=> (string) $b->getUserStableId());
+        $decisions = $snapshot->getDemandDecisions()->toArray();
+        usort($decisions, static fn (PlanningSnapshotDemandDecision $a, PlanningSnapshotDemandDecision $b): int => (string) $a->getDuty()->getStableId() <=> (string) $b->getDuty()->getStableId());
+
+        return [
+            'policyStableId' => (string) $policy->getPolicyStableId(),
+            'policyVersion' => $policy->getPolicyVersion(),
+            'sourceLineStableId' => (string) $policy->getSourceLineStableId(),
+            'sourceGenerationStableId' => (string) $policy->getSourceGenerationStableId(),
+            'triggers' => array_map(static fn (PlanningSnapshotDemandTrigger $t): array => [
+                'triggerStableId' => (string) $t->getTriggerStableId(),
+                'userStableId' => (string) $t->getUserStableId(),
+                'weekdays' => array_map(static fn ($w): string => $w->value, $t->getWeekdays()),
+                'increment' => $t->getIncrement(),
+            ], $triggers),
+            'decisions' => array_map(static fn (PlanningSnapshotDemandDecision $d): array => [
+                'dutyStableId' => (string) $d->getDuty()->getStableId(),
+                'sourceDutyStableId' => (string) $d->getSourceDutyStableId(),
+                'weekday' => $d->getWeekday()->value,
+                'sourceUserStableId' => null !== $d->getSourceUserStableId() ? (string) $d->getSourceUserStableId() : null,
+                'triggerStableId' => null !== $d->getTriggerStableId() ? (string) $d->getTriggerStableId() : null,
+                'dayReason' => $d->getDayReason()->value,
+                'required' => $d->getRequired(),
+                'reason' => $d->getReason()->value,
+            ], $decisions),
+        ];
     }
 
     /**
@@ -166,10 +244,10 @@ final class SnapshotHasher
      */
     private function canonicalizeDuty(Duty $duty): array
     {
-        return [
+        $canonical = [
             'stableId' => (string) $duty->getStableId(),
-            'startsAt' => $duty->getStartsAt()->format(\DATE_ATOM),
-            'endsAt' => $duty->getEndsAt()->format(\DATE_ATOM),
+            'startsAt' => self::instant($duty->getStartsAt()),
+            'endsAt' => self::instant($duty->getEndsAt()),
             'dutyTypeStableId' => (string) $duty->getDutyType()->getStableId(),
             'demandType' => $duty->getDemandType()->value,
             'criticality' => $duty->getCriticality()->value,
@@ -181,5 +259,13 @@ final class SnapshotHasher
             // enters the hash").
             'allocationFamilyStableId' => null !== $duty->getAllocationFamily() ? (string) $duty->getAllocationFamily()->getStableId() : null,
         ];
+
+        // docs/decisions.md D164: a conditional duty's coverage source decides its demand — hashed only when present,
+        // so every existing (non-conditional) duty keeps exactly the canonical form it always had.
+        if (null !== $duty->getCoverageSource()) {
+            $canonical['coverageSourceStableId'] = (string) $duty->getCoverageSource()->getStableId();
+        }
+
+        return $canonical;
     }
 }

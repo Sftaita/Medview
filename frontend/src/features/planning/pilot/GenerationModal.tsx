@@ -465,6 +465,9 @@ function lineTone(line: LaunchLineResult): string {
 }
 
 function lineText(line: LaunchLineResult): string {
+  if (line.error === 'source_generation_failed') {
+    return 'sa ligne source n’a pas pu être générée : les renforts n’ont pas été calculés.'
+  }
   if (line.error) {
     return 'la génération n’a pas pu aboutir.'
   }
@@ -472,9 +475,28 @@ function lineText(line: LaunchLineResult): string {
     return 'aucun résultat exploitable n’a été produit.'
   }
   const assigned = plural(line.assignmentCount ?? 0, 'garde affectée', 'gardes affectées')
-  return line.coverageStatus === 'COMPLETE'
-    ? `couverture complète, ${assigned}.`
-    : `couverture incomplète, ${assigned}, ${plural(line.unassignedDutyCount ?? 0, 'garde non pourvue', 'gardes non pourvues')}.`
+  const coverage =
+    line.coverageStatus === 'COMPLETE'
+      ? `couverture complète, ${assigned}.`
+      : `couverture incomplète, ${assigned}, ${plural(line.unassignedDutyCount ?? 0, 'garde non pourvue', 'gardes non pourvues')}.`
+  return `${demandText(line)}${coverage}${undeterminedText(line)}`
+}
+
+/** A conditional line (docs/decisions.md D164): how many reinforcements its source line's holders required. */
+function demandText(line: LaunchLineResult): string {
+  if (!line.demand) {
+    return ''
+  }
+  return line.demand.requiredUnitCount === 0
+    ? 'aucun renfort requis, '
+    : `${plural(line.demand.requiredUnitCount, 'renfort requis', 'renforts requis')}, `
+}
+
+function undeterminedText(line: LaunchLineResult): string {
+  const count = line.demand?.undeterminedUnitCount ?? 0
+  return count > 0
+    ? ` ${plural(count, 'renfort n’a pas pu être évalué', 'renforts n’ont pas pu être évalués')} : la garde source correspondante n’a pas de titulaire.`
+    : ''
 }
 
 function blockerText(issue: PreflightIssue): string {
@@ -488,8 +510,6 @@ function blockerText(issue: PreflightIssue): string {
       return `${line}la période est publiée ou archivée : une nouvelle génération est impossible.`
     case 'NO_SOLVER_PARAMETER_SET':
       return 'Le moteur de génération n’est pas configuré.'
-    case 'CONDITIONAL_GENERATION_NOT_YET_AVAILABLE':
-      return `${line}la génération d’une ligne de renfort conditionnelle n’est pas encore disponible.`
     case 'AMBIGUOUS_COVERAGE_SOURCE':
       return `${line}certains jours correspondent à plusieurs gardes de la ligne source : impossible de savoir laquelle déclenche le renfort.`
     default:

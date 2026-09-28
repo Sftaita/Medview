@@ -25,6 +25,7 @@ final readonly class PlanningResultDuty
         public ?DutyAssignment $assignment,
         public bool $covered,
         public array $reasons = [],
+        public bool $required = true,
     ) {
     }
 }

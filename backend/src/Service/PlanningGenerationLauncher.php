@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Entity\Planning;
+use App\Entity\PlanningGenerationStatus;
 use App\Entity\PlanningLine;
 use App\Entity\PlanningPeriod;
 use App\Entity\PlanningPeriodStatus;
 use App\Entity\RestPolicyOptions;
 use App\Entity\User;
+use App\Exception\ConditionalSourceNotGeneratedException;
 use App\Exception\NoActivePlanningRuleSetException;
 use App\Exception\NoSolverParameterSetException;
 use App\Exception\PlanningGenerationAlreadySnapshottedException;
@@ -104,7 +106,6 @@ final class PlanningGenerationLauncher
             $period = $line->getPlanningPeriod();
             // Sources first (PlanningLineOrder): a conditional line's source calendar already exists here (D163).
             $anomalies = $this->weeklyDutyCalendarService->ensureMaterialized($period, $period->getEndsAt());
-            $conditional = true === $this->policyRepository->findActiveForLine($line)?->getMode()->isConditional();
 
             $readiness = new LaunchLineReadiness(
                 $line,
@@ -130,10 +131,6 @@ final class PlanningGenerationLauncher
             }
             if (0 === $readiness->memberCount) {
                 $warnings[] = new PreflightIssue(PreflightIssueCode::LINE_WITHOUT_MEMBERS, $line);
-            }
-            if ($conditional) {
-                // Temporary (D163): generating a conditional line arrives with the next lot.
-                $blockers[] = new PreflightIssue(PreflightIssueCode::CONDITIONAL_GENERATION_NOT_YET_AVAILABLE, $line);
             }
             if ([] !== array_filter($anomalies, static fn (CoverageSourceAnomaly $a): bool => CoverageSourceAnomaly::AMBIGUOUS === $a->kind)) {
                 $blockers[] = new PreflightIssue(PreflightIssueCode::AMBIGUOUS_COVERAGE_SOURCE, $line);
@@ -173,9 +170,24 @@ final class PlanningGenerationLauncher
 
             // One line after another, in resolution order (PlanningLineOrder): a line's snapshot is taken
             // only once the lines before it are solved, so it sees their fresh assignments as commitments.
+            // A conditional line (docs/decisions.md D164) additionally needs its source line to have produced a
+            // COMPLETED generation in THIS launch — its demand is decided from that result. Otherwise it is not
+            // resolved at all: no generation is created for it (never an older source result, never a fake one).
             $results = [];
+            $completedLineIds = [];
             foreach ($preflight->lines as $readiness) {
-                $results[] = $this->runLine($readiness->line, $launchedBy, $restPolicy ?? RestPolicyOptions::none());
+                $line = $readiness->line;
+                $source = $this->conditionalSourceOf($line);
+                if (null !== $source && !isset($completedLineIds[(int) $source->getId()])) {
+                    $results[] = new LaunchLineResult($line, null, null, null, 'source_generation_failed');
+                    continue;
+                }
+
+                $result = $this->runLine($line, $launchedBy, $restPolicy ?? RestPolicyOptions::none());
+                if (PlanningGenerationStatus::COMPLETED === $result->generation?->getStatus()) {
+                    $completedLineIds[(int) $line->getId()] = true;
+                }
+                $results[] = $result;
             }
 
             return $results;
@@ -228,19 +240,30 @@ final class PlanningGenerationLauncher
             $snapshot = $this->snapshotService->createSnapshot($generation);
         } catch (NoActivePlanningRuleSetException|PlanningGenerationAlreadySnapshottedException) {
             return new LaunchLineResult($line, $generation, null, null, 'snapshot_failed');
+        } catch (ConditionalSourceNotGeneratedException) {
+            return new LaunchLineResult($line, $generation, null, null, 'source_generation_failed');
         }
+        $demand = LineDemandSummary::ofSnapshot($snapshot);
 
         try {
             $result = $this->generationService->generate($generation);
         } catch (NoSolverParameterSetException) {
-            return new LaunchLineResult($line, $generation, $snapshot, null, 'no_solver_parameter_set');
+            return new LaunchLineResult($line, $generation, $snapshot, null, 'no_solver_parameter_set', $demand);
         } catch (StalePlanningGenerationDataException) {
-            return new LaunchLineResult($line, $generation, $snapshot, null, 'stale_generation_data');
+            return new LaunchLineResult($line, $generation, $snapshot, null, 'stale_generation_data', $demand);
         } catch (PlanningGenerationConcurrentSolveException) {
-            return new LaunchLineResult($line, $generation, $snapshot, null, 'generation_not_solvable');
+            return new LaunchLineResult($line, $generation, $snapshot, null, 'generation_not_solvable', $demand);
         }
 
-        return new LaunchLineResult($line, $generation, $snapshot, $result);
+        return new LaunchLineResult($line, $generation, $snapshot, $result, null, $demand);
+    }
+
+    /** The source line of $line when its demand policy in force is conditional (D162), null otherwise. */
+    private function conditionalSourceOf(PlanningLine $line): ?PlanningLine
+    {
+        $policy = $this->policyRepository->findActiveForLine($line);
+
+        return null !== $policy && $policy->getMode()->isConditional() ? $policy->getSourceLine() : null;
     }
 
     /**

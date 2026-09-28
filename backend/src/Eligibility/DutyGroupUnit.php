@@ -19,7 +19,11 @@ final readonly class DutyGroupUnit implements DutyUnit
     public function __construct(
         private DutyGroupInstance $groupInstance,
         private array $duties,
+        private ?bool $demandRequired = null,
     ) {
+        if (null !== $demandRequired && !$duties[0]->isConditional()) {
+            throw new \InvalidArgumentException('Only a conditional unit carries a demand decision.');
+        }
     }
 
     public function getGroupInstance(): DutyGroupInstance
@@ -52,6 +56,11 @@ final readonly class DutyGroupUnit implements DutyUnit
      */
     public function isRequired(): bool
     {
+        // A conditional block is atomic: one decision for the whole unit (docs/decisions.md D163/D164).
+        if ($this->duties[0]->isConditional()) {
+            return $this->demandRequired ?? throw new \LogicException('A conditional unit built without its demand decision has no answer: build it through a DemandView (docs/decisions.md D164).');
+        }
+
         $first = $this->duties[0]->isRequired();
 
         foreach ($this->duties as $duty) {

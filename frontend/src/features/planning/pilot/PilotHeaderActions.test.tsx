@@ -269,6 +269,7 @@ const SUCCESS: LaunchResult = {
       optimality: { GENERATE: true },
       diagnostics: null,
       snapshot: { capturedAt: '2026-09-21T08:14:00+00:00', memberCount: 16, unavailableCount: 42 },
+      demand: null,
     },
   ],
 }
@@ -458,10 +459,7 @@ describe('GenerationModal', () => {
       [preflightUrl]: () =>
         makePreflight({
           canGenerate: false,
-          blockers: [
-            { code: 'CONDITIONAL_GENERATION_NOT_YET_AVAILABLE', lineStableId: 'line-2', lineName: 'Renfort' },
-            { code: 'AMBIGUOUS_COVERAGE_SOURCE', lineStableId: 'line-2', lineName: 'Renfort' },
-          ],
+          blockers: [{ code: 'AMBIGUOUS_COVERAGE_SOURCE', lineStableId: 'line-2', lineName: 'Renfort' }],
           warnings: [{ code: 'COVERAGE_SOURCE_MISSING', lineStableId: 'line-2', lineName: 'Renfort' }],
         }),
     })
@@ -471,14 +469,11 @@ describe('GenerationModal', () => {
 
     const dialog = await screen.findByRole('dialog')
     const blockers = await within(dialog).findByRole('list', { name: 'Points bloquants' })
-    expect(
-      within(blockers).getByText(/Ligne « Renfort » : la génération d’une ligne de renfort conditionnelle/),
-    ).toBeInTheDocument()
     expect(within(blockers).getByText(/plusieurs gardes de la ligne source/)).toBeInTheDocument()
     expect(
       within(dialog).getByText(/aucune garde sur la ligne source : aucun renfort n’y est possible/),
     ).toBeInTheDocument()
-    expect(within(dialog).queryByText(/COVERAGE_SOURCE|CONDITIONAL_GENERATION/)).not.toBeInTheDocument()
+    expect(within(dialog).queryByText(/COVERAGE_SOURCE/)).not.toBeInTheDocument()
   })
 
   it('tells when another generation is already running', async () => {
@@ -573,6 +568,44 @@ describe('GenerationModal', () => {
     expect(screen.getByText(/couverture complète, 28 gardes affectées/)).toBeInTheDocument()
     expect(
       screen.getByText(/État figé le 21\/09\/2026 à 10:14 \(16 membres, 42 indisponibilités\)/),
+    ).toBeInTheDocument()
+  })
+
+  it('says what a conditional line required, and when its source line failed (docs/decisions.md D164)', async () => {
+    renderResult({
+      lines: [
+        {
+          ...SUCCESS.lines[0],
+          lineStableId: 'line-2',
+          lineName: 'Renfort',
+          coverageStatus: 'COMPLETE',
+          assignmentCount: 3,
+          demand: { requiredUnitCount: 2, notRequiredUnitCount: 5, undeterminedUnitCount: 1 },
+        },
+        {
+          ...SUCCESS.lines[0],
+          lineStableId: 'line-3',
+          lineName: 'Renfort bis',
+          generationStableId: null,
+          status: null,
+          error: 'source_generation_failed',
+          coverageStatus: null,
+          assignmentCount: null,
+          demand: null,
+        },
+      ],
+    })
+
+    expect(
+      await screen.findByText(/2 renforts requis, couverture complète, 3 gardes affectées\./),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        /1 renfort n’a pas pu être évalué : la garde source correspondante n’a pas de titulaire\./,
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/sa ligne source n’a pas pu être générée : les renforts n’ont pas été calculés\./),
     ).toBeInTheDocument()
   })
 

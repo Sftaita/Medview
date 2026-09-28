@@ -98,8 +98,10 @@ final class RunPlanningJobHandler
         $results = $this->launcher->launch($job->getPlanning(), $job->getRequestedBy(), $restPolicy);
 
         $lines = array_map($this->launchResultPresenter->lineToArray(...), $results);
-        $usable = array_filter($results, static fn (LaunchLineResult $r): bool => PlanningGenerationStatus::COMPLETED === $r->generation->getStatus());
-        $incomplete = array_filter($usable, static fn (LaunchLineResult $r): bool => CoverageStatus::INCOMPLETE === $r->result?->coverageStatus);
+        $usable = array_filter($results, static fn (LaunchLineResult $r): bool => PlanningGenerationStatus::COMPLETED === $r->generation?->getStatus());
+        // A conditional line whose demand could not be fully determined (a source duty nobody held, D164) is
+        // incomplete too — never reported as complete because the undecided units were left out of its problem.
+        $incomplete = array_filter($usable, static fn (LaunchLineResult $r): bool => CoverageStatus::INCOMPLETE === $r->result?->coverageStatus || ($r->demand?->undeterminedUnitCount ?? 0) > 0);
 
         $outcome = [
             'lines' => $lines,

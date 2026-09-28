@@ -48,8 +48,9 @@ final class LaunchResultPresenter
         return [
             'lineStableId' => (string) $line->line->getStableId(),
             'lineName' => $line->line->getName(),
-            'generationStableId' => (string) $generation->getStableId(),
-            'status' => $generation->getStatus()->value,
+            // Null only for a conditional line that was not resolved because its source line failed (D164).
+            'generationStableId' => null !== $generation ? (string) $generation->getStableId() : null,
+            'status' => $generation?->getStatus()->value,
             'error' => $line->error,
             'coverageStatus' => $result?->coverageStatus->value,
             'strictSolverStatus' => $result?->strictSolverStatus->value,
@@ -66,6 +67,12 @@ final class LaunchResultPresenter
                 ? $this->unsatReportPresenter->toArray($result->diagnostics)
                 : null,
             'snapshot' => $snapshot,
+            // docs/decisions.md D164: a conditional line's demand, per unit — null for an independent line.
+            'demand' => null === $line->demand ? null : [
+                'requiredUnitCount' => $line->demand->requiredUnitCount,
+                'notRequiredUnitCount' => $line->demand->notRequiredUnitCount,
+                'undeterminedUnitCount' => $line->demand->undeterminedUnitCount,
+            ],
         ];
     }
 }

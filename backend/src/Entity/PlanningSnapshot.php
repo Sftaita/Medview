@@ -52,6 +52,23 @@ class PlanningSnapshot
     #[ORM\OneToMany(targetEntity: PlanningSnapshotExternalCommitment::class, mappedBy: 'snapshot')]
     private Collection $externalCommitments;
 
+    /**
+     * The demand policy a conditional line was generated with — at most one
+     * (docs/decisions.md D164); empty for an independent line.
+     *
+     * @var Collection<int, PlanningSnapshotDemandPolicy>
+     */
+    #[ORM\OneToMany(targetEntity: PlanningSnapshotDemandPolicy::class, mappedBy: 'snapshot')]
+    private Collection $demandPolicies;
+
+    /**
+     * One decision per conditional duty (docs/decisions.md D164).
+     *
+     * @var Collection<int, PlanningSnapshotDemandDecision>
+     */
+    #[ORM\OneToMany(targetEntity: PlanningSnapshotDemandDecision::class, mappedBy: 'snapshot')]
+    private Collection $demandDecisions;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -60,6 +77,8 @@ class PlanningSnapshot
         $this->generation = $generation;
         $this->members = new ArrayCollection();
         $this->externalCommitments = new ArrayCollection();
+        $this->demandPolicies = new ArrayCollection();
+        $this->demandDecisions = new ArrayCollection();
         $this->createdAt = new \DateTimeImmutable();
     }
 
@@ -111,6 +130,45 @@ class PlanningSnapshot
     {
         if (!$this->externalCommitments->contains($commitment)) {
             $this->externalCommitments->add($commitment);
+        }
+    }
+
+    /** The frozen demand policy of a conditional line's generation, null for an independent line (D164). */
+    public function getDemandPolicy(): ?PlanningSnapshotDemandPolicy
+    {
+        $first = $this->demandPolicies->first();
+
+        return false === $first ? null : $first;
+    }
+
+    /**
+     * @internal
+     */
+    public function addDemandPolicy(PlanningSnapshotDemandPolicy $policy): void
+    {
+        if (!$this->demandPolicies->contains($policy)) {
+            if (!$this->demandPolicies->isEmpty()) {
+                throw new \LogicException('A snapshot freezes at most one demand policy.');
+            }
+            $this->demandPolicies->add($policy);
+        }
+    }
+
+    /**
+     * @return Collection<int, PlanningSnapshotDemandDecision>
+     */
+    public function getDemandDecisions(): Collection
+    {
+        return $this->demandDecisions;
+    }
+
+    /**
+     * @internal
+     */
+    public function addDemandDecision(PlanningSnapshotDemandDecision $decision): void
+    {
+        if (!$this->demandDecisions->contains($decision)) {
+            $this->demandDecisions->add($decision);
         }
     }
 

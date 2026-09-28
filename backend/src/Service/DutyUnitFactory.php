@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Demand\DemandView;
 use App\Eligibility\DutyGroupUnit;
 use App\Eligibility\DutyUnit;
 use App\Eligibility\SingleDutyUnit;
@@ -30,7 +31,7 @@ final class DutyUnitFactory
      *                        never by auto-increment id or insertion order
      *                        (docs/eligibility.md §Déterminisme)
      */
-    public function fromDuties(iterable $duties): array
+    public function fromDuties(iterable $duties, ?DemandView $demand = null): array
     {
         $dutyUnits = [];
 
@@ -55,8 +56,42 @@ final class DutyUnitFactory
             $dutyUnits[] = new DutyGroupUnit($groupInstances[$groupId], $dutiesInGroup);
         }
 
+        if (null !== $demand) {
+            $dutyUnits = $this->applyDemand($dutyUnits, $demand);
+        }
+
         usort($dutyUnits, static fn (DutyUnit $a, DutyUnit $b): int => $a->getStableKey() <=> $b->getStableKey());
 
         return $dutyUnits;
+    }
+
+    /**
+     * docs/decisions.md D164 — the units of a generation's problem: an
+     * intrinsic unit is kept as it is; a conditional unit is kept only when
+     * the demand view finds it REQUIRED (then flagged so), and is otherwise
+     * ABSENT — never turned into an optional unit, never given to the
+     * solver. A unit whose demand could not be determined is absent too.
+     *
+     * @param list<DutyUnit> $units
+     *
+     * @return list<DutyUnit>
+     */
+    private function applyDemand(array $units, DemandView $demand): array
+    {
+        $kept = [];
+        foreach ($units as $unit) {
+            if (!$unit->getDuties()[0]->isConditional()) {
+                $kept[] = $unit;
+                continue;
+            }
+            if (!$demand->forUnit($unit)->required) {
+                continue;
+            }
+            $kept[] = $unit instanceof DutyGroupUnit
+                ? new DutyGroupUnit($unit->getGroupInstance(), $unit->getDuties(), true)
+                : new SingleDutyUnit($unit->getDuties()[0], true);
+        }
+
+        return $kept;
     }
 }

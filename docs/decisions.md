@@ -5189,3 +5189,144 @@ l'ancienne (voir légende).
   date au moment de l'évaluation ; choisir une source parmi plusieurs ;
   matérialiser un bloc partiellement ; dupliquer la règle de bloc dans
   chaque consommateur.
+
+## D164 — Génération d'une ligne conditionnelle : source avant cible dans D149, demande figée par génération, unités non déclenchées absentes du problème
+
+- **Contexte** : L5 du chantier « ligne secondaire conditionnelle ». Rendre
+  une ligne conditionnelle (D162/D163) réellement générable, dans
+  l'orchestration existante (D149), sans second orchestrateur ni solveur
+  global — et supprimer le blocage temporaire
+  `CONDITIONAL_GENERATION_NOT_YET_AVAILABLE` (D163).
+- **Décision — source → cible dans D149** : aucune boucle nouvelle.
+  `PlanningGenerationLauncher::launch()` (exécuté par le worker, D149) suit
+  déjà `PlanningLineOrder` (sources d'abord, D161) ; la dépendance devient
+  une **précondition** de la ligne cible :
+  - la source a produit une génération `COMPLETED` **dans ce lancement** →
+    la cible est générée et lit ce résultat frais (jamais une ancienne
+    génération) ;
+  - sinon (source `FAILED`, exception, verrou…) → la cible n'est **pas
+    résolue** : aucune génération, aucun snapshot, aucun appel au solveur ;
+    la ligne remonte `error = source_generation_failed` et le job est
+    `FAILED` comme pour toute ligne en échec ;
+  - garde-fou en profondeur : `PlanningSnapshotService::createSnapshot()`
+    refuse (`ConditionalSourceNotGeneratedException`, **avant** toute
+    écriture) une cible dont la source n'a aucune génération `COMPLETED`.
+- **Décision — source incomplète : état « indéterminé », jamais
+  `required=false`** : une garde source sans titulaire après génération
+  (source `COMPLETED` mais `INCOMPLETE`) ne signifie jamais « pas de
+  renfort ». La demande devient tri-état : requise / non requise /
+  **indéterminée** (`UnitDemand::$determined`, raisons
+  `SOURCE_UNASSIGNED`, `SOURCE_LINE_NOT_GENERATED`, `NOT_IN_SNAPSHOT`). Une
+  unité indéterminée est figée avec `required = NULL` (jamais `false`), est
+  absente du problème (on ne génère pas un renfort peut-être inutile), la
+  cible termine `COMPLETED` pour le reste, et la couverture du job est
+  `INCOMPLETE` (`demand.undeterminedUnitCount > 0`) — jamais annoncée
+  complète. Choix « résultat partiel » plutôt que blocage : cohérent avec la
+  couverture partielle existante (D106) ; L6 fera évoluer la demande live
+  quand la source sera complétée. Un bloc dont un jour est déclenché reste
+  requis même si un autre jour est indéterminé (la règle de bloc suffit).
+- **Décision — politique figée par génération** : chaque snapshot d'une
+  ligne conditionnelle fige (`planning_snapshot_demand_policies` +
+  `planning_snapshot_demand_triggers`, valeurs uniquement) :
+  `policyStableId`, `policyVersion`, `sourceLineStableId`,
+  `sourceGenerationStableId`, et chaque déclencheur (`triggerStableId`,
+  `userStableId`, `weekdayMask`, `increment`). Au plus une politique figée
+  par snapshot (unique `snapshot_id`). Une ligne indépendante n'en a pas.
+- **Décision — `PlanningSnapshotDemandDecision`** (une par garde
+  conditionnelle du snapshot, unique `(snapshot_id, duty_id)`) : garde
+  (relation vers la `Duty` immuable), `sourceDutyStableId`, `weekday`
+  évalué, `sourceUserStableId` (titulaire source ayant servi, NULL si
+  aucun), `triggerStableId` (NULL si aucun), `dayReason` (la réponse du
+  jour lui-même), `required` (TRUE/FALSE/**NULL** = indéterminé) et
+  `reason` (celle de l'unité, `TRIGGERED_BY_BLOCK` pour un jour requis par
+  un autre jour du bloc). CHECK : `required = TRUE` seulement avec
+  `TRIGGERED`/`TRIGGERED_BY_BLOCK` (aussi garanti par le constructeur).
+  Ligne, génération et politique source : portées par la politique figée
+  du même snapshot (jamais dupliquées par décision). On stocke
+  l'explication, jamais un booléen seul ; les jours déclencheurs d'un bloc
+  (`triggeringDuties`) se relisent par `SnapshotDemandView`.
+- **Décision — `SnapshotDemandView` réel** : construit
+  (`SnapshotDemandViewFactory::forSnapshot()`) uniquement depuis les
+  décisions et déclencheurs figés — jamais `DutyAssignment.current`, jamais
+  la politique ni les déclencheurs en vigueur — puis la même règle de bloc
+  que le live (`DemandCalculator::fromDays`). Une garde sans décision
+  figée → `NOT_IN_SNAPSHOT` (indéterminée), jamais recalculée.
+  `EligibilityMatrixBuilder` construit ses unités avec cette vue : un
+  ancien snapshot se relit à l'identique après toute modification
+  ultérieure de la politique ou du calendrier source.
+- **Décision — unités non déclenchées absentes du problème** :
+  `DutyUnitFactory::fromDuties($duties, $demandView)` garde une unité
+  intrinsèque telle quelle, garde une unité conditionnelle requise
+  (marquée `demandRequired = true`, bloc entier), et **retire** une unité
+  conditionnelle non requise ou indéterminée — jamais convertie en
+  OPTIONAL, aucune variable ni contrainte pour elle dans CP-SAT.
+  `DutyUnit::isRequired()` d'une unité conditionnelle construite sans
+  décision lève une exception (consommateur non migré détecté).
+- **Décision — génération à zéro unité** : aucune unité déclenchée → la
+  cible termine `COMPLETED`, problème vide, 0 affectation, avec snapshot,
+  décisions, politique figée et `snapshotHash` — jamais `FAILED`, partielle
+  ni « rien à générer ». Le résultat de lancement expose
+  `demand = {requiredUnitCount, notRequiredUnitCount, undeterminedUnitCount}`
+  (comptés par unité) pour chaque ligne conditionnelle.
+- **Décision — équité sur la demande réelle** : chaque ligne garde son
+  propre `FairnessContext`. `RequiredDemandBuilder::buildFromUnits()` lit
+  les unités de la matrice (donc déjà filtrées) : `requiredDemand`,
+  `structurallyForcedLoad`, cibles brutes et discrétionnaires, dimensions
+  calendaires et `ALLOCATION_FAMILY` ne voient que les unités déclenchées.
+  `effectiveExposure` (sommée sur les unités de la matrice) porte, pour une
+  ligne CONDITIONAL, **uniquement sur la demande réellement présente dans
+  le problème** : 10 possibilités structurelles dont 3 déclenchées → une
+  exposition de 3. Pour une ligne INDEPENDENT rien ne change (D084 : toutes
+  ses gardes, REQUIRED et OPTIONAL, sont dans la matrice) — le filtre
+  n'agit que sur les unités conditionnelles, au seul endroit où les unités
+  sont construites, sans exception dispersée.
+- **Décision — engagements et décisions : deux concepts** : les
+  affectations source restent les engagements externes figés (D161,
+  `PlanningSnapshotExternalCommitment` : contraintes de personne et de
+  repos, `SELF_COVERAGE`) ; les décisions expliquent pourquoi le renfort
+  existe. Elles peuvent désigner la même garde source, sans représentation
+  concurrente. `SELF_COVERAGE` est démontré de bout en bout avec des
+  horaires sans chevauchement : le titulaire de la source est exclu par
+  `SELF_COVERAGE` seul.
+- **Décision — `snapshotHash`** : une section `demand` (politique figée,
+  déclencheurs, décisions triées) et `coverageSourceStableId` par garde,
+  **uniquement** s'ils existent : la forme canonique d'un snapshot
+  indépendant est strictement celle d'avant D164 (testé,
+  `testAnIndependentSnapshotKeepsItsLegacyCanonicalForm`). Bug réel trouvé
+  et corrigé : les instants étaient formatés dans le fuseau où ils avaient
+  été chargés (`+01:00` pour une garde matérialisée dans le même
+  processus, UTC relue depuis la base) — le hash « avant » et « après »
+  solve pouvait diverger sans aucun changement de donnée
+  (`StalePlanningGenerationDataException` factice). Tous les instants sont
+  désormais normalisés en UTC avant `DATE_ATOM` (test de régression
+  dédié). Les hashes déjà stockés ne sont jamais recalculés.
+- **Décision — historique vs live, règle pour L6** : l'historique d'une
+  génération lit toujours sa politique figée. Le calendrier courant
+  (`LiveDemandViewFactory`) lit les **titulaires d'aujourd'hui**
+  (`DutyAssignment.current`) avec la **version de politique figée par la
+  génération courante** de la ligne (sa plus récente `COMPLETED`) ; seule
+  une ligne jamais générée lit la politique en vigueur. Une modification de
+  politique s'applique donc aux **prochaines générations**, jamais
+  rétroactivement à un calendrier déjà généré ou publié ; une réaffectation
+  de la source, elle, change la demande live immédiatement. Implémenté dès
+  L5 (testé) ; reste à L6 : `coverage_not_required`, `dependentImpacts`,
+  avertissements de renfort superflu, complétion sur la demande live.
+- **Consommateurs migrés** : `PlanningResultService` (champ `required`
+  lu via la vue live), `PlanningPeriodLifecycleService::isCurrentlyFullyCovered`,
+  `PlanningPublicationPreflightService::checkLine` — plus aucun appel à
+  `Duty::isRequired()` sur une garde conditionnelle, jamais
+  `CONDITIONAL => true/false`. `LiveDemandViewFactory` n'est plus `public`
+  (exception D163 retirée).
+- **Tests** : `ConditionalGenerationTest` (13 tests bout en bout, worker
+  réel, OR-Tools réel, couvrant les 20 scénarios du lot) ;
+  `FaultInjectingPlanningSolver` gagne `$errorWhen` (résultat ERROR sans
+  exception) et `$solvedProblems` (problèmes reçus par le solveur).
+  Mutations toutes détectées : unités non déclenchées incluses, règle de
+  bloc « tous les jours », politique en vigueur dans `SnapshotDemandView`,
+  `SELF_COVERAGE` désactivé, normalisation UTC retirée.
+- **Rejeté** : un orchestrateur conditionnel dédié ; transformer une
+  unité non déclenchée en OPTIONAL ; figer `required=false` pour une source
+  sans titulaire ; relire la politique en vigueur pour expliquer une
+  ancienne génération ; appliquer une nouvelle politique au calendrier déjà
+  généré ; fusionner l'équité de la cible avec celle de la source.
+- **Migration** : `Version20260929090000`.

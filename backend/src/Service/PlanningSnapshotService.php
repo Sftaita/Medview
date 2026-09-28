@@ -4,18 +4,32 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Demand\DemandCalculator;
+use App\Demand\SourceHolding;
+use App\Entity\Duty;
 use App\Entity\PlanningGeneration;
 use App\Entity\PlanningGenerationStatus;
+use App\Entity\PlanningLine;
+use App\Entity\PlanningLineDemandPolicy;
+use App\Entity\PlanningPeriod;
 use App\Entity\PlanningSnapshot;
 use App\Entity\PlanningSnapshotAvailabilityPeriod;
+use App\Entity\PlanningSnapshotDemandDecision;
+use App\Entity\PlanningSnapshotDemandPolicy;
+use App\Entity\PlanningSnapshotDemandTrigger;
 use App\Entity\PlanningSnapshotExternalCommitment;
 use App\Entity\PlanningSnapshotMember;
 use App\Entity\PlanningSnapshotNonParticipationPeriod;
 use App\Entity\PlanningSnapshotParticipationPeriod;
 use App\Entity\PlanningSnapshotRuleSet;
 use App\Entity\PlanningTeamMember;
+use App\Exception\ConditionalSourceNotGeneratedException;
 use App\Exception\NoActivePlanningRuleSetException;
 use App\Exception\PlanningGenerationAlreadySnapshottedException;
+use App\Repository\DutyAssignmentRepository;
+use App\Repository\DutyRepository;
+use App\Repository\PlanningGenerationRepository;
+use App\Repository\PlanningLineDemandPolicyRepository;
 use App\Repository\PlanningLineRepository;
 use App\Repository\PlanningRuleSetRepository;
 use App\Repository\PlanningTeamMemberRepository;
@@ -24,6 +38,7 @@ use App\Repository\TeamMemberParticipationPeriodRepository;
 use App\Repository\UserAvailabilityPeriodRepository;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
+use Symfony\Component\Uid\Uuid;
 
 /**
  * Builds the immutable PlanningSnapshot for one PlanningGeneration
@@ -45,6 +60,12 @@ final class PlanningSnapshotService
         private readonly PlanningLineRepository $lineRepository,
         private readonly PlanningLineOrder $lineOrder,
         private readonly PersonCommitmentReader $commitmentReader,
+        private readonly PlanningLineDemandPolicyRepository $demandPolicyRepository,
+        private readonly PlanningGenerationRepository $generationRepository,
+        private readonly DutyAssignmentRepository $assignmentRepository,
+        private readonly DutyRepository $dutyRepository,
+        private readonly DutyUnitFactory $dutyUnitFactory,
+        private readonly DemandCalculator $demandCalculator,
     ) {
     }
 
@@ -63,6 +84,7 @@ final class PlanningSnapshotService
      *                                                       docs/planning-generation.md
      *                                                       "Concurrence")
      * @throws NoActivePlanningRuleSetException              if the PlanningTeam has never activated a PlanningRuleSet
+     * @throws ConditionalSourceNotGeneratedException        a conditional line whose source line was never generated (D164)
      */
     public function createSnapshot(PlanningGeneration $generation): PlanningSnapshot
     {
@@ -77,6 +99,9 @@ final class PlanningSnapshotService
         if (null === $activeRuleSet) {
             throw new NoActivePlanningRuleSetException();
         }
+
+        // Checked before anything is persisted, like the rule set above: a refusal never leaves half a snapshot behind.
+        $demandSource = $this->demandSourceOf($planningPeriod);
 
         // TeamMemberParticipationPeriod is DATE-typed, mirroring
         // PlanningPeriod's own bounds directly. UserAvailabilityPeriod and
@@ -144,6 +169,9 @@ final class PlanningSnapshotService
         }
 
         $this->freezeExternalCommitments($snapshot, $relevantMembers);
+        if (null !== $demandSource) {
+            $this->freezeDemand($snapshot, ...$demandSource);
+        }
 
         $this->entityManager->persist(new PlanningSnapshotRuleSet(
             $snapshot,
@@ -161,6 +189,80 @@ final class PlanningSnapshotService
         }
 
         return $snapshot;
+    }
+
+    /**
+     * docs/decisions.md D164 — a conditional line only: the policy in force
+     * (version and every trigger, copied), the source line's generation that
+     * is read (its most recent COMPLETED one — at a planning-level launch,
+     * the one this very launch just produced, sources being solved first),
+     * and one decision per conditional duty, computed by the one demand rule
+     * (DemandCalculator) from who holds each source duty in that generation
+     * right now (DutyAssignment.current). The same source assignments are
+     * frozen separately as external commitments (D161): those constrain the
+     * people, these explain why each reinforcement exists — two roles, one
+     * source of truth read once.
+     *
+     * A source duty nobody holds leaves its days UNDETERMINED (required =
+     * null, reason SOURCE_UNASSIGNED) unless another day of the block is
+     * triggered — never recorded as "not required".
+     *
+     * @return array{0: PlanningLineDemandPolicy, 1: PlanningLine, 2: PlanningGeneration}|null
+     *                                                                                         the policy in force, its source line and the source generation to read — null for an independent line
+     *
+     * @throws ConditionalSourceNotGeneratedException
+     */
+    private function demandSourceOf(PlanningPeriod $period): ?array
+    {
+        $line = $this->lineRepository->findOneByPlanningPeriod($period);
+        $policy = null !== $line ? $this->demandPolicyRepository->findActiveForLine($line) : null;
+        $sourceLine = null !== $policy && $policy->getMode()->isConditional() ? $policy->getSourceLine() : null;
+        if (null === $policy || null === $sourceLine) {
+            return null;
+        }
+
+        $sourceGeneration = $this->generationRepository->findMostRecentCompletedByPlanningPeriod($sourceLine->getPlanningPeriod())
+            ?? throw new ConditionalSourceNotGeneratedException();
+
+        return [$policy, $sourceLine, $sourceGeneration];
+    }
+
+    private function freezeDemand(PlanningSnapshot $snapshot, PlanningLineDemandPolicy $policy, PlanningLine $sourceLine, PlanningGeneration $sourceGeneration): void
+    {
+        $period = $snapshot->getGeneration()->getPlanningPeriod();
+        $frozenPolicy = new PlanningSnapshotDemandPolicy($snapshot, $policy->getStableId(), $policy->getVersion(), $sourceLine->getStableId(), $sourceGeneration->getStableId());
+        $this->entityManager->persist($frozenPolicy);
+        foreach ($policy->getTriggers() as $trigger) {
+            $this->entityManager->persist(new PlanningSnapshotDemandTrigger($frozenPolicy, $trigger));
+        }
+
+        $holders = [];
+        foreach ($this->assignmentRepository->findForGenerations([$sourceGeneration]) as $assignment) {
+            $holders[(int) $assignment->getDuty()->getId()] = (string) $assignment->getTeamMember()->getUser()->getStableId();
+        }
+        $holdingOf = static fn (Duty $source): SourceHolding => new SourceHolding(true, $holders[(int) $source->getId()] ?? null);
+        $rules = $frozenPolicy->toRules();
+
+        foreach ($this->dutyUnitFactory->fromDuties($this->dutyRepository->findByPlanningPeriod($period)) as $unit) {
+            if (!$unit->getDuties()[0]->isConditional()) {
+                continue;
+            }
+
+            $demand = $this->demandCalculator->unit($unit->getDuties(), $rules, $holdingOf);
+            foreach ($demand->duties as $dutyDemand) {
+                $day = $dutyDemand->ownDay;
+                $this->entityManager->persist(new PlanningSnapshotDemandDecision(
+                    $snapshot,
+                    $dutyDemand->duty,
+                    $day->weekday,
+                    null !== $day->sourceHolderUserStableId ? Uuid::fromString($day->sourceHolderUserStableId) : null,
+                    null !== $day->trigger?->triggerStableId ? Uuid::fromString($day->trigger->triggerStableId) : null,
+                    $day->reason,
+                    $demand->determined ? $demand->required : null,
+                    $dutyDemand->reason,
+                ));
+            }
+        }
     }
 
     /**

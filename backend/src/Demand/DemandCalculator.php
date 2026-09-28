@@ -58,8 +58,24 @@ final class DemandCalculator
         }
 
         $days = array_map(fn (Duty $duty): DayDemand => $this->day($duty, $rules, $holdingOf), $unitDuties);
+
+        return self::fromDays($days);
+    }
+
+    /**
+     * The block rule, applied to days already evaluated — shared by the
+     * LIVE calculation above and by the SNAPSHOT view, which reads its days
+     * from a generation's frozen decisions (docs/decisions.md D164): one
+     * triggered day requires the whole unit; otherwise an undetermined day
+     * makes the unit undetermined, never "not required".
+     *
+     * @param list<DayDemand> $days the days of ONE conditional unit, in date order
+     */
+    public static function fromDays(array $days): UnitDemand
+    {
         $triggering = array_values(array_map(static fn (DayDemand $d): Duty => $d->duty, array_filter($days, static fn (DayDemand $d): bool => $d->isTriggered())));
         $required = [] !== $triggering;
+        $determined = $required || [] === array_filter($days, static fn (DayDemand $d): bool => $d->reason->isUndetermined());
 
         $duties = array_map(static fn (DayDemand $day): DutyDemand => new DutyDemand(
             $day->duty,
@@ -71,15 +87,16 @@ final class DemandCalculator
             },
             $day,
             $required ? $triggering : [],
+            $determined,
         ), $days);
 
-        return new UnitDemand($required, $duties, $triggering);
+        return new UnitDemand($required, array_values($duties), $triggering, $determined);
     }
 
     /**
      * @param list<Duty> $unitDuties
      */
-    private function intrinsic(array $unitDuties): UnitDemand
+    public function intrinsic(array $unitDuties): UnitDemand
     {
         $duties = array_map(static fn (Duty $duty): DutyDemand => new DutyDemand(
             $duty,

@@ -22,6 +22,7 @@ final class EligibilityMatrixBuilder
         private readonly DutyRepository $dutyRepository,
         private readonly EligibilityService $eligibilityService,
         private readonly DutyUnitFactory $dutyUnitFactory,
+        private readonly SnapshotDemandViewFactory $demandViewFactory,
     ) {
     }
 
@@ -38,7 +39,11 @@ final class EligibilityMatrixBuilder
         $planningPeriod = $snapshot->getGeneration()->getPlanningPeriod();
         $duties = $this->dutyRepository->findByPlanningPeriod($planningPeriod);
 
-        $dutyUnits = $this->dutyUnitFactory->fromDuties($duties);
+        // docs/decisions.md D164: the units of THIS generation's problem, per its frozen demand — an intrinsic unit as
+        // always; a conditional unit only when its frozen decision is "required" (absent otherwise, never optional).
+        // Everything built from the matrix (eligibility, exposure, forced load, targets, conflicts, the problem)
+        // therefore only ever sees the demand this generation really has.
+        $dutyUnits = $this->dutyUnitFactory->fromDuties($duties, $this->demandViewFactory->forSnapshot($snapshot));
 
         $candidates = $snapshot->getMembers()->toArray();
         usort($candidates, static fn ($a, $b): int => (string) $a->getSourceTeamMemberStableId() <=> (string) $b->getSourceTeamMemberStableId());

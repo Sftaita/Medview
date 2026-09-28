@@ -642,8 +642,8 @@ récurrent. Corrigé par un champ dédié `DutyPattern.recurring`
 > matérialisé et remonte au préflight (`COVERAGE_SOURCE_MISSING`
 > avertissement, `AMBIGUOUS_COVERAGE_SOURCE` bloquant). Tant que la
 > génération conditionnelle n'existe pas, un planning ayant une ligne
-> conditionnelle est bloqué (`CONDITIONAL_GENERATION_NOT_YET_AVAILABLE`,
-> temporaire). Détail : `docs/decisions.md` D163.
+> conditionnelle était bloqué (`CONDITIONAL_GENERATION_NOT_YET_AVAILABLE`,
+> temporaire, **supprimé par D164** — voir §25). Détail : `docs/decisions.md` D163.
 
 Point d'accroche choisi après audit des alternatives :
 `PlanningGenerationService::create()` (Lot 3) était trop tard — le blocage
@@ -816,3 +816,57 @@ contrôle live.
 
 Table : `planning_snapshot_external_commitments` — migration
 `Version20260928120000`.
+
+## 25. Génération d'une ligne conditionnelle (docs/decisions.md D164)
+
+Une ligne conditionnelle (D162/D163) se génère dans le **même** lancement
+que les autres lignes (worker D149, `PlanningGenerationLauncher`), sans
+orchestrateur dédié.
+
+**Ordre et précondition** — `PlanningLineOrder` place la source avant la
+cible. La cible n'est générée que si sa source a produit une génération
+`COMPLETED` **dans ce lancement** ; sinon aucune génération, aucun snapshot,
+aucun solve : la ligne remonte `error = source_generation_failed`
+(`generationStableId`/`status` à `null`) et le job est `FAILED`.
+`PlanningSnapshotService` refuse aussi, avant toute écriture, une cible dont
+la source n'a jamais été générée (`ConditionalSourceNotGeneratedException`).
+
+**Demande figée** — le snapshot de la cible fige :
+
+| Table | Contenu |
+|---|---|
+| `planning_snapshot_demand_policies` | `policyStableId`, `policyVersion`, `sourceLineStableId`, `sourceGenerationStableId` (au plus une par snapshot) |
+| `planning_snapshot_demand_triggers` | `triggerStableId`, `userStableId`, `weekdayMask`, `increment` |
+| `planning_snapshot_demand_decisions` | une par garde conditionnelle : garde, `sourceDutyStableId`, `weekday`, `sourceUserStableId`, `triggerStableId`, `dayReason`, `required` (TRUE/FALSE/NULL = indéterminé), `reason` (`TRIGGERED_BY_BLOCK` pour un jour requis par son bloc) |
+
+Les titulaires lus sont les affectations courantes de la génération source
+de ce lancement. `SnapshotDemandView` relit ces seules valeurs : ni
+politique en vigueur, ni `DutyAssignment.current`.
+
+**Problème** — seules les unités requises entrent dans l'`EligibilityMatrix`
+et donc dans l'`OptimizationProblem` (bloc entier dès qu'un jour est
+déclenché). Une unité non requise ou indéterminée est **absente** — jamais
+OPTIONAL.
+
+**Résultats possibles de la cible** :
+
+- aucune unité déclenchée → `COMPLETED`, 0 affectation, snapshot + décisions
+  + `snapshotHash` complets ;
+- une garde source sans titulaire → unité **indéterminée** (`required =
+  NULL`, raison `SOURCE_UNASSIGNED`), absente du problème, cible `COMPLETED`
+  pour le reste, couverture du job `INCOMPLETE` ;
+- le résultat de lancement de chaque ligne conditionnelle porte
+  `demand = {requiredUnitCount, notRequiredUnitCount, undeterminedUnitCount}`.
+
+**Hash** — section `demand` et `coverageSourceStableId` uniquement s'ils
+existent : un snapshot indépendant garde sa forme canonique d'avant D164.
+Instants normalisés en UTC (bug de fuseau corrigé, voir D164).
+
+**Historique vs live** — l'historique d'une génération ne change jamais.
+Le calendrier courant lit les titulaires d'aujourd'hui avec la version de
+politique figée par la génération courante de la ligne : une nouvelle
+politique s'applique à la **prochaine** génération, jamais au calendrier
+déjà généré.
+
+Tables : migration `Version20260929090000`. Tests :
+`ConditionalGenerationTest`.

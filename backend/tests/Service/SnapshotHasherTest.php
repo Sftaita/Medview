@@ -102,6 +102,32 @@ final class SnapshotHasherTest extends KernelTestCase
         self::assertNotSame($withoutCommitment, $hasher->hash($snapshot));
     }
 
+    /**
+     * docs/decisions.md D164 — a real bug found while building conditional
+     * generation: a Duty materialized in the very process that solves
+     * carries its team's zone (+01:00), the same Duty reloaded from
+     * PostgreSQL carries UTC. The same instants must hash the same.
+     */
+    public function testTheHashDoesNotDependOnTheTimezoneTheInstantsWereLoadedIn(): void
+    {
+        self::bootKernel();
+        $em = self::getContainer()->get(EntityManagerInterface::class);
+        $hasher = self::getContainer()->get(SnapshotHasher::class);
+        $team = $this->createTeam($em);
+        $period = $this->createPlanningPeriod($em, $team);
+        $dutyType = new \App\Entity\DutyType($team, 'GARDE', 'Garde');
+        $em->persist($dutyType);
+        self::getContainer()->get(\App\Service\DutyMaterializationService::class)->createStandaloneDuty($period, $dutyType, new \DateTimeImmutable('2027-01-05'), new \DateTimeImmutable('2027-01-06'));
+        $snapshot = $this->buildSnapshotOn($em, $period, [$this->syntheticMember('2027-01-01T00:00:00+00:00')]);
+
+        $inMemory = $hasher->hash($snapshot);
+        $snapshotId = $snapshot->getId();
+        $em->clear();
+        $reloaded = $hasher->hash($em->find(PlanningSnapshot::class, $snapshotId));
+
+        self::assertSame($inMemory, $reloaded);
+    }
+
     public function testDifferentSourceTimestampsOnAvailabilityNeverAffectTheHash(): void
     {
         self::bootKernel();

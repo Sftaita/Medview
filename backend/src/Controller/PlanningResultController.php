@@ -146,7 +146,7 @@ final class PlanningResultController
             'endsAt' => $duty->getEndsAt()->format(\DATE_ATOM),
             'timezone' => $duty->getTimezone(),
             'dutyType' => ['stableId' => (string) $type->getStableId(), 'code' => $type->getCode(), 'name' => $type->getName()],
-            'required' => $duty->isRequired(),
+            'required' => $result->required,
             'grouped' => null !== $group,
             // The atomic block this duty belongs to (docs/decisions.md D148): the calendar draws it as
             // one unit and any edit of one of its days edits all of them — never inferred client-side.

@@ -140,6 +140,18 @@ n'agrège jamais entre plusieurs lignes (§8). Ne dépend ni du nombre de
 candidats, ni de l'éligibilité, ni d'un solve futur — une pure lecture
 des `Duty` requises de la période.
 
+> **Ligne conditionnelle (D164)** : `requiredDemand` est calculé
+> (`RequiredDemandBuilder::buildFromUnits()`) sur les unités de
+> l'`EligibilityMatrix`, qui ne contient d'une ligne conditionnelle que les
+> unités **déclenchées** par sa génération (bloc entier dès qu'un jour est
+> déclenché) — les unités non requises ou indéterminées sont absentes du
+> problème, jamais OPTIONAL. `requiredDemand`, `structurallyForcedLoad`,
+> cibles brutes et discrétionnaires, dimensions calendaires et
+> `ALLOCATION_FAMILY` ne voient donc que la demande réelle. Pour une ligne
+> INDEPENDENT, les unités de la matrice sont exactement ses gardes : rien ne
+> change. Le `FairnessContext` d'une ligne conditionnelle reste le sien,
+> jamais fusionné avec celui de sa source.
+
 ## 6. `EffectiveExposureService`
 
 ```
@@ -175,6 +187,20 @@ confondues — voir `docs/decisions.md` D084 pour la justification textuelle
 > L'exposition, les cibles et la charge forcée de chaque ligne restent
 > calculées sur sa seule population (testé :
 > `EligibilityServiceTest::testACrossLineCommitmentExcludesButNeverZeroesStructuralOpportunity`).
+
+> **`effectiveExposure` — INDEPENDENT vs CONDITIONAL (D164)** : la somme
+> porte sur les gardes des unités de la matrice.
+>
+> - **INDEPENDENT** : toutes les gardes de la période, REQUIRED et OPTIONAL
+>   — D084 **strictement inchangée** (testé : 10 gardes → exposition 10).
+> - **CONDITIONAL** : uniquement les gardes des unités **réellement
+>   présentes dans le problème** de la génération (déclenchées). Une
+>   possibilité structurelle non déclenchée n'augmente jamais l'exposition
+>   (testé : 10 gardes possibles, 3 déclenchées → exposition 3, cible brute
+>   1,5 pour deux candidats).
+>
+> Le filtre est posé au seul endroit où les unités sont construites
+> (`DutyUnitFactory`), pas par des exceptions dans chaque calcul.
 
 **Deux invariants de résistance au gaming, testés explicitement**
 (`EffectiveExposureServiceTest`) :

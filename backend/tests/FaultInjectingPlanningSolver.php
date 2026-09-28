@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests;
 
+use App\Fairness\CoverageStatus;
 use App\Fairness\OptimizationProblem;
 use App\Fairness\OptimizationResult;
 use App\Fairness\PlanningSolver;
@@ -24,6 +25,18 @@ final class FaultInjectingPlanningSolver implements PlanningSolver
     /** @var (callable(): void)|null */
     public static $duringSolve;
 
+    /**
+     * docs/decisions.md D164: when it returns true for a problem, the solve
+     * ends with SolverStatus::ERROR (a FAILED generation of that line) —
+     * without throwing, so the rest of the launch goes on.
+     *
+     * @var (callable(OptimizationProblem): bool)|null
+     */
+    public static $errorWhen;
+
+    /** @var list<OptimizationProblem> every problem the solver received since the last reset() */
+    public static array $solvedProblems = [];
+
     public function __construct(
         private readonly OrToolsPlanningSolver $inner,
     ) {
@@ -33,12 +46,20 @@ final class FaultInjectingPlanningSolver implements PlanningSolver
     {
         self::$failWith = null;
         self::$duringSolve = null;
+        self::$errorWhen = null;
+        self::$solvedProblems = [];
     }
 
     public function solve(OptimizationProblem $problem): OptimizationResult
     {
         if (null !== self::$failWith) {
             throw self::$failWith;
+        }
+
+        self::$solvedProblems[] = $problem;
+
+        if (null !== self::$errorWhen && (self::$errorWhen)($problem)) {
+            return new OptimizationResult(SolverStatus::ERROR, null, CoverageStatus::INCOMPLETE, [], [], [], [], null, null, null);
         }
 
         $result = $this->inner->solve($problem);

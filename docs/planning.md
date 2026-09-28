@@ -441,6 +441,12 @@ gardes `CONDITIONAL`, chacune reliée explicitement à la garde de la ligne
 source du même jour (`coverageSource`). Qu'elle soit requise se lit dans une
 `DemandView` (LIVE : titulaire courant de la source ; un bloc est requis en
 entier dès qu'un de ses jours est déclenché), jamais dans la garde.
-`SELF_COVERAGE` empêche d'être son propre renfort. La **génération** d'une
-ligne conditionnelle arrive au lot suivant : d'ici là le préflight la
-refuse explicitement (`CONDITIONAL_GENERATION_NOT_YET_AVAILABLE`).
+`SELF_COVERAGE` empêche d'être son propre renfort.
+
+**Génération (D164)** : une ligne conditionnelle se génère dans le même
+lancement, après sa source ; seules ses unités déclenchées entrent dans le
+problème, la demande de chaque garde est figée dans le snapshot (titulaire
+source, déclencheur, raison), et une ligne sans aucun renfort déclenché
+termine `COMPLETED` à zéro affectation. Une nouvelle politique s'applique à
+la prochaine génération, jamais au calendrier déjà généré. Détail :
+`docs/planning-generation.md` §25.

@@ -1077,3 +1077,28 @@ jamais la version de l'application ni celle d'OR-Tools.
 planning antérieur à préserver), `GLOBALLY_FORCED`/`ForcedAssignmentAnalyzer`,
 infeasible core CP-SAT réel (D096), REPAIR, SIMULATE, MAX_DUTIES/
 MAX_WEEKENDS/MAX_CONSECUTIVE_NIGHTS (D104).
+
+## 38. Ligne conditionnelle : ce que reçoit le solveur (docs/decisions.md D164)
+
+Le solveur ne connaît pas la notion de ligne conditionnelle : il reçoit un
+`OptimizationProblem` ordinaire. Toute la décision est prise **avant**,
+dans le domaine :
+
+- `DutyUnitFactory::fromDuties($duties, $demandView)` (appelé par
+  `EligibilityMatrixBuilder` avec la `SnapshotDemandView` de la génération)
+  ne garde d'une ligne conditionnelle que les unités **requises** ; elles
+  entrent dans `requiredDutyUnits` comme n'importe quelle unité REQUIRED
+  (bloc entier, atomicité inchangée) ;
+- une unité conditionnelle non requise ou indéterminée n'est **ni** dans
+  `requiredDutyUnits` **ni** dans `optionalDutyUnits` : aucune variable,
+  aucune contrainte CP-SAT (testé via
+  `FaultInjectingPlanningSolver::$solvedProblems`) ;
+- aucune unité déclenchée → problème vide, résolu comme tel (`COMPLETED`,
+  0 affectation) ;
+- `SELF_COVERAGE` (D163) et les contraintes `CROSS_LINE_*` (D161) sont des
+  exclusions locales déjà présentes dans la matrice : le solveur ne les
+  recalcule jamais.
+
+Les phases lexicographiques, la bascule STRICT → PARTIAL et `UnsatReport`
+sont inchangés. Test : `FaultInjectingPlanningSolver::$errorWhen` simule un
+résultat ERROR (source en échec) sans exception.

@@ -22,7 +22,14 @@ namespace App\Demand;
  * - WEEKDAY_NOT_TRIGGERED: the holder's trigger does not cover that weekday;
  * - LINE_NOT_CONDITIONAL: the line's rules are not conditional (never
  *   produced in practice: changing the mode of a materialized line is
- *   refused, D162).
+ *   refused, D162);
+ * - NOT_IN_SNAPSHOT: a SNAPSHOT view asked about a conditional duty its
+ *   generation never decided (a duty materialized after the snapshot —
+ *   which the snapshot hash also reports as stale data, D164).
+ *
+ * SOURCE_LINE_NOT_GENERATED, SOURCE_UNASSIGNED and NOT_IN_SNAPSHOT are
+ * UNDETERMINED, never "not required": nobody knows yet whether the
+ * reinforcement is needed (UnitDemand::$determined).
  *
  * And at the level of a whole block (a conditional block is atomic):
  * - TRIGGERED_BY_BLOCK: this day is not triggered itself, but another day
@@ -39,4 +46,11 @@ enum DemandReason: string
     case HOLDER_HAS_NO_TRIGGER = 'HOLDER_HAS_NO_TRIGGER';
     case WEEKDAY_NOT_TRIGGERED = 'WEEKDAY_NOT_TRIGGERED';
     case LINE_NOT_CONDITIONAL = 'LINE_NOT_CONDITIONAL';
+    case NOT_IN_SNAPSHOT = 'NOT_IN_SNAPSHOT';
+
+    /** The day could not be evaluated: nobody holds (or held) its source duty. */
+    public function isUndetermined(): bool
+    {
+        return \in_array($this, [self::SOURCE_LINE_NOT_GENERATED, self::SOURCE_UNASSIGNED, self::NOT_IN_SNAPSHOT], true);
+    }
 }

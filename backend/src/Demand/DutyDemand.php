@@ -20,6 +20,8 @@ use App\Entity\Duty;
  * - `triggeringDuties`: the days of its block that triggered the
  *   requirement (itself included when triggered) — empty when not required
  *   or intrinsic.
+ * - `determined`: its unit's answer is known (UnitDemand::$determined) —
+ *   false means "unknown", never "not required".
  */
 final readonly class DutyDemand
 {
@@ -32,6 +34,7 @@ final readonly class DutyDemand
         public DemandReason $reason,
         public ?DayDemand $ownDay,
         public array $triggeringDuties,
+        public bool $determined = true,
     ) {
     }
 
