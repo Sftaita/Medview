@@ -8,7 +8,7 @@ nelmio_cors:
         # response headers that are exposed here, regardless of whether the
         # server actually sent them (found via UAT — the frontend could
         # never read the header the 429 responses already carried).
-        expose_headers: ['Link', 'Retry-After']
+        expose_headers: ['Link', 'Retry-After', 'Content-Disposition']
         max_age: 3600
         # Required so the browser attaches/accepts the HttpOnly refresh
         # cookie on cross-origin fetches to /api/token/*. Safe to allow
