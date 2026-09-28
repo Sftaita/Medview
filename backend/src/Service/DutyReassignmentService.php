@@ -64,14 +64,14 @@ final class DutyReassignmentService
     }
 
     /**
+     * @return list<DependentImpact> what the change did to the reinforcements depending on this block (D165) — reported, never acted on
+     *
      * @throws DutyNotGeneratedException
      * @throws StaleReassignmentException
      * @throws InvalidReassignmentCandidateException
      * @throws PlanningGenerationNotSnapshottedException
-     * @throws CoverageNotRequiredException            a new assignment on a reinforcement the live demand does not require (D165)
-     * @throws CoverageUndeterminedException           a new assignment on a reinforcement whose demand cannot be evaluated (D165)
-     *
-     * @return list<DependentImpact> what the change did to the reinforcements depending on this block (D165) — reported, never acted on
+     * @throws CoverageNotRequiredException              a new assignment on a reinforcement the live demand does not require (D165)
+     * @throws CoverageUndeterminedException             a new assignment on a reinforcement whose demand cannot be evaluated (D165)
      */
     public function reassign(
         Duty $representativeDuty,
@@ -123,11 +123,11 @@ final class DutyReassignmentService
      * not an error. Its previous rows are superseded (never deleted) and one
      * event per constituent Duty records the removal (newAssignment = null).
      *
+     * @return list<DependentImpact> docs/decisions.md D165 — removing a source holder may leave its reinforcements undetermined
+     *
      * @throws DutyNotGeneratedException
      * @throws StaleReassignmentException    the block no longer has the holder the editor showed
      * @throws DutyAlreadyUncoveredException there is nobody to remove
-     *
-     * @return list<DependentImpact> docs/decisions.md D165 — removing a source holder may leave its reinforcements undetermined
      */
     public function unassign(Duty $representativeDuty, ?string $expectedCurrentTeamMemberStableId, User $author, bool $wasPublished): array
     {

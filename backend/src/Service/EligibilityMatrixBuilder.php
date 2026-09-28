@@ -28,15 +28,15 @@ final class EligibilityMatrixBuilder
     }
 
     /**
-     * @param bool $withFrozenExternalCommitments false leaves out the duties frozen from other lines
-     *                                            (docs/decisions.md D161) — only for a caller that
-     *                                            re-checks cross-line compatibility against the live
-     *                                            calendar instead (PlanningCompletionService): a frozen
-     *                                            commitment may no longer hold, and must then never keep
-     *                                            excluding a person who is free today
-     * @param DemandView|null $demand             the demand deciding which conditional units exist: the generation's
-     *                                            own frozen one by default (D164); the LIVE one for a completion
-     *                                            (D165), which fills what the current calendar requires today
+     * @param bool            $withFrozenExternalCommitments false leaves out the duties frozen from other lines
+     *                                                       (docs/decisions.md D161) — only for a caller that
+     *                                                       re-checks cross-line compatibility against the live
+     *                                                       calendar instead (PlanningCompletionService): a frozen
+     *                                                       commitment may no longer hold, and must then never keep
+     *                                                       excluding a person who is free today
+     * @param DemandView|null $demand                        the demand deciding which conditional units exist: the generation's
+     *                                                       own frozen one by default (D164); the LIVE one for a completion
+     *                                                       (D165), which fills what the current calendar requires today
      */
     public function build(PlanningSnapshot $snapshot, bool $withFrozenExternalCommitments = true, ?DemandView $demand = null): EligibilityMatrix
     {

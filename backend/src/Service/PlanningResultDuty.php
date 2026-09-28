@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace App\Service;
 
-use App\Demand\UnitDemand;
-use App\Demand\LiveCoverageState;
 use App\Demand\DutyDemand;
+use App\Demand\LiveCoverageState;
+use App\Demand\UnitDemand;
 use App\Entity\Duty;
 use App\Entity\DutyAssignment;
 

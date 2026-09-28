@@ -19,7 +19,7 @@ final readonly class PublicationPreflight
      * @param list<InconsistentPublicationGroup> $inconsistentGroups
      * @param list<InvalidPublicationAssignment> $invalidAssignments
      * @param list<PublicationConflict>          $conflicts
-     * @param list<ConditionalPublicationDuty>   $undeterminedDuties  docs/decisions.md D165 — blocks publication AND republication
+     * @param list<ConditionalPublicationDuty>   $undeterminedDuties   docs/decisions.md D165 — blocks publication AND republication
      * @param list<ConditionalPublicationDuty>   $superfluousCoverages docs/decisions.md D165 — a warning, never a blocker
      */
     public function __construct(
