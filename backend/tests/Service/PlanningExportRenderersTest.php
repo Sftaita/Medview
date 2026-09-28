@@ -69,6 +69,16 @@ final class PlanningExportRenderersTest extends KernelTestCase
         self::assertFalse($week[5]['inRange'], 'The 17th is outside the exported range.');
     }
 
+    public function testTheSizeLimitCountsExactlyTheRowsThePdfLaysOut(): void
+    {
+        $renderer = static::getContainer()->get(PlanningExportPdfRenderer::class);
+        foreach ([['2026-10-01', '2026-12-31', 2], ['2026-10-14', '2026-10-16', 1], ['2027-03-27', '2027-04-02', 3], ['2026-11-30', '2027-02-28', 5]] as [$from, $last, $lineCount]) {
+            $view = $renderer->view($this->data($from, $last, array_map(static fn (int $i): string => "L{$i}", range(1, $lineCount))));
+            $weeks = array_sum(array_map(static fn (array $month): int => \count($month['weeks']), $view['months']));
+            self::assertSame($weeks * ($lineCount + 1), PlanningExportPdfRenderer::rowCount(new \DateTimeImmutable($from), new \DateTimeImmutable($last), $lineCount), "{$from} → {$last}");
+        }
+        self::assertLessThanOrEqual(PlanningExportPdfRenderer::MAX_ROWS, PlanningExportPdfRenderer::rowCount(new \DateTimeImmutable('2027-01-01'), new \DateTimeImmutable('2027-12-31'), 10), 'Ten lines over a whole year fit.');
+    }
     // --- XLSX --------------------------------------------------------------------------
 
     public function testTheWorkbookHasAPlanningSheetWithRealDatesAndOneColumnPerLineInOrder(): void

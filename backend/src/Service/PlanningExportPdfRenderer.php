@@ -27,8 +27,56 @@ final class PlanningExportPdfRenderer
     {
     }
 
+    /**
+     * Largest PDF produced, in table rows (see rowCount()). dompdf holds the
+     * whole document in memory and its cost follows the rows it lays out,
+     * not the number of duties: measured ≈ 37 MB + 0.25 MB and 0.018 to
+     * 0.026 s per row (dev machine, long wrapping names) — a year of 6 lines
+     * (448 rows) already exceeded PHP's default 128 MB, and 1 188 rows took
+     * 22 s. 800 rows (e.g. 10 lines over a whole year) stays around 20 s and
+     * 240 MB. Beyond that, the request is refused up front
+     * (PlanningExportRequestParser) instead of failing half-way; the .xlsx
+     * writer streams and has no such limit.
+     */
+    public const MAX_ROWS = 800;
+
+    /** Headroom for MAX_ROWS: ≈ 240 MB and ≈ 20 s measured. */
+    private const RENDER_MEMORY_LIMIT = '512M';
+    private const RENDER_TIME_LIMIT_SECONDS = 90;
+
+    /**
+     * Rows the PDF grid will hold: for each month, each week holding an
+     * exported date is one row of dates plus one row per line — exactly
+     * what view() lays out.
+     */
+    public static function rowCount(\DateTimeImmutable $first, \DateTimeImmutable $last, int $lineCount): int
+    {
+        $weeks = 0;
+        for ($monthStart = $first->modify('first day of this month'); $monthStart <= $last; $monthStart = $monthStart->modify('first day of next month')) {
+            $from = max($first, $monthStart);
+            $to = min($last, $monthStart->modify('last day of this month'));
+            $weeks += intdiv((int) $from->modify('monday this week')->diff($to)->days, 7) + 1;
+        }
+
+        return $weeks * ($lineCount + 1);
+    }
+
+    /**
+     * Memory and time limits are raised for the rest of the request (the
+     * response is sent right after) and never lowered back: PHP refuses —
+     * with a warning — to go below the memory already in use.
+     */
     public function render(PlanningExportData $data): string
     {
+        $limit = (string) ini_get('memory_limit');
+        if ('-1' !== $limit && self::bytes($limit) < self::bytes(self::RENDER_MEMORY_LIMIT)) {
+            ini_set('memory_limit', self::RENDER_MEMORY_LIMIT);
+        }
+        $timeLimit = (int) ini_get('max_execution_time');
+        if (0 !== $timeLimit && $timeLimit < self::RENDER_TIME_LIMIT_SECONDS) {
+            set_time_limit(self::RENDER_TIME_LIMIT_SECONDS);
+        }
+
         $options = new Options();
         $options->setDefaultFont('DejaVu Sans');
         $options->setIsRemoteEnabled(false);
@@ -47,6 +95,19 @@ final class PlanningExportPdfRenderer
         $canvas->page_text($canvas->get_width() / 2 - 20, $canvas->get_height() - 28, 'Page {PAGE_NUM} / {PAGE_COUNT}', $font, 6.5, [0.447, 0.494, 0.549]);
 
         return (string) $dompdf->output();
+    }
+
+    /** "128M" → bytes (PHP shorthand K/M/G). */
+    private static function bytes(string $value): int
+    {
+        $number = (int) $value;
+
+        return match (strtoupper(substr(trim($value), -1))) {
+            'G' => $number * 1024 ** 3,
+            'M' => $number * 1024 ** 2,
+            'K' => $number * 1024,
+            default => $number,
+        };
     }
 
     /**

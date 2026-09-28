@@ -7,6 +7,8 @@ namespace App\Tests\Controller;
 use App\Repository\PlanningLineRepository;
 use App\Repository\PlanningPublicationRepository;
 use App\Repository\PlanningRepository;
+use App\Service\PlanningExportPdfRenderer;
+use App\Service\PlanningPdfRenderer;
 use App\Tests\CalendarWorkflowTestHelpers;
 use App\Tests\PlanningExportTestHelpers;
 use Doctrine\ORM\EntityManagerInterface;
@@ -197,6 +199,100 @@ final class PlanningExportControllerTest extends WebTestCase
         }
     }
 
+    public function testOneDayAMonthEndAFullMonthAndTheDstChangeHaveNeitherGapNorRepeat(): void
+    {
+        $client = static::createClient();
+        $s = $this->publishedScenario($client);
+        $holders = $this->holderNames($s['planningId']);
+
+        $dates = fn (string $from, string $to): array => array_map(
+            static fn (array $row): string => $row[0]->format('Y-m-d'),
+            \array_slice($this->readXlsx($this->export($client, $s, $this->body($s, ['format' => 'xlsx', 'from' => $from, 'to' => $to])))['Planning'], 1),
+        );
+
+        $oneDay = $this->readXlsx($this->export($client, $s, $this->body($s, ['format' => 'xlsx', 'from' => '2027-01-06', 'to' => '2027-01-07'])))['Planning'];
+        self::assertCount(2, $oneDay, 'Header + a single day.');
+        self::assertSame(['2027-01-06', 'Mercredi', $this->safe($holders['2027-01-06'])], [$oneDay[1][0]->format('Y-m-d'), $oneDay[1][1], $oneDay[1][2]]);
+
+        self::assertSame(['2027-01-30', '2027-01-31', '2027-02-01', '2027-02-02'], $dates('2027-01-30', '2027-02-03'));
+        self::assertCount(28, $dates('2027-02-01', '2027-03-01'), 'February 2027, whole.');
+        self::assertSame(['2027-03-27', '2027-03-28', '2027-03-29'], $dates('2027-03-27', '2027-03-30'), 'Summer time starts on 28 March 2027 in Europe/Brussels.');
+
+        $pdf = $this->export($client, $s, $this->body($s, ['from' => '2027-01-30', 'to' => '2027-02-03']));
+        self::assertResponseIsSuccessful();
+        self::assertResponseHeaderSame('Content-Disposition', 'attachment; filename=Gardes-Seniors_2027-01_2027-02.pdf');
+        self::assertSame(2, $this->pdfPageCount($pdf), 'Four days over two months: two pages.');
+    }
+
+    public function testATooLargePdfIsRefusedUpFrontWhileExcelStaysAvailable(): void
+    {
+        $client = static::createClient();
+        $s = $this->publishedScenario($client);
+        $planning = $this->planning($s['planningId']);
+        $planning->extendTo($planning->getStartsAt(), new \DateTimeImmutable('2044-01-01'));
+        static::getContainer()->get(EntityManagerInterface::class)->flush();
+
+        self::assertGreaterThan(PlanningExportPdfRenderer::MAX_ROWS, PlanningExportPdfRenderer::rowCount(new \DateTimeImmutable('2027-01-01'), new \DateTimeImmutable('2043-12-31'), 1));
+        $response = $this->exportJson($client, $s, $this->body($s));
+        self::assertResponseStatusCodeSame(422);
+        self::assertArrayHasKey('size', $response['violations'], 'One line over 17 years: far too many rows for one PDF.');
+
+        self::assertLessThanOrEqual(PlanningExportPdfRenderer::MAX_ROWS, PlanningExportPdfRenderer::rowCount(new \DateTimeImmutable('2027-01-01'), new \DateTimeImmutable('2030-12-31'), 1));
+        $pdf = $this->export($client, $s, $this->body($s, ['to' => '2031-01-01']));
+        self::assertResponseIsSuccessful('Four years of one line: accepted, and rendered for real.');
+        self::assertSame(48, $this->pdfPageCount($pdf), 'One page per month, no parasitic page.');
+
+        $rows = $this->readXlsx($this->export($client, $s, $this->body($s, ['format' => 'xlsx'])))['Planning'];
+        self::assertResponseIsSuccessful();
+        self::assertCount(1 + 6209, $rows, 'Excel streams: no size limit.');
+    }
+
+    // --- publication PDF vs current export ---------------------------------------------
+
+    public function testTheExportFollowsTheCalendarWhileThePublicationPdfStaysFrozenUntilRepublished(): void
+    {
+        $client = static::createClient();
+        $s = $this->publishedScenario($client);
+        $published = $this->holderNames($s['planningId']);
+        $exported = fn (): array => array_map(
+            static fn (array $row): string => $row[2] ?? '',
+            \array_slice($this->readXlsx($this->export($client, $s, $this->body($s, ['format' => 'xlsx', 'from' => '2027-01-05', 'to' => '2027-01-08'])))['Planning'], 1),
+        );
+        $publicationPdf = function () use ($s): array {
+            $view = static::getContainer()->get(PlanningPdfRenderer::class)->view($this->latestPublication($s['planningId']));
+            $days = array_merge(...array_column($view['weeks'], 'days'));
+
+            return [$days[4]['cells'][0][0]['name'], $days[5]['cells'][0][0]['name'], $days[6]['cells'][0][0]['name']];
+        };
+
+        // Publication A → export: the published holders.
+        $asPublished = array_map($this->safe(...), array_values($published));
+        self::assertSame($asPublished, $exported());
+        self::assertSame(array_values($published), $publicationPdf());
+
+        // Reassignment → export: the new holder at once; the publication PDF does not move.
+        $holderEmail = $this->currentCalendar($s['planningId'])['0|2027-01-06|ONCALL'];
+        $replacement = 'alice@example.com' === $holderEmail ? 'bob@example.com' : 'alice@example.com';
+        $this->reassignTo($client, $s, $this->dutyOn($s['planningId'], '2027-01-06'), $replacement);
+        self::assertResponseIsSuccessful();
+        $newName = implode(' ', self::NAMES[$replacement]);
+        self::assertSame([$asPublished[0], $this->safe($newName), $asPublished[2]], $exported());
+        self::assertSame(array_values($published), $publicationPdf(), 'Frozen: nothing was republished.');
+
+        // Removal → export: uncovered at once; the publication PDF still does not move.
+        $this->unassignDuty($client, $s, $this->dutyOn($s['planningId'], '2027-01-07'));
+        self::assertResponseIsSuccessful();
+        self::assertSame([$asPublished[0], $this->safe($newName), 'Non attribué'], $exported());
+        self::assertSame(array_values($published), $publicationPdf());
+
+        // Republication B → the publication PDF is B; the export is still the current calendar.
+        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/republish", [], $s['creator']);
+        self::assertResponseIsSuccessful();
+        self::assertSame([$published['2027-01-05'], $newName, null], $publicationPdf(), 'B, with the removal as "Non attribué".');
+        self::assertSame([$asPublished[0], $this->safe($newName), 'Non attribué'], $exported());
+        self::assertCount(2, static::getContainer()->get(PlanningPublicationRepository::class)->findByPlanning($this->planning($s['planningId'])), 'A and B — the exports recorded nothing.');
+    }
+
     // --- validation --------------------------------------------------------------------
 
     public function testInvalidRequestsAreRefusedWithAClearViolation(): void
@@ -379,6 +475,14 @@ final class PlanningExportControllerTest extends WebTestCase
     private function safe(string $text): string
     {
         return str_starts_with($text, '=') ? "'".$text : $text;
+    }
+
+    private function latestPublication(string $planningStableId): \App\Entity\PlanningPublication
+    {
+        $publication = static::getContainer()->get(PlanningPublicationRepository::class)->findLatestForPlanning($this->planning($planningStableId));
+        self::assertNotNull($publication);
+
+        return $publication;
     }
 
     private function planning(string $stableId): \App\Entity\Planning

@@ -52,6 +52,19 @@ describe('exportModel', () => {
     ).toBeDefined()
   })
 
+  it('crosses the DST change and a month end without losing or repeating a day', () => {
+    const planning = { ...PLANNING, startsAt: '2027-03-01', endsAt: '2027-05-01' } as PlanningDetail
+    const state = {
+      ...initialExportState(planning),
+      period: 'custom' as const,
+      firstDay: '2027-03-28',
+      lastDay: '2027-03-31',
+    }
+    expect(toExportRequest(state)).toMatchObject({ from: '2027-03-28', to: '2027-04-01' })
+    const single = { ...state, firstDay: '2027-03-28', lastDay: '2027-03-28' }
+    expect(toExportRequest(single)).toMatchObject({ from: '2027-03-28', to: '2027-03-29' })
+  })
+
   it('moves lines within bounds only', () => {
     const lines = initialExportState(PLANNING).lines
     expect(moveLine(lines, 0, 1).map((line) => line.stableId)).toEqual(['b', 'a'])

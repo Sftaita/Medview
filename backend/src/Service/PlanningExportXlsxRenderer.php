@@ -229,9 +229,13 @@ final class PlanningExportXlsxRenderer
         return htmlspecialchars($text, \ENT_XML1 | \ENT_QUOTES, 'UTF-8');
     }
 
-    /** Excel header/footer codes start with "&": a literal one is doubled. */
+    /**
+     * Excel header/footer codes start with "&": a literal one is doubled.
+     * Capped at 80 characters *before* doubling so a header section can
+     * never push the whole header past Excel's 255-character limit.
+     */
     private function headerText(string $text): string
     {
-        return str_replace('&', '&&', mb_substr($text, 0, 100));
+        return str_replace('&', '&&', mb_substr($text, 0, 80));
     }
 }

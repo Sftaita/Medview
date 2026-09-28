@@ -75,9 +75,10 @@ function initialMonth(keys: string[]): string | undefined {
  * Everything is read from the current calendar (`/result`); nothing is
  * computed here beyond laying it out. A manager can edit a duty, complete
  * the holes automatically, open the statistics, publish, republish the
- * changes and download the published PDF; a member only reads. Once the
- * planning is published, anyone who reads it can export the current
- * calendar (PDF or Excel, docs/planning-export.md).
+ * changes and download the PDF of the last diffusion (frozen); a member
+ * only reads. Once the planning is published, anyone who reads it can also
+ * export the calendar as it is now (PDF or Excel, docs/planning-export.md)
+ * — two different documents, labelled so they are not confused.
  */
 export function PlanningCalendar({ planning, onPublished, onRequestCompletion, jobActive = false }: Props) {
   const canEdit = planning.canManageCalendar === true
@@ -210,12 +211,22 @@ export function PlanningCalendar({ planning, onPublished, onRequestCompletion, j
             </button>
           )}
           {published && (
-            <button type="button" className="pd-btn pd-btn-secondary" onClick={handleDownload}>
-              Télécharger le PDF
+            <button
+              type="button"
+              className="pd-btn pd-btn-secondary"
+              onClick={handleDownload}
+              title="Le planning tel qu’il a été diffusé, sans les modifications faites depuis"
+            >
+              PDF de la dernière diffusion
             </button>
           )}
           {published && (
-            <button type="button" className="pd-btn pd-btn-secondary" onClick={() => setDialog('export')}>
+            <button
+              type="button"
+              className="pd-btn pd-btn-secondary"
+              onClick={() => setDialog('export')}
+              title="PDF ou Excel du calendrier tel qu’il est maintenant"
+            >
               Exporter
             </button>
           )}

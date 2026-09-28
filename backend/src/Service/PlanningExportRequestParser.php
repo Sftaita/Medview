@@ -79,6 +79,12 @@ final class PlanningExportRequestParser
 
         \assert(null !== $format && null !== $title);
 
+        // Too large a PDF is refused here, never half-way through dompdf (PlanningExportPdfRenderer::MAX_ROWS).
+        $rows = PlanningExportPdfRenderer::rowCount($from, $to->modify('-1 day'), \count($lines));
+        if (PlanningExportFormat::PDF === $format && $rows > PlanningExportPdfRenderer::MAX_ROWS) {
+            throw new InvalidPlanningExportRequestException(['size' => 'This PDF would hold '.$rows.' table rows, more than the '.PlanningExportPdfRenderer::MAX_ROWS.' allowed: shorten the period, export fewer lines, or choose xlsx.']);
+        }
+
         return new PlanningExportRequest($planning, $format, $title, $from, $to, $lines);
     }
 

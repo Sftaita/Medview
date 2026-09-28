@@ -4888,3 +4888,15 @@ l'ancienne (voir légende).
   libres) ; réutiliser `PlanningPdfRenderer` (il imprime une publication
   figée, par semaine et en portrait — un autre document, pour un autre
   usage) ; un nouvel attribut de voter.
+- **Revue avant merge (même lot)** : (1) une année de 6 lignes faisait
+  dépasser les 128 Mo de PHP à dompdf (500) — le coût suit les rangées du
+  tableau, pas les gardes : le PDF est limité à 800 rangées, comptées par
+  `PlanningExportPdfRenderer::rowCount()` (la règle de la mise en page
+  elle-même), refus `422 size` d'emblée, `memory_limit` 512 Mo et 90 s
+  pour le rendu ; Excel, en flux, n'est pas limité. (2) Les deux PDF sont
+  nommés sans ambiguïté : « PDF de la dernière diffusion » (figé) et
+  « Exporter » (calendrier actuel), avec infobulles. (3) Sur téléphone et
+  écran tactile, l'aperçu est un lien vers le même PDF (les navigateurs
+  mobiles n'affichent pas un PDF dans une `<iframe>`). (4) En-tête/pied
+  Excel : 80 caractères par section avant doublement des `&` (limite Excel
+  de 255).

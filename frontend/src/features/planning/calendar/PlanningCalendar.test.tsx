@@ -266,7 +266,7 @@ describe('PlanningCalendar', () => {
 
     expect(await screen.findByText('Non publié')).toBeInTheDocument()
     expect(await screen.findByRole('button', { name: 'Publier le planning' })).toBeEnabled()
-    expect(screen.queryByRole('button', { name: 'Télécharger le PDF' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'PDF de la dernière diffusion' })).not.toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: 'Exporter' }),
       'Nothing to export before a publication.',
@@ -284,7 +284,15 @@ describe('PlanningCalendar', () => {
 
     expect(await screen.findByText('Planning publié')).toBeInTheDocument()
     expect(screen.getByText('Dernière diffusion le 1 octobre 2026 à 10:00')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Télécharger le PDF' })).toBeInTheDocument()
+    // Two different documents, never confused: the frozen diffusion and the calendar as it is now.
+    expect(screen.getByRole('button', { name: 'PDF de la dernière diffusion' })).toHaveAttribute(
+      'title',
+      'Le planning tel qu’il a été diffusé, sans les modifications faites depuis',
+    )
+    expect(screen.getByRole('button', { name: 'Exporter' })).toHaveAttribute(
+      'title',
+      'PDF ou Excel du calendrier tel qu’il est maintenant',
+    )
     expect(screen.getByRole('button', { name: 'Republier les modifications' })).toBeDisabled()
     expect(screen.queryByText(/Modifications non publiées/)).not.toBeInTheDocument()
   })
@@ -340,7 +348,7 @@ describe('PlanningCalendar', () => {
     render(<PlanningCalendar planning={PLANNING} />)
 
     expect(await screen.findByText('Planning publié')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Télécharger le PDF' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'PDF de la dernière diffusion' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Republier les modifications' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Exporter' }))

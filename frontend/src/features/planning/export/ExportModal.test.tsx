@@ -252,6 +252,7 @@ describe('ExportModal', () => {
       status(422, { error: 'validation_failed', violations: { to: 'to must not be after the end.' } }),
       'dates du planning',
     ],
+    [status(422, { error: 'validation_failed', violations: { size: 'Too large.' } }), 'trop volumineux'],
     [status(403, {}), 'Vous n’avez pas accès à ce planning.'],
     [status(500, {}), 'L’export n’a pas pu être généré. Réessayez.'],
   ])('explains a refusal from the server (%#)', async (reply, message) => {
@@ -261,6 +262,21 @@ describe('ExportModal', () => {
     expect(await screen.findByText(new RegExp(message))).toBeInTheDocument()
     expect(clicked).toHaveLength(0)
     expect(screen.getByRole('button', { name: 'Exporter' })).toBeEnabled()
+  })
+
+  it('on a phone, offers the preview as a link to the same PDF instead of an inline frame', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query.includes('max-width: 640px'),
+      media: query,
+    }))
+    stubApi({ [EXPORT]: () => file() })
+    renderModal()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Aperçu' }))
+    const link = await screen.findByRole('link', { name: 'Ouvrir l’aperçu PDF' })
+    expect(link).toHaveAttribute('href', 'blob:export-1')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(screen.queryByTitle('Aperçu du PDF')).not.toBeInTheDocument()
   })
 
   it('previews the very same PDF from the server, and drops the preview once a parameter changes', async () => {

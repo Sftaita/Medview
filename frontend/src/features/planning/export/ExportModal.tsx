@@ -24,6 +24,17 @@ type Props = {
 
 type Busy = 'export' | 'preview' | null
 
+/**
+ * Phones and touch tablets: their browsers do not reliably show a PDF inside
+ * an iframe (Chrome on Android renders nothing, Safari only the first page),
+ * so the preview is offered as a link that opens the same PDF on its own.
+ */
+const COMPACT_PREVIEW_QUERY = '(max-width: 640px), (pointer: coarse)'
+
+function prefersPreviewLink(): boolean {
+  return typeof window.matchMedia === 'function' && window.matchMedia(COMPACT_PREVIEW_QUERY).matches
+}
+
 function errorMessage(err: unknown): string {
   if (err instanceof ApiError) {
     const body = err.body as { error?: string; violations?: Record<string, string> } | null
@@ -33,6 +44,9 @@ function errorMessage(err: unknown): string {
     if (err.status === 403) return 'Vous n’avez pas accès à ce planning.'
     if (err.status === 422) {
       const fields = Object.keys(body?.violations ?? {})
+      if (fields.includes('size')) {
+        return 'Ce PDF serait trop volumineux pour être produit en une fois. Réduisez la période ou le nombre de lignes, ou choisissez Excel.'
+      }
       if (fields.includes('lines')) return 'Sélectionnez au moins une ligne à exporter.'
       if (fields.some((field) => field.startsWith('lines['))) {
         return 'Une des lignes choisies n’est plus exportable. Fermez puis rouvrez l’export.'
@@ -72,6 +86,7 @@ export function ExportModal({ planning, onClose }: Props) {
   const request = useMemo(() => toExportRequest(state), [state])
   const requestKey = JSON.stringify({ ...request, format: 'pdf' })
   const lastDay = lastDayOf(planning.endsAt)
+  const [previewAsLink] = useState(prefersPreviewLink)
 
   // A preview only describes the parameters it was made with.
   const shownPreview = preview && preview.key === requestKey ? preview : null
@@ -127,7 +142,7 @@ export function ExportModal({ planning, onClose }: Props) {
       title="Exporter le planning"
       onClose={onClose}
       dismissible={busy === null}
-      wide={shownPreview !== null}
+      wide={shownPreview !== null && !previewAsLink}
       footer={
         <>
           <button type="button" className="btn btn--secondary" onClick={onClose} disabled={busy !== null}>
@@ -158,11 +173,12 @@ export function ExportModal({ planning, onClose }: Props) {
         </>
       }
     >
-      <div className={shownPreview ? 'export export--with-preview' : 'export'}>
+      <div className={shownPreview && !previewAsLink ? 'export export--with-preview' : 'export'}>
         <div className="export-form form">
           <p className="muted export-note">
-            Le document reprend le calendrier tel qu’il est maintenant, modifications non publiées comprises.
-            Les noms choisis ici ne servent qu’au document.
+            Le document reprend le calendrier tel qu’il est maintenant, modifications non encore diffusées
+            comprises. La version diffusée reste disponible avec « PDF de la dernière diffusion ». Les noms
+            choisis ici ne servent qu’au document.
           </p>
 
           <fieldset className="export-fieldset">
@@ -329,11 +345,21 @@ export function ExportModal({ planning, onClose }: Props) {
           )}
         </div>
 
-        {shownPreview && (
-          <div className="export-preview">
-            <iframe title="Aperçu du PDF" src={shownPreview.url} className="export-preview__frame" />
-          </div>
-        )}
+        {shownPreview &&
+          (previewAsLink ? (
+            <a
+              className="btn btn--secondary export-preview-link"
+              href={shownPreview.url}
+              target="_blank"
+              rel="noopener"
+            >
+              Ouvrir l’aperçu PDF
+            </a>
+          ) : (
+            <div className="export-preview">
+              <iframe title="Aperçu du PDF" src={shownPreview.url} className="export-preview__frame" />
+            </div>
+          ))}
       </div>
     </Overlay>
   )
