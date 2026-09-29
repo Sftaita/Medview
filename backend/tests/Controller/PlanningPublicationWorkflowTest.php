@@ -168,6 +168,163 @@ final class PlanningPublicationWorkflowTest extends WebTestCase
         self::assertSame('PUBLISHED', $this->api($client, 'GET', "/api/plannings/{$s['planningId']}", token: $s['creator'])['lines'][0]['periodStatus']);
     }
 
+    /**
+     * The production case of 2026-09-29, anonymised: after the publication, holes are made (a removal), and the
+     * holder of another duty declares an unavailability covering it. The removal alone would be republishable
+     * (D143); the now-invalid assignment is not — and the preflight says which duty, which dates, which rule.
+     */
+    public function testAnUnavailabilityDeclaredAfterPublicationBlocksTheRepublicationAndIsLocalized(): void
+    {
+        $client = static::createClient();
+        $s = $this->pilotScenario($client);
+        $this->prepareLine($s['planningId'], self::STANDALONE);
+        $this->generate($client, $s);
+        $this->publishPlanning($client, $s);
+        self::assertResponseIsSuccessful();
+
+        $this->unassignDuty($client, $s, $this->dutyOn($s['planningId'], '2027-01-05'));
+        self::assertResponseIsSuccessful();
+        $holder = $this->currentCalendar($s['planningId'])['0|2027-01-07|ONCALL'];
+        self::assertNotNull($holder);
+        // The holder's own token: 'alice@example.com' → $s['alice'].
+        $this->declareRange($client, $s[strstr($holder, '@', true)], '2027-01-07', '2027-01-08');
+
+        $preflight = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/publication-preflight", token: $s['creator']);
+        self::assertFalse($preflight['republishable']);
+        self::assertCount(1, $preflight['uncoveredDuties'], 'The removal is listed, but does not block a republication.');
+        self::assertCount(1, $preflight['invalidAssignments']);
+        $item = $preflight['invalidAssignments'][0];
+        self::assertSame($this->dutyOn($s['planningId'], '2027-01-07'), $item['duty']['dutyStableId']);
+        self::assertSame(['2027-01-07'], $item['dates']);
+        self::assertSame([$item['duty']['dutyStableId']], $item['dutyStableIds']);
+        self::assertSame('UNAVAILABLE', $item['reasonCode']);
+        self::assertSame('indisponible', $item['reason']);
+        self::assertSame('Seniors', $item['duty']['lineName']);
+
+        $response = $this->republishPlanning($client, $s);
+        self::assertResponseStatusCodeSame(409);
+        self::assertSame('not_publishable', $response['error']);
+
+        // Fixing that one assignment is enough: the removal itself stays announceable.
+        $this->unassignDuty($client, $s, $item['duty']['dutyStableId']);
+        self::assertResponseIsSuccessful();
+        $preflight = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/publication-preflight", token: $s['creator']);
+        self::assertSame([], $preflight['invalidAssignments']);
+        self::assertTrue($preflight['republishable']);
+    }
+
+    /**
+     * docs/decisions.md D171 — an absence declared after publication on ONE day of a block: the whole block is
+     * "à corriger" (dates, holder, rule), the absence itself stays, and the block can be given directly to an
+     * admissible person — never to the absent holder — after which the calendar republishes.
+     *
+     * @return array{0: KernelBrowser, 1: array<string, mixed>, 2: string, 3: string, 4: array<string, string|null>}
+     */
+    private function publishedBlockWithALateAbsence(): array
+    {
+        $client = static::createClient();
+        $s = $this->pilotScenario($client);
+        $this->prepareLine($s['planningId'], self::STANDALONE, ['2027-01-09', '2027-01-10', '2027-01-11']);
+        $this->generate($client, $s);
+        $this->publishPlanning($client, $s);
+        self::assertResponseIsSuccessful();
+
+        $before = $this->currentCalendar($s['planningId']);
+        $holder = $this->holderOn($before, '2027-01-10');
+        self::assertNotNull($holder);
+        self::assertSame($holder, $this->holderOn($before, '2027-01-09'), 'Precondition: one holder for the block.');
+        // Absent on the block's second day only, declared after the publication.
+        $this->declareRange($client, $s[strstr($holder, '@', true)], '2027-01-10', '2027-01-11');
+
+        return [$client, $s, $holder, $this->dutyOn($s['planningId'], '2027-01-09'), $before];
+    }
+
+    /** The holder of line 0 on $date, whatever the duty type code (a test block's types are random). */
+    private function holderOn(array $calendar, string $date): ?string
+    {
+        foreach ($calendar as $key => $who) {
+            if (str_starts_with($key, "0|{$date}|")) {
+                return $who;
+            }
+        }
+
+        self::fail("No duty on {$date}.");
+    }
+
+    public function testALateAbsenceOnABlockIsLocalizedAndFixedByADirectReassignment(): void
+    {
+        [$client, $s, $holder, $firstDuty] = $this->publishedBlockWithALateAbsence();
+
+        $preflight = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/publication-preflight", token: $s['creator']);
+        self::assertFalse($preflight['republishable']);
+        self::assertCount(1, $preflight['invalidAssignments'], 'One unit: the block, never one item per day.');
+        $item = $preflight['invalidAssignments'][0];
+        self::assertSame(['2027-01-09', '2027-01-10'], $item['dates']);
+        self::assertSame([$firstDuty, $this->dutyOn($s['planningId'], '2027-01-10')], $item['dutyStableIds']);
+        self::assertSame('UNAVAILABLE', $item['reasonCode']);
+        self::assertSame($this->memberStableIdIn($s['planningId'], $holder), $item['member']['teamMemberStableId']);
+
+        // The candidates never include the absent holder: only admissible people for the whole block.
+        $view = $this->candidatesFor($client, $s, $firstDuty);
+        $candidates = array_column($view['candidates'], 'teamMemberStableId');
+        self::assertNotContains($this->memberStableIdIn($s['planningId'], $holder), $candidates);
+        self::assertNotEmpty($candidates);
+        $replacement = null;
+        foreach (['admin', 'alice', 'bob'] as $who) {
+            if (\in_array($this->memberStableIdIn($s['planningId'], "{$who}@example.com"), $candidates, true)) {
+                $replacement = "{$who}@example.com";
+                break;
+            }
+        }
+        self::assertNotNull($replacement);
+        $this->reassignTo($client, $s, $firstDuty, $replacement);
+        self::assertResponseIsSuccessful();
+
+        $after = $this->currentCalendar($s['planningId']);
+        self::assertSame($replacement, $this->holderOn($after, '2027-01-09'));
+        self::assertSame($replacement, $this->holderOn($after, '2027-01-10'), 'The block moved as one unit.');
+
+        $preflight = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/publication-preflight", token: $s['creator']);
+        self::assertSame([], $preflight['invalidAssignments']);
+        self::assertTrue($preflight['republishable']);
+        $this->republishPlanning($client, $s);
+        self::assertResponseIsSuccessful();
+
+        // The absence was never touched by any of this.
+        $calendar = $this->api($client, 'GET', '/api/me/calendar?from=2027-01-01&to=2027-02-01', token: $s[strstr($holder, '@', true)]);
+        self::assertResponseIsSuccessful();
+        self::assertStringContainsString('2027-01-10', json_encode($calendar, \JSON_THROW_ON_ERROR));
+    }
+
+    public function testALateAbsenceIsFixedByRemovingTheAssignmentThenCompletingWithoutTouchingAnythingElse(): void
+    {
+        [$client, $s, $holder, $firstDuty, $before] = $this->publishedBlockWithALateAbsence();
+
+        $this->unassignDuty($client, $s, $firstDuty);
+        self::assertResponseIsSuccessful();
+        $response = $this->completePlanning($client, $s);
+        self::assertResponseIsSuccessful();
+        self::assertSame('completed', $response['lines'][0]['status']);
+        self::assertSame(1, $response['lines'][0]['filledUnitCount'], 'The block is one unit.');
+
+        $after = $this->currentCalendar($s['planningId']);
+        $newHolder = $this->holderOn($after, '2027-01-09');
+        self::assertNotNull($newHolder);
+        self::assertSame($newHolder, $this->holderOn($after, '2027-01-10'), 'Filled atomically, by one person.');
+        self::assertNotSame($holder, $newHolder, 'The absent holder is never given the block back.');
+        foreach ($before as $key => $who) {
+            if (!str_contains($key, '2027-01-09') && !str_contains($key, '2027-01-10')) {
+                self::assertSame($who, $after[$key], "{$key} was not touched by the fix: it must be exactly as before.");
+            }
+        }
+
+        $preflight = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/publication-preflight", token: $s['creator']);
+        self::assertSame([], $preflight['invalidAssignments']);
+        self::assertTrue($preflight['republishable']);
+        $this->republishPlanning($client, $s);
+        self::assertResponseIsSuccessful();
+    }
+
     public function testRepublicationIsRefusedWhenNothingChangedEvenAfterAnEditAndItsUndo(): void
     {
         $client = static::createClient();

@@ -171,7 +171,7 @@ final class PlanningPublicationPreflightService
 
             if (\count($assignees) > 1) {
                 if (null !== $group) {
-                    $inconsistentGroups[] = new InconsistentPublicationGroup($group);
+                    $inconsistentGroups[] = new InconsistentPublicationGroup($group, $block, array_values($assignees));
                 }
                 continue;
             }
@@ -185,26 +185,28 @@ final class PlanningPublicationPreflightService
                 continue;
             }
 
-            $this->classify($duty, $member, $reason, $invalidAssignments, $conflicts);
+            $this->classify($block, $member, $reason, $invalidAssignments, $conflicts);
         }
     }
 
     /**
+     * @param list<Duty>                         $block
      * @param list<InvalidPublicationAssignment> $invalidAssignments
      * @param list<PublicationConflict>          $conflicts
      */
     private function classify(
-        Duty $duty,
+        array $block,
         PlanningTeamMember $member,
         ExclusionReason $reason,
         array &$invalidAssignments,
         array &$conflicts,
     ): void {
         $label = $this->reasonLabeler->label($reason);
+        $duty = $block[0];
         match ($reason) {
             ExclusionReason::CONFLICT, ExclusionReason::LEGAL_MIN_REST, ExclusionReason::TEAM_MIN_REST,
-            ExclusionReason::CROSS_LINE_CONFLICT, ExclusionReason::CROSS_LINE_LEGAL_MIN_REST, ExclusionReason::CROSS_LINE_TEAM_MIN_REST => $conflicts[] = new PublicationConflict($duty, $member, $label),
-            default => $invalidAssignments[] = new InvalidPublicationAssignment($duty, $member, $label),
+            ExclusionReason::CROSS_LINE_CONFLICT, ExclusionReason::CROSS_LINE_LEGAL_MIN_REST, ExclusionReason::CROSS_LINE_TEAM_MIN_REST => $conflicts[] = new PublicationConflict($duty, $member, $label, $block, $reason),
+            default => $invalidAssignments[] = new InvalidPublicationAssignment($duty, $member, $label, $block, $reason),
         };
     }
 }

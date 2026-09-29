@@ -483,6 +483,7 @@ export function PlanningDetailPage() {
                     onPublished={load}
                     onRequestCompletion={requestCompletion}
                     jobActive={jobs.active}
+                    jobKind={jobs.active ? (jobs.job?.kind ?? null) : null}
                   />
                 ) : (
                   <PersonalPlanningView key={generationVersion} planning={planning} />

@@ -3,6 +3,8 @@ import { Icon } from '../../../components/Icon'
 import { Overlay } from '../../../components/Overlay'
 import { ApiError } from '../../../lib/apiClient'
 import { fetchPublicationPreflight, publishPlanning } from './api'
+import { PreflightIssueList } from '../calendar/PreflightIssueList'
+import { blockingIssues } from '../calendar/preflightIssues'
 import type { PublicationPreflight, PublicationResult } from './types'
 
 type Props = {
@@ -10,6 +12,8 @@ type Props = {
   onClose: () => void
   /** The planning was actually published: carries the real, server-returned per-line statuses. */
   onPublished: (result: PublicationResult) => void
+  /** "Voir dans le calendrier" on a blocking issue: the dialog closes and the calendar shows the duty. */
+  onLocate?: (dutyStableId: string) => void
 }
 
 /**
@@ -20,7 +24,7 @@ type Props = {
  * server always re-validates for real at that moment (§11/§19 of the
  * spec), never trusting what this modal showed when it opened.
  */
-export function PublishModal({ planningStableId, onClose, onPublished }: Props) {
+export function PublishModal({ planningStableId, onClose, onPublished, onLocate }: Props) {
   const [preflight, setPreflight] = useState<PublicationPreflight | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
@@ -104,7 +108,7 @@ export function PublishModal({ planningStableId, onClose, onPublished }: Props) 
         </p>
       )}
 
-      {preflight && !result && <PreflightBody preflight={preflight} />}
+      {preflight && !result && <PreflightBody preflight={preflight} onLocate={onLocate} />}
 
       {publishError && (
         <p role="alert" className="alert alert--error">
@@ -138,7 +142,13 @@ export function PublishModal({ planningStableId, onClose, onPublished }: Props) 
   )
 }
 
-function PreflightBody({ preflight }: { preflight: PublicationPreflight }) {
+function PreflightBody({
+  preflight,
+  onLocate,
+}: {
+  preflight: PublicationPreflight
+  onLocate?: (dutyStableId: string) => void
+}) {
   if (preflight.publishable) {
     return (
       <>
@@ -209,37 +219,15 @@ function PreflightBody({ preflight }: { preflight: PublicationPreflight }) {
             </span>
           </li>
         )}
-        {preflight.inconsistentGroups.length > 0 && (
-          <li className="alert alert--warning">
-            <Icon name="alert" size={18} strokeWidth={2} />
-            <span>
-              {plural(preflight.inconsistentGroups.length, 'bloc de garde a', 'blocs de garde ont')} une
-              attribution incohérente entre ses journées.
-            </span>
-          </li>
-        )}
-        {preflight.invalidAssignments.length > 0 && (
-          <li className="alert alert--warning">
-            <Icon name="alert" size={18} strokeWidth={2} />
-            <span>
-              {plural(preflight.invalidAssignments.length, 'garde attribuée ne', 'gardes attribuées ne')} sont
-              plus valides ({preflight.invalidAssignments[0].reason}
-              {preflight.invalidAssignments.length > 1 ? ', …' : ''}).
-            </span>
-          </li>
-        )}
-        {preflight.conflicts.length > 0 && (
-          <li className="alert alert--warning">
-            <Icon name="alert" size={18} strokeWidth={2} />
-            <span>
-              {plural(preflight.conflicts.length, 'conflit', 'conflits')} détecté
-              {preflight.conflicts.length > 1 ? 's' : ''} dans le calendrier actuel (
-              {preflight.conflicts[0].reason}
-              {preflight.conflicts.length > 1 ? ', …' : ''}).
-            </span>
-          </li>
-        )}
       </ul>
+      {/* Each refused assignment on its own — duty or block, person, rule, fix — never a count and a first reason. */}
+      <PreflightIssueList
+        issues={blockingIssues(preflight, 'publish').filter(
+          (issue) => issue.kind === 'assignment' || issue.kind === 'inconsistent',
+        )}
+        onLocate={onLocate}
+        label="Affectations à corriger"
+      />
       {totalIssues === 0 && preflight.lines.every((line) => !line.hasGeneration) && (
         <p className="muted">Aucune ligne de ce planning n&apos;a encore été générée.</p>
       )}

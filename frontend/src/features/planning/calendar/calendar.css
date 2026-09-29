@@ -306,3 +306,97 @@ button.cal-block:hover {
   margin: 0;
   padding-left: var(--space-5);
 }
+
+/* Preflight issues, localizable (docs/decisions.md D133): where, what, which rule, how to fix — never only a count. */
+.preflight-issue {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.preflight-issue__body {
+  display: flex;
+  flex: 1 1 220px;
+  flex-direction: column;
+  gap: 2px;
+}
+.preflight-issue__rule {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.preflight-issue__locate {
+  flex: none;
+  align-self: center;
+}
+.cal-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cal-issues__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--red-700);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+/* An assigned duty the preflight refuses: its own words and a red outline, never colour alone. */
+.cal-item--invalid {
+  outline: 2px solid var(--red-600);
+  outline-offset: -2px;
+}
+.cal-tag--invalid {
+  color: var(--red-700);
+}
+/* "Voir dans le calendrier" — the located duty stays visibly pointed at. */
+.cal-item--located {
+  box-shadow: 0 0 0 3px var(--amber-600);
+}
+
+/* A computation is running: said on the button itself and next to the calendar, not only at the top of the page. */
+.cal-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.cal-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: cal-spin 0.9s linear infinite;
+}
+@keyframes cal-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cal-spinner {
+    animation: none;
+    border-right-color: currentColor;
+    opacity: 0.6;
+  }
+}
+.cal-job {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--blue-100);
+  border-radius: 10px;
+  background: var(--blue-50);
+  color: var(--text-body);
+  font-size: 14px;
+}
+.cal-check {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.cal-check__refresh {
+  color: var(--text-muted);
+  font-weight: 600;
+}

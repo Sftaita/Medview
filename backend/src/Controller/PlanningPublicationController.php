@@ -325,7 +325,32 @@ final class PlanningPublicationController
      */
     private function inconsistentGroupToArray(InconsistentPublicationGroup $item): array
     {
-        return ['groupInstanceStableId' => (string) $item->group->getStableId()];
+        return [
+            'groupInstanceStableId' => (string) $item->group->getStableId(),
+            // Where the block is, and who holds which part of it — so it can be found and fixed in the calendar.
+            'duty' => [] !== $item->block ? $this->dutyToArray($item->block[0]) : null,
+            ...$this->unitToArray($item->block),
+            'members' => array_map($this->memberToArray(...), $item->holders),
+        ];
+    }
+
+    /**
+     * The whole unit an issue is about — a block's every day — so the calendar can locate it (every one of its
+     * duties) and the text can give its dates.
+     *
+     * @param list<Duty> $block
+     *
+     * @return array{unitStableKey: string|null, dates: list<string>, dutyStableIds: list<string>}
+     */
+    private function unitToArray(array $block): array
+    {
+        $first = $block[0] ?? null;
+
+        return [
+            'unitStableKey' => null !== $first ? (string) ($first->getGroupInstance()?->getStableId() ?? $first->getStableId()) : null,
+            'dates' => array_map(static fn (Duty $d): string => $d->getLocalDate()->format('Y-m-d'), $block),
+            'dutyStableIds' => array_map(static fn (Duty $d): string => (string) $d->getStableId(), $block),
+        ];
     }
 
     /**
@@ -335,8 +360,10 @@ final class PlanningPublicationController
     {
         return [
             'duty' => $this->dutyToArray($item->duty),
+            ...$this->unitToArray([] !== $item->block ? $item->block : [$item->duty]),
             'member' => $this->memberToArray($item->member),
             'reason' => $item->reason,
+            'reasonCode' => $item->reasonCode?->value,
         ];
     }
 
@@ -347,8 +374,10 @@ final class PlanningPublicationController
     {
         return [
             'duty' => $this->dutyToArray($item->duty),
+            ...$this->unitToArray([] !== $item->block ? $item->block : [$item->duty]),
             'member' => $this->memberToArray($item->member),
             'reason' => $item->reason,
+            'reasonCode' => $item->reasonCode?->value,
         ];
     }
 

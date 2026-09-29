@@ -949,3 +949,21 @@ aujourd'hui.
 - **Vue « toute l'équipe »** : même lecture que le calendrier (un renfort non
   requis et vide n'y figure pas ; « ? Renfort non évalué » ; « Couverture
   complète » jamais annoncée tant qu'un renfort est non évalué).
+
+## 29. Incohérences localisables et complétion en cours (docs/decisions.md D171)
+
+- `GET /publication-preflight` : chaque affectation refusée
+  (`invalidAssignments`, `conflicts`) porte `unitStableKey`, `dates`,
+  `dutyStableIds` (toutes les gardes du bloc) et `reasonCode`
+  (`ExclusionReason`) ; un bloc incohérent (`inconsistentGroups`) porte
+  aussi `duty`, `dates`, `dutyStableIds` et `members` (ses titulaires).
+- Le calendrier d'un gestionnaire lit ce préflight : panneau « Affectations
+  à corriger », marquage de la cellule, « Voir dans le calendrier » ; les
+  modales Publier/Republier listent les mêmes éléments en tête. Le contrôle
+  ne retarde jamais le calendrier ; en cours ou en échec, il le dit
+  (« Contrôle des incohérences en cours… », « n'a pas pu être effectué —
+  Réessayer ») : jamais un faux « rien à corriger ».
+- Pendant un job, « Compléter automatiquement » devient « Complétion en
+  cours… » (ou « Calcul en cours… ») et une ligne d'état s'affiche au-dessus
+  du calendrier. La complétion reste possible sur un planning `PUBLISHED`
+  (D145) ; elle ne corrige jamais une affectation existante devenue invalide.

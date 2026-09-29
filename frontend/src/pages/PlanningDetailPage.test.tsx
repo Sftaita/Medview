@@ -552,9 +552,12 @@ describe('PlanningDetailPage — engine jobs (docs/decisions.md D149)', () => {
       'Complétion du planning en cours…',
     )
     expect(api.requests('POST', '/api/plannings/plan-1/complete')).toHaveLength(1)
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Compléter automatiquement' })).toBeDisabled(),
-    )
+    // Reported in production: a greyed button far below the banner, with no reason in sight. The button itself
+    // now says a completion is running, and so does the calendar.
+    const running = await screen.findByRole('button', { name: 'Complétion en cours…' })
+    expect(running).toBeDisabled()
+    expect(running).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByText(/Complétion automatique en cours : les gardes non attribuées/)).toBeInTheDocument()
   })
 })
 

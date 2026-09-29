@@ -1,16 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../../components/Icon'
 import { ApiError } from '../../../lib/apiClient'
 import { Sheet } from '../detail/Sheet'
 import { ExportModal } from '../export/ExportModal'
-import { fetchPlanningResult, fetchPublicationPdf, fetchPublicationState } from '../result/api'
+import {
+  fetchPlanningResult,
+  fetchPublicationPdf,
+  fetchPublicationPreflight,
+  fetchPublicationState,
+} from '../result/api'
 import { PublishModal } from '../result/PublishModal'
 import { impactSummary } from '../result/impacts'
 import { ReassignmentModal } from '../result/ReassignmentModal'
 import { StatisticsPanel } from '../result/StatisticsPanel'
-import type { PlanningResult, PublicationState } from '../result/types'
+import type { PlanningResult, PublicationPreflight, PublicationState } from '../result/types'
 import type { PlanningDetail } from '../types'
 import { buildCalendar, type CalendarItem, presentDuty } from './calendarModel'
+import { PreflightIssueList } from './PreflightIssueList'
+import { blockingIssues, issuesByDuty, type PreflightIssue } from './preflightIssues'
 import { RepublishModal } from './RepublishModal'
 import './calendar.css'
 
@@ -26,6 +33,8 @@ type Props = {
   onRequestCompletion?: () => Promise<void>
   /** A generation or a completion is queued or running on this planning. */
   jobActive?: boolean
+  /** Which one — said on the disabled button, so it never reads as simply unavailable. */
+  jobKind?: 'GENERATE' | 'COMPLETE' | null
 }
 
 const MONTH = new Intl.DateTimeFormat('fr-BE', { month: 'long', year: 'numeric', timeZone: 'UTC' })
@@ -81,7 +90,13 @@ function initialMonth(keys: string[]): string | undefined {
  * export the calendar as it is now (PDF or Excel, docs/planning-export.md)
  * — two different documents, labelled so they are not confused.
  */
-export function PlanningCalendar({ planning, onPublished, onRequestCompletion, jobActive = false }: Props) {
+export function PlanningCalendar({
+  planning,
+  onPublished,
+  onRequestCompletion,
+  jobActive = false,
+  jobKind = null,
+}: Props) {
   const canEdit = planning.canManageCalendar === true
   const canPublish = planning.canPublish === true
   const [result, setResult] = useState<PlanningResult | null>(null)
@@ -93,8 +108,35 @@ export function PlanningCalendar({ planning, onPublished, onRequestCompletion, j
   const [completing, setCompleting] = useState(false)
   const [notice, setNotice] = useState<{ tone: 'success' | 'error' | 'info'; text: string } | null>(null)
   const [statsKey, setStatsKey] = useState(0)
+  const [preflight, setPreflight] = useState<PublicationPreflight | null>(null)
+  // Never "nothing to fix" by default: until the check answers, and when it fails, the calendar says so.
+  const [preflightStatus, setPreflightStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(
+    canPublish ? 'loading' : 'idle',
+  )
+  const preflightRequest = useRef(0)
+  // `seq` makes a second "Voir" on the same duty scroll to it again.
+  const [located, setLocated] = useState<{ dutyStableId: string; seq: number } | null>(null)
+  const tableRef = useRef<HTMLDivElement>(null)
 
-  // Both reads always come from the server — the current calendar and its publication state.
+  // What would block a (re)publication, read before anyone clicks "Publier" — so the calendar can point at it. Its
+  // own request: a slow check never delays the calendar, and only the latest answer is kept.
+  const loadPreflight = useCallback(() => {
+    if (!canPublish) return
+    const request = ++preflightRequest.current
+    fetchPublicationPreflight(planning.stableId)
+      .then((value) => {
+        if (request !== preflightRequest.current) return
+        setPreflight(value)
+        setPreflightStatus('ready')
+      })
+      .catch(() => {
+        if (request !== preflightRequest.current) return
+        setPreflight(null)
+        setPreflightStatus('error')
+      })
+  }, [planning.stableId, canPublish])
+
+  // Every read always comes from the server — the current calendar, its publication state, its preflight.
   const fetchAll = useCallback(() => {
     fetchPlanningResult(planning.stableId)
       .then((value) => {
@@ -105,7 +147,8 @@ export function PlanningCalendar({ planning, onPublished, onRequestCompletion, j
     fetchPublicationState(planning.stableId)
       .then(setState)
       .catch(() => setState(null))
-  }, [planning.stableId])
+    loadPreflight()
+  }, [planning.stableId, loadPreflight])
 
   useEffect(() => {
     fetchAll()
@@ -113,9 +156,10 @@ export function PlanningCalendar({ planning, onPublished, onRequestCompletion, j
 
   /** After any write: the calendar, the "Modifications non publiées" state and the statistics all re-read. */
   const reload = useCallback(() => {
+    if (canPublish) setPreflightStatus('loading')
     fetchAll()
     setStatsKey((key) => key + 1)
-  }, [fetchAll])
+  }, [fetchAll, canPublish])
 
   const model = useMemo(
     () => (result ? buildCalendar(result.lines, planning.startsAt, planning.endsAt) : null),
@@ -125,6 +169,41 @@ export function PlanningCalendar({ planning, onPublished, onRequestCompletion, j
   const shownMonth = month && monthKeys.includes(month) ? month : initialMonth(monthKeys)
   const monthIndex = shownMonth ? monthKeys.indexOf(shownMonth) : -1
   const current = model && monthIndex >= 0 ? model.months[monthIndex] : null
+
+  const published = state?.published === true
+  const issues = useMemo(
+    () => (preflight ? blockingIssues(preflight, published ? 'republish' : 'publish') : []),
+    [preflight, published],
+  )
+  const cellIssues = useMemo(() => issuesByDuty(issues), [issues])
+  const assignmentIssues = useMemo(
+    () => issues.filter((issue) => issue.kind === 'assignment' || issue.kind === 'inconsistent'),
+    [issues],
+  )
+
+  /** "Voir dans le calendrier": the month of the duty, then the duty itself, scrolled to and focused. */
+  const locate = useCallback(
+    (dutyStableId: string) => {
+      const found = result?.lines
+        .flatMap((line) => line.duties)
+        .find((duty) => duty.dutyStableId === dutyStableId)
+      if (!found) return
+      setMonth(found.date.slice(0, 7))
+      setLocated((previous) => ({ dutyStableId, seq: (previous?.seq ?? 0) + 1 }))
+    },
+    [result],
+  )
+
+  useEffect(() => {
+    if (!located) return
+    // After the browser has laid out the month just switched to — scrolling earlier lands nowhere.
+    const frame = window.requestAnimationFrame(() => {
+      const element = tableRef.current?.querySelector<HTMLElement>(`[data-duty="${located.dutyStableId}"]`)
+      element?.scrollIntoView?.({ block: 'center' })
+      element?.focus({ preventScroll: true })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [located, shownMonth])
 
   async function handleComplete() {
     if (!onRequestCompletion) return
@@ -160,7 +239,6 @@ export function PlanningCalendar({ planning, onPublished, onRequestCompletion, j
     }
   }
 
-  const published = state?.published === true
   const dirty = state?.hasUnpublishedChanges === true
   const changeCount = state?.changes?.length ?? 0
 
@@ -200,10 +278,25 @@ export function PlanningCalendar({ planning, onPublished, onRequestCompletion, j
               className="pd-btn pd-btn-secondary"
               onClick={handleComplete}
               disabled={completing || jobActive || !model || model.uncoveredCount === 0}
-              aria-busy={completing}
-              title={model?.uncoveredCount === 0 ? 'Aucune garde non attribuée' : undefined}
+              aria-busy={completing || jobActive}
+              title={
+                jobActive
+                  ? 'Un calcul est en cours sur ce planning'
+                  : model?.uncoveredCount === 0
+                    ? 'Aucune garde non attribuée'
+                    : undefined
+              }
             >
-              {completing ? 'Envoi…' : 'Compléter automatiquement'}
+              {jobActive ? (
+                <span className="cal-busy">
+                  <span className="cal-spinner" aria-hidden />
+                  {jobKind === 'COMPLETE' ? 'Complétion en cours…' : 'Calcul en cours…'}
+                </span>
+              ) : completing ? (
+                'Envoi…'
+              ) : (
+                'Compléter automatiquement'
+              )}
             </button>
           )}
           {canEdit && (
@@ -281,16 +374,69 @@ export function PlanningCalendar({ planning, onPublished, onRequestCompletion, j
           <span>{error}</span>
         </p>
       )}
+      {jobActive && canEdit && (
+        <p role="status" className="cal-job">
+          <span className="cal-spinner" aria-hidden />
+          <span>
+            {jobKind === 'COMPLETE'
+              ? 'Complétion automatique en cours : les gardes non attribuées sont en cours de calcul. Le calendrier se mettra à jour tout seul à la fin.'
+              : 'Un calcul est en cours sur ce planning. Le calendrier se mettra à jour tout seul à la fin.'}{' '}
+            Une modification faite d’ici là annulerait son résultat.
+          </span>
+        </p>
+      )}
       {!result && !error && (
         <p role="status" className="muted">
           Chargement du planning…
         </p>
       )}
 
+      {model && preflightStatus === 'loading' && preflight === null && (
+        <p role="status" className="cal-summary cal-check">
+          <span className="cal-spinner" aria-hidden />
+          Contrôle des incohérences en cours…
+        </p>
+      )}
+      {model && preflightStatus === 'error' && (
+        <p role="alert" className="alert alert--warning cal-check">
+          <Icon name="alert" size={18} strokeWidth={2} />
+          <span>
+            Le contrôle des incohérences n’a pas pu être effectué : les affectations à corriger ne sont pas
+            affichées.
+          </span>
+          <button
+            type="button"
+            className="btn btn--sm btn--secondary"
+            onClick={() => {
+              setPreflightStatus('loading')
+              loadPreflight()
+            }}
+          >
+            Réessayer
+          </button>
+        </p>
+      )}
+      {assignmentIssues.length > 0 && (
+        <section className="cal-issues" aria-label="Affectations à corriger">
+          <span className="cal-issues__title">
+            <Icon name="alert" size={16} strokeWidth={2.2} />
+            {assignmentIssues.length === 1 ? '1 affectation' : `${assignmentIssues.length} affectations`} à
+            corriger avant de {published ? 'republier' : 'publier'}
+            {preflightStatus === 'loading' && (
+              <span className="cal-check__refresh">· vérification en cours…</span>
+            )}
+          </span>
+          <PreflightIssueList issues={assignmentIssues} onLocate={locate} label="Affectations à corriger" />
+        </section>
+      )}
       {model && model.uncoveredCount > 0 && (
         <p className="cal-summary">
           <span className="cal-uncovered">
-            ⚠ {summaryText(model.uncoveredCount - model.missingReinforcementCount, model.missingReinforcementCount)}
+            ⚠{' '}
+            {summaryText(
+              model.uncoveredCount - model.missingReinforcementCount,
+              model.missingReinforcementCount,
+            )}
           </span>
           {canEdit && ' — attribuez-les une à une ou utilisez « Compléter automatiquement ».'}
         </p>
@@ -308,8 +454,9 @@ export function PlanningCalendar({ planning, onPublished, onRequestCompletion, j
       {model && model.superfluousCount > 0 && (
         <p className="cal-summary cal-summary--quiet">
           {model.superfluousCount} renfort{model.superfluousCount > 1 ? 's' : ''} attribué
-          {model.superfluousCount > 1 ? 's' : ''} mais plus nécessaire{model.superfluousCount > 1 ? 's' : ''} (« Renfort non
-          requis ») — {model.superfluousCount > 1 ? 'ils restent' : 'il reste'} en place tant que vous ne
+          {model.superfluousCount > 1 ? 's' : ''} mais plus nécessaire{model.superfluousCount > 1 ? 's' : ''}{' '}
+          (« Renfort non requis ») — {model.superfluousCount > 1 ? 'ils restent' : 'il reste'} en place tant
+          que vous ne
           {model.superfluousCount > 1 ? ' les' : ' le'} retirez pas.
         </p>
       )}
@@ -340,7 +487,7 @@ export function PlanningCalendar({ planning, onPublished, onRequestCompletion, j
             </button>
           </div>
 
-          <div className="cal-scroll">
+          <div className="cal-scroll" ref={tableRef}>
             <table className="cal-table" style={{ ['--cal-lines' as string]: model.lines.length }}>
               <thead>
                 <tr>
@@ -379,6 +526,8 @@ export function PlanningCalendar({ planning, onPublished, onRequestCompletion, j
                                 item={item}
                                 canEdit={canEdit}
                                 onEdit={setEditing}
+                                issue={cellIssues.get(item.duty.dutyStableId)}
+                                located={located?.dutyStableId === item.duty.dutyStableId}
                               />
                             ))
                           )}
@@ -404,7 +553,10 @@ export function PlanningCalendar({ planning, onPublished, onRequestCompletion, j
             const consequences = impactSummary(impacts)
             setNotice(
               consequences.length > 0
-                ? { tone: 'info', text: `Conséquence${consequences.length > 1 ? 's' : ''} sur les renforts — ${consequences.join(' ; ')}.` }
+                ? {
+                    tone: 'info',
+                    text: `Conséquence${consequences.length > 1 ? 's' : ''} sur les renforts — ${consequences.join(' ; ')}.`,
+                  }
                 : null,
             )
             reload()
@@ -422,6 +574,10 @@ export function PlanningCalendar({ planning, onPublished, onRequestCompletion, j
         <PublishModal
           planningStableId={planning.stableId}
           onClose={() => setDialog(null)}
+          onLocate={(dutyStableId) => {
+            setDialog(null)
+            locate(dutyStableId)
+          }}
           onPublished={() => {
             reload()
             onPublished?.()
@@ -436,6 +592,10 @@ export function PlanningCalendar({ planning, onPublished, onRequestCompletion, j
           planningStableId={planning.stableId}
           changes={state.changes}
           onClose={() => setDialog(null)}
+          onLocate={(dutyStableId) => {
+            setDialog(null)
+            locate(dutyStableId)
+          }}
           onRepublished={() => {
             reload()
             onPublished?.()
@@ -450,10 +610,15 @@ function DutyCell({
   item,
   canEdit,
   onEdit,
+  issue,
+  located,
 }: {
   item: CalendarItem
   canEdit: boolean
   onEdit: (dutyStableId: string) => void
+  /** The preflight refuses this assignment (docs/decisions.md D133): marked on the cell, with its reason. */
+  issue?: PreflightIssue
+  located?: boolean
 }) {
   const { duty, blockPart, showType } = item
   const who = duty.assignment ? `${duty.assignment.user.firstName} ${duty.assignment.user.lastName}` : null
@@ -469,7 +634,10 @@ function DutyCell({
       ) : (
         <span className="cal-uncovered">⚠ {gap}</span>
       )}
-      {presentation.tag && <span className={`cal-tag cal-tag--${presentation.tone}`}>{presentation.tag}</span>}
+      {presentation.tag && (
+        <span className={`cal-tag cal-tag--${presentation.tone}`}>{presentation.tag}</span>
+      )}
+      {issue && <span className="cal-tag cal-tag--invalid">⚠ À corriger : {issue.tag}</span>}
       {showType && <span className="cal-type"> · {duty.dutyType.name}</span>}
       {(blockPart === 'first' || blockPart === 'single') && (
         <span className="cal-block-label">Bloc {duty.groupLabel ?? ''}</span>
@@ -481,22 +649,27 @@ function DutyCell({
     blockPart ? `cal-block cal-block--${blockPart}` : '',
     who ? '' : presentation.tone === 'undetermined' ? 'cal-item--undetermined' : 'cal-item--uncovered',
     presentation.tone === 'superfluous' ? 'cal-item--superfluous' : '',
+    issue ? 'cal-item--invalid' : '',
+    located ? 'cal-item--located' : '',
   ]
     .filter(Boolean)
     .join(' ')
-  const label = `${who ?? gap}${presentation.spoken && who ? ` (${presentation.spoken})` : ''}${blockPart ? ` — bloc ${duty.groupLabel ?? ''}` : ''}, ${duty.date}`
+  const label = `${who ?? gap}${presentation.spoken && who ? ` (${presentation.spoken})` : ''}${blockPart ? ` — bloc ${duty.groupLabel ?? ''}` : ''}, ${duty.date}${issue ? ` — à corriger : ${issue.tag}` : ''}`
 
   return canEdit ? (
     <button
       type="button"
       className={className}
+      data-duty={duty.dutyStableId}
       onClick={() => onEdit(duty.dutyStableId)}
       aria-label={`Modifier : ${label}`}
     >
       {content}
     </button>
   ) : (
-    <div className={className}>{content}</div>
+    <div className={className} data-duty={duty.dutyStableId} tabIndex={located ? -1 : undefined}>
+      {content}
+    </div>
   )
 }
 
@@ -505,6 +678,8 @@ function summaryText(duties: number, reinforcements: number): string {
   const parts: string[] = []
   if (duties > 0) parts.push(`${duties} garde${duties > 1 ? 's' : ''} non attribuée${duties > 1 ? 's' : ''}`)
   if (reinforcements > 0)
-    parts.push(`${reinforcements} renfort${reinforcements > 1 ? 's' : ''} requis non attribué${reinforcements > 1 ? 's' : ''}`)
+    parts.push(
+      `${reinforcements} renfort${reinforcements > 1 ? 's' : ''} requis non attribué${reinforcements > 1 ? 's' : ''}`,
+    )
   return parts.join(' et ')
 }
