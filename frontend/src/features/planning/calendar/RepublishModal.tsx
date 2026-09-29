@@ -4,12 +4,16 @@ import { Overlay } from '../../../components/Overlay'
 import { ApiError } from '../../../lib/apiClient'
 import { fetchPublicationPreflight, republishPlanning } from '../result/api'
 import type { PublicationChange, PublicationPreflight, PublicationResult } from '../result/types'
+import { PreflightIssueList } from './PreflightIssueList'
+import { blockingIssues } from './preflightIssues'
 
 type Props = {
   planningStableId: string
   changes: PublicationChange[]
   onClose: () => void
   onRepublished: (result: PublicationResult) => void
+  /** "Voir dans le calendrier" on a blocking issue: the dialog closes and the calendar shows the duty. */
+  onLocate?: (dutyStableId: string) => void
 }
 
 const DAY = new Intl.DateTimeFormat('fr-BE', {
@@ -31,7 +35,7 @@ function holder(person: { firstName: string; lastName: string } | null, shown = 
  * concerned by an impacted date. The server re-checks the calendar and
  * recomputes the changes at the moment of the click; this list is a preview.
  */
-export function RepublishModal({ planningStableId, changes, onClose, onRepublished }: Props) {
+export function RepublishModal({ planningStableId, changes, onClose, onRepublished, onLocate }: Props) {
   const [preflight, setPreflight] = useState<PublicationPreflight | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
@@ -121,6 +125,13 @@ export function RepublishModal({ planningStableId, changes, onClose, onRepublish
         </p>
       ) : (
         <>
+          {/* What blocks comes first: with dozens of changes listed, a refusal at the bottom goes unseen. */}
+          {!preflight && !loadError && (
+            <p role="status" className="muted">
+              Contrôle du planning…
+            </p>
+          )}
+          {preflight && !preflight.republishable && <RepublishBlockers preflight={preflight} onLocate={onLocate} />}
           <ul className="cal-changes" aria-label="Modifications non publiées">
             {units.map(({ key, dates, change }) => (
               <li key={key}>
@@ -141,20 +152,6 @@ export function RepublishModal({ planningStableId, changes, onClose, onRepublish
             dates modifiées : l’ancien et le nouveau titulaire, et les personnes de garde ces mêmes jours sur
             les autres lignes.
           </p>
-          {!preflight && !loadError && (
-            <p role="status" className="muted">
-              Contrôle du planning…
-            </p>
-          )}
-          {preflight && !preflight.republishable && (
-            <p role="alert" className="alert alert--error">
-              <Icon name="alert" size={18} strokeWidth={2} />
-              <span>
-                Republication impossible : le calendrier contient des affectations qui ne sont plus valides ou
-                incohérentes. Corrigez-les d’abord.
-              </span>
-            </p>
-          )}
         </>
       )}
       {(loadError || error) && (
@@ -164,6 +161,34 @@ export function RepublishModal({ planningStableId, changes, onClose, onRepublish
         </p>
       )}
     </Overlay>
+  )
+}
+
+/**
+ * Why the calendar cannot go out as it is — each issue with its duty or
+ * block, its line, the person, the rule and the fix (never only "des
+ * affectations ne sont plus valides").
+ */
+function RepublishBlockers({
+  preflight,
+  onLocate,
+}: {
+  preflight: PublicationPreflight
+  onLocate?: (dutyStableId: string) => void
+}) {
+  const issues = blockingIssues(preflight, 'republish')
+  return (
+    <>
+      <p role="alert" className="alert alert--error">
+        <Icon name="alert" size={18} strokeWidth={2} />
+        <span>
+          {issues.length === 0
+            ? 'Republication impossible : le calendrier n’est pas prêt à être diffusé.'
+            : `Republication impossible : ${issues.length === 1 ? '1 point à corriger' : `${issues.length} points à corriger`} d’abord.`}
+        </span>
+      </p>
+      <PreflightIssueList issues={issues} onLocate={onLocate} />
+    </>
   )
 }
 

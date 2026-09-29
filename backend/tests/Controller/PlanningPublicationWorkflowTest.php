@@ -168,6 +168,51 @@ final class PlanningPublicationWorkflowTest extends WebTestCase
         self::assertSame('PUBLISHED', $this->api($client, 'GET', "/api/plannings/{$s['planningId']}", token: $s['creator'])['lines'][0]['periodStatus']);
     }
 
+    /**
+     * The production case of 2026-09-29, anonymised: after the publication, holes are made (a removal), and the
+     * holder of another duty declares an unavailability covering it. The removal alone would be republishable
+     * (D143); the now-invalid assignment is not — and the preflight says which duty, which dates, which rule.
+     */
+    public function testAnUnavailabilityDeclaredAfterPublicationBlocksTheRepublicationAndIsLocalized(): void
+    {
+        $client = static::createClient();
+        $s = $this->pilotScenario($client);
+        $this->prepareLine($s['planningId'], self::STANDALONE);
+        $this->generate($client, $s);
+        $this->publishPlanning($client, $s);
+        self::assertResponseIsSuccessful();
+
+        $this->unassignDuty($client, $s, $this->dutyOn($s['planningId'], '2027-01-05'));
+        self::assertResponseIsSuccessful();
+        $holder = $this->currentCalendar($s['planningId'])['0|2027-01-07|ONCALL'];
+        self::assertNotNull($holder);
+        // The holder's own token: 'alice@example.com' → $s['alice'].
+        $this->declareRange($client, $s[strstr($holder, '@', true)], '2027-01-07', '2027-01-08');
+
+        $preflight = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/publication-preflight", token: $s['creator']);
+        self::assertFalse($preflight['republishable']);
+        self::assertCount(1, $preflight['uncoveredDuties'], 'The removal is listed, but does not block a republication.');
+        self::assertCount(1, $preflight['invalidAssignments']);
+        $item = $preflight['invalidAssignments'][0];
+        self::assertSame($this->dutyOn($s['planningId'], '2027-01-07'), $item['duty']['dutyStableId']);
+        self::assertSame(['2027-01-07'], $item['dates']);
+        self::assertSame([$item['duty']['dutyStableId']], $item['dutyStableIds']);
+        self::assertSame('UNAVAILABLE', $item['reasonCode']);
+        self::assertSame('indisponible', $item['reason']);
+        self::assertSame('Seniors', $item['duty']['lineName']);
+
+        $response = $this->republishPlanning($client, $s);
+        self::assertResponseStatusCodeSame(409);
+        self::assertSame('not_publishable', $response['error']);
+
+        // Fixing that one assignment is enough: the removal itself stays announceable.
+        $this->unassignDuty($client, $s, $item['duty']['dutyStableId']);
+        self::assertResponseIsSuccessful();
+        $preflight = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/publication-preflight", token: $s['creator']);
+        self::assertSame([], $preflight['invalidAssignments']);
+        self::assertTrue($preflight['republishable']);
+    }
+
     public function testRepublicationIsRefusedWhenNothingChangedEvenAfterAnEditAndItsUndo(): void
     {
         $client = static::createClient();

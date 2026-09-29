@@ -5947,3 +5947,60 @@ l'ancienne (voir légende).
   limiter le débit de la route publique (256 bits ne se devinent pas, et les
   agendas interrogent depuis de nombreuses IP partagées).
 - **Migration** : `Version20260929140000` (nouvelle table uniquement).
+
+## D171 — Préflight de (re)publication localisable dans le calendrier, état « complétion en cours » visible sur le bouton
+
+- **Constat (copie locale de la production du 2026-09-29, jamais la
+  production elle-même)** : un planning publié, une seule ligne, 120 gardes
+  REQUIRED (dont 17 blocs). Après publication, 86 gardes ont été retirées
+  (17:31–17:36), puis « Compléter automatiquement » lancé à 17:36:45 : le job
+  `COMPLETE` est resté `QUEUED`/`RUNNING` 72 s et a rempli les 86 gardes
+  (62 unités) — un second retrait + complétion à 17:43. Pendant ces 72 s le
+  bouton était **grisé à juste titre** (`jobActive`, un calcul par planning,
+  D149) mais n'affichait ni sablier ni raison : le seul indicateur était le
+  bandeau du job, en haut de la page, hors de vue quand on regarde le
+  calendrier. Ni le statut `PUBLISHED` ni une erreur ne bloquaient : la
+  complétion sur un planning publié est déjà prise en charge (D145, testé).
+- **Constat — republication refusée** : le préflight courant contenait une
+  seule incohérence, `invalidAssignments` : une garde isolée attribuée par la
+  génération, dont le titulaire a déclaré ensuite (après la publication) une
+  indisponibilité couvrant ce jour (`UNAVAILABLE`). La complétion ne la
+  touche pas (toute unité tenue est fixée, D145 — ce n'est pas REPAIR). Le
+  serveur renvoyait déjà la garde, le titulaire et la raison, mais
+  `RepublishModal` n'en affichait qu'un message générique, sous la liste des
+  91 modifications, et `PublishModal` un compte et la première raison ; le
+  calendrier ne lisait jamais le préflight.
+- **Décision — le préflight dit où** : chaque élément
+  `invalidAssignments`/`conflicts` porte en plus `unitStableKey`, `dates`,
+  `dutyStableIds` (toutes les gardes du bloc) et `reasonCode` (la valeur
+  d'`ExclusionReason`, la règle réellement violée) ; `inconsistentGroups`
+  porte la première garde, les dates, les gardes et les titulaires
+  divergents. Aucune nouvelle vérification : mêmes calculs, sérialisés en
+  entier. Champs ajoutés, jamais retirés (compatibles avec un ancien client).
+- **Décision — le calendrier le montre** : pour un gestionnaire, le
+  calendrier lit le préflight avec le calendrier et l'état de publication
+  (relu après chaque écriture et à la fin d'un job) : un panneau
+  « N affectation(s) à corriger avant de (re)publier » liste chaque garde ou
+  bloc (date, ligne, titulaire, règle, correction), « Voir dans le
+  calendrier » ouvre le mois, amène la garde à l'écran et lui donne le focus ;
+  la cellule elle-même porte « ⚠ À corriger : <raison> » et un contour. Les
+  modales de publication et de republication listent les mêmes éléments, en
+  tête de modale. Le texte est un libellé côté frontend
+  (`preflightIssues.ts`) des codes renvoyés par le serveur — la décision
+  reste au serveur ; la règle D143 (une garde non couverte ne bloque une
+  republication que sur une ligne jamais publiée) est appliquée à l'identique.
+- **Décision — le bouton dit qu'un calcul tourne** : pendant un job, le
+  bouton affiche « Complétion en cours… » (ou « Calcul en cours… » pour une
+  génération) avec un indicateur, `aria-busy`, une infobulle, et une ligne
+  d'état au-dessus du calendrier rappelle qu'une modification faite pendant
+  le calcul en annulerait le résultat (`calendar_changed`, D149).
+- **Pas de nouveau mode de génération** : compléter un planning publié
+  fonctionne déjà ; corriger une affectation devenue invalide reste un geste
+  manuel (remplacer ou retirer, puis compléter si besoin). Déplacer
+  automatiquement des affectations existantes, c'est REPAIR
+  (`docs/allocation-algorithm.md` §11), toujours non implémenté.
+- **Rejeté** : faire recalculer les messages par le frontend depuis le
+  calendrier (deuxième implémentation des contraintes) ; bloquer une
+  déclaration d'indisponibilité sur une garde déjà publiée (la personne est
+  réellement indisponible : le calendrier doit le montrer, pas le cacher) ;
+  retirer automatiquement l'affectation invalide.

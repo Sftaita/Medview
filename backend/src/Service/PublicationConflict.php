@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Eligibility\ExclusionReason;
 use App\Entity\Duty;
 use App\Entity\PlanningTeamMember;
 
@@ -16,10 +17,16 @@ use App\Entity\PlanningTeamMember;
  */
 final readonly class PublicationConflict
 {
+    /**
+     * @param list<Duty> $block the whole unit the assignment covers (a block's every day), so it can be located
+     */
     public function __construct(
         public Duty $duty,
         public PlanningTeamMember $member,
         public string $reason,
+        public array $block = [],
+        /** The rule actually violated — the stable code behind $reason. */
+        public ?ExclusionReason $reasonCode = null,
     ) {
     }
 }

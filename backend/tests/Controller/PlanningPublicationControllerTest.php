@@ -127,6 +127,15 @@ final class PlanningPublicationControllerTest extends WebTestCase
         self::assertFalse($preflight['publishable']);
         self::assertCount(1, $preflight['inconsistentGroups']);
         self::assertSame((string) $group->getStableId(), $preflight['inconsistentGroups'][0]['groupInstanceStableId']);
+        // Localizable: the block's days, every one of its duties, and the different people holding them.
+        $item = $preflight['inconsistentGroups'][0];
+        self::assertSame(['2027-01-09', '2027-01-10'], $item['dates']);
+        self::assertSame([(string) $duty0->getStableId(), (string) $duty1->getStableId()], $item['dutyStableIds']);
+        self::assertSame((string) $group->getStableId(), $item['unitStableKey']);
+        self::assertSame((string) $duty0->getStableId(), $item['duty']['dutyStableId']);
+        self::assertNotNull($item['duty']['lineName']);
+        self::assertCount(2, $item['members']);
+        self::assertNotSame($item['members'][0]['teamMemberStableId'], $item['members'][1]['teamMemberStableId']);
     }
 
     public function testAMemberWhoBecameUnavailableAfterGenerationBlocksPublicationAsAnInvalidAssignment(): void
@@ -145,6 +154,13 @@ final class PlanningPublicationControllerTest extends WebTestCase
         self::assertFalse($preflight['publishable']);
         self::assertCount(1, $preflight['invalidAssignments']);
         self::assertSame('indisponible', $preflight['invalidAssignments'][0]['reason']);
+        // Which rule, which duty, which dates — what the calendar needs to point at it (not only a count).
+        $item = $preflight['invalidAssignments'][0];
+        self::assertSame('UNAVAILABLE', $item['reasonCode']);
+        self::assertSame(['2027-01-05'], $item['dates']);
+        self::assertSame([$item['duty']['dutyStableId']], $item['dutyStableIds']);
+        self::assertSame($item['duty']['dutyStableId'], $item['unitStableKey']);
+        self::assertFalse($preflight['republishable']);
     }
 
     public function testAnOverlapConflictIsDetectedIndependently(): void
@@ -164,6 +180,8 @@ final class PlanningPublicationControllerTest extends WebTestCase
         self::assertFalse($preflight['publishable']);
         self::assertNotEmpty($preflight['conflicts']);
         self::assertSame('déjà affecté à une garde incompatible', $preflight['conflicts'][0]['reason']);
+        self::assertSame('CONFLICT', $preflight['conflicts'][0]['reasonCode']);
+        self::assertSame([$preflight['conflicts'][0]['duty']['date']], $preflight['conflicts'][0]['dates']);
     }
 
     // --- publish ---------------------------------------------------------------------

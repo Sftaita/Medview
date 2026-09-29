@@ -286,16 +286,37 @@ export type PublicationMemberRef = {
   lastName: string
 }
 
-export type InvalidPublicationAssignment = {
-  duty: PublicationDutyRef
-  member: PublicationMemberRef
-  reason: string
+/**
+ * The whole unit a preflight issue is about — a block's every day — so the
+ * calendar can point at it (every one of its duties) and the text can give
+ * its dates. Older servers do not send it: every field stays optional.
+ */
+export type PublicationUnitRef = {
+  unitStableKey?: string | null
+  dates?: string[]
+  dutyStableIds?: string[]
 }
 
-export type PublicationConflict = {
+export type InvalidPublicationAssignment = PublicationUnitRef & {
   duty: PublicationDutyRef
   member: PublicationMemberRef
   reason: string
+  /** The rule actually violated (ExclusionReason), behind the translated `reason`. */
+  reasonCode?: string | null
+}
+
+export type PublicationConflict = PublicationUnitRef & {
+  duty: PublicationDutyRef
+  member: PublicationMemberRef
+  reason: string
+  reasonCode?: string | null
+}
+
+/** A block whose days are not all held by the same person. */
+export type InconsistentPublicationGroup = PublicationUnitRef & {
+  groupInstanceStableId: string
+  duty?: PublicationDutyRef | null
+  members?: PublicationMemberRef[]
 }
 
 /** GET /api/plannings/{id}/publication-preflight — read-only, never modifies anything. */
@@ -305,7 +326,7 @@ export type PublicationPreflight = {
   republishable: boolean
   lines: PublicationLineReadiness[]
   uncoveredDuties: PublicationDutyRef[]
-  inconsistentGroups: { groupInstanceStableId: string }[]
+  inconsistentGroups: InconsistentPublicationGroup[]
   invalidAssignments: InvalidPublicationAssignment[]
   conflicts: PublicationConflict[]
   /** Reinforcements whose demand cannot be evaluated — block publication and republication (D165). */
