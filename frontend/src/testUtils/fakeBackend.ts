@@ -67,6 +67,8 @@ export type FakeBackendOptions = {
   periods?: UserAvailabilityPeriod[]
   collections?: AvailabilityCollection[]
   plannings?: unknown[]
+  /** GET /api/me/duties — "Mes gardes" (D168); null makes it fail with a 500. */
+  duties?: unknown[] | null
 }
 
 export function createFakeBackend(options: FakeBackendOptions = {}) {
@@ -97,6 +99,9 @@ export function createFakeBackend(options: FakeBackendOptions = {}) {
     if (path === '/api/token/refresh') return respond({ token: 'access' })
     if (path === '/api/me') return respond(ME)
     if (path === '/api/plannings' && method === 'GET') return respond(plannings)
+    if (path === '/api/me/duties') {
+      return options.duties === null ? respond({ error: 'server_error' }, 500) : respond({ duties: options.duties ?? [] })
+    }
 
     if (path === '/api/me/calendar' && method === 'GET') return respond(periods)
     if (path === '/api/me/calendar' && method === 'POST') {

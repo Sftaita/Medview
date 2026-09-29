@@ -7,6 +7,7 @@ import { dayIndex } from '../features/availability/calendarAxis'
 import { MyAvailabilityProvider } from '../features/availability/MyAvailabilityProvider'
 import type { UserAvailabilityPeriod } from '../features/availability/types'
 import { createFakeBackend, makeCollection } from '../testUtils/fakeBackend'
+import { makeMyDuty } from '../testUtils/myDuty'
 import { DashboardPage } from './DashboardPage'
 import { MyAvailabilityPage } from './MyAvailabilityPage'
 
@@ -199,6 +200,52 @@ describe('DashboardPage', () => {
 
     expect(await screen.findByText('Page mes gardes')).toBeInTheDocument()
     expect(screen.queryByText('Page planning')).not.toBeInTheDocument()
+  })
+
+  it('shows the next duty with its countdown, and how many follow', async () => {
+    frozenMockupDay()
+    createFakeBackend({
+      plannings: [{ ...TRAUMA, published: true }],
+      duties: [
+        makeMyDuty(['2026-09-20']),
+        makeMyDuty(['2026-10-03', '2026-10-04'], { blockName: 'Week-end', planningName: 'Trauma Delta' }),
+        makeMyDuty(['2026-10-13']),
+        makeMyDuty(['2026-11-02']),
+      ],
+    }).install()
+    render(
+      <MemoryRouter>
+        <AuthProvider>
+          <MyAvailabilityProvider>
+            <Routes>
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/my-duties" element={<p>Page mes gardes</p>} />
+            </Routes>
+          </MyAvailabilityProvider>
+        </AuthProvider>
+      </MemoryRouter>,
+    )
+
+    const card = await screen.findByRole('region', { name: 'Prochaine garde' })
+    const row = within(card).getByRole('link', { name: /Sam\. 3/ })
+    expect(row).toHaveTextContent('Sam. 3 → dim. 4 oct.')
+    expect(row).toHaveTextContent('Trauma Delta · Première ligne · Bloc Week-end')
+    expect(row).toHaveTextContent('Dans 7 jours')
+    expect(row).toHaveAttribute('href', '/plannings/p1')
+    expect(card).toHaveTextContent('Puis 2 autres gardes à venir')
+    expect(within(card).queryByText(/13 oct/)).not.toBeInTheDocument()
+
+    fireEvent.click(within(card).getByRole('link', { name: /Mes gardes/ }))
+    expect(await screen.findByText('Page mes gardes')).toBeInTheDocument()
+  })
+
+  it('shows no next-duty card without an upcoming duty', async () => {
+    frozenMockupDay()
+    createFakeBackend({ plannings: [TRAUMA], duties: [makeMyDuty(['2026-09-20'])] }).install()
+    renderDashboard()
+
+    await screen.findByText('Trauma Delta')
+    expect(screen.queryByRole('region', { name: 'Prochaine garde' })).not.toBeInTheDocument()
   })
 
   it('lists upcoming unavailabilities only, the next one with its countdown', async () => {

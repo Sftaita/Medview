@@ -41,6 +41,28 @@ class PlanningRepository extends ServiceEntityRepository
             ->getResult();
     }
 
+    /**
+     * Plannings with at least one active PUBLISHED line where $user holds or
+     * has ever held a membership — ended ones included: a duty somebody did
+     * before leaving a team stays theirs ("Mes gardes", docs/decisions.md D168).
+     *
+     * @return list<Planning>
+     */
+    public function findWithPublishedLineForMember(User $user): array
+    {
+        return $this->createQueryBuilder('p')
+            ->distinct()
+            ->join(PlanningLine::class, 'l', 'WITH', 'l.planning = p AND l.active = true')
+            ->join('l.planningPeriod', 'pp')
+            ->join('App\Entity\PlanningTeamMember', 'tm', 'WITH', 'tm.planning = p AND tm.user = :user')
+            ->andWhere('pp.status = :published')
+            ->setParameter('published', PlanningPeriodStatus::PUBLISHED)
+            ->setParameter('user', $user)
+            ->orderBy('p.id', 'ASC')
+            ->getQuery()
+            ->getResult();
+    }
+
     public function findOneByStableId(string $stableId): ?Planning
     {
         try {

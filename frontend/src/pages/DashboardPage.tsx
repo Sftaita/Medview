@@ -22,6 +22,10 @@ import {
   relativeDays,
   startOfDay,
 } from '../features/dashboard/dates'
+import { fetchMyDuties } from '../features/duties/api'
+import { DutyRow } from '../features/duties/DutyRow'
+import { splitDuties } from '../features/duties/dutyDates'
+import type { MyDuty } from '../features/duties/types'
 import { fetchPlannings } from '../features/planning/api'
 import type { PlanningSummary } from '../features/planning/types'
 
@@ -36,6 +40,7 @@ export function DashboardPage() {
   const { ranges, loadError, collections } = useMyAvailability()
   const [joinedTeams] = useState(readJoinedTeamsFlash)
   const [plannings, setPlannings] = useState<PlanningSummary[] | null>(null)
+  const [duties, setDuties] = useState<MyDuty[] | null>(null)
   const today = useMemo(() => startOfDay(new Date()), [])
 
   // Read from the shared store, never fetched here: whatever was just changed in the calendar is already in it.
@@ -65,6 +70,21 @@ export function DashboardPage() {
 
   // Shown once: cleared as soon as it has been rendered.
   useEffect(() => clearJoinedTeamsFlash(), [])
+
+  useEffect(() => {
+    let cancelled = false
+    // Same rule as the plannings: a failed load shows nothing rather than an error.
+    fetchMyDuties()
+      .then((result) => {
+        if (!cancelled) setDuties(result)
+      })
+      .catch(() => {
+        if (!cancelled) setDuties([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -114,6 +134,8 @@ export function DashboardPage() {
           ))}
         </div>
       )}
+
+      {duties !== null && <NextDutyCard duties={duties} today={today} />}
 
       <div className="db-grid">
         <PlanningsCard plannings={plannings} upcoming={upcoming} today={today} />
@@ -301,6 +323,27 @@ function PlanningRow({
         )}
       </div>
     </Link>
+  )
+}
+
+/** The next duty of the signed-in user, when they have one (docs/decisions.md D168) — nothing otherwise. */
+function NextDutyCard({ duties, today }: { duties: MyDuty[]; today: Date }) {
+  const { upcoming } = splitDuties(duties, today)
+  if (upcoming.length === 0) return null
+  const others = upcoming.length - 1
+  return (
+    <section className="db-card" aria-label="Prochaine garde">
+      <CardHeader
+        title="Prochaine garde"
+        sub={others > 0 ? `Puis ${plural(others, 'autre garde', 'autres gardes')} à venir` : undefined}
+        link={{ to: '/my-duties', long: 'Mes gardes', short: 'Tout voir' }}
+      />
+      <ul className="db-list">
+        <li>
+          <DutyRow duty={upcoming[0]} today={today} />
+        </li>
+      </ul>
+    </section>
   )
 }
 

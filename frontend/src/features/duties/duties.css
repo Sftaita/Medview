@@ -1,0 +1,19 @@
+/* "Mes gardes" (docs/decisions.md D168): the dashboard's cards and rows (dashboard.css), plus these. */
+.duty-reinforcement {
+  align-self: flex-start;
+}
+.duties-toolbar {
+  margin-bottom: 16px;
+}
+.duties-month {
+  margin: 0;
+  padding: 14px 20px 6px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.duties-month:first-child {
+  padding-top: 18px;
+}

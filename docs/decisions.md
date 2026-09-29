@@ -5809,3 +5809,39 @@ l'ancienne (voir légende).
   et la ligne source) ; test de plusieurs actions dans le même tick et
   mutation.
 - **Aucune migration.**
+
+## D168 — « Mes gardes » et « Prochaine garde » : calendrier courant des lignes publiées, pour l'appelant seulement
+
+- **Contexte** : la page « Mes gardes » (`/my-duties`, entrée du menu depuis
+  D151, cible du lien « Voir mes gardes » du tableau de bord) n'était qu'un
+  texte d'attente ; l'accueil n'affichait pas la prochaine garde.
+- **Décision — source** : `GET /api/me/duties` (`MyDutiesService`) lit le
+  **calendrier courant** (`CurrentCalendarReader`, `DutyAssignment.current`)
+  des seules lignes **PUBLISHED** — exactement la lecture du rappel du samedi
+  (D146) : un brouillon n'est jamais montré à ses membres, une modification
+  sur une ligne publiée l'est dès qu'elle est faite, republiée ou non (comme
+  le rappel, et comme le calendrier qu'un membre voit déjà dans le planning).
+  Seules les gardes de l'appelant sortent du service ; pas de Voter
+  (`/api/me/*`, D057).
+- **Plannings lus** : ceux où l'appelant a **une adhésion, ouverte ou close**
+  (`PlanningRepository::findWithPublishedLineForMember`) — une garde faite
+  avant de quitter une équipe reste la sienne (historique jamais effacé),
+  alors que `findVisibleTo` ne retient que les adhésions ouvertes.
+- **Unité** : un bloc est une seule entrée avec tous ses jours (`dates`,
+  `blockName`), comme le rappel ; une garde de renfort porte `conditional` et
+  son état live (`coverageState`, D165/D166) — un renfort superflu encore
+  tenu reste listé (« Renfort non requis actuellement »), jamais masqué.
+- **Frontend** : « À venir » (du plus proche au plus lointain, compte à
+  rebours, « En cours » pour un bloc entamé) / « Passées » (du plus récent),
+  groupées par mois, chaque garde menant à son planning ; styles des cartes
+  et rangées du tableau de bord (`DutyRow` partagé). « À venir » = dernier
+  jour ≥ aujourd'hui, comparé en jours calendaires. Accueil : carte
+  « Prochaine garde » au-dessus de la grille, absente sans garde à venir
+  (hors maquette `react_dashboard`, qui n'en prévoyait pas).
+- **Rejeté** : lire la dernière publication (`PlanningPublicationEntry`) —
+  elle ignorerait un remplacement déjà fait mais non republié, alors que le
+  rappel du samedi et le calendrier du planning le montrent déjà ; filtrer
+  par date côté serveur (fuseau de chaque planning, volume faible) ; un
+  export ICS (ligne « Échanges de garde, notifications, ICS », pas commencé).
+- **Aucune migration.**
+
