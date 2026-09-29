@@ -100,6 +100,19 @@
   (le worker **stable**, pas en boucle de redémarrage :
   `docker inspect medvue-worker --format '{{.RestartCount}}'` ne doit pas
   augmenter entre deux lectures).
+- Moteur de génération (D152) — **obligatoire à chaque déploiement**, car
+  les tests et la CI des tests tournent avec les dépendances de dev,
+  l'image de production non :
+  - `medvue-backend` et `medvue-worker` exécutent l'image qui vient d'être
+    construite : `docker inspect --format '{{.Image}}' medvue-backend medvue-worker`
+    donne deux fois le même identifiant, égal à
+    `docker image inspect --format '{{.Id}}' medvue-backend:local` ;
+  - dans **chacun des deux** conteneurs :
+    `php -r 'require "vendor/autoload.php"; var_dump(class_exists(Symfony\Component\Process\Process::class));'`
+    → `bool(true)`, puis `php bin/console app:solver:smoke` →
+    `[OK] Solver smoke test passed.` (problème en mémoire résolu par le vrai
+    chemin PHP → Process → Python du venv → OR-Tools, sans toucher la base) ;
+  - puis la génération réelle ci-dessous.
 - Worker (D149) : `docker logs --tail 50 medvue-worker` montre
   `Consuming messages from transport "planning_jobs"` ; une génération
   réelle lancée depuis l'interface passe `QUEUED → RUNNING → SUCCEEDED`
@@ -338,3 +351,21 @@ n'est réécrit : chaque correction est un commit distinct.
    noyau 6.17 azure, 4 CPU, ~16 Go, PHP 8.3.33, Composer 2.10.3,
    Python 3.12.3, OR-Tools 9.15.6755 (numpy 2.5.3, pandas 3.0.6), image
    `postgres:16-alpine`, `LANG=C.UTF-8`, fuseau UTC ; rien d'autre ne différait.
+10. **Aucune génération n'a jamais pu aboutir en production (constaté le
+    2026-09-28, `v2026.09.28-prod`).** « Générer le planning » sur « Trauma
+    Delta » : `PlanningJob` #2 et #3 `FAILED` / `unexpected_error`,
+    `failure_detail` = `Error: Class "Symfony\Component\Process\Process" not found`
+    (`OrToolsPlanningSolver::runProcess()`), `PlanningGeneration`
+    `01a0e9c5-6d0c-78e5-998c-f1618a62985d` et
+    `01a0e9c5-99d3-773a-923f-df52a5d2fa36` `FAILED` (« Interrupted:
+    unexpected_error »), snapshot pris, aucune affectation. Ce sont les deux
+    seules générations jamais lancées en production : le chemin solveur n'y
+    avait jamais tourné. Cause : `symfony/process` n'était installé que
+    transitivement par `require-dev` (`php-cs-fixer`, `maker-bundle`), et
+    l'image de production fait `composer install --no-dev`. OR-Tools, Python,
+    le script et les migrations étaient corrects. Invisible partout
+    ailleurs (tests, CI, recettes : tous avec les dépendances de dev), et la
+    génération réelle du §2 n'avait pas été faite en production. Correction
+    livrée par `4d1ca85` (`v2026.09.29-prod-2`, §6 — le `PlanningJob` #4 avait
+    échoué entre-temps de la même façon) ; garde-fous : D152. Les
+    générations `FAILED` restent dans l'historique.

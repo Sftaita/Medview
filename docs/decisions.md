@@ -4937,6 +4937,95 @@ l'ancienne (voir légende).
   aux liens du tableau de bord : appliquées telles quelles, elles effaçaient
   le texte du bouton de l'encart de collecte.
 
+## D152 — Dépendances d'exécution déclarées et vérifiées sur une installation `--no-dev`, test fumée du solveur dans l'image de production
+
+- **Incident** (`docs/deployment.md` §8 point 10) : en production, toute
+  génération échouait avec `Error: Class "Symfony\Component\Process\Process"
+  not found` (`OrToolsPlanningSolver::runProcess()`). `symfony/process`
+  n'arrivait que transitivement par `require-dev` (`friendsofphp/php-cs-fixer`,
+  `symfony/maker-bundle`) depuis l'arrivée du solveur réel en subprocess
+  Python (D031, commit `4afbfe9`, 2026-09-20),
+  et `backend/Dockerfile.prod` installe `--no-dev`. Tests, CI et recettes
+  tournaient tous avec les dépendances de dev : rien ne pouvait le voir.
+- **Correctif** : `symfony/process` `7.4.*` dans `require`, le paquet passant
+  de `packages-dev` à `packages` à **version identique** (v7.4.18). Écrit
+  d'abord sur cette branche (2026-09-28), il a été livré séparément et en
+  premier par `4d1ca85` (`v2026.09.29-prod-2`, `docs/deployment.md` §6) avec
+  `tests/Deployment/ProductionDependenciesTest` : tout namespace vendor
+  importé (`use`) par `src/` doit appartenir à un paquet non-dev de
+  `composer.lock`. Cette décision garde ce correctif et ce test, et y ajoute
+  les déclarations et les deux garde-fous ci-dessous, rebasés le 2026-09-29.
+  Les deux contrôles sont complémentaires : le test se limite aux `use` et
+  au lock, sans rien installer ; `composer-require-checker` exige aussi
+  que chaque symbole (y compris les noms pleinement qualifiés, les fonctions
+  et les extensions) vienne d'un paquet **déclaré**, et non d'une simple
+  dépendance transitive.
+- **Audit** (`composer install --no-dev` + `composer-require-checker`) :
+  `symfony/process` était le **seul** paquet utilisé par `src/` et absent
+  d'une installation `--no-dev`. Les 65 autres symboles signalés venaient de
+  paquets déjà installés en production, mais seulement transitivement
+  (`framework-bundle`, `security-bundle`, `doctrine/orm`…), plus `ext-intl`
+  (`Collator`, `transliterator_transliterate`) et `ext-mbstring`.
+- **Décision — déclarer, pas de liste blanche** : ces 19 paquets
+  (`doctrine/collections`, `doctrine/dbal`, `doctrine/persistence`,
+  `psr/log`, `twig/twig`, `symfony/clock`, `dependency-injection`,
+  `doctrine-bridge`, `event-dispatcher`, `http-foundation`, `http-kernel`,
+  `mime`, `password-hasher`, `routing`, `security-core`, `security-http`,
+  `serializer`, `twig-bridge`, `validator`) et `ext-intl`/`ext-mbstring`
+  sont déclarés dans `require`, contraintes calées sur les versions
+  installées (`7.4.*` pour Symfony, `^majeure.mineure` sinon). Aucun paquet
+  installé ne change (lock : `content-hash` et `platform` seulement, `vendor/`
+  de production identique). Une liste blanche de 65 symboles aurait fait
+  échouer la CI à chaque nouvelle contrainte de validation ou classe
+  Symfony utilisée, sans rien protéger de plus. **Aucune configuration ni
+  liste blanche** de `composer-require-checker` n'est nécessaire.
+- **Au rebase sur `master` (2026-09-29)** : chacun des 19 paquets est
+  réellement utilisé par `src/` (de 1 à 47 fichiers : aucune déclaration
+  superflue), et `ext-intl` (`Normalizer`, `Collator`) et `ext-mbstring`
+  (`mb_*`) le sont aussi. Rejoué sur le code de D160-D170,
+  `composer-require-checker` a trouvé un 20ᵉ paquet :
+  `Symfony\Contracts\Service\ResetInterface` (`LiveDemandPresenter`, D165).
+  `symfony/service-contracts` `^3.7` est donc déclaré (v3.7.3, déjà installé
+  en production — le garde-fou a fonctionné comme prévu, sans incident).
+- **Garde-fou 1 — job CI `backend-prod-dependencies`** :
+  `composer validate --no-check-publish`, `composer install --no-dev`, puis
+  `composer-require-checker` **4.20.0** (phar épinglé, vérifié contre le
+  digest SHA-256 publié par GitHub — pas une dépendance Composer : il a ses
+  propres dépendances et n'a rien à faire dans le lock du projet). 4.20.0 est
+  la dernière version qui tourne sous PHP 8.3 (4.21+ exigent 8.4 et
+  s'arrêtent sur le contrôle de plateforme de leur propre phar, constaté) :
+  le job garde la version de PHP de l'image de production. Un symbole de
+  `src/` fourni par un paquet non déclaré dans `require` fait échouer le job ;
+  un paquet `require-dev` n'est même pas installé, donc ses classes sont
+  signalées. Vérifié en rejouant l'incident (retrait de `symfony/process`
+  de `require`) : le job échoue sur `Symfony\Component\Process\Process` et
+  `Symfony\Component\Process\Exception\ProcessTimedOutException`.
+  `--no-check-publish` : `name`/`description` ne servent qu'à publier un
+  paquet sur Packagist, ce que ce projet n'est pas.
+- **Garde-fou 2 — job CI `backend-prod-image` et commande `app:solver:smoke`** :
+  construit réellement `backend/Dockerfile.prod`, puis dans l'image :
+  `class_exists(Process::class)`, `import ortools` avec le Python du venv, et
+  `app:solver:smoke`. La commande (`SolverSmokeCheck`) résout un problème
+  **en mémoire, jamais persisté** — deux gardes REQUIRED sur deux jours
+  consécutifs, deux candidats éligibles, une vraie phase `SPACING_SCORE` —
+  par le `PlanningSolver` configuré : PHP → `OrToolsPlanningSolver` → Symfony
+  Process → `/opt/ortools-venv/bin/python3` → `cp_sat_solver.py` → CP-SAT →
+  JSON → `OptimizationResult`. Attendu : STRICT `OPTIMAL`, couverture
+  `COMPLETE`, version d'OR-Tools rapportée par le script, les deux gardes
+  attribuées à **deux candidats différents** (seul optimum de l'espacement).
+  Aucune base de données : sûre en CI, sur une image fraîchement construite
+  et en production après déploiement, dans `medvue-backend` comme dans
+  `medvue-worker` (`docs/deployment.md` §2).
+- **Tests** : `SolverSmokeCheckTest` (chemin réel → succès ; classe
+  `Process` absente → la commande ne rend jamais « OK » ; interpréteur
+  Python inutilisable → échec `ERROR` et aucune version ; solution qui rate
+  l'optimum d'espacement → échec), `CiWorkflowTest` (les deux jobs, l'ordre
+  install `--no-dev` → vérification, le phar vérifié, les contrôles exécutés
+  dans l'image construite ; `symfony/process` dans `require` et dans
+  `packages`).
+- **Hors périmètre** : les deux `PlanningGeneration` `FAILED` du 2026-09-28
+  restent dans l'historique (jamais nettoyées) ; aucune reprise automatique.
+
 ## D160 — Une adhésion ouverte par équipe, plus par Planning (remplace D080)
 
 - **Contexte** : chantier « ligne secondaire conditionnelle » (renfort
