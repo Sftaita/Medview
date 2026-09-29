@@ -390,3 +390,13 @@ button.cal-block:hover {
   color: var(--text-body);
   font-size: 14px;
 }
+.cal-check {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.cal-check__refresh {
+  color: var(--text-muted);
+  font-weight: 600;
+}

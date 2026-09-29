@@ -149,6 +149,36 @@ describe('PublishModal', () => {
     expect(screen.getByText(/1 renfort ne peut pas être évalué/)).toBeInTheDocument()
   })
 
+  it('lists each refused assignment with its date, holder and rule, and locates it (docs/decisions.md D171)', async () => {
+    stubPreflight(
+      preflight({
+        publishable: false,
+        republishable: false,
+        invalidAssignments: [
+          {
+            duty: { dutyStableId: 'd29', date: '2026-10-29', dutyTypeName: 'Garde', lineStableId: 'l1', lineName: 'Seniors' },
+            unitStableKey: 'd29',
+            dates: ['2026-10-29'],
+            dutyStableIds: ['d29'],
+            member: { teamMemberStableId: 'm1', firstName: 'Membre', lastName: 'Un' },
+            reason: 'indisponible',
+            reasonCode: 'UNAVAILABLE',
+          },
+        ],
+      }),
+    )
+    const onLocate = vi.fn()
+    render(<PublishModal planningStableId="plan-1" onClose={vi.fn()} onPublished={vi.fn()} onLocate={onLocate} />)
+
+    const list = await screen.findByRole('list', { name: 'Affectations à corriger' })
+    expect(within(list).getByText('Jeudi 29 octobre · ligne « Seniors »')).toBeInTheDocument()
+    expect(within(list).getByText('Membre Un a déclaré une indisponibilité ce jour-là.')).toBeInTheDocument()
+    expect(within(list).getByText(/Règle : personne n’est de garde un jour où elle s’est déclarée indisponible/)).toBeInTheDocument()
+    fireEvent.click(within(list).getByRole('button', { name: 'Voir dans le calendrier' }))
+    expect(onLocate).toHaveBeenCalledWith('d29')
+    expect(screen.queryByRole('button', { name: 'Publier' })).not.toBeInTheDocument()
+  })
+
   it('never calls POST /publish before the final "Publier" click', async () => {
     const api = stubPreflight(preflight())
     renderModal()

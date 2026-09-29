@@ -3,7 +3,12 @@ import { Icon } from '../../../components/Icon'
 import { ApiError } from '../../../lib/apiClient'
 import { Sheet } from '../detail/Sheet'
 import { ExportModal } from '../export/ExportModal'
-import { fetchPlanningResult, fetchPublicationPdf, fetchPublicationPreflight, fetchPublicationState } from '../result/api'
+import {
+  fetchPlanningResult,
+  fetchPublicationPdf,
+  fetchPublicationPreflight,
+  fetchPublicationState,
+} from '../result/api'
 import { PublishModal } from '../result/PublishModal'
 import { impactSummary } from '../result/impacts'
 import { ReassignmentModal } from '../result/ReassignmentModal'
@@ -104,11 +109,34 @@ export function PlanningCalendar({
   const [notice, setNotice] = useState<{ tone: 'success' | 'error' | 'info'; text: string } | null>(null)
   const [statsKey, setStatsKey] = useState(0)
   const [preflight, setPreflight] = useState<PublicationPreflight | null>(null)
+  // Never "nothing to fix" by default: until the check answers, and when it fails, the calendar says so.
+  const [preflightStatus, setPreflightStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(
+    canPublish ? 'loading' : 'idle',
+  )
+  const preflightRequest = useRef(0)
   // `seq` makes a second "Voir" on the same duty scroll to it again.
   const [located, setLocated] = useState<{ dutyStableId: string; seq: number } | null>(null)
   const tableRef = useRef<HTMLDivElement>(null)
 
-  // Both reads always come from the server — the current calendar and its publication state.
+  // What would block a (re)publication, read before anyone clicks "Publier" — so the calendar can point at it. Its
+  // own request: a slow check never delays the calendar, and only the latest answer is kept.
+  const loadPreflight = useCallback(() => {
+    if (!canPublish) return
+    const request = ++preflightRequest.current
+    fetchPublicationPreflight(planning.stableId)
+      .then((value) => {
+        if (request !== preflightRequest.current) return
+        setPreflight(value)
+        setPreflightStatus('ready')
+      })
+      .catch(() => {
+        if (request !== preflightRequest.current) return
+        setPreflight(null)
+        setPreflightStatus('error')
+      })
+  }, [planning.stableId, canPublish])
+
+  // Every read always comes from the server — the current calendar, its publication state, its preflight.
   const fetchAll = useCallback(() => {
     fetchPlanningResult(planning.stableId)
       .then((value) => {
@@ -119,13 +147,8 @@ export function PlanningCalendar({
     fetchPublicationState(planning.stableId)
       .then(setState)
       .catch(() => setState(null))
-    // What would block a (re)publication, read before anyone clicks "Publier" — so the calendar can point at it.
-    if (canPublish) {
-      fetchPublicationPreflight(planning.stableId)
-        .then(setPreflight)
-        .catch(() => setPreflight(null))
-    }
-  }, [planning.stableId, canPublish])
+    loadPreflight()
+  }, [planning.stableId, loadPreflight])
 
   useEffect(() => {
     fetchAll()
@@ -133,9 +156,10 @@ export function PlanningCalendar({
 
   /** After any write: the calendar, the "Modifications non publiées" state and the statistics all re-read. */
   const reload = useCallback(() => {
+    if (canPublish) setPreflightStatus('loading')
     fetchAll()
     setStatsKey((key) => key + 1)
-  }, [fetchAll])
+  }, [fetchAll, canPublish])
 
   const model = useMemo(
     () => (result ? buildCalendar(result.lines, planning.startsAt, planning.endsAt) : null),
@@ -160,7 +184,9 @@ export function PlanningCalendar({
   /** "Voir dans le calendrier": the month of the duty, then the duty itself, scrolled to and focused. */
   const locate = useCallback(
     (dutyStableId: string) => {
-      const found = result?.lines.flatMap((line) => line.duties).find((duty) => duty.dutyStableId === dutyStableId)
+      const found = result?.lines
+        .flatMap((line) => line.duties)
+        .find((duty) => duty.dutyStableId === dutyStableId)
       if (!found) return
       setMonth(found.date.slice(0, 7))
       setLocated((previous) => ({ dutyStableId, seq: (previous?.seq ?? 0) + 1 }))
@@ -365,12 +391,40 @@ export function PlanningCalendar({
         </p>
       )}
 
+      {model && preflightStatus === 'loading' && preflight === null && (
+        <p role="status" className="cal-summary cal-check">
+          <span className="cal-spinner" aria-hidden />
+          Contrôle des incohérences en cours…
+        </p>
+      )}
+      {model && preflightStatus === 'error' && (
+        <p role="alert" className="alert alert--warning cal-check">
+          <Icon name="alert" size={18} strokeWidth={2} />
+          <span>
+            Le contrôle des incohérences n’a pas pu être effectué : les affectations à corriger ne sont pas
+            affichées.
+          </span>
+          <button
+            type="button"
+            className="btn btn--sm btn--secondary"
+            onClick={() => {
+              setPreflightStatus('loading')
+              loadPreflight()
+            }}
+          >
+            Réessayer
+          </button>
+        </p>
+      )}
       {assignmentIssues.length > 0 && (
         <section className="cal-issues" aria-label="Affectations à corriger">
           <span className="cal-issues__title">
             <Icon name="alert" size={16} strokeWidth={2.2} />
-            {assignmentIssues.length === 1 ? '1 affectation' : `${assignmentIssues.length} affectations`} à corriger
-            avant de {published ? 'republier' : 'publier'}
+            {assignmentIssues.length === 1 ? '1 affectation' : `${assignmentIssues.length} affectations`} à
+            corriger avant de {published ? 'republier' : 'publier'}
+            {preflightStatus === 'loading' && (
+              <span className="cal-check__refresh">· vérification en cours…</span>
+            )}
           </span>
           <PreflightIssueList issues={assignmentIssues} onLocate={locate} label="Affectations à corriger" />
         </section>
@@ -378,7 +432,11 @@ export function PlanningCalendar({
       {model && model.uncoveredCount > 0 && (
         <p className="cal-summary">
           <span className="cal-uncovered">
-            ⚠ {summaryText(model.uncoveredCount - model.missingReinforcementCount, model.missingReinforcementCount)}
+            ⚠{' '}
+            {summaryText(
+              model.uncoveredCount - model.missingReinforcementCount,
+              model.missingReinforcementCount,
+            )}
           </span>
           {canEdit && ' — attribuez-les une à une ou utilisez « Compléter automatiquement ».'}
         </p>
@@ -396,8 +454,9 @@ export function PlanningCalendar({
       {model && model.superfluousCount > 0 && (
         <p className="cal-summary cal-summary--quiet">
           {model.superfluousCount} renfort{model.superfluousCount > 1 ? 's' : ''} attribué
-          {model.superfluousCount > 1 ? 's' : ''} mais plus nécessaire{model.superfluousCount > 1 ? 's' : ''} (« Renfort non
-          requis ») — {model.superfluousCount > 1 ? 'ils restent' : 'il reste'} en place tant que vous ne
+          {model.superfluousCount > 1 ? 's' : ''} mais plus nécessaire{model.superfluousCount > 1 ? 's' : ''}{' '}
+          (« Renfort non requis ») — {model.superfluousCount > 1 ? 'ils restent' : 'il reste'} en place tant
+          que vous ne
           {model.superfluousCount > 1 ? ' les' : ' le'} retirez pas.
         </p>
       )}
@@ -494,7 +553,10 @@ export function PlanningCalendar({
             const consequences = impactSummary(impacts)
             setNotice(
               consequences.length > 0
-                ? { tone: 'info', text: `Conséquence${consequences.length > 1 ? 's' : ''} sur les renforts — ${consequences.join(' ; ')}.` }
+                ? {
+                    tone: 'info',
+                    text: `Conséquence${consequences.length > 1 ? 's' : ''} sur les renforts — ${consequences.join(' ; ')}.`,
+                  }
                 : null,
             )
             reload()
@@ -572,7 +634,9 @@ function DutyCell({
       ) : (
         <span className="cal-uncovered">⚠ {gap}</span>
       )}
-      {presentation.tag && <span className={`cal-tag cal-tag--${presentation.tone}`}>{presentation.tag}</span>}
+      {presentation.tag && (
+        <span className={`cal-tag cal-tag--${presentation.tone}`}>{presentation.tag}</span>
+      )}
       {issue && <span className="cal-tag cal-tag--invalid">⚠ À corriger : {issue.tag}</span>}
       {showType && <span className="cal-type"> · {duty.dutyType.name}</span>}
       {(blockPart === 'first' || blockPart === 'single') && (
@@ -614,6 +678,8 @@ function summaryText(duties: number, reinforcements: number): string {
   const parts: string[] = []
   if (duties > 0) parts.push(`${duties} garde${duties > 1 ? 's' : ''} non attribuée${duties > 1 ? 's' : ''}`)
   if (reinforcements > 0)
-    parts.push(`${reinforcements} renfort${reinforcements > 1 ? 's' : ''} requis non attribué${reinforcements > 1 ? 's' : ''}`)
+    parts.push(
+      `${reinforcements} renfort${reinforcements > 1 ? 's' : ''} requis non attribué${reinforcements > 1 ? 's' : ''}`,
+    )
   return parts.join(' et ')
 }

@@ -959,7 +959,10 @@ aujourd'hui.
   aussi `duty`, `dates`, `dutyStableIds` et `members` (ses titulaires).
 - Le calendrier d'un gestionnaire lit ce préflight : panneau « Affectations
   à corriger », marquage de la cellule, « Voir dans le calendrier » ; les
-  modales Publier/Republier listent les mêmes éléments en tête.
+  modales Publier/Republier listent les mêmes éléments en tête. Le contrôle
+  ne retarde jamais le calendrier ; en cours ou en échec, il le dit
+  (« Contrôle des incohérences en cours… », « n'a pas pu être effectué —
+  Réessayer ») : jamais un faux « rien à corriger ».
 - Pendant un job, « Compléter automatiquement » devient « Complétion en
   cours… » (ou « Calcul en cours… ») et une ligne d'état s'affiche au-dessus
   du calendrier. La complétion reste possible sur un planning `PUBLISHED`

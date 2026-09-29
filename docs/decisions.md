@@ -5994,6 +5994,15 @@ l'ancienne (voir légende).
   génération) avec un indicateur, `aria-busy`, une infobulle, et une ligne
   d'état au-dessus du calendrier rappelle qu'une modification faite pendant
   le calcul en annulerait le résultat (`calendar_changed`, D149).
+- **Contrôle lent ou en échec — jamais un faux « rien à corriger »** : le
+  préflight est une requête séparée du calendrier, qui s'affiche sans
+  l'attendre. Tant qu'il n'a pas répondu : « Contrôle des incohérences en
+  cours… » ; s'il échoue : une alerte « le contrôle n'a pas pu être
+  effectué » avec « Réessayer », jamais un calendrier présenté comme sans
+  incohérence ; après une écriture, la liste précédente reste affichée
+  (« vérification en cours… ») jusqu'à la nouvelle réponse, et seule la
+  dernière réponse est retenue. La décision de publier reste au serveur, qui
+  refait le préflight au clic.
 - **Pas de nouveau mode de génération** : compléter un planning publié
   fonctionne déjà ; corriger une affectation devenue invalide reste un geste
   manuel (remplacer ou retirer, puis compléter si besoin). Déplacer

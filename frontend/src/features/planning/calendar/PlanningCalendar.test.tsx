@@ -230,9 +230,8 @@ describe('PlanningCalendar', () => {
     render(<PlanningCalendar planning={MANAGER} onRequestCompletion={onRequestCompletion} />)
 
     fireEvent.click(await screen.findByRole('button', { name: 'Compléter automatiquement' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Une génération ou une complétion est déjà en cours',
-    )
+    const message = await screen.findByText(/Une génération ou une complétion est déjà en cours/)
+    expect(message.closest('[role="alert"]')).not.toBeNull()
   })
 
   it('disables completion and publication while a job runs', async () => {
@@ -504,6 +503,71 @@ describe('PlanningCalendar', () => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
       expect(screen.getByText('Novembre 2026')).toBeInTheDocument()
       expect(screen.getByRole('button', { name: /Carol Petit, 2026-11-05 — à corriger/ })).toHaveClass('cal-item--located')
+    })
+
+    it('never delays the calendar on a slow check, and never shows a failed check as "nothing to fix"', async () => {
+      let answer: (value: unknown) => void = () => {}
+      let fail = true
+      setup(
+        PUBLISHED_DIRTY,
+        {
+          'GET /api/plannings/plan-1/publication-preflight': () =>
+            fail ? { __status: 500, body: {} } : new Promise((resolve) => (answer = resolve)),
+        },
+        NOVEMBER,
+      )
+      render(<PlanningCalendar planning={MANAGER} />)
+
+      // A failed check: the calendar is there, and it says the check could not run — never a clean calendar.
+      expect(await screen.findByRole('table')).toBeInTheDocument()
+      expect(await screen.findByText(/Le contrôle des incohérences n’a pas pu être effectué/)).toBeInTheDocument()
+      expect(screen.queryByRole('region', { name: 'Affectations à corriger' })).not.toBeInTheDocument()
+
+      // Retried, and slow: the calendar stays usable while the check runs, and says it is running.
+      fail = false
+      fireEvent.click(screen.getByRole('button', { name: 'Réessayer' }))
+      expect(await screen.findByText('Contrôle des incohérences en cours…')).toBeInTheDocument()
+      expect(screen.getByRole('table')).toBeInTheDocument()
+      expect(screen.queryByText(/n’a pas pu être effectué/)).not.toBeInTheDocument()
+
+      answer(REFUSED)
+      expect(await screen.findByRole('region', { name: 'Affectations à corriger' })).toBeInTheDocument()
+      expect(screen.queryByText('Contrôle des incohérences en cours…')).not.toBeInTheDocument()
+    })
+
+    it('re-reads the check after a correction, and the panel goes once nothing is left', async () => {
+      let current: unknown = REFUSED
+      setup(
+        PUBLISHED_DIRTY,
+        {
+          'GET /api/plannings/plan-1/publication-preflight': () => current,
+          'GET /api/plannings/plan-1/duties/n5/reassignment-candidates': () => ({
+            groupInstanceStableId: null,
+            groupLabel: null,
+            blockDuties: [{ dutyStableId: 'n5', date: '2026-11-05', startsAt: '', endsAt: '', dutyTypeName: 'Garde' }],
+            generationStableId: 'g-l1',
+            currentTeamMemberStableId: 'm-Carol',
+            currentAssignee: { teamMemberStableId: 'm-Carol', firstName: 'Carol', lastName: 'Petit' },
+            candidates: [{ teamMemberStableId: 'm-Denis', firstName: 'Denis', lastName: 'Roux', reasons: [] }],
+          }),
+          'POST /api/plannings/plan-1/duties/n5/reassign': () => {
+            current = { ...REFUSED, invalidAssignments: [], republishable: true }
+            return { impacts: [] }
+          },
+        },
+        NOVEMBER,
+      )
+      render(<PlanningCalendar planning={MANAGER} />)
+
+      const panel = await screen.findByRole('region', { name: 'Affectations à corriger' })
+      fireEvent.click(within(panel).getByRole('button', { name: 'Voir dans le calendrier' }))
+      fireEvent.click(screen.getByRole('button', { name: /Carol Petit, 2026-11-05 — à corriger/ }))
+      const candidates = await screen.findByRole('list', { name: 'Candidats' })
+      expect(within(candidates).queryByText('Carol Petit')).not.toBeInTheDocument()
+      fireEvent.click(within(candidates).getByRole('button', { name: 'Choisir' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Remplacer' }))
+
+      await waitFor(() => expect(screen.queryByRole('region', { name: 'Affectations à corriger' })).not.toBeInTheDocument())
     })
 
     it('marks nothing when the preflight is clean, and never reads it for a member', async () => {
