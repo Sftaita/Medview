@@ -12,6 +12,7 @@ use App\Entity\PlanningPeriodStatus;
 use App\Entity\PlanningTeamMember;
 use App\Entity\User;
 use App\Exception\OverlappingFairnessPeriodException;
+use App\Repository\AvailabilityCollectionRepository;
 use App\Repository\PlanningLineRepository;
 use App\Repository\PlanningRepository;
 use App\Repository\PlanningTeamMemberRepository;
@@ -45,6 +46,7 @@ final class PlanningController
         private readonly AuthorizationCheckerInterface $authorizationChecker,
         private readonly ValidatorInterface $validator,
         private readonly Security $security,
+        private readonly AvailabilityCollectionRepository $collectionRepository,
     ) {
     }
 
@@ -237,6 +239,9 @@ final class PlanningController
             'myLineName' => $this->lineNamesOf($lines, $memberships),
             'memberCount' => $this->distinctMemberCount($lines),
             'published' => [] !== array_filter($lines, static fn (PlanningLine $line) => $line->isActive() && PlanningPeriodStatus::PUBLISHED === $line->getPlanningPeriod()->getStatus()),
+            // Plannings list: its active lines, and whether an availability collection is open (D169).
+            'lineCount' => \count(array_filter($lines, static fn (PlanningLine $line) => $line->isActive())),
+            'collecting' => [] !== $this->collectionRepository->findOpenByPlanning($planning),
             'canManageAvailability' => $this->authorizationChecker->isGranted(PlanningVoter::MANAGE_AVAILABILITY, $planning),
             'canGenerate' => $this->authorizationChecker->isGranted(PlanningVoter::GENERATE, $planning),
             'canManageCalendar' => $this->authorizationChecker->isGranted(PlanningVoter::MANAGE_CALENDAR, $planning),

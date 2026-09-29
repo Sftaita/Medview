@@ -26,6 +26,10 @@ export type PlanningSummary = {
   memberCount?: number
   /** At least one active line is published (dashboard). */
   published?: boolean
+  /** Active lines of the planning (plannings list, D169). */
+  lineCount?: number
+  /** An availability collection is open (plannings list, D169). */
+  collecting?: boolean
   startsAt: string
   endsAt: string
   timezone: string

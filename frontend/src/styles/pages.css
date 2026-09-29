@@ -28,38 +28,6 @@
 }
 
 /* ---------- Plannings ---------- */
-.plannings-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.plannings-list__item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  color: inherit;
-  text-decoration: none;
-}
-
-.plannings-list__item:hover {
-  border-color: var(--border-strong);
-}
-
-.plannings-list__main {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.plannings-list__name {
-  font-size: var(--text-lg);
-  font-weight: var(--weight-bold);
-  color: var(--text-strong);
-}
-
 .planning-create {
   max-width: 560px;
 }

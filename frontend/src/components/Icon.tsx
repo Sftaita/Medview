@@ -42,6 +42,8 @@ const PATHS = {
   calendarPlus:
     '<path d="M8 2v4"></path><path d="M16 2v4"></path><path d="M21 13V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h8"></path><path d="M3 10h18"></path><path d="M16 19h6"></path><path d="M19 16v6"></path>',
   more: '<circle cx="5" cy="12" r="1"></circle><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle>',
+  clock: '<path d="M12 6v6l4 2"></path><circle cx="12" cy="12" r="10"></circle>',
+  rows: '<path d="M3 5h18"></path><path d="M3 12h18"></path><path d="M3 19h18"></path>',
   search: '<circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path>',
   settings:
     '<path d="M20 7h-9"></path><path d="M14 17H5"></path><circle cx="17" cy="17" r="3"></circle><circle cx="7" cy="7" r="3"></circle>',

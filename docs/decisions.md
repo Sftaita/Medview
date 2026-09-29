@@ -5845,6 +5845,28 @@ l'ancienne (voir légende).
   export ICS (ligne « Échanges de garde, notifications, ICS », pas commencé).
 - **Aucune migration.**
 
+## D169 — « Mes plannings » : liste groupée par phase, frise par mois, étape du planning (maquette `react_mes_plannings`)
+
+- **Contexte** : la liste `/plannings` n'affichait que le nom et les dates
+  brutes (fin exclusive) de chaque planning. La maquette
+  `docs/Design/react_mes_plannings` la remplace par des cartes : statut
+  (« Commence dans N jours » / « En cours · jour X sur N » / « Terminé »),
+  compteur, frise par mois, durée, lignes, membres et étape.
+- **Décision — backend** : `GET /api/plannings` expose en plus `lineCount`
+  (lignes actives) et `collecting` (une `AvailabilityCollection` OPEN existe).
+  L'étape affichée se déduit côté frontend : `published` → « Publié », sinon
+  `collecting` → « Collecte des indispos ouverte », sinon « À générer ».
+- **Décision — frontend** : `PlanningsPage` reprend le contenu de la maquette
+  (préfixe `mp-`, `features/planning/plannings.css`) ; la sidebar, la barre
+  du haut et la barre du bas de la maquette sont celles d'`AppShell` (D151),
+  pas dupliquées. Dates : helpers du tableau de bord (`features/dashboard/dates.ts`),
+  fin affichée **inclusive** (`endsAt − 1 jour`). Plusieurs plannings →
+  groupes En cours / À venir / Terminés (terminés du plus récent). Le
+  formulaire de création existant est conservé, ouvert par « Créer un
+  planning ».
+- **Rejeté** : une étape « générée non publiée » distincte (la maquette n'en
+  prévoit que trois) ; persister une étape sur `Planning` (dérivable).
+- **Aucune migration.**
 
 ## D170 — Mes gardes dans Google Agenda, Apple Calendrier et Outlook : un abonnement iCalendar par adresse secrète
 

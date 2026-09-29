@@ -227,6 +227,17 @@ final class PlanningControllerTest extends WebTestCase
         $asCreator = $summaryFor($creatorToken);
         self::assertNull($asCreator['myLineName']);
         self::assertSame(2, $asCreator['memberCount']);
+        self::assertSame(2, $asCreator['lineCount']);
+        // Creating a planning opens its availability collection, until it is closed.
+        self::assertTrue($asCreator['collecting']);
+
+        $client->request('GET', '/api/plannings/'.$planningStableId.'/availability-collections', server: $this->authHeader($creatorToken));
+        self::assertResponseStatusCodeSame(200);
+        foreach (json_decode((string) $client->getResponse()->getContent(), true) as $collection) {
+            $client->request('POST', '/api/availability-collections/'.$collection['stableId'].'/close', server: $this->authHeader($creatorToken));
+            self::assertResponseIsSuccessful();
+        }
+        self::assertFalse($summaryFor($memberToken)['collecting']);
 
         $container = static::getContainer();
         $period = $container->get(PlanningLineRepository::class)->findByPlanning($container->get(PlanningRepository::class)->findOneByStableId($planningStableId))[0]->getPlanningPeriod();
