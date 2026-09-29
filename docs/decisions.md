@@ -5809,3 +5809,119 @@ l'ancienne (voir légende).
   et la ligne source) ; test de plusieurs actions dans le même tick et
   mutation.
 - **Aucune migration.**
+
+## D168 — « Mes gardes » et « Prochaine garde » : calendrier courant des lignes publiées, pour l'appelant seulement
+
+- **Contexte** : la page « Mes gardes » (`/my-duties`, entrée du menu depuis
+  D151, cible du lien « Voir mes gardes » du tableau de bord) n'était qu'un
+  texte d'attente ; l'accueil n'affichait pas la prochaine garde.
+- **Décision — source** : `GET /api/me/duties` (`MyDutiesService`) lit le
+  **calendrier courant** (`CurrentCalendarReader`, `DutyAssignment.current`)
+  des seules lignes **PUBLISHED** — exactement la lecture du rappel du samedi
+  (D146) : un brouillon n'est jamais montré à ses membres, une modification
+  sur une ligne publiée l'est dès qu'elle est faite, republiée ou non (comme
+  le rappel, et comme le calendrier qu'un membre voit déjà dans le planning).
+  Seules les gardes de l'appelant sortent du service ; pas de Voter
+  (`/api/me/*`, D057).
+- **Plannings lus** : ceux où l'appelant a **une adhésion, ouverte ou close**
+  (`PlanningRepository::findWithPublishedLineForMember`) — une garde faite
+  avant de quitter une équipe reste la sienne (historique jamais effacé),
+  alors que `findVisibleTo` ne retient que les adhésions ouvertes.
+- **Unité** : un bloc est une seule entrée avec tous ses jours (`dates`,
+  `blockName`), comme le rappel ; une garde de renfort porte `conditional` et
+  son état live (`coverageState`, D165/D166) — un renfort superflu encore
+  tenu reste listé (« Renfort non requis actuellement »), jamais masqué.
+- **Frontend** : « À venir » (du plus proche au plus lointain, compte à
+  rebours, « En cours » pour un bloc entamé) / « Passées » (du plus récent),
+  groupées par mois, chaque garde menant à son planning ; styles des cartes
+  et rangées du tableau de bord (`DutyRow` partagé). « À venir » = dernier
+  jour ≥ aujourd'hui, comparé en jours calendaires. Accueil : carte
+  « Prochaine garde » au-dessus de la grille, absente sans garde à venir
+  (hors maquette `react_dashboard`, qui n'en prévoyait pas).
+- **Rejeté** : lire la dernière publication (`PlanningPublicationEntry`) —
+  elle ignorerait un remplacement déjà fait mais non republié, alors que le
+  rappel du samedi et le calendrier du planning le montrent déjà ; filtrer
+  par date côté serveur (fuseau de chaque planning, volume faible) ; un
+  export ICS (ligne « Échanges de garde, notifications, ICS », pas commencé).
+- **Aucune migration.**
+
+
+## D170 — Mes gardes dans Google Agenda, Apple Calendrier et Outlook : un abonnement iCalendar par adresse secrète
+
+- **Contexte** : les médecins veulent voir leurs gardes dans l'agenda de leur
+  téléphone ou de leur messagerie, sans recopier chaque garde ni refaire la
+  manœuvre à chaque changement.
+- **Décision — abonnement, pas fichier** : un flux iCalendar
+  (`GET /api/calendar-feeds/{token}.ics`, RFC 5545) auquel l'agenda
+  **s'abonne** et qu'il interroge lui-même (Google, Apple, Outlook). Un
+  remplacement, un retrait ou une nouvelle publication suivent sans action de
+  la personne ; un `.ics` téléchargé une fois serait faux au premier
+  remplacement.
+- **Contenu = « Mes gardes »** : le flux est rendu depuis
+  `MyDutiesService::dutiesOf()` (D168), sans autre lecture — calendrier
+  courant des lignes **PUBLISHED**, gardes de la personne seulement,
+  adhésions closes incluses, un bloc = une entrée. Un brouillon n'atteint
+  jamais un téléphone. Pas de coupure par ancienneté : un agenda abonné
+  reflète le flux (une garde retirée du flux disparaît de l'agenda), et
+  quelques centaines d'événements restent un petit document.
+- **Événements journée entière** : les gardes sont matérialisées de minuit à
+  minuit dans le fuseau du planning (pas d'heure de garde configurable,
+  D136) ; une date est l'unité honnête — un événement horaire affirmerait des
+  heures que personne n'a configurées. `DTEND` exclusif (bloc samedi +
+  dimanche → `DTEND` lundi) ; un bloc dont les jours ne se suivent pas est
+  découpé en plusieurs événements. `UID` = identifiant stable de l'unité
+  (`DutyGroupInstance` ou `Duty`) : une garde réaffectée quitte le flux de
+  l'un et entre dans celui de l'autre avec le même `UID`, jamais dupliquée.
+  Un renfort non requis actuellement ou indéterminé (D165) est `TENTATIVE`,
+  avec le libellé du badge « Mes gardes ». Titre « Garde {ligne} · {bloc} »
+  (« Renfort … » pour une ligne conditionnelle), description avec planning,
+  ligne, type ou bloc, `URL` vers le planning (`APP_FRONTEND_URL`).
+- **Sérialisation maison** (`App\Calendar\IcsWriter`) plutôt qu'une
+  bibliothèque : le sous-ensemble est minuscule (VCALENDAR + VEVENT en
+  valeurs DATE) ; ses trois pièges sont traités et testés — CRLF,
+  échappement TEXT (`\ ; ,` et retours à la ligne), pliage à 75 octets sans
+  couper un caractère UTF-8.
+- **Authentification du flux — le jeton est la capacité** : les agendas
+  n'envoient pas de JWT. `CalendarFeed` (table `calendar_feeds`) porte un
+  jeton aléatoire de 256 bits ; la route est publique dans `security.yaml`
+  pour ce seul format (`[0-9a-f]{64}\.ics`, GET/HEAD). Jeton inconnu,
+  révoqué ou compte désactivé : le même 404. Lecture seule, gardes d'une
+  seule personne.
+- **Jeton stocké en clair — écart assumé avec D141/invitations/refresh** :
+  l'adresse doit pouvoir être **ré-affichée** à chaque nouvel agenda ajouté
+  (téléphone puis ordinateur) ; un hachage imposerait de la régénérer, donc
+  de casser les abonnements existants. Et le hachage ne protégerait rien :
+  le jeton ne donne accès qu'à des données que la base contient déjà en
+  clair (les gardes). Contrairement à un jeton de réinitialisation, il
+  n'ouvre aucun droit supplémentaire.
+- **Cycle de vie** : rien n'est créé sans demande (`POST
+  /api/me/calendar-feed`, idempotent — un double clic ne crée jamais une
+  deuxième adresse) ; « Générer un nouveau lien » (`POST
+  .../regenerate`) révoque l'ancienne adresse à l'instant (lien partagé par
+  erreur) ; « Désactiver » (`DELETE`). Au plus une adresse active par
+  personne (index unique partiel `WHERE revoked_at IS NULL`, non mappé comme
+  les autres index partiels) ; chaque écriture verrouille d'abord la ligne
+  `users` de la personne, pour que deux requêtes concurrentes se sérialisent
+  au lieu de heurter l'index. Les adresses révoquées sont conservées.
+  `lastFetchedAt` (réécrit au plus une fois par heure) montre à la personne
+  si un agenda s'est déjà synchronisé.
+- **Indépendant de la réinitialisation du mot de passe** : D142 révoque les
+  sessions, pas l'adresse d'agenda — la révoquer casserait silencieusement
+  les agendas de quelqu'un qui a simplement oublié son mot de passe. En cas
+  de doute, la personne régénère le lien (le dialogue le dit).
+- **Frontend** : bouton « Ajouter à mon agenda » sur « Mes gardes », dialogue
+  (`CalendarSubscriptionModal`) — Google Agenda (`render?cid=webcal://…`),
+  Apple Calendrier (`webcal://…`), Outlook.com et Outlook Microsoft 365
+  (`addfromweb?url=https://…`), copie du lien pour tout autre agenda,
+  avertissement « ne le partagez pas », délai de synchronisation propre à
+  chaque agenda (jusqu'à 24 h chez Google), régénérer / désactiver avec une
+  confirmation dans le dialogue (jamais `window.confirm`). L'adresse est
+  construite côté frontend depuis `VITE_API_URL` (déjà correcte en
+  production) — aucune nouvelle variable d'environnement.
+- **Rejeté** : un fichier `.ics` à télécharger (figé au premier changement) ;
+  l'API Google Calendar / Microsoft Graph avec OAuth (écriture dans l'agenda
+  de la personne, consentements, trois intégrations à maintenir, pour un
+  gain nul sur un flux en lecture seule) ; des événements horaires ;
+  limiter le débit de la route publique (256 bits ne se devinent pas, et les
+  agendas interrogent depuis de nombreuses IP partagées).
+- **Migration** : `Version20260929140000` (nouvelle table uniquement).

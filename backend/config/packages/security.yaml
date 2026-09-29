@@ -64,6 +64,10 @@ security:
         # invitation lookup above.
         - { path: ^/api/password-reset/request, roles: PUBLIC_ACCESS }
         - { path: ^/api/password-reset/confirm, roles: PUBLIC_ACCESS }
+        # Polled by Google Calendar, Apple Calendar and Outlook, which send no
+        # JWT: the secret token in the path is the credential (read-only, one
+        # person's duties — docs/decisions.md D170).
+        - { path: '^/api/calendar-feeds/[0-9a-f]{64}\.ics$', methods: [GET, HEAD], roles: PUBLIC_ACCESS }
         - { path: ^/api, roles: IS_AUTHENTICATED_FULLY }
 
 when@test:
