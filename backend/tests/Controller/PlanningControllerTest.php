@@ -239,6 +239,41 @@ final class PlanningControllerTest extends WebTestCase
         self::assertTrue($summaryFor($memberToken)['published']);
     }
 
+    /**
+     * D160 × D151: a person in several lines of the same planning sees every
+     * one of them, in the planning's order, and is counted once.
+     */
+    public function testTheDashboardSummaryListsEveryLineOfAPersonInSeveralLines(): void
+    {
+        $client = static::createClient();
+
+        $this->registerUser($client, 'plan.multi.creator@example.com', 'correct-horse-battery');
+        $creatorToken = $this->loginUser($client, 'plan.multi.creator@example.com', 'correct-horse-battery');
+        $this->registerUser($client, 'plan.multi.member@example.com', 'correct-horse-battery');
+        $memberToken = $this->loginUser($client, 'plan.multi.member@example.com', 'correct-horse-battery');
+
+        $planningStableId = $this->createPlanningViaApi($client, $creatorToken, 'Seniors', 'Multi Line Planning')['stableId'];
+        $client->request('POST', '/api/plannings/'.$planningStableId.'/lines', server: $this->authHeader($creatorToken), content: json_encode(['name' => 'Renfort']));
+        self::assertResponseStatusCodeSame(201);
+
+        $container = static::getContainer();
+        $member = $container->get(UserRepository::class)->findOneByEmail('plan.multi.member@example.com');
+        $membershipService = $container->get(PlanningTeamMembershipService::class);
+        $lines = $container->get(PlanningLineRepository::class)->findByPlanning($container->get(PlanningRepository::class)->findOneByStableId($planningStableId));
+        // Joined in the reverse order of the lines: the summary still follows the planning's order.
+        $membershipService->addMember($lines[1]->getPlanningTeam(), $member, TeamMemberRole::MEMBER, $this->date('2026-01-01'));
+        $membershipService->addMember($lines[0]->getPlanningTeam(), $member, TeamMemberRole::MEMBER, $this->date('2026-01-01'));
+
+        $client->request('GET', '/api/plannings', server: $this->authHeader($memberToken));
+        self::assertResponseStatusCodeSame(200);
+        $list = json_decode((string) $client->getResponse()->getContent(), true);
+        $summary = array_values(array_filter($list, static fn ($p) => 'Multi Line Planning' === $p['name']))[0];
+
+        self::assertTrue($summary['participating']);
+        self::assertSame($lines[0]->getName().', '.$lines[1]->getName(), $summary['myLineName']);
+        self::assertSame(1, $summary['memberCount']);
+    }
+
     public function testCreatorIsNeverAcceptedFromTheClient(): void
     {
         $client = static::createClient();
