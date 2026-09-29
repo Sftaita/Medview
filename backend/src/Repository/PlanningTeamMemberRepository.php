@@ -118,7 +118,11 @@ class PlanningTeamMemberRepository extends ServiceEntityRepository
      * (docs/planning-generation.md §Membres). A member who joined and left
      * entirely outside the window is not relevant to this generation.
      *
-     * @return list<PlanningTeamMember>
+     * $from/$to are calendar DATES (half-open, like the stint itself:
+     * [membershipStart, membershipEnd), and like PlanningPeriod), never a
+     * duty's instants — a UTC instant is not the local date it belongs to.
+     *
+     * @return list<PlanningTeamMember> one row per stint: a person with two stints in the window appears twice
      */
     public function findIntersecting(PlanningTeam $planningTeam, \DateTimeImmutable $from, \DateTimeImmutable $to): array
     {

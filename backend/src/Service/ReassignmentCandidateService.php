@@ -92,8 +92,13 @@ final class ReassignmentCandidateService
         $currentTeamMember = $this->currentBlockTeamMember($block, $currentByDuty);
 
         $team = $duty->getTeam();
-        $blockStart = min(array_map(static fn (Duty $d): \DateTimeImmutable => $d->getStartsAt(), $block));
-        $blockEnd = max(array_map(static fn (Duty $d): \DateTimeImmutable => $d->getEndsAt(), $block));
+        // A membership stint is a range of calendar DATES, half-open [membershipStart, membershipEnd) — the same
+        // convention as PlanningTeamMember::isActiveAt() and the PlanningPeriod bounds. So the block is looked up by
+        // its local dates, [first day, last day + 1), never by its instants: a duty of the first day of a stint
+        // starts the evening before in UTC (Europe/Brussels) and would otherwise miss that stint, although the
+        // write path (isActiveAt on the local date) accepts it.
+        $blockFirstDay = min(array_map(static fn (Duty $d): \DateTimeImmutable => $d->getLocalDate(), $block));
+        $blockDayAfter = max(array_map(static fn (Duty $d): \DateTimeImmutable => $d->getLocalDate(), $block))->modify('+1 day');
 
         // docs/decisions.md D165: a conditional block the live demand does not require (or cannot evaluate) takes
         // no new holder — the list is then empty ON PURPOSE and says why, never an ambiguous empty list.
@@ -111,7 +116,7 @@ final class ReassignmentCandidateService
         }
 
         $candidates = [];
-        foreach (null === $notAssignableReason ? $this->teamMemberRepository->findIntersecting($team, $blockStart, $blockEnd) : [] as $member) {
+        foreach (null === $notAssignableReason ? $this->teamMemberRepository->findIntersecting($team, $blockFirstDay, $blockDayAfter) : [] as $member) {
             if ($member === $currentTeamMember) {
                 continue;
             }
