@@ -4,6 +4,7 @@ import { Icon } from '../components/Icon'
 import '../features/dashboard/dashboard.css'
 import { startOfDay } from '../features/dashboard/dates'
 import { fetchMyDuties } from '../features/duties/api'
+import { CalendarSubscriptionModal } from '../features/duties/CalendarSubscriptionModal'
 import '../features/duties/duties.css'
 import { DutyRow } from '../features/duties/DutyRow'
 import { groupByMonth, splitDuties } from '../features/duties/dutyDates'
@@ -19,6 +20,7 @@ export function MyDutiesPage() {
   const [duties, setDuties] = useState<MyDuty[] | null>(null)
   const [error, setError] = useState(false)
   const [tab, setTab] = useState<Tab>('upcoming')
+  const [subscribing, setSubscribing] = useState(false)
   const today = useMemo(() => startOfDay(new Date()), [])
 
   useEffect(() => {
@@ -45,6 +47,10 @@ export function MyDutiesPage() {
           <h1>Mes gardes</h1>
           <p className="page__lead">Vos gardes des plannings publiés, toutes équipes confondues.</p>
         </div>
+        <button type="button" className="btn btn--secondary" onClick={() => setSubscribing(true)}>
+          <Icon name="calendar" size={18} strokeWidth={2} />
+          Ajouter à mon agenda
+        </button>
       </header>
 
       {duties === null && !error && (
@@ -115,6 +121,8 @@ export function MyDutiesPage() {
           )}
         </>
       )}
+
+      {subscribing && <CalendarSubscriptionModal onClose={() => setSubscribing(false)} />}
     </section>
   )
 }

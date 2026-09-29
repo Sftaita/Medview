@@ -1,6 +1,7 @@
 import { vi } from 'vitest'
 import type { AvailabilityCollection } from '../features/availability/collectionTypes'
 import type { UserAvailabilityPeriod } from '../features/availability/types'
+import type { CalendarFeed } from '../features/duties/calendarFeed'
 
 /**
  * A tiny in-memory backend for the availability screens: the personal
@@ -69,12 +70,21 @@ export type FakeBackendOptions = {
   plannings?: unknown[]
   /** GET /api/me/duties — "Mes gardes" (D168); null makes it fail with a 500. */
   duties?: unknown[] | null
+  /** /api/me/calendar-feed — the subscription address of "Mes gardes" (D170); none by default. */
+  calendarFeed?: CalendarFeed | null
 }
 
 export function createFakeBackend(options: FakeBackendOptions = {}) {
   let periods = [...(options.periods ?? [])]
   let collections = [...(options.collections ?? [])]
   const plannings = options.plannings ?? []
+  let calendarFeed = options.calendarFeed ?? null
+  let nextFeedToken = 1
+  const newFeed = (): CalendarFeed => ({
+    token: String(nextFeedToken++).padStart(64, '0'),
+    createdAt: '2026-12-14T09:00:00+00:00',
+    lastFetchedAt: null,
+  })
   const calls: FakeCall[] = []
   const holds = new Map<string, Deferred>()
   const failures: { key: string; status: number; body: unknown }[] = []
@@ -100,7 +110,23 @@ export function createFakeBackend(options: FakeBackendOptions = {}) {
     if (path === '/api/me') return respond(ME)
     if (path === '/api/plannings' && method === 'GET') return respond(plannings)
     if (path === '/api/me/duties') {
-      return options.duties === null ? respond({ error: 'server_error' }, 500) : respond({ duties: options.duties ?? [] })
+      return options.duties === null
+        ? respond({ error: 'server_error' }, 500)
+        : respond({ duties: options.duties ?? [] })
+    }
+
+    if (path === '/api/me/calendar-feed' && method === 'GET') return respond({ feed: calendarFeed })
+    if (path === '/api/me/calendar-feed' && method === 'POST') {
+      calendarFeed ??= newFeed()
+      return respond({ feed: calendarFeed })
+    }
+    if (path === '/api/me/calendar-feed/regenerate' && method === 'POST') {
+      calendarFeed = newFeed()
+      return respond({ feed: calendarFeed })
+    }
+    if (path === '/api/me/calendar-feed' && method === 'DELETE') {
+      calendarFeed = null
+      return respond(null, 204)
     }
 
     if (path === '/api/me/calendar' && method === 'GET') return respond(periods)

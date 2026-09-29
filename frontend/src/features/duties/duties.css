@@ -17,3 +17,58 @@
 .duties-month:first-child {
   padding-top: 18px;
 }
+
+/* "Ajouter à mon agenda" (docs/decisions.md D170). */
+.cal-sub__apps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+  margin: 16px 0;
+  padding: 0;
+  list-style: none;
+}
+.cal-sub__copy {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.cal-sub__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-body);
+}
+.cal-sub__row {
+  display: flex;
+  gap: 8px;
+}
+.cal-sub__row .field__input {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+.cal-sub__note {
+  font-size: 13px;
+}
+.cal-sub__manage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.cal-sub__confirm {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+.cal-sub__confirm p {
+  margin: 0;
+}
+.cal-sub__apps .btn {
+  height: auto;
+  min-height: var(--control-h-md);
+  white-space: normal;
+  text-align: center;
+}

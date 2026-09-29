@@ -1,5 +1,10 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
+/** The absolute URL of a backend path — for addresses used outside the app (e.g. a calendar subscription). */
+export function apiUrl(path: string): string {
+  return `${API_BASE_URL}${path}`
+}
+
 /** Exported so AuthProvider can recognize this key in cross-tab `storage` events. */
 export const TOKEN_STORAGE_KEY = 'medvue.auth.token'
 

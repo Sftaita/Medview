@@ -74,7 +74,8 @@ détaillé (encore conceptuel, rien d'implémenté) :
 | Tableau de bord refondu (maquette `react_dashboard`) + cadre applicatif aligné (menu latéral dès 760 px, barre du bas à 4 entrées, avatar « Mon compte ») ; `GET /api/plannings` expose `myLineName`/`memberCount`/`published` | ✅ Livré (2026-09-28) — tests backend + frontend ; comparé au pixel près à la maquette dans Chrome (1 600 px et 390 px) | `docs/decisions.md` D151, `docs/Design/react_dashboard` |
 | Ligne secondaire **conditionnelle** (« renfort selon le chirurgien de garde »), de bout en bout : multi-appartenance d'un `User` à plusieurs lignes (D160), contraintes inter-lignes par personne — engagements figés + contrôle live symétrique (D161), politique de demande **versionnée** avec déclencheurs `User` × jours de semaine (D162), gardes `CONDITIONAL` reliées à leur garde source (`Duty.coverageSource`), `DemandView` LIVE/SNAPSHOT, `SELF_COVERAGE` (D163), génération source → cible dans l'orchestration D149, demande figée par génération dans le snapshot et le `snapshotHash`, unités non déclenchées absentes du problème, équité et exposition sur la demande réelle (D164), calendrier live — `dependentImpacts`, `coverage_not_required`, renforts superflus conservés, retrait explicite, complétion sur la demande live, indéterminé jamais complété (D165), publication / statistiques / emails / PDF / export PDF-XLSX sur une seule décision live (D166), frontend — « Paramètres de la ligne », matrice chirurgiens × jours, cinq états live, responsive et accessible (D167) | ✅ Livré et déployé en production (`v2026.09.29-prod`, 2026-09-29, `docs/deployment.md` §6 ; branche `feature/conditional-secondary-line` fusionnée dans `master` avec le tableau de bord D151) — tests backend + frontend, mutations ciblées à chaque lot, recette navigateur desktop (17 étapes) et smartphone (390 px) avec OR-Tools et worker réels ; L9 : correctif des candidats de réaffectation au premier jour d'une adhésion (dates, jamais instants) | `docs/planning.md` §16, `docs/planning-generation.md` §24-§28, `docs/planning-solver.md` §38-§39, `docs/fairness.md`, `docs/planning-export.md` §12, `docs/decisions.md` D160-D167 |
 | « Mes gardes » (`GET /api/me/duties`, calendrier courant des lignes publiées, à venir / passées, blocs groupés, renforts signalés, adhésions closes incluses) + carte « Prochaine garde » sur l'accueil | ✅ Livré (2026-09-29) — tests backend + frontend | `docs/decisions.md` D168 |
-| Échanges de garde, notifications (in-app), export calendrier (ICS) | ⏳ Pas commencé | — |
+| Abonnement agenda de « Mes gardes » (Google Agenda, Apple Calendrier, Outlook) : flux iCalendar `GET /api/calendar-feeds/{token}.ics` public par adresse secrète (`CalendarFeed`, jeton en clair assumé), lecture exacte de `MyDutiesService`, événements journée entière, blocs d'un seul tenant, renforts incertains `TENTATIVE`, créer / régénérer / désactiver depuis « Mes gardes » | ✅ Livré (2026-09-29, branche `feature/calendar-subscription`) — tests backend (34 nouveaux, suite complète 1175 OK) + frontend (15 nouveaux, suite 503 OK), mutations ciblées (règle publique, jetons révoqués) ; recette API + navigateur desktop sur une copie de la base de dev, flux relu par ical.js ; non vérifiés : mobile dans le navigateur, et de vrais Google/Apple/Outlook (le flux doit être joignable publiquement, donc en production) | `docs/calendar-subscription.md`, `docs/decisions.md` D170 |
+| Échanges de garde, notifications (in-app) | ⏳ Pas commencé | — |
 
 ## Où trouver quoi
 
@@ -185,6 +186,11 @@ détaillé (encore conceptuel, rien d'implémenté) :
   exclusif), modèle intermédiaire `PlanningExportData` partagé par les deux
   renderers (dompdf, `openspout/openspout`), injection de formule, nom de
   fichier, dialogue, limites.
+- **`docs/calendar-subscription.md`** — abonnement agenda de « Mes gardes »
+  (D170) : flux iCalendar public par adresse secrète, contenu (lecture
+  `MyDutiesService`), événements journée entière, `CalendarFeed`,
+  endpoints, liens Google / Apple / Outlook, limites (délai de
+  synchronisation propre à chaque agenda).
 - **`docs/allocation-algorithm.md`** — design du moteur de répartition des
   gardes (équité multidimensionnelle, contraintes, pipeline de
   génération). **Document vivant** : encore conceptuel, à corriger et
