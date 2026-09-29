@@ -51,7 +51,9 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
       type: 'PRIMARY',
     })
 
-    expect(await screen.findByText(/La ligne principale est toujours une garde indépendante/)).toBeInTheDocument()
+    expect(
+      await screen.findByText(/La ligne principale est toujours une garde indépendante/),
+    ).toBeInTheDocument()
     expect(screen.queryByText('Renfort selon le chirurgien de garde')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Enregistrer' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Modifier la semaine type/ })).toBeInTheDocument()
@@ -89,13 +91,18 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
 
     fireEvent.change(await screen.findByLabelText('Ligne à renforcer'), { target: { value: 'line-autre' } })
 
-    const rows = screen.getAllByRole('row').slice(1).map((row) => within(row).getByRole('rowheader').textContent)
+    const rows = screen
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => within(row).getByRole('rowheader').textContent)
     expect(rows).toEqual(['Bob Claes', 'Alice BernardNe fait plus partie de la ligne à renforcer'])
   })
 
   it('edits locally (box, whole row, no day) and sends MONDAY…SUNDAY once, on "Enregistrer"', async () => {
     desktopWidth()
-    const saved = conditionalView({ policy: { stableId: 'policy-2', version: 2, createdAt: '2026-12-02T10:00:00+00:00' } })
+    const saved = conditionalView({
+      policy: { stableId: 'policy-2', version: 2, createdAt: '2026-12-02T10:00:00+00:00' },
+    })
     const { api, onSaved } = setup(policyView(), () => saved)
 
     fireEvent.click(await screen.findByRole('radio', { name: /Renfort selon le chirurgien de garde/ }))
@@ -117,7 +124,11 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
       mode: 'CONDITIONAL_ON_SOURCE_ASSIGNMENT',
       source: { lineStableId: SENIORS },
       triggers: [
-        { userStableId: DR_B.userStableId, weekdays: ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'], increment: 1 },
+        {
+          userStableId: DR_B.userStableId,
+          weekdays: ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'],
+          increment: 1,
+        },
         { userStableId: DR_C.userStableId, weekdays: ['FRIDAY', 'SATURDAY', 'SUNDAY'], increment: 1 },
       ],
     })
@@ -175,9 +186,21 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
     setup(
       conditionalView({
         warnings: [
-          { code: 'TRIGGER_PERSON_NOT_IN_SOURCE_LINE', details: {}, message: 'Alice Bernard ne fait pas partie de la ligne source.' },
-          { code: 'TRIGGER_DAY_EXCLUDED_FROM_TARGET', details: {}, message: 'Bob Claes : la semaine type n’a pas de garde le mercredi.' },
-          { code: 'TRIGGER_PARTIALLY_COVERS_TARGET_BLOCK', details: {}, message: 'Bob Claes : le bloc Week-end n’est coché qu’en partie.' },
+          {
+            code: 'TRIGGER_PERSON_NOT_IN_SOURCE_LINE',
+            details: {},
+            message: 'Alice Bernard ne fait pas partie de la ligne source.',
+          },
+          {
+            code: 'TRIGGER_DAY_EXCLUDED_FROM_TARGET',
+            details: {},
+            message: 'Bob Claes : la semaine type n’a pas de garde le mercredi.',
+          },
+          {
+            code: 'TRIGGER_PARTIALLY_COVERS_TARGET_BLOCK',
+            details: {},
+            message: 'Bob Claes : le bloc Week-end n’est coché qu’en partie.',
+          },
         ],
       }),
     )
@@ -189,9 +212,17 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
   })
 
   it.each([
-    ['line_already_materialized', status(409, { error: 'line_already_materialized' }), /ne peuvent plus changer/],
+    [
+      'line_already_materialized',
+      status(409, { error: 'line_already_materialized' }),
+      /ne peuvent plus changer/,
+    ],
     ['planning_already_published', status(409, { error: 'planning_already_published' }), /déjà publiée/],
-    ['source no longer independent', status(422, { error: 'invalid_demand_policy', code: 'SOURCE_NOT_INDEPENDENT' }), /elle-même une ligne de renfort/],
+    [
+      'source no longer independent',
+      status(422, { error: 'invalid_demand_policy', code: 'SOURCE_NOT_INDEPENDENT' }),
+      /elle-même une ligne de renfort/,
+    ],
   ])('explains a refusal: %s', async (_name, reply, text) => {
     desktopWidth()
     setup(conditionalView(), () => reply)
@@ -208,8 +239,13 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Sélectionner le mardi pour tous' }))
     fireEvent.click(screen.getByRole('button', { name: /Modifier la semaine type/ }))
-    expect(await screen.findByText('Semaine type — Renfort')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Annuler' }))
+    const weekDialog = await screen.findByRole('dialog', { name: 'Semaine type — Renfort' })
+    // Once loaded, the editor has its own (selection) "Annuler": close through the dialog's footer.
+    fireEvent.click(
+      within(weekDialog.querySelector<HTMLElement>('.overlay__footer')!).getByRole('button', {
+        name: 'Annuler',
+      }),
+    )
 
     expect(await screen.findByText('Paramètres — Renfort')).toBeInTheDocument()
     expect(box('Anne Admin', 'mardi')).toBeChecked() // the unsaved selection survived
@@ -218,22 +254,44 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
 
   it('a day without duty in the weekly structure takes no new selection, but keeps an existing one visible', async () => {
     desktopWidth()
-    setup(conditionalView({ targetStructure: { configured: true, excludedWeekdays: ['FRIDAY', 'WEDNESDAY'], blocks: [] } }))
+    setup(
+      conditionalView({
+        targetStructure: { configured: true, excludedWeekdays: ['FRIDAY', 'WEDNESDAY'], blocks: [] },
+      }),
+    )
 
-    expect(await screen.findByRole('checkbox', { name: 'Anne Admin — mercredi (pas de garde de renfort ce jour)' })).toBeDisabled()
-    const kept = screen.getByRole('checkbox', { name: 'Bob Claes — vendredi (pas de garde de renfort ce jour)' })
+    expect(
+      await screen.findByRole('checkbox', {
+        name: 'Anne Admin — mercredi (pas de garde de renfort ce jour)',
+      }),
+    ).toBeDisabled()
+    const kept = screen.getByRole('checkbox', {
+      name: 'Bob Claes — vendredi (pas de garde de renfort ce jour)',
+    })
     expect(kept).toBeChecked()
     expect(kept).toBeEnabled() // can still be unchecked
     expect(screen.getByText(/Pas de garde le mercredi, vendredi/)).toBeInTheDocument()
   })
 
   it('explains the block rule when the line has blocks', async () => {
-    setup(conditionalView({ targetStructure: { configured: true, excludedWeekdays: [], blocks: [{ name: 'Week-end', weekdays: ['FRIDAY', 'SATURDAY', 'SUNDAY'] }] } }))
-    expect(await screen.findByText(/tout le bloc est considéré comme nécessitant un renfort/)).toBeInTheDocument()
+    setup(
+      conditionalView({
+        targetStructure: {
+          configured: true,
+          excludedWeekdays: [],
+          blocks: [{ name: 'Week-end', weekdays: ['FRIDAY', 'SATURDAY', 'SUNDAY'] }],
+        },
+      }),
+    )
+    expect(
+      await screen.findByText(/tout le bloc est considéré comme nécessitant un renfort/),
+    ).toBeInTheDocument()
   })
 
   it('switches to one card per person on a narrow screen — same data, same controls', async () => {
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: STACKED_BELOW - 1 } as DOMRect)
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+      width: STACKED_BELOW - 1,
+    } as DOMRect)
     setup(conditionalView())
 
     const cards = await screen.findByRole('list', { name: 'Jours nécessitant un renfort, par chirurgien' })
