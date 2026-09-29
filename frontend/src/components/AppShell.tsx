@@ -1,6 +1,5 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { Link, NavLink, Outlet, useMatch } from 'react-router-dom'
 import { useAuth } from '../features/auth/useAuth'
-import { HealthStatus } from '../features/system/HealthStatus'
 import { Icon, type IconName } from './Icon'
 import { Logo } from './Logo'
 
@@ -9,7 +8,7 @@ type NavItem = {
   icon: IconName
   /** Full label (sidebar). */
   label: string
-  /** Short label (bottom bar, 5 entries on a phone). */
+  /** Short label (bottom bar on a phone). */
   shortLabel: string
   end?: boolean
 }
@@ -17,8 +16,8 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
   { to: '/', icon: 'home', label: 'Tableau de bord', shortLabel: 'Accueil', end: true },
   { to: '/plannings', icon: 'layers', label: 'Plannings', shortLabel: 'Plannings' },
-  { to: '/my-duties', icon: 'moon', label: 'Mes gardes', shortLabel: 'Mes gardes' },
-  { to: '/my-availability', icon: 'calendarX', label: 'Mes indisponibilités', shortLabel: 'Calendrier' },
+  { to: '/my-duties', icon: 'moon', label: 'Mes gardes', shortLabel: 'Gardes' },
+  { to: '/my-availability', icon: 'calendarX', label: 'Mes indisponibilités', shortLabel: 'Indispos' },
 ]
 
 function initials(firstName: string, lastName: string): string {
@@ -26,11 +25,15 @@ function initials(firstName: string, lastName: string): string {
 }
 
 /**
- * Authenticated frame: a left sidebar on desktop, a brand bar on top and a
- * five-entry bottom navigation on a phone (one DOM, switched by CSS).
+ * Authenticated frame (docs/Design/react_dashboard): a left sidebar from 760px,
+ * a brand bar with the account avatar on top and a four-entry bottom navigation
+ * on a phone (one DOM, switched by CSS).
  */
 export function AppShell() {
   const { user, logout } = useAuth()
+  // The dashboard lays out its own margins, as in its mockup.
+  const bare = useMatch('/') !== null
+  const userInitials = user ? initials(user.firstName, user.lastName) : ''
 
   return (
     <div className="shell">
@@ -43,39 +46,48 @@ export function AppShell() {
         <nav aria-label="Navigation principale" className="shell__nav">
           {NAV_ITEMS.map((item) => (
             <NavLink key={item.to} to={item.to} end={item.end} className="shell__nav-link">
-              <Icon name={item.icon} size={20} />
+              <Icon name={item.icon} size={20} strokeWidth={1.9} />
               {item.label}
             </NavLink>
           ))}
         </nav>
 
-        <div className="shell__sidebar-footer">
-          <HealthStatus />
-          {user && (
-            <NavLink to="/account" className="shell__account">
-              <span className="avatar avatar--sm">{initials(user.firstName, user.lastName)}</span>
-              <span>
-                <span className="shell__account-name">
-                  {user.firstName} {user.lastName}
-                </span>
-                <span className="shell__account-sub">Mon compte</span>
-              </span>
-            </NavLink>
-          )}
-          <button type="button" className="btn btn--ghost btn--sm shell__logout" onClick={logout}>
-            <Icon name="logout" size={18} />
-            Se déconnecter
-          </button>
-        </div>
+        {user && (
+          <div className="shell__user">
+            <span className="shell__avatar">{userInitials}</span>
+            <div className="shell__user-text">
+              <div className="shell__user-name">
+                {user.firstName} {user.lastName}
+              </div>
+              <Link to="/account">Mon compte</Link>
+            </div>
+            <button
+              type="button"
+              className="shell__icon-btn"
+              onClick={logout}
+              aria-label="Se déconnecter"
+              title="Se déconnecter"
+            >
+              <Icon name="logout" size={18} strokeWidth={2} />
+            </button>
+          </div>
+        )}
       </aside>
 
       <div className="shell__body">
         <header className="shell__topbar">
-          <Logo size={32} />
-          <span className="shell__brand-name">MedVue</span>
+          <div className="shell__brand shell__brand--sm">
+            <Logo size={30} />
+            <span className="shell__brand-name">MedVue</span>
+          </div>
+          {user && (
+            <Link to="/account" className="shell__avatar shell__avatar--sm" aria-label="Mon compte">
+              {userInitials}
+            </Link>
+          )}
         </header>
 
-        <main className="shell__content">
+        <main className={bare ? 'shell__content shell__content--bare' : 'shell__content'}>
           <Outlet />
         </main>
       </div>
@@ -83,18 +95,10 @@ export function AppShell() {
       <nav aria-label="Navigation mobile" className="shell__tabbar">
         {NAV_ITEMS.map((item) => (
           <NavLink key={item.to} to={item.to} end={item.end} className="shell__tab">
-            <span className="shell__tab-icon">
-              <Icon name={item.icon} size={22} />
-            </span>
-            <span className="shell__tab-label">{item.shortLabel}</span>
+            <Icon name={item.icon} size={22} strokeWidth={1.9} />
+            {item.shortLabel}
           </NavLink>
         ))}
-        <NavLink to="/account" className="shell__tab">
-          <span className="shell__tab-icon">
-            <Icon name="user" size={22} />
-          </span>
-          <span className="shell__tab-label">Compte</span>
-        </NavLink>
       </nav>
     </div>
   )

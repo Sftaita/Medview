@@ -27,81 +27,6 @@
   color: var(--gray-600);
 }
 
-/* ---------- Tableau de bord ---------- */
-.dashboard {
-  display: grid;
-  gap: 16px;
-  align-items: start;
-}
-
-.dashboard__title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-
-.dashboard__ranges {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.dashboard__range {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--red-100);
-  border-radius: var(--radius-md);
-  background: var(--red-50);
-  color: var(--red-700);
-  font-weight: var(--weight-bold);
-}
-
-.dashboard__range--prefer {
-  border-color: var(--green-200);
-  background: var(--green-50);
-  color: var(--green-800);
-}
-
-.dashboard__range-dot {
-  width: 9px;
-  height: 9px;
-  flex: none;
-  border-radius: 50%;
-  background: var(--red-600);
-}
-
-.dashboard__range--prefer .dashboard__range-dot {
-  background: var(--brand);
-}
-
-.dashboard__range-type {
-  margin-left: auto;
-  font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
-}
-
-.dashboard__note {
-  margin: 14px 0 16px;
-  font-size: var(--text-sm);
-  line-height: 1.5;
-}
-
-.dashboard__empty {
-  margin-bottom: 4px;
-}
-
-.dashboard__empty--padded {
-  padding: 8px 16px 16px;
-}
-
-.dashboard__link {
-  display: block;
-  text-decoration: none;
-}
-
 /* ---------- Plannings ---------- */
 .plannings-list {
   display: flex;
@@ -264,11 +189,6 @@
 @media (min-width: 900px) {
   .form-grid {
     grid-template-columns: 1fr 1fr;
-  }
-
-  .dashboard {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 24px;
   }
 
   .planning-detail {

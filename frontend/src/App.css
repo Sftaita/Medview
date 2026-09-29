@@ -44,7 +44,7 @@
   color: var(--gray-600);
 }
 
-/* ---------- Cadre authentifié (mobile d'abord) ---------- */
+/* ---------- Cadre authentifié (maquette docs/Design/react_dashboard, mobile d'abord) ---------- */
 .shell {
   min-height: 100dvh;
 }
@@ -59,24 +59,62 @@
   min-height: 100dvh;
 }
 
+.shell__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px;
+}
+
+.shell__brand-name {
+  font-size: 20px;
+  font-weight: var(--weight-extra);
+  line-height: normal;
+  letter-spacing: -0.01em;
+  color: var(--text-strong);
+}
+
+.shell__brand--sm {
+  gap: 8px;
+  padding: 0;
+}
+
+.shell__brand--sm .shell__brand-name {
+  font-size: 17px;
+}
+
 .shell__topbar {
   position: sticky;
   top: 0;
   z-index: var(--z-sticky);
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
   height: var(--appbar-height);
-  padding: 0 20px;
+  padding: 0 16px;
   background: var(--surface-card);
   border-bottom: 1px solid var(--border-subtle);
 }
 
-.shell__brand-name {
-  font-size: 19px;
+.shell__avatar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--brand-subtle);
+  color: var(--green-800);
+  font-size: 13px;
   font-weight: var(--weight-extra);
-  letter-spacing: var(--tracking-tight);
-  color: var(--text-strong);
+  text-decoration: none;
+}
+
+.shell__avatar--sm {
+  width: 34px;
+  height: 34px;
+  font-size: 12px;
 }
 
 .shell__content {
@@ -85,14 +123,17 @@
   padding: 20px 20px calc(var(--bottomnav-height) + 24px + env(safe-area-inset-bottom));
 }
 
+.shell__content--bare {
+  padding: 0;
+}
+
 .shell__tabbar {
   position: fixed;
   right: 0;
   bottom: 0;
   left: 0;
   z-index: var(--z-nav);
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  display: flex;
   height: calc(var(--bottomnav-height) + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
   background: var(--surface-card);
@@ -101,36 +142,106 @@
 }
 
 .shell__tab {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 3px;
-  color: var(--gray-600);
-  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: var(--weight-semibold);
+  line-height: normal;
+  text-decoration: none;
+}
+
+.shell__tab.active {
+  color: var(--green-700);
+  font-weight: var(--weight-extra);
+}
+
+.shell__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.shell__nav-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 46px;
+  padding: 0 12px;
+  border-radius: 10px;
+  color: var(--text-body);
+  font-size: 15px;
   font-weight: var(--weight-semibold);
   text-decoration: none;
 }
 
-.shell__tab-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 56px;
-  height: 28px;
-  border-radius: var(--radius-pill);
+.shell__nav-link:hover {
+  background: var(--surface-hover);
+  color: var(--text-strong);
 }
 
-.shell__tab.active {
+.shell__nav-link.active {
+  background: var(--brand-subtle);
   color: var(--green-800);
   font-weight: var(--weight-bold);
 }
 
-.shell__tab.active .shell__tab-icon {
-  background: var(--green-100);
+.shell__user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: auto;
+  padding: 12px 8px 0;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 16px;
+  line-height: normal;
 }
 
-@media (min-width: 900px) {
+.shell__user-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.shell__user-name {
+  font-size: 14px;
+  font-weight: var(--weight-bold);
+  color: var(--text-strong);
+}
+
+.shell__user-text a {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.shell__user-text a:hover {
+  color: var(--green-800);
+}
+
+.shell__icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.shell__icon-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text-strong);
+}
+
+@media (min-width: 760px) {
   .shell {
     display: grid;
     grid-template-columns: 248px minmax(0, 1fr);
@@ -141,7 +252,7 @@
     top: 0;
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: 28px;
     height: 100dvh;
     padding: 24px 16px;
     background: var(--surface-card);
@@ -156,90 +267,10 @@
   .shell__content {
     padding: 32px 40px 48px;
   }
-}
 
-.shell__brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 8px;
-}
-
-.shell__brand .shell__brand-name {
-  font-size: 21px;
-}
-
-.shell__nav {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.shell__nav-link {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 44px;
-  padding: 0 12px;
-  border-radius: var(--radius-md);
-  color: var(--gray-700);
-  font-size: var(--text-base);
-  font-weight: var(--weight-semibold);
-  text-decoration: none;
-}
-
-.shell__nav-link:hover {
-  background: var(--surface-hover);
-}
-
-.shell__nav-link.active {
-  background: var(--green-50);
-  color: var(--green-800);
-  font-weight: var(--weight-bold);
-}
-
-.shell__sidebar-footer {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-top: auto;
-  padding-top: 16px;
-  border-top: 1px solid var(--border-subtle);
-}
-
-.shell__sidebar-footer .health {
-  padding: 0 8px;
-}
-
-.shell__account {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px;
-  border-radius: var(--radius-md);
-  text-decoration: none;
-}
-
-.shell__account:hover {
-  background: var(--surface-hover);
-}
-
-.shell__account-name {
-  display: block;
-  font-size: var(--text-base);
-  font-weight: var(--weight-bold);
-  color: var(--text-strong);
-}
-
-.shell__account-sub {
-  display: block;
-  font-size: var(--text-xs);
-  color: var(--gray-600);
-}
-
-.shell__logout {
-  justify-content: flex-start;
-  color: var(--gray-700);
+  .shell__content--bare {
+    padding: 0;
+  }
 }
 
 /* ---------- Pages publiques (connexion, inscription, invitation) ---------- */

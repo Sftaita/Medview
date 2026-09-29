@@ -20,6 +20,12 @@ export type PlanningSummary = {
   canPublish?: boolean
   /** Creator or team OWNER/ADMIN: may configure a line — its weekly structure and how it is covered (D162/D167). */
   canManageLineStructure?: boolean
+  /** Name of the line the caller takes part in — their lines, comma-separated, when several (D160); null when in none (dashboard). */
+  myLineName?: string | null
+  /** People with a membership over one of the active lines, each counted once (dashboard). */
+  memberCount?: number
+  /** At least one active line is published (dashboard). */
+  published?: boolean
   startsAt: string
   endsAt: string
   timezone: string
