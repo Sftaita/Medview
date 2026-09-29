@@ -263,7 +263,7 @@ final class PlanningController
      * The caller's line, or their lines in the planning's order when they
      * belong to several (D160) — "Seniors, Renfort"; null when in none.
      *
-     * @param list<PlanningLine>        $lines
+     * @param list<PlanningLine>       $lines
      * @param list<PlanningTeamMember> $memberships
      */
     private function lineNamesOf(array $lines, array $memberships): ?string
