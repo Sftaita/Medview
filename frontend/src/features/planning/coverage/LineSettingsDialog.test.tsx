@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { status, stubApi } from '../../../testUtils/stubApi'
 import { conditionalView, DR_A, DR_B, DR_C, policyView, RENFORT, SENIORS } from './coverageTestData'
@@ -124,6 +124,24 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
     const sent = api.requests('PUT', POLICY)[0].body as { triggers: { userStableId: string }[] }
     expect(sent.triggers.map((t) => t.userStableId)).not.toContain(DR_A.userStableId) // no day: no trigger at all
     expect(await screen.findByText(/Configuration enregistrée/)).toBeInTheDocument()
+  })
+
+  it('never loses a change: several edits in the same tick all apply (functional updates)', async () => {
+    desktopWidth()
+    setup(conditionalView())
+    await screen.findByLabelText('Ligne à renforcer')
+
+    // Three changes dispatched before React re-renders — the UAT case that exposed a stale selection.
+    act(() => {
+      screen.getByRole('button', { name: 'Tous les jours pour Anne Admin' }).click()
+      screen.getByRole('button', { name: 'Aucun jour pour Alice Bernard' }).click()
+      screen.getByRole('button', { name: 'Aucun jour pour Bob Claes' }).click()
+    })
+
+    expect(box('Anne Admin', 'lundi')).toBeChecked()
+    expect(box('Anne Admin', 'dimanche')).toBeChecked()
+    expect(box('Alice Bernard', 'lundi')).not.toBeChecked()
+    expect(box('Bob Claes', 'vendredi')).not.toBeChecked()
   })
 
   it('a whole column at once', async () => {

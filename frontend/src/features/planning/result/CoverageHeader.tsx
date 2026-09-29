@@ -27,7 +27,9 @@ export function CoverageHeader({ lines }: Props) {
   const requiredTotal = generated.reduce((sum, line) => sum + line.requiredDutyCount, 0)
   const coveredTotal = generated.reduce((sum, line) => sum + line.coveredRequiredDutyCount, 0)
   const uncoveredTotal = requiredTotal - coveredTotal
-  const complete = uncoveredTotal === 0
+  // docs/decisions.md D167: a reinforcement whose need cannot be evaluated is never "complete coverage".
+  const undeterminedTotal = generated.reduce((sum, line) => sum + (line.undeterminedDutyCount ?? 0), 0)
+  const complete = uncoveredTotal === 0 && undeterminedTotal === 0
 
   return (
     <div className="coverage-header">
@@ -45,9 +47,15 @@ export function CoverageHeader({ lines }: Props) {
           </p>
         </div>
       </div>
-      {!complete && (
+      {uncoveredTotal > 0 && (
         <p className="coverage-header__uncovered">
           {uncoveredTotal} garde{uncoveredTotal > 1 ? 's' : ''} non couverte{uncoveredTotal > 1 ? 's' : ''}
+        </p>
+      )}
+      {undeterminedTotal > 0 && (
+        <p className="coverage-header__uncovered">
+          {undeterminedTotal} renfort{undeterminedTotal > 1 ? 's' : ''} non évalué{undeterminedTotal > 1 ? 's' : ''} (la garde
+          dont {undeterminedTotal > 1 ? 'ils dépendent' : 'il dépend'} n’a pas de titulaire)
         </p>
       )}
       {lines.length > 1 &&

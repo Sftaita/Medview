@@ -66,6 +66,12 @@ final class ConditionalGenerationTest extends WebTestCase
         $s = $this->scenario($client);
         $this->forceHolders($client, $s, ['2027-01-05' => 'admin@example.com', '2027-01-08' => 'admin@example.com', '2027-01-09' => 'admin@example.com', '2027-01-10' => 'admin@example.com']);
 
+        // The generation preflight never counts a reinforcement before its source line is assigned (D167).
+        $preflightLines = array_column($this->api($client, 'GET', "/api/plannings/{$s['planningId']}/generation-preflight", token: $s['creator'])['lines'], null, 'name');
+        self::assertNull($preflightLines['Seniors']['demandSourceLineName']);
+        self::assertSame('Seniors', $preflightLines['Renfort']['demandSourceLineName']);
+        self::assertSame([], $preflightLines['Renfort']['familyUnitCounts']);
+
         $job = $this->launch($client, $s);
 
         self::assertSame('SUCCEEDED', $job['status']);

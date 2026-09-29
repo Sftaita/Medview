@@ -152,6 +152,7 @@ function PreflightBody({
   disabled: boolean
 }) {
   const familyCounts = mergedFamilyUnitCounts(preflight)
+  const reinforcementLines = preflight.lines.filter((line) => line.demandSourceLineName)
 
   return (
     <>
@@ -186,9 +187,16 @@ function PreflightBody({
         {familyCounts.length > 0 &&
           familyCounts.map(([name, count]) => (
             <li key={name || '__no_family'}>
-              {plural(count, 'garde à répartir', 'gardes à répartir')} — {name || 'Sans famille'}
+              {plural(count, reinforcementLines.length > 0 ? 'garde indépendante à répartir' : 'garde à répartir', reinforcementLines.length > 0 ? 'gardes indépendantes à répartir' : 'gardes à répartir')}{' '}
+              — {name || 'Sans famille'}
             </li>
           ))}
+        {/* docs/decisions.md D167: never a guessed number — a reinforcement exists only once its source is assigned. */}
+        {reinforcementLines.map((line) => (
+          <li key={`reinforcement-${line.stableId}`}>
+            Ligne « {line.name} » : renforts déterminés après l’attribution de la ligne « {line.demandSourceLineName} »
+          </li>
+        ))}
       </ul>
 
       {preflight.blockers.length > 0 && (

@@ -145,6 +145,8 @@ final class PlanningLaunchController
                 // The empty-string key (units with no family) is rendered
                 // by the frontend as "Sans famille".
                 'familyUnitCounts' => $line->familyUnitCounts,
+                // A reinforcement line (D164): its demand is decided after its source line is assigned — no count.
+                'demandSourceLineName' => $line->demandSourceLine?->getName(),
             ], $preflight->lines),
             'blockers' => array_map($this->issueToArray(...), $preflight->blockers),
             'warnings' => array_map($this->issueToArray(...), $preflight->warnings),

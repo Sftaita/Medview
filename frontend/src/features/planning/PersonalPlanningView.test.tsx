@@ -300,6 +300,32 @@ describe('PersonalPlanningView — whole team (generated result)', () => {
     expect(screen.getByText(/Bob Durand : indisponible, repos d.équipe insuffisant/)).toBeInTheDocument()
   })
 
+  it('reinforcements: nobody needed and nobody on it is not a duty; unknown need is said; never "complete" while undetermined (D167)', async () => {
+    stubResult([
+      makeLine({
+        requiredDutyCount: 1,
+        coveredRequiredDutyCount: 1,
+        uncoveredRequiredDutyCount: 0,
+        undeterminedDutyCount: 1,
+        duties: [
+          resultDuty('a1', '2027-02-05'),
+          resultDuty('r1', '2027-02-06', { covered: false, assignment: null, required: false, demand: { state: 'NOT_REQUIRED_UNASSIGNED', required: false, reason: 'HOLDER_HAS_NO_TRIGGER', superfluous: false, triggeringDutyStableIds: [], triggeringDates: [], dayReason: 'HOLDER_HAS_NO_TRIGGER', weekday: 'FRIDAY', sourceDutyStableId: 's', sourceDate: '2027-02-05', sourceHolder: null, trigger: null } }),
+          resultDuty('r2', '2027-02-07', { covered: false, assignment: null, required: false, demand: { state: 'UNDETERMINED', required: null, reason: 'HOLDER_HAS_NO_TRIGGER', superfluous: false, triggeringDutyStableIds: [], triggeringDates: [], dayReason: 'HOLDER_HAS_NO_TRIGGER', weekday: 'FRIDAY', sourceDutyStableId: 's', sourceDate: '2027-02-05', sourceHolder: null, trigger: null } }),
+          resultDuty('r3', '2027-02-08', { required: false, demand: { state: 'NOT_REQUIRED_ASSIGNED', required: false, reason: 'HOLDER_HAS_NO_TRIGGER', superfluous: true, triggeringDutyStableIds: [], triggeringDates: [], dayReason: 'HOLDER_HAS_NO_TRIGGER', weekday: 'FRIDAY', sourceDutyStableId: 's', sourceDate: '2027-02-05', sourceHolder: null, trigger: null } }),
+        ],
+      }),
+    ])
+    renderView()
+
+    expect(await screen.findByText('Couverture incomplète')).toBeInTheDocument()
+    expect(screen.getByText(/1 renfort non évalué/)).toBeInTheDocument()
+    expect(screen.getByText('? Renfort non évalué')).toBeInTheDocument()
+    expect(screen.getByText('Renfort non requis')).toBeInTheDocument()
+    const days = screen.getByRole('list', { name: 'Gardes du mois' })
+    expect(within(days).getAllByRole('listitem').filter((li) => li.classList.contains('duty'))).toHaveLength(3)
+    expect(screen.queryByText('NON COUVERTE')).not.toBeInTheDocument()
+  })
+
   it('shows a neutral message instead of inventing a reason when none is known', async () => {
     stubResult([
       makeLine({

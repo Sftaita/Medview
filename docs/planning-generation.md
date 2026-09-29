@@ -941,3 +941,11 @@ aujourd'hui.
   aucun sélecteur.
 - **Publier** : bloquants (gardes, renforts requis, renforts non évalués)
   et avertissements (renforts superflus, jamais bloquants) séparés.
+- **Préflight de génération** : « N gardes indépendantes à répartir » ne
+  compte que les unités requises des lignes indépendantes ; une ligne de
+  renfort est annoncée « renforts déterminés après l'attribution de la ligne
+  « X » » (`demandSourceLineName`) — jamais un nombre de renforts avant que
+  la ligne source soit attribuée.
+- **Vue « toute l'équipe »** : même lecture que le calendrier (un renfort non
+  requis et vide n'y figure pas ; « ? Renfort non évalué » ; « Couverture
+  complète » jamais annoncée tant qu'un renfort est non évalué).

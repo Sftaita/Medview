@@ -11,7 +11,11 @@ type Props = {
   /** Days the line itself has no duty (its weekly structure): no new selection there, existing ones kept visible. */
   excludedWeekdays: ApiWeekday[]
   disabled?: boolean
-  onChange: (selection: Selection) => void
+  /**
+   * Receives an UPDATE of the selection, never a computed value: each change applies to the latest selection,
+   * so two quick changes (or two events in the same tick) can never overwrite each other.
+   */
+  onChange: (update: (selection: Selection) => Selection) => void
 }
 
 /** Below this width, one card per person with its days on a wrapping row, instead of a 7-column table. */
@@ -43,7 +47,7 @@ export function CoverageMatrix({ rows, selection, excludedWeekdays, disabled = f
           checked={checked}
           disabled={disabled || (offDay && !checked)}
           aria-label={`${fullName(row)} — ${day.long}${offDay ? ' (pas de garde de renfort ce jour)' : ''}`}
-          onChange={() => onChange(toggleDay(selection, row.userStableId, day.api))}
+          onChange={() => onChange((current) => toggleDay(current, row.userStableId, day.api))}
         />
         {showLabel && <span aria-hidden>{day.short}</span>}
       </label>
@@ -59,7 +63,7 @@ export function CoverageMatrix({ rows, selection, excludedWeekdays, disabled = f
           className="pd-link"
           disabled={disabled}
           aria-label={`Tous les jours pour ${fullName(row)}`}
-          onClick={() => onChange(setDays(selection, row.userStableId, available))}
+          onClick={() => onChange((current) => setDays(current, row.userStableId, available))}
         >
           Tous les jours
         </button>
@@ -68,7 +72,7 @@ export function CoverageMatrix({ rows, selection, excludedWeekdays, disabled = f
           className="pd-link"
           disabled={disabled}
           aria-label={`Aucun jour pour ${fullName(row)}`}
-          onClick={() => onChange(setDays(selection, row.userStableId, []))}
+          onClick={() => onChange((current) => setDays(current, row.userStableId, []))}
         >
           Aucun jour
         </button>
@@ -120,7 +124,7 @@ export function CoverageMatrix({ rows, selection, excludedWeekdays, disabled = f
                       disabled={disabled || (offDay && !allOn)}
                       aria-label={`${allOn ? 'Désélectionner' : 'Sélectionner'} le ${day.long} pour tous`}
                       title={offDay ? 'Pas de garde de renfort ce jour dans la semaine type' : undefined}
-                      onClick={() => onChange(setColumn(selection, userIds, day.api, !allOn))}
+                      onClick={() => onChange((current) => setColumn(current, userIds, day.api, !allOn))}
                     >
                       {day.short}
                     </button>

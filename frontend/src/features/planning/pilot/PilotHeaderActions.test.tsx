@@ -282,6 +282,39 @@ describe('GenerationModal', () => {
   const preflightUrl = 'GET /api/plannings/plan-1/generation-preflight'
   const launchUrl = 'POST /api/plannings/plan-1/generations'
 
+  it('never counts reinforcements before their source line is assigned — says when they are decided (D167)', async () => {
+    const base = makePreflight()
+    stubApi({
+      [preflightUrl]: () =>
+        makePreflight({
+          lines: [
+            base.lines[0],
+            {
+              stableId: 'line-2',
+              name: 'Renfort',
+              type: 'SECONDARY',
+              memberCount: 2,
+              dutyCount: 30,
+              periodStatus: 'DRAFT',
+              hasActiveRuleSet: true,
+              familyUnitCounts: {},
+              demandSourceLineName: 'Seniors',
+            },
+          ],
+        }),
+    })
+    renderActions()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+
+    const dialog = await screen.findByRole('dialog', { name: 'Générer le planning ?' })
+    expect(await within(dialog).findByText(/20 gardes indépendantes à répartir/)).toBeInTheDocument()
+    expect(
+      within(dialog).getByText('Ligne « Renfort » : renforts déterminés après l’attribution de la ligne « Seniors »'),
+    ).toBeInTheDocument()
+    expect(within(dialog).queryByText(/30 gardes/)).not.toBeInTheDocument()
+  })
+
   it('shows the preflight: period, participants, who confirmed, who did not, unavailabilities', async () => {
     stubApi({ [preflightUrl]: () => makePreflight() })
     renderActions()

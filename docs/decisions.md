@@ -5750,11 +5750,20 @@ l'ancienne (voir légende).
   `reasonLabel`, `canManageLineStructure`, `lineName`/`conditional` et le
   récapitulatif de republication. Recette navigateur desktop (17 étapes) et
   smartphone (390 px) sur la stack du chantier, OR-Tools et worker réels.
-- **Constat de recette hors périmètre, non corrigé ici** (préexistant,
-  `master`) : `PlanningTeamMemberRepository::findIntersecting()` compare la
-  date de début d'adhésion à des instants ; pour une garde du premier jour
-  d'adhésion qui se termine avant minuit UTC (fuseau Europe/Brussels), la
-  personne n'est pas listée parmi les candidats de réaffectation, alors que
-  l'écriture l'accepte. Aucun effet sur la génération. À traiter dans un
-  correctif dédié.
+- **Constat de recette hors périmètre** (préexistant, `master`) : la liste
+  des candidats de réaffectation interrogeait les adhésions (des dates, en
+  demi-ouvert) avec les **instants UTC** de la garde ; le premier jour d'une
+  adhésion (garde commençant la veille au soir en UTC), la personne manquait
+  alors que l'écriture l'acceptait. **Corrigé en L9** par un commit séparé :
+  la recherche se fait sur les dates locales du bloc, `[premier jour,
+  dernier jour + 1)` — convention inchangée, `findIntersecting()`
+  documentée ; tests de frontière et mutations.
+- **Constat de recette L9 (défaut de la matrice)** : chaque action de la
+  matrice calculait la nouvelle sélection depuis la valeur du dernier rendu ;
+  deux actions rapprochées (avant un nouveau rendu) s'écrasaient — une
+  politique enregistrée différente de celle saisie. Corrigé : la matrice
+  émet une **mise à jour** (`(sélection) => sélection`), le dialogue
+  l'applique au brouillon courant (`setDraft` fonctionnel, idem pour le mode
+  et la ligne source) ; test de plusieurs actions dans le même tick et
+  mutation.
 - **Aucune migration.**

@@ -161,6 +161,8 @@ export type GenerationPreflight = {
      * the empty-string key groups units with no family. Never hardcoded names —
      * always rendered from what this line's structure actually configured. */
     familyUnitCounts: Record<string, number>
+    /** docs/decisions.md D164/D167 — the line a reinforcement line depends on; its reinforcements are not counted. */
+    demandSourceLineName: string | null
   }[]
   blockers: PreflightIssue[]
   warnings: PreflightIssue[]

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Icon } from '../../components/Icon'
 import { fetchAssignments, fetchTeamMembers } from './api'
+import { isShown, presentDuty } from './calendar/calendarModel'
 import { CoverageHeader } from './result/CoverageHeader'
 import { fetchPlanningResult } from './result/api'
 import type { PlanningResult, PlanningResultDuty } from './result/types'
@@ -166,7 +167,8 @@ export function PersonalPlanningView({ planning }: Props) {
 
   const byDayResult = useMemo(() => {
     const flat: FlatResultDuty[] = (teamResult?.lines ?? []).flatMap((line) =>
-      line.duties.map((duty) => ({ ...duty, lineName: line.lineName, lineStableId: line.lineStableId })),
+      // docs/decisions.md D167: a reinforcement nobody needs and nobody holds is not a duty of the day.
+      line.duties.filter(isShown).map((duty) => ({ ...duty, lineName: line.lineName, lineStableId: line.lineStableId })),
     )
     const groups = new Map<string, FlatResultDuty[]>()
     for (const duty of flat) {
@@ -268,7 +270,11 @@ export function PersonalPlanningView({ planning }: Props) {
                         {duty.covered && duty.assignment && (
                           <span className="duty__who">{fullName(duty.assignment.user)}</span>
                         )}
+                        {presentDuty(duty).tag && <span className="muted duty__tag">{presentDuty(duty).tag}</span>}
                         {!duty.covered && duty.required && <UncoveredDuty reasons={duty.reasons} />}
+                        {!duty.covered && presentDuty(duty).tone === 'undetermined' && (
+                          <span className="cal-undetermined">? Renfort non évalué</span>
+                        )}
                         {planning.lines.length > 1 && (
                           <span className="muted duty__line">{duty.lineName}</span>
                         )}

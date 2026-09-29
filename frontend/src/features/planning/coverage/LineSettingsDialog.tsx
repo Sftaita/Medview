@@ -185,7 +185,7 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
                       name={`${sourceId}-mode`}
                       checked={!conditional}
                       disabled={saving}
-                      onChange={() => setDraft({ ...draft, mode: 'INDEPENDENT' })}
+                      onChange={() => setDraft((current) => current && { ...current, mode: 'INDEPENDENT' })}
                     />
                     <span>
                       <strong>Garde indépendante</strong>
@@ -198,7 +198,7 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
                       name={`${sourceId}-mode`}
                       checked={conditional}
                       disabled={saving}
-                      onChange={() => setDraft({ ...draft, mode: 'CONDITIONAL_ON_SOURCE_ASSIGNMENT' })}
+                      onChange={() => setDraft((current) => current && { ...current, mode: 'CONDITIONAL_ON_SOURCE_ASSIGNMENT' })}
                     />
                     <span>
                       <strong>Renfort selon le chirurgien de garde</strong>
@@ -224,7 +224,10 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
                       className="cov-select"
                       value={draft.sourceLineStableId ?? ''}
                       disabled={saving}
-                      onChange={(event) => setDraft({ ...draft, sourceLineStableId: event.target.value || null })}
+                      onChange={(event) => {
+                        const sourceLineStableId = event.target.value || null
+                        setDraft((current) => current && { ...current, sourceLineStableId })
+                      }}
                     >
                       <option value="">Choisir une ligne…</option>
                       {view.sourceOptions.map((option) => (
@@ -252,7 +255,8 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
                         selection={draft.selection}
                         excludedWeekdays={excluded}
                         disabled={saving}
-                        onChange={(selection) => setDraft({ ...draft, selection })}
+                        // Functional updates only (docs/decisions.md D167): never a stale draft overwriting a change.
+                        onChange={(update) => setDraft((current) => current && { ...current, selection: update(current.selection) })}
                       />
                     </>
                   )}

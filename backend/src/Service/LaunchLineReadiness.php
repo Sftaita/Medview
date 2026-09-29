@@ -27,6 +27,11 @@ final readonly class LaunchLineReadiness
         public PlanningPeriodStatus $periodStatus,
         public bool $hasActiveRuleSet,
         public array $familyUnitCounts = [],
+        /**
+         * The line it reinforces, for a conditional line (docs/decisions.md D162/D164): its reinforcements are
+         * decided only once that line is assigned, so none is counted in $familyUnitCounts — never a guessed number.
+         */
+        public ?PlanningLine $demandSourceLine = null,
     ) {
     }
 }

@@ -146,6 +146,7 @@ export function makePreflight(overrides: Partial<GenerationPreflight> = {}): Gen
         periodStatus: 'DRAFT',
         hasActiveRuleSet: true,
         familyUnitCounts: { '': 20, 'Week-end': 10 },
+        demandSourceLineName: null,
       },
     ],
     blockers: [],

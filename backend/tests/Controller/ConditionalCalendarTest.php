@@ -455,6 +455,41 @@ final class ConditionalCalendarTest extends WebTestCase
         self::assertSame([self::TUE => 'REQUIRED_ASSIGNED', self::FRI => 'REQUIRED_ASSIGNED', self::SAT => 'REQUIRED_ASSIGNED', self::SUN => 'REQUIRED_ASSIGNED'], $this->renfortStates($client, $s));
     }
 
+    public function testTheLiveCalendarFollowsTheHoldersButKeepsTheGeneratedPolicyUntilTheNextGeneration(): void
+    {
+        $client = static::createClient();
+        // 1. Generated with P1 (Dr B every day, Dr C Friday–Sunday); Dr A holds every main-line day.
+        $s = $this->generatedScenario($client, self::DR_A_EVERYWHERE);
+        $firstGeneration = (string) $this->currentGeneration($s, 1)->getStableId();
+
+        // 2. P2 without generating: only Dr A triggers, every day.
+        $this->setPolicy($client, $s, [['admin@example.com', self::ALL_DAYS]]);
+
+        // 3. The generated calendar still reads P1: Dr A triggers nothing.
+        self::assertSame([self::TUE => 'NOT_REQUIRED_UNASSIGNED', self::FRI => 'NOT_REQUIRED_UNASSIGNED', self::SAT => 'NOT_REQUIRED_UNASSIGNED', self::SUN => 'NOT_REQUIRED_UNASSIGNED'], $this->renfortStates($client, $s));
+
+        // 4-5. Dr B takes Tuesday: the live demand follows the new holder — still under P1 (under P2, Dr B would
+        // trigger nothing).
+        $response = $this->replaceSource($client, $s, self::TUE, 'alice@example.com');
+        self::assertSame('REQUIRED_UNASSIGNED', $response['dependentImpacts'][0]['newState']);
+        self::assertSame('REQUIRED_UNASSIGNED', $this->renfortStates($client, $s)[self::TUE]);
+        self::assertSame('NOT_REQUIRED_UNASSIGNED', $this->renfortStates($client, $s)[self::FRI]);
+
+        // 6-7. A new generation: P2 is now the policy the calendar reads.
+        $this->launch($client, $s);
+        self::assertNotSame($firstGeneration, (string) $this->currentGeneration($s, 1)->getStableId());
+        self::assertSame(2, $this->snapshotOf($this->currentGeneration($s, 1))->getDemandPolicy()->getPolicyVersion());
+        $main = $this->currentCalendar($s['planningId']);
+        $states = $this->renfortStates($client, $s);
+        $drA = static fn (string $date): bool => 'admin@example.com' === $main['0|'.$date.'|ONCALL'];
+        self::assertSame($drA(self::TUE), str_starts_with((string) $states[self::TUE], 'REQUIRED'), 'Tuesday: required exactly when Dr A holds it (P2).');
+        // Friday–Sunday is one block: required as a whole as soon as Dr A holds one of its days.
+        $blockTriggered = $drA(self::FRI) || $drA(self::SAT) || $drA(self::SUN);
+        foreach ([self::FRI, self::SAT, self::SUN] as $date) {
+            self::assertSame($blockTriggered, str_starts_with((string) $states[$date], 'REQUIRED'), "{$date}: the whole block follows P2.");
+        }
+    }
+
     // --- fairness of a completion ---------------------------------------------------------------------------
 
     public function testCompletionFairnessUsesTheLiveDemandAndCountsASuperfluousReinforcementAsLoad(): void

@@ -114,6 +114,7 @@ final class PlanningGenerationLauncher
                 $period->getStatus(),
                 null !== $this->ruleSetRepository->findActive($line->getPlanningTeam()),
                 $this->familyUnitCounts($period),
+                $this->conditionalSourceOf($line),
             );
             $lines[] = $readiness;
 

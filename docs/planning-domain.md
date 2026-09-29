@@ -109,7 +109,11 @@ supplémentaire, dénormalisé depuis `planningTeam.planning` (D081) — voir
 plus bas.
 
 Une ligne = **un stint continu** d'appartenance (`membershipStart`,
-`membershipEnd` nullable). Quitter une équipe ferme le stint
+`membershipEnd` nullable — des **dates** calendaires, en demi-ouvert
+`[membershipStart, membershipEnd)`, comme `isActiveAt()` et les bornes d'une
+`PlanningPeriod` ; toute recherche d'adhésion pour une garde se fait sur ses
+dates locales, jamais sur ses instants UTC — correctif L9 des candidats de
+réaffectation au premier jour d'une adhésion). Quitter une équipe ferme le stint
 (`membershipEnd`), ne le supprime jamais. Revenir crée un **nouveau**
 `PlanningTeamMember` — l'historique reste une vraie séquence append-only,
 jamais réécrite.
