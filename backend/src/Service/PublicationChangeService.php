@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Service;
 
-use App\Demand\LiveCoverageState;
 use App\Entity\Planning;
 use App\Entity\PlanningPublication;
 use App\Entity\PlanningTeamMember;
@@ -15,23 +14,27 @@ use App\Repository\PlanningTeamMemberRepository;
 
 /**
  * "What changed since the last diffusion, and who must be told"
- * (docs/decisions.md D143).
+ * (docs/decisions.md D143, D172).
  *
  * Changes: the current calendar compared duty by duty with the latest
  * PlanningPublication's frozen entries — by holder, never by
  * DutyAssignment row, so A → B → A is no change at all, and a block
  * changes on each of its days at once (its duties always move together).
+ * The holder is compared by durable identity, the User — never the
+ * PlanningTeamMember row, which changes when someone leaves and rejoins a
+ * team while nothing changes for anyone.
  *
- * Audience of a republication — a business rule, not a convenience:
- * every person concerned by an impacted DATE is told, i.e.
- *   the previous holder(s) of each changed duty
- *   ∪ the new holder(s)
- *   ∪ whoever currently holds any duty, on any line, on any impacted date.
- * A changed block impacts every one of its dates. Deduplicated by user;
- * deactivated accounts are never emailed.
+ * Audience of a republication (D172, supersedes D143's "everyone on duty
+ * on an impacted date"): only the people whose OWN duties changed — the
+ * previous holder of a changed duty (a removal) and its new holder (an
+ * addition), grouped per person, one email each, with their changes only.
+ * Deactivated accounts are never emailed.
  */
 final class PublicationChangeService
 {
+    public const ADDED = 'added';
+    public const REMOVED = 'removed';
+
     public function __construct(
         private readonly PlanningPublicationEntryRepository $entryRepository,
         private readonly PlanningLineRepository $lineRepository,
@@ -57,7 +60,7 @@ final class PublicationChangeService
             // D166: except a conditional duty, which is absent from a publication only when it was not required then.
             $recorded = \array_key_exists((int) $cell->duty->getId(), $publishedByDutyId);
             $before = $publishedByDutyId[(int) $cell->duty->getId()] ?? null;
-            if ($before?->getId() !== $cell->member?->getId()) {
+            if ($before?->getUser()->getId() !== $cell->member?->getUser()->getId()) {
                 $changes[] = new PublicationChange($cell->line, $cell->duty, $before, $cell->member, $recorded || !$cell->duty->isConditional(), $cell->isShown());
             }
         }
@@ -68,28 +71,76 @@ final class PublicationChangeService
     }
 
     /**
-     * @param list<PublicationChange> $changes
-     * @param list<CalendarCell>      $cells   the current calendar, every line
+     * Each concerned person's own changes (docs/decisions.md D172): the
+     * previous holder of a changed duty loses it (REMOVED), its new holder
+     * gains it (ADDED) — A → B tells A of the removal and B of the addition,
+     * nothing else. A block is one unit carrying every one of its dates
+     * (its days always move together); a solo duty is one unit. What this
+     * returns is exactly what each email says — frozen by the caller with
+     * the publication, never re-derived when an email is retried.
      *
-     * @return list<User>
+     * Nothing about anybody else's duties is ever part of a person's
+     * changes, and nothing personal beyond the duties themselves (no
+     * unavailability) is ever read here.
+     *
+     * @param list<PublicationChange> $changes changesSince()
+     *
+     * @return list<array{user: User, changes: list<array{kind: string, line: string, dutyType: ?string, block: ?string, dates: list<string>}>}> sorted by name; units chronological
      */
-    public function audienceForChanges(array $changes, array $cells): array
+    public function personalChanges(array $changes): array
     {
-        $impactedDates = [];
-        $members = [];
+        /** @var array<int, User> $users */
+        $users = [];
+        /** @var array<int, array<string, array{kind: string, line: string, dutyType: ?string, block: ?string, dates: list<string>, sort: array{0: \DateTimeImmutable, 1: int, 2: int}}>> $units */
+        $units = [];
         foreach ($changes as $change) {
-            $impactedDates[$change->duty->getLocalDate()->format('Y-m-d')] = true;
-            $members[] = $change->before;
-            $members[] = $change->after;
-        }
+            $before = $change->before?->getUser();
+            $after = $change->after?->getUser();
+            if ($before?->getId() === $after?->getId()) {
+                continue; // the same person, through another membership: nothing changed for anyone
+            }
 
-        foreach ($cells as $cell) {
-            if (isset($impactedDates[$cell->duty->getLocalDate()->format('Y-m-d')])) {
-                $members[] = $cell->member;
+            foreach ([self::REMOVED => $before, self::ADDED => $after] as $kind => $user) {
+                if (null === $user || !$user->isActive()) {
+                    continue;
+                }
+                $userId = (int) $user->getId();
+                $users[$userId] = $user;
+
+                $group = $change->duty->getGroupInstance();
+                $key = $kind.'|'.(null !== $group ? 'g'.$group->getId() : 'd'.$change->duty->getId());
+                $units[$userId][$key] ??= [
+                    'kind' => $kind,
+                    'line' => $change->line->getName(),
+                    // A block reads as its name; a solo duty as its type (a line may hold a day and a night duty).
+                    'dutyType' => null === $group ? $change->duty->getDutyType()->getName() : null,
+                    'block' => $group?->getPattern()->getName(),
+                    'dates' => [],
+                    'sort' => [$change->duty->getStartsAt(), $change->line->getPosition(), self::REMOVED === $kind ? 0 : 1],
+                ];
+                $units[$userId][$key]['dates'][] = $change->duty->getLocalDate()->format('Y-m-d');
+                if ($change->duty->getStartsAt() < $units[$userId][$key]['sort'][0]) {
+                    $units[$userId][$key]['sort'][0] = $change->duty->getStartsAt();
+                }
             }
         }
 
-        return $this->distinctActiveUsers($members);
+        $result = [];
+        foreach ($this->sortedByName($users) as $user) {
+            $userUnits = array_values($units[(int) $user->getId()]);
+            usort($userUnits, static fn (array $a, array $b): int => $a['sort'] <=> $b['sort']);
+            $result[] = [
+                'user' => $user,
+                'changes' => array_map(static function (array $unit): array {
+                    $dates = array_values(array_unique($unit['dates']));
+                    sort($dates);
+
+                    return ['kind' => $unit['kind'], 'line' => $unit['line'], 'dutyType' => $unit['dutyType'], 'block' => $unit['block'], 'dates' => $dates];
+                }, $userUnits),
+            ];
+        }
+
+        return $result;
     }
 
     /**
@@ -113,136 +164,27 @@ final class PublicationChangeService
             static fn (PlanningTeamMember $member): bool => isset($activeTeamIds[(int) $member->getPlanningTeam()->getId()]),
         );
 
-        return $this->distinctActiveUsers(array_values($members));
-    }
-
-    /**
-     * @param list<PlanningTeamMember|null> $members
-     *
-     * @return list<User> sorted by name
-     */
-    private function distinctActiveUsers(array $members): array
-    {
         $users = [];
         foreach ($members as $member) {
-            if (null === $member) {
-                continue;
-            }
             $user = $member->getUser();
             if ($user->isActive()) {
                 $users[(int) $user->getId()] = $user;
             }
         }
 
+        return $this->sortedByName($users);
+    }
+
+    /**
+     * @param array<int, User> $users
+     *
+     * @return list<User>
+     */
+    private function sortedByName(array $users): array
+    {
         $users = array_values($users);
         usort($users, static fn (User $a, User $b): int => [$a->getLastName(), $a->getFirstName(), $a->getEmail()] <=> [$b->getLastName(), $b->getFirstName(), $b->getEmail()]);
 
         return $users;
-    }
-
-    /**
-     * What a republication email says (docs/decisions.md D143):
-     * - `units`: one line per changed unit — a whole block once, with its
-     *   date range, never day by day — "before → after";
-     * - `days`: for every impacted date, every line's situation that day,
-     *   changed ("A → B") or not ("C — inchangé"), so a colleague on
-     *   another line sees exactly why they are told.
-     *
-     * @param list<PublicationChange> $changes
-     * @param list<CalendarCell>      $cells   the current calendar, every line
-     *
-     * @return array{units: list<array{line: string, when: string, block: ?string, before: string, after: string}>, days: list<array{label: string, rows: list<array{line: string, text: string}>}>}
-     */
-    public function digest(array $changes, array $cells): array
-    {
-        $units = [];
-        $changeByDutyId = [];
-        foreach ($changes as $change) {
-            $changeByDutyId[(int) $change->duty->getId()] = $change;
-            $group = $change->duty->getGroupInstance();
-            $key = null !== $group ? 'g'.$group->getId() : 'd'.$change->duty->getId();
-            $units[$key] ??= ['change' => $change, 'dates' => []];
-            $units[$key]['dates'][] = $change->duty->getLocalDate();
-        }
-
-        $unitRows = [];
-        foreach ($units as $unit) {
-            $change = $unit['change'];
-            $dates = $unit['dates'];
-            sort($dates);
-            $unitRows[] = [
-                'line' => $change->line->getName(),
-                'when' => FrenchDate::range($dates[0], $dates[\count($dates) - 1]),
-                'block' => $change->duty->getGroupInstance()?->getPattern()->getName(),
-                'before' => self::holder($change->before, $change->beforeShown),
-                'after' => self::holder($change->after, $change->afterShown),
-            ];
-        }
-
-        $impactedDates = [];
-        foreach ($changes as $change) {
-            $impactedDates[$change->duty->getLocalDate()->format('Y-m-d')] = $change->duty->getLocalDate();
-        }
-        ksort($impactedDates);
-
-        $days = [];
-        foreach ($impactedDates as $dateKey => $date) {
-            $cellsOfDay = array_values(array_filter($cells, static fn (CalendarCell $cell): bool => $cell->duty->getLocalDate()->format('Y-m-d') === $dateKey));
-            usort($cellsOfDay, static fn (CalendarCell $a, CalendarCell $b): int => [$a->line->getPosition(), $a->duty->getStartsAt()] <=> [$b->line->getPosition(), $b->duty->getStartsAt()]);
-
-            $perLine = [];
-            foreach ($cellsOfDay as $cell) {
-                $perLine[(int) $cell->line->getId()][] = $cell;
-            }
-
-            $rows = [];
-            foreach ($cellsOfDay as $cell) {
-                $showType = \count($perLine[(int) $cell->line->getId()]) > 1;
-                $change = $changeByDutyId[(int) $cell->duty->getId()] ?? null;
-                if (null === $change && !$cell->isShown()) {
-                    continue; // D166: a reinforcement nobody needs, unchanged — not part of the day's situation
-                }
-                $text = null !== $change
-                    ? self::holder($change->before, $change->beforeShown).' → '.self::holder($change->after, $change->afterShown)
-                    : self::unchangedText($cell);
-                $rows[] = [
-                    'line' => $cell->line->getName().($showType ? ' · '.$cell->duty->getDutyType()->getName() : ''),
-                    'text' => $text,
-                ];
-            }
-
-            $days[] = ['label' => ucfirst(FrenchDate::withWeekday($date)), 'rows' => $rows];
-        }
-
-        return ['units' => $unitRows, 'days' => $days];
-    }
-
-    /**
-     * An unchanged cell of the day (docs/decisions.md D167): a reinforcement reads as its live state — "Renfort
-     * requis — non attribué" when it is needed and missing (it may not even have existed at the last
-     * diffusion), never a plain "Non attribué" that would look like nothing changed for it.
-     */
-    private static function unchangedText(CalendarCell $cell): string
-    {
-        if (null === $cell->member && LiveCoverageState::REQUIRED_UNASSIGNED === $cell->coverageState) {
-            return 'Renfort requis — non attribué';
-        }
-        if (null === $cell->member && $cell->isUndetermined()) {
-            return 'Renfort non évalué';
-        }
-
-        return self::holder($cell->member).' — inchangé';
-    }
-
-    /**
-     * @param bool $shown false: a reinforcement nobody needs (D166) — "Pas de renfort", never "Non attribué"
-     */
-    private static function holder(?PlanningTeamMember $member, bool $shown = true): string
-    {
-        if (null !== $member) {
-            return $member->getUser()->getFirstName().' '.$member->getUser()->getLastName();
-        }
-
-        return $shown ? 'Non attribué' : 'Pas de renfort';
     }
 }

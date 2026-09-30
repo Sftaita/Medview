@@ -15,7 +15,6 @@ use App\Exception\PlanningNotPublishableException;
 use App\Exception\PlanningNotYetPublishedException;
 use App\Exception\PlanningPublicationInProgressException;
 use App\Repository\PlanningLineRepository;
-use App\Repository\PlanningPublicationDeliveryRepository;
 use App\Repository\PlanningPublicationRepository;
 use App\Repository\PlanningRepository;
 use App\Security\Voter\PlanningVoter;
@@ -57,7 +56,6 @@ final class PlanningPublicationController
         private readonly PlanningPublicationPreflightService $preflightService,
         private readonly PlanningPublicationService $publicationService,
         private readonly PlanningPublicationRepository $publicationRepository,
-        private readonly PlanningPublicationDeliveryRepository $deliveryRepository,
         private readonly PlanningPdfRenderer $pdfRenderer,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
         private readonly LiveDemandPresenter $demandPresenter,
@@ -171,8 +169,8 @@ final class PlanningPublicationController
                 'publishedAt' => $publication->getPublishedAt()->format(\DATE_ATOM),
                 'publishedBy' => ['firstName' => $publication->getPublishedBy()->getFirstName(), 'lastName' => $publication->getPublishedBy()->getLastName()],
                 'changedDutyCount' => $publication->getChangedDutyCount(),
-                'recipientCount' => \count($this->deliveryRepository->findByPublication($publication)),
-                'sentCount' => \count(array_filter($this->deliveryRepository->findByPublication($publication), static fn ($delivery): bool => $delivery->isSent())),
+                // docs/decisions.md D172: recipientCount / sentCount / failedCount (still retried, or given up).
+                ...$this->publicationService->deliveryCounts($publication),
             ], $state->history);
         }
 

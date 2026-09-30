@@ -203,6 +203,8 @@ export type PublicationHistoryItem = {
   changedDutyCount: number
   recipientCount: number
   sentCount: number
+  /** docs/decisions.md D172: emails not delivered yet (retried automatically) or given up. */
+  failedCount: number
 }
 
 /**
@@ -344,7 +346,11 @@ export type ConditionalPublicationItem = {
   unitStableKey: string
   dates: string[]
   member: PublicationMemberRef | null
-  source: { dutyStableId: string; date: string; holder: { userStableId: string; firstName: string; lastName: string } | null }
+  source: {
+    dutyStableId: string
+    date: string
+    holder: { userStableId: string; firstName: string; lastName: string } | null
+  }
   reason: string
   /** Plain-language explanation, computed by the backend. */
   explanation: string

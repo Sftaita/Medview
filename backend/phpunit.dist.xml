@@ -13,6 +13,9 @@
     <php>
         <ini name="display_errors" value="1" />
         <ini name="error_reporting" value="-1" />
+        <!-- One process runs the whole suite and each dompdf rendering peaks near 100 MB (docs/decisions.md D172):
+             the CLI default of 128M was already reached by the suite before D172. Test process only. -->
+        <ini name="memory_limit" value="512M" />
         <server name="APP_ENV" value="test" force="true" />
         <server name="SHELL_VERBOSITY" value="-1" />
     </php>

@@ -3,6 +3,7 @@ import { Icon } from '../../../components/Icon'
 import { Overlay } from '../../../components/Overlay'
 import { ApiError } from '../../../lib/apiClient'
 import { fetchPublicationPreflight, republishPlanning } from '../result/api'
+import { undeliveredMessage } from '../result/publicationDelivery'
 import type { PublicationChange, PublicationPreflight, PublicationResult } from '../result/types'
 import { PreflightIssueList } from './PreflightIssueList'
 import { blockingIssues } from './preflightIssues'
@@ -30,9 +31,9 @@ function holder(person: { firstName: string; lastName: string } | null, shown = 
 }
 
 /**
- * "Republier les modifications" (docs/decisions.md D143): lists what
+ * "Republier les modifications" (docs/decisions.md D143, D172): lists what
  * changed since the last diffusion and who will be told — only the people
- * concerned by an impacted date. The server re-checks the calendar and
+ * whose own duties change, each with their own changes. The server re-checks the calendar and
  * recomputes the changes at the moment of the click; this list is a preview.
  */
 export function RepublishModal({ planningStableId, changes, onClose, onRepublished, onLocate }: Props) {
@@ -114,15 +115,18 @@ export function RepublishModal({ planningStableId, changes, onClose, onRepublish
       }
     >
       {result ? (
-        <p className="alert alert--success">
-          <Icon name="check" size={18} strokeWidth={2} />
-          <span>
-            Planning republié. {result.recipientCount} personne{result.recipientCount > 1 ? 's' : ''}{' '}
-            concernée
-            {result.recipientCount > 1 ? 's ont' : ' a'} été informée{result.recipientCount > 1 ? 's' : ''}{' '}
-            par email.
-          </span>
-        </p>
+        <>
+          <p className="alert alert--success">
+            <Icon name="check" size={18} strokeWidth={2} />
+            <span>{republishedMessage(result)}</span>
+          </p>
+          {undeliveredMessage(result) && (
+            <p role="alert" className="alert alert--warning">
+              <Icon name="alert" size={18} strokeWidth={2} />
+              <span>{undeliveredMessage(result)}</span>
+            </p>
+          )}
+        </>
       ) : (
         <>
           {/* What blocks comes first: with dozens of changes listed, a refusal at the bottom goes unseen. */}
@@ -131,7 +135,9 @@ export function RepublishModal({ planningStableId, changes, onClose, onRepublish
               Contrôle du planning…
             </p>
           )}
-          {preflight && !preflight.republishable && <RepublishBlockers preflight={preflight} onLocate={onLocate} />}
+          {preflight && !preflight.republishable && (
+            <RepublishBlockers preflight={preflight} onLocate={onLocate} />
+          )}
           <ul className="cal-changes" aria-label="Modifications non publiées">
             {units.map(({ key, dates, change }) => (
               <li key={key}>
@@ -142,15 +148,16 @@ export function RepublishModal({ planningStableId, changes, onClose, onRepublish
                   · {change.lineName}
                 </span>
                 <span>
-                  {holder(change.before, change.beforeShown)} → <strong>{holder(change.after, change.afterShown)}</strong>
+                  {holder(change.before, change.beforeShown)} →{' '}
+                  <strong>{holder(change.after, change.afterShown)}</strong>
                 </span>
               </li>
             ))}
           </ul>
           <p className="muted">
-            Un email détaillant ces modifications sera envoyé uniquement aux personnes concernées par les
-            dates modifiées : l’ancien et le nouveau titulaire, et les personnes de garde ces mêmes jours sur
-            les autres lignes.
+            Seules les personnes dont les gardes changent reçoivent un email : l’ancien titulaire (garde
+            retirée) et le nouveau (garde ajoutée). Chacune n’y voit que ses propres changements, avec le
+            planning actualisé en PDF.
           </p>
         </>
       )}
@@ -190,6 +197,15 @@ function RepublishBlockers({
       <PreflightIssueList issues={issues} onLocate={onLocate} />
     </>
   )
+}
+
+/** docs/decisions.md D172: one personal email per person whose own duties changed. */
+function republishedMessage(result: PublicationResult): string {
+  if (result.recipientCount === 0)
+    return 'Planning republié. Aucune personne n’est concernée : aucun email envoyé.'
+  const people =
+    result.recipientCount > 1 ? `${result.recipientCount} personnes concernées` : '1 personne concernée'
+  return `Planning republié. ${people} — chacune reçoit le détail de ses propres changements et le planning actualisé en PDF.`
 }
 
 function errorMessage(err: unknown): string {

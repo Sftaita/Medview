@@ -1,23 +1,34 @@
-Modification du planning de garde
+Modification de vos gardes
 
 Bonjour {{ firstName }},
 
-Le planning de garde {{ planningName }} a été modifié.
-{% for unit in units %}
+Vos gardes du planning {{ planningName }} ont été modifiées. Voici ce qui change pour vous.
+{% if removed is not empty %}
 
-{{ unit.line }} — {{ unit.when }}{% if unit.block %} (bloc {{ unit.block }}){% endif %}
+{{ removed|length > 1 ? 'GARDES RETIRÉES' : 'GARDE RETIRÉE' }}
+{% for u in removed %}
 
-  {{ unit.before }} → {{ unit.after }}
-{% endfor %}
-{% for day in days %}
+- {{ u.when }} — {{ u.line }}{% if u.detail %} ({{ u.detail }}){% endif %}
 
-{{ day.label }}
-{% for row in day.rows %}
-  {{ row.line }} : {{ row.text }}
+{% for d in u.dates %}
+    {{ d }}
 {% endfor %}
 {% endfor %}
+{% endif %}
+{% if added is not empty %}
 
-Le planning actualisé est disponible dans MedVue :
+{{ added|length > 1 ? 'GARDES AJOUTÉES' : 'GARDE AJOUTÉE' }}
+{% for u in added %}
+
+- {{ u.when }} — {{ u.line }}{% if u.detail %} ({{ u.detail }}){% endif %}
+
+{% for d in u.dates %}
+    {{ d }}
+{% endfor %}
+{% endfor %}
+{% endif %}
+
+Le planning complet actualisé est joint en PDF. Il reste consultable à tout moment dans MedVue :
 {{ planningUrl }}
 
 L'équipe MedVue

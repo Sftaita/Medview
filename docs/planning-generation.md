@@ -722,7 +722,8 @@ corrections (remplacer / retirer, bloc toujours entier) → gardes non
 attribuées → « Compléter automatiquement » (trous uniquement) → statistiques
 → publier (email + PDF à chaque participant) → planning publié, toujours
 éditable → « Modifications non publiées » → republier (email aux seules
-personnes concernées par les dates modifiées) → rappel du samedi.
+personnes dont les propres gardes changent, avec leurs seuls changements et
+le PDF actualisé — §30, D172) → rappel du samedi.
 
 | Endpoint | Droit | Rôle |
 |---|---|---|
@@ -732,8 +733,8 @@ personnes concernées par les dates modifiées) → rappel du samedi.
 | `POST /api/plannings/{id}/complete` | MANAGE_CALENDAR | comble les trous, affectations existantes fixées (D145) |
 | `GET /api/plannings/{id}/statistics` | VIEW | + `weightedLoad`, `countsByDutyType` |
 | `POST /api/plannings/{id}/publish` | PUBLISH | première diffusion, enregistrée garde par garde (D143) |
-| `POST /api/plannings/{id}/republish` | PUBLISH | diffuse les changements depuis la dernière diffusion |
-| `GET /api/plannings/{id}/publication-state` | VIEW (détails : PUBLISH) | publié ?, dates, changements non diffusés, historique |
+| `POST /api/plannings/{id}/republish` | PUBLISH | diffuse les changements depuis la dernière diffusion (D172 : un email personnel par personne concernée) |
+| `GET /api/plannings/{id}/publication-state` | VIEW (détails : PUBLISH) | publié ?, dates, changements non diffusés, historique (`recipientCount`, `sentCount`, `failedCount`) |
 | `GET /api/plannings/{id}/publication.pdf` | VIEW | PDF de la dernière diffusion |
 | `POST /api/plannings/{id}/export` | VIEW (planning publié) | PDF ou Excel du **calendrier courant** — lignes, ordre, noms, titre, période choisis (`docs/planning-export.md`, D150) |
 | `PUT /api/plannings/{id}/teams/{t}/members/{m}/role` | MANAGE (créateur) | accorde/retire « Gestionnaire » (ADMIN, D147) |
@@ -967,3 +968,26 @@ aujourd'hui.
   cours… » (ou « Calcul en cours… ») et une ligne d'état s'affiche au-dessus
   du calendrier. La complétion reste possible sur un planning `PUBLISHED`
   (D145) ; elle ne corrige jamais une affectation existante devenue invalide.
+
+## 30. Emails de republication personnalisés (docs/decisions.md D172)
+
+- **Référence** : la dernière `PlanningPublication` (entrées figées, D143) —
+  jamais la génération initiale ni les modifications intermédiaires ; A → B
+  → A n'est pas un changement. Comparaison par `User` (identité durable,
+  plusieurs adhésions possibles, D160).
+- **Destinataires** : l'ancien titulaire de chaque garde changée (garde
+  retirée) et son nouveau titulaire (garde ajoutée) — personne d'autre ;
+  comptes désactivés exclus. Aucun email si rien n'a changé (`no_changes`).
+- **Contenu** : un email par personne, « Garde(s) retirée(s) » / « Garde(s)
+  ajoutée(s) » avec ses seuls changements, un bloc une fois avec chacune de
+  ses dates ; PDF joint = planning général de la version republiée
+  (`PlanningPdfRenderer`, entrées de la publication).
+- **Envoi** : `planning_publication_notifications` (une ligne par
+  publication × personne, changements figés en JSON) écrite dans la
+  transaction de la publication, envoyée juste après le commit par
+  `PublicationNotificationSender` ; réservation atomique avant chaque envoi
+  (jamais deux fois le même email) ; échecs retentés par
+  `app:publication-notifications:retry` (cron, `docs/deployment.md`
+  §5 quater) jusqu'à 5 tentatives, puis visibles (`failedCount`).
+- **Première publication** : inchangée (chaque participant, PDF joint),
+  désormais par la même boîte d'envoi (donc retentée elle aussi).

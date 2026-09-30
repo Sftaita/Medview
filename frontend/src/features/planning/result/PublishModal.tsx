@@ -5,6 +5,7 @@ import { ApiError } from '../../../lib/apiClient'
 import { fetchPublicationPreflight, publishPlanning } from './api'
 import { PreflightIssueList } from '../calendar/PreflightIssueList'
 import { blockingIssues } from '../calendar/preflightIssues'
+import { undeliveredMessage } from './publicationDelivery'
 import type { PublicationPreflight, PublicationResult } from './types'
 
 type Props = {
@@ -126,6 +127,12 @@ export function PublishModal({ planningStableId, onClose, onPublished, onLocate 
           </span>
         </p>
       )}
+      {result && undeliveredMessage(result) && (
+        <p role="alert" className="alert alert--warning">
+          <Icon name="alert" size={18} strokeWidth={2} />
+          <span>{undeliveredMessage(result)}</span>
+        </p>
+      )}
       {result && (
         <ul className="preflight-issues" aria-label="Résultat de la publication">
           {result.lines.map((line) => (
@@ -194,7 +201,8 @@ function PreflightBody({
           <li className="alert alert--warning">
             <Icon name="alert" size={18} strokeWidth={2} />
             <span>
-              {plural(missingDuties.length, 'garde obligatoire reste', 'gardes obligatoires restent')} non couverte
+              {plural(missingDuties.length, 'garde obligatoire reste', 'gardes obligatoires restent')} non
+              couverte
               {missingDuties.length > 1 ? 's' : ''}.
             </span>
           </li>
@@ -203,7 +211,8 @@ function PreflightBody({
           <li className="alert alert--warning">
             <Icon name="alert" size={18} strokeWidth={2} />
             <span>
-              {plural(missingReinforcements.length, 'renfort requis n’est', 'renforts requis ne sont')} pas attribué
+              {plural(missingReinforcements.length, 'renfort requis n’est', 'renforts requis ne sont')} pas
+              attribué
               {missingReinforcements.length > 1 ? 's' : ''}
               {missingReinforcements[0].lineName ? ` (ligne « ${missingReinforcements[0].lineName} »)` : ''}.
             </span>
@@ -266,14 +275,14 @@ function SuperfluousWarnings({ items }: { items: PublicationPreflight['superfluo
     <>
       <h3 className="preflight-heading">Avertissements — ils n’empêchent pas la publication</h3>
       <ul className="preflight-issues" aria-label="Avertissements">
-      {items.map((item) => (
-        <li key={item.unitStableKey} className="alert alert--warning">
-          <Icon name="alert" size={18} strokeWidth={2} />
-          <span>
-            Ligne « {item.lineName} » : {item.explanation}
-          </span>
-        </li>
-      ))}
+        {items.map((item) => (
+          <li key={item.unitStableKey} className="alert alert--warning">
+            <Icon name="alert" size={18} strokeWidth={2} />
+            <span>
+              Ligne « {item.lineName} » : {item.explanation}
+            </span>
+          </li>
+        ))}
       </ul>
     </>
   )

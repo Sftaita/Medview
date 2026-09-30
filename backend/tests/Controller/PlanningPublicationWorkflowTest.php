@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace App\Tests\Controller;
 
 use App\Entity\PlanningPublicationKind;
-use App\Repository\PlanningPublicationDeliveryRepository;
+use App\Entity\PublicationNotificationStatus;
 use App\Repository\PlanningPublicationEntryRepository;
+use App\Repository\PlanningPublicationNotificationRepository;
 use App\Repository\PlanningPublicationRepository;
 use App\Repository\PlanningRepository;
 use App\Service\PlanningPdfRenderer;
@@ -75,12 +76,22 @@ final class PlanningPublicationWorkflowTest extends WebTestCase
             $key = '0|'.$entry->getDuty()->getLocalDate()->format('Y-m-d').'|ONCALL';
             self::assertSame($calendar[$key], $entry->getTeamMember()?->getUser()->getEmail());
         }
-        self::assertCount(3, static::getContainer()->get(PlanningPublicationDeliveryRepository::class)->findByPublication($publication));
+        // docs/decisions.md D172: one notification per participant, recorded with the publication, all sent, no "changes".
+        $notifications = static::getContainer()->get(PlanningPublicationNotificationRepository::class)->findByPublication($publication);
+        self::assertCount(3, $notifications);
+        foreach ($notifications as $notification) {
+            self::assertSame(PublicationNotificationStatus::SENT, $notification->getStatus());
+            self::assertSame(1, $notification->getAttempts());
+            self::assertNull($notification->getChanges());
+        }
 
         $state = $this->state($client, $s);
         self::assertTrue($state['published']);
         self::assertNotNull($state['lastPublishedAt']);
         self::assertFalse($state['hasUnpublishedChanges']);
+        self::assertSame(3, $state['history'][0]['recipientCount']);
+        self::assertSame(3, $state['history'][0]['sentCount']);
+        self::assertSame(0, $state['history'][0]['failedCount']);
     }
 
     public function testThePdfShowsEveryDateEveryLineThePeopleAndTheBlocks(): void
@@ -349,7 +360,11 @@ final class PlanningPublicationWorkflowTest extends WebTestCase
         self::assertCount(1, static::getContainer()->get(PlanningPublicationRepository::class)->findByPlanning($this->planningEntity($s['planningId'])), 'Nothing recorded.');
     }
 
-    public function testRepublicationAudienceIsOldAndNewHolderPlusEveryoneOnDutyThatDayOnOtherLines(): void
+    /**
+     * docs/decisions.md D172 (supersedes D143's audience by date): A → B tells A of the removal and B of the
+     * addition — each their own change only — and nobody else, not even the other line's person on duty that day.
+     */
+    public function testAReassignmentTellsOnlyTheOldAndTheNewHolderEachTheirOwnChange(): void
     {
         $client = static::createClient();
         $s = $this->pilotScenario($client);
@@ -371,21 +386,31 @@ final class PlanningPublicationWorkflowTest extends WebTestCase
         self::assertSame('UPDATE', $response['publication']['kind']);
         self::assertSame(1, $response['publication']['changedDutyCount']);
 
-        $expected = array_values(array_unique([$oldHolder, $newHolder, $colleagueSameDay]));
+        $expected = [$oldHolder, $newHolder];
         sort($expected);
-        self::assertSame($expected, $this->emailedAddresses(), 'Old holder, new holder, and the other line\'s person on duty that day — nobody else.');
+        self::assertNotContains($colleagueSameDay, $expected, 'Precondition: the colleague is someone else.');
+        self::assertSame($expected, $this->emailedAddresses(), 'The old and the new holder — never the other line\'s person on duty that day.');
+        self::assertSame(2, $response['recipientCount']);
+        self::assertSame(2, $response['sentCount']);
 
-        $body = (string) self::getMailerMessages()[0]->getTextBody();
-        self::assertStringContainsString('Modification du planning de garde', $body);
-        self::assertStringContainsString('Mercredi 6 janvier 2027', $body);
-        self::assertStringContainsString('Seniors : Test User → Test User', $body);
-        self::assertStringContainsString('Juniors : Test User — inchangé', $body);
+        $removal = $this->bodyFor($oldHolder);
+        self::assertStringContainsString('Modification de vos gardes', $removal);
+        self::assertStringContainsString("GARDE RETIRÉE\n\n- Mercredi 6 janvier 2027 — Seniors", $removal);
+        self::assertStringNotContainsString('AJOUTÉE', $removal);
+        $addition = $this->bodyFor($newHolder);
+        self::assertStringContainsString("GARDE AJOUTÉE\n\n- Mercredi 6 janvier 2027 — Seniors", $addition);
+        self::assertStringNotContainsString('RETIRÉE', $addition);
         foreach (self::getMailerMessages() as $message) {
-            self::assertCount(0, $message->getAttachments(), 'No PDF on a republication.');
+            self::assertInstanceOf(Email::class, $message);
+            self::assertSame('Modification de vos gardes — Gardes Seniors', $message->getSubject());
+            self::assertStringNotContainsString('Juniors', (string) $message->getTextBody(), 'Nothing about the other line.');
+            self::assertStringNotContainsString('Mardi 5 janvier', (string) $message->getTextBody(), 'Nothing about unchanged duties.');
+            self::assertCount(1, $message->getAttachments(), 'The updated planning, as a PDF.');
+            self::assertSame('planning-gardes-seniors.pdf', $message->getAttachments()[0]->getFilename());
         }
     }
 
-    public function testRepublishingAChangedBlockInformsColleaguesOfEveryDayOfTheBlock(): void
+    public function testARepublishedBlockGivesEachOfItsDatesOnceToTheOldAndTheNewHolderOnly(): void
     {
         $client = static::createClient();
         $s = $this->pilotScenario($client);
@@ -403,14 +428,29 @@ final class PlanningPublicationWorkflowTest extends WebTestCase
         $this->republishPlanning($client, $s);
         self::assertResponseIsSuccessful();
 
-        $expected = array_values(array_unique([$blockHolder, $newHolder, $calendar['1|2027-01-08|ONCALL'], $calendar['1|2027-01-09|ONCALL']]));
+        $expected = [$blockHolder, $newHolder];
         sort($expected);
-        self::assertSame($expected, $this->emailedAddresses(), 'Both days of the block are impacted — Sunday\'s other-line colleague is not.');
-        $body = (string) self::getMailerMessages()[0]->getTextBody();
-        self::assertStringContainsString('du vendredi 8 au samedi 9 janvier 2027 (bloc Test group)', $body);
+        self::assertSame($expected, $this->emailedAddresses(), 'One email each, for the whole block — the other line\'s colleagues are not told.');
+
+        foreach ([$blockHolder => 'RETIRÉE', $newHolder => 'AJOUTÉE'] as $who => $kind) {
+            $body = $this->bodyFor($who);
+            self::assertStringContainsString("GARDE {$kind}\n\n- Du vendredi 8 au samedi 9 janvier 2027 — Seniors (bloc Test group)", $body, 'The block is one change…');
+            self::assertStringContainsString("    Vendredi 8 janvier 2027\n    Samedi 9 janvier 2027\n", $body, '…with every one of its dates.');
+            self::assertSame(1, substr_count($body, '- Du vendredi'), 'Never one item per day of the block.');
+        }
+        foreach (self::getMailerMessages() as $message) {
+            self::assertInstanceOf(Email::class, $message);
+            $html = (string) $message->getHtmlBody();
+            self::assertStringContainsString('Du vendredi 8 au samedi 9 janvier 2027', $html);
+            self::assertStringContainsString('Vendredi 8 janvier 2027<br>Samedi 9 janvier 2027', $html);
+            self::assertStringContainsString('Seniors — bloc Test group', $html);
+        }
+        $notification = static::getContainer()->get(PlanningPublicationNotificationRepository::class)->findByPublication($this->latestPublication($s['planningId']))[0];
+        self::assertSame(['2027-01-08', '2027-01-09'], $notification->getChanges()[0]['dates']);
+        self::assertSame('Test group', $notification->getChanges()[0]['block']);
     }
 
-    public function testARemovalWithoutReplacementIsRepublishedToTheRemovedPersonAndColleagues(): void
+    public function testARemovalWithoutReplacementIsRepublishedToTheRemovedPersonOnly(): void
     {
         $client = static::createClient();
         $s = $this->pilotScenario($client);
@@ -428,10 +468,10 @@ final class PlanningPublicationWorkflowTest extends WebTestCase
 
         $this->republishPlanning($client, $s);
         self::assertResponseIsSuccessful();
-        $expected = [$calendar['0|2027-01-06|ONCALL'], 'junior@example.com'];
-        sort($expected);
-        self::assertSame($expected, $this->emailedAddresses());
-        self::assertStringContainsString('Test User → Non attribué', (string) self::getMailerMessages()[0]->getTextBody());
+        $formerHolder = $calendar['0|2027-01-06|ONCALL'];
+        self::assertNotNull($formerHolder);
+        self::assertSame([$formerHolder], $this->emailedAddresses(), 'The former holder — the junior on duty that day learns nothing new.');
+        self::assertStringContainsString("GARDE RETIRÉE\n\n- Mercredi 6 janvier 2027 — Seniors", $this->bodyFor($formerHolder));
     }
 
     public function testASuccessfulRepublicationBecomesTheNewReference(): void
@@ -563,6 +603,20 @@ final class PlanningPublicationWorkflowTest extends WebTestCase
         sort($addresses);
 
         return $addresses;
+    }
+
+    /** The text body of the (only) email sent to $address. */
+    private function bodyFor(string $address): string
+    {
+        $bodies = [];
+        foreach (self::getMailerMessages() as $message) {
+            if ($message instanceof Email && $message->getTo()[0]->getAddress() === $address) {
+                $bodies[] = (string) $message->getTextBody();
+            }
+        }
+        self::assertCount(1, $bodies, "Exactly one email to {$address}.");
+
+        return $bodies[0];
     }
 
     /** A primary-line member who is none of $excluded. */

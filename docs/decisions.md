@@ -4557,7 +4557,9 @@ l'ancienne (voir légende).
   impacte chacune de ses dates. Dédupliqué par utilisateur, comptes inactifs
   exclus. Email = détail des changements (un bloc une fois, avec sa plage de
   dates) + pour chaque date impactée la situation de chaque ligne
-  (« A → B » ou « C — inchangé »). Pas de PDF.
+  (« A → B » ou « C — inchangé »). Pas de PDF. **Supersédé par D172** :
+  seules les personnes dont les propres gardes changent, chacune avec ses
+  seuls changements et le planning actualisé en PDF.
 - **Emails après commit** : un échec d'envoi n'annule jamais une publication ;
   chaque tentative est tracée (`PlanningPublicationDelivery`).
 - **PDF** (`dompdf/dompdf`, pur PHP, aucune extension nouvelle) : construit
@@ -6102,3 +6104,104 @@ l'ancienne (voir légende).
   déclaration d'indisponibilité sur une garde déjà publiée (la personne est
   réellement indisponible : le calendrier doit le montrer, pas le cacher) ;
   retirer automatiquement l'affectation invalide.
+
+## D172 — Republication : un email personnel aux seules personnes dont les gardes changent, avec le planning actualisé en PDF, envoi au plus une fois et jamais perdu
+
+- **Audit préalable (code, pas seulement la doc)** : la référence « dernière
+  version publiée » existait déjà et est fiable — `PlanningPublication` +
+  `PlanningPublicationEntry` (D143), append-only, figées sous le
+  `CalendarWriteLock` ; `PublicationChangeService::changesSince()` compare
+  le calendrier courant à la **dernière** publication (jamais la génération
+  initiale, jamais un rejeu d'événements : A → B → A n'est pas un
+  changement). Aucune nouvelle référence persistée n'a donc été nécessaire,
+  ni aucune initialisation pour les plannings déjà publiés (la migration de
+  D143 leur a déjà créé une publication FIRST). Ce qui posait problème :
+  l'audience « par DATE » de D143 (anciens et nouveaux titulaires **plus**
+  toute personne de garde, sur n'importe quelle ligne, à une date impactée),
+  un même corps d'email pour tous (tous les changements + la situation de
+  chaque ligne ces jours-là), pas de PDF, et un envoi « best effort » sans
+  reprise (`PlanningPublicationDelivery.sent = false`, rien d'autre).
+- **Décision — audience (supersède la règle d'audience de D143)** : seules
+  les personnes dont les **propres** gardes changent entre la dernière
+  publication et la version republiée : l'ancien titulaire d'une garde
+  changée (garde **retirée**) et son nouveau titulaire (garde **ajoutée**).
+  A → B : A est informé du retrait, B de l'ajout, personne d'autre (plus les
+  collègues de garde le même jour sur une autre ligne). Un retrait sans
+  remplacement n'informe que l'ancien titulaire. Comptes désactivés : jamais
+  emailés (ils ne peuvent de toute façon pas tenir une garde republiée, le
+  préflight le refuse — `USER_INACTIVE`).
+- **Identité durable** : la comparaison se fait par `User`, jamais par
+  `PlanningTeamMember` — une personne ayant plusieurs adhésions (D160) ou
+  ayant quitté puis rejoint une équipe n'est jamais vue comme « changée »
+  pour une garde qu'elle tient toujours. `changesSince()` compare désormais
+  aussi par `User` (« Modifications non publiées » et `changedDutyCount`
+  suivent la même règle).
+- **Contenu** : un seul email par personne et par republication, groupant
+  tous ses changements (toutes lignes confondues) en « Garde(s) retirée(s) »
+  / « Garde(s) ajoutée(s) », chronologiques ; un bloc (week-end…) apparaît
+  une fois, avec sa plage **et** chacune de ses dates écrites en toutes
+  lettres ; une garde isolée avec son type. Aucune ligne sur les autres
+  membres, aucune indisponibilité. Un changement de date, d'horaire ou de
+  ligne est toujours un retrait + un ajout (une `Duty` est immuable :
+  horaire et ligne font partie de la garde elle-même).
+- **PDF joint** : le planning général de la version republiée, rendu par
+  le `PlanningPdfRenderer` existant depuis les **entrées de cette
+  publication** (même source que « Télécharger le PDF ») — dates, lignes,
+  titulaires, blocs ; aucune indisponibilité. La première publication
+  garde son comportement (tous les participants, PDF joint, déjà présent).
+- **Une seule version figée** : dans la transaction de la publication et
+  sous le `CalendarWriteLock`, les mêmes cellules servent aux entrées, au
+  calcul des changements et aux changements personnels de chaque
+  destinataire, **enregistrés** avec la publication
+  (`PlanningPublicationNotification.changes`, JSON). Une modification
+  concurrente attend le verrou ; une modification ultérieure ne change ni
+  le contenu d'un email renvoyé plus tard ni son PDF (rendu depuis les
+  entrées de sa publication).
+- **Boîte d'envoi `planning_publication_notifications`** (une ligne par
+  publication × utilisateur, unique) : écrite dans la même transaction que
+  la publication — une diffusion ne peut pas exister sans ses
+  notifications. États `PENDING → SENDING → SENT | FAILED | CANCELLED`.
+  Chaque envoi est précédé d'une **réservation atomique** (un `UPDATE`
+  conditionnel : seul un gagnant) — un double clic, une requête rejouée, la
+  requête de publication et la commande de reprise ne peuvent jamais
+  envoyer deux fois le même email ; une ligne `SENT` n'est jamais renvoyée.
+  Un double clic est de toute façon déjà refusé en amont (verrou
+  consultatif `publication_in_progress`, puis `no_changes`).
+- **Échecs et reprise** : un échec d'envoi n'annule jamais la publication
+  (inchangé) ; la ligne reste `FAILED`, comptée dans l'historique
+  (`failedCount`) et signalée dans les modales Publier/Republier (« N email(s)
+  n'ont pas pu être envoyés : renvoi automatique »). `app:publication-notifications:retry`
+  (cron, `docs/deployment.md` §5 quater) retente les `FAILED`, les `PENDING`
+  laissés par une requête morte après le commit (au-delà de 2 min) et les
+  `SENDING` abandonnés (réservation de plus de 15 min), jusqu'à
+  `MAX_ATTEMPTS` = 5 ; au-delà, la ligne reste `FAILED`, visible — jamais
+  une perte silencieuse. Même infrastructure que le rappel du samedi
+  (D146 : commande idempotente + cron) plutôt qu'un nouveau transport
+  Messenger : l'unique worker est occupé par des calculs OR-Tools de
+  plusieurs minutes (D149), un email n'a pas à attendre derrière.
+- **Republication sans différence** : inchangé — `no_changes` (409), rien
+  d'enregistré, aucun email ; une édition annulée avant republication (A →
+  B → A) n'est pas une différence. Une republication dont les changements ne
+  concernent aucun compte actif est enregistrée sans aucun email.
+- **Existant** : `planning_publication_deliveries` reste l'audit
+  (append-only) des publications antérieures à D172 ; il n'est plus écrit.
+  L'historique lit les notifications, sinon cet audit. Aucune notification
+  n'est reconstruite pour le passé (le contenu des anciens emails de
+  republication n'a jamais été stocké) et rien n'est renvoyé.
+- **Limite connue (au plus une fois, pas exactement une fois)** : si le
+  processus meurt **pendant** l'appel SMTP, après l'acceptation par le
+  serveur mais avant l'écriture `SENT`, la réservation expire au bout de
+  15 min et l'email est renvoyé une fois de plus. Fenêtre de quelques
+  millisecondes ; préférée à une perte silencieuse.
+- **Mémoire** : le PDF est rendu une fois par publication (partagé entre
+  les destinataires), comme l'était déjà la première publication ; une
+  republication coûte donc désormais un rendu dompdf dans la requête. La
+  suite PHPUnit, un seul processus, atteignait déjà ~121 MB sur 128 avant
+  D172 : `memory_limit=512M` dans `phpunit.dist.xml` (test uniquement) ;
+  la commande de reprise tourne avec `-d memory_limit=256M` (cron).
+- **Rejeté** : garder l'audience par date (des collègues recevaient des
+  changements qui ne les concernent pas, avec les noms des autres) ;
+  recalculer le contenu au moment d'un renvoi (il pourrait décrire une
+  version jamais publiée) ; un transport Messenger dédié aux emails (worker
+  partagé avec les calculs, déploiement modifié) ; renvoyer tous les emails
+  d'une publication dès qu'un seul échoue (doublons).

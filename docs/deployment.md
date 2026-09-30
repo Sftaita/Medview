@@ -237,6 +237,31 @@ exécute le calcul OR-Tools, aussi long soit-il.
 Vérifier après chaque déploiement (§2) : worker stable, une génération réelle
 aboutit, `messenger:failed:show` vide.
 
+## 5 quater. Reprise des emails de publication (D172)
+
+Les emails de publication et de republication sont envoyés juste après la
+publication ; ceux que le transport a refusés (`FAILED`), ceux qu'une
+requête morte après le commit n'a jamais tentés (`PENDING` depuis plus de
+2 min) et ceux dont l'envoi a été interrompu (`SENDING` depuis plus de
+15 min) sont retentés par `app:publication-notifications:retry`, jusqu'à 5
+tentatives par email. Sans risque de doublon : chaque email est réservé
+atomiquement avant l'envoi, un email envoyé ne l'est jamais deux fois ;
+relancer la commande à la main est toujours sans danger. Code de sortie ≠ 0
+si un envoi a encore échoué.
+
+À ajouter **une seule fois** au crontab de `deploy`, mêmes précautions que
+§5 bis (copie de sécurité du crontab, ne rien toucher d'autre), toutes les
+10 minutes :
+
+```bash
+*/10 * * * * cd /opt/stack/apps/medvue && docker compose -f docker-compose.prod.yml exec -T backend php -d memory_limit=256M bin/console app:publication-notifications:retry >> /home/deploy/backups/medvue/publication-notifications.log 2>&1
+```
+
+Vérifier : `crontab -l | grep publication-notifications`. Un email
+abandonné après 5 tentatives reste visible (historique des diffusions,
+`failedCount`) et dans `planning_publication_notifications`
+(`status = 'FAILED' AND attempts >= 5`).
+
 ## 6. Historique des déploiements
 
 | Date | Tag | Commit | Notes |
