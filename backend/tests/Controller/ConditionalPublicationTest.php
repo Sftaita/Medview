@@ -249,12 +249,27 @@ final class ConditionalPublicationTest extends WebTestCase
 
         $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/republish", [], $s['creator']);
         self::assertResponseIsSuccessful();
-        $bodies = array_map(static fn (Email $m): string => (string) $m->getTextBody(), array_filter(self::getMailerMessages(), static fn ($m): bool => $m instanceof Email));
-        self::assertNotEmpty($bodies);
-        foreach ($bodies as $body) {
-            self::assertStringContainsString($this->nameOf($holder).' → Pas de renfort', $body);
-            self::assertStringNotContainsString('Non attribué', $body);
+        // docs/decisions.md D172: only the former holder is told — a removal of their reinforcement.
+        $bodies = $this->bodiesByRecipient();
+        self::assertSame([$holder], array_keys($bodies));
+        self::assertStringContainsString("GARDE RETIRÉE\n\n- Mardi 5 janvier 2027 — Renfort", $bodies[$holder]);
+        self::assertStringNotContainsString('Non attribué', $bodies[$holder]);
+    }
+
+    /**
+     * @return array<string, string> text body by recipient address
+     */
+    private function bodiesByRecipient(): array
+    {
+        $bodies = [];
+        foreach (self::getMailerMessages() as $message) {
+            if ($message instanceof Email) {
+                $bodies[$message->getTo()[0]->getAddress()] = (string) $message->getTextBody();
+            }
         }
+        ksort($bodies);
+
+        return $bodies;
     }
 
     public function testAnUnchangedNonRequiredReinforcementIsNotPartOfTheRepublicationDigest(): void
@@ -269,23 +284,24 @@ final class ConditionalPublicationTest extends WebTestCase
         $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/republish", [], $s['creator']);
         self::assertResponseIsSuccessful();
 
-        $bodies = array_map(static fn (Email $m): string => (string) $m->getTextBody(), array_filter(self::getMailerMessages(), static fn ($m): bool => $m instanceof Email));
-        self::assertNotEmpty($bodies);
+        // docs/decisions.md D172: Dr A loses Tuesday, Dr C gains it — the reinforcement nobody needs is nobody's change.
+        $bodies = $this->bodiesByRecipient();
+        self::assertSame(['admin@example.com', 'bob@example.com'], array_keys($bodies));
+        self::assertStringContainsString("GARDE RETIRÉE\n\n- Mardi 5 janvier 2027 — Seniors", $bodies['admin@example.com']);
+        self::assertStringContainsString("GARDE AJOUTÉE\n\n- Mardi 5 janvier 2027 — Seniors", $bodies['bob@example.com']);
         foreach ($bodies as $body) {
-            self::assertStringContainsString($this->nameOf('admin@example.com').' → '.$this->nameOf('bob@example.com'), $body);
-            self::assertStringNotContainsString('Renfort', $body, 'The reinforcement nobody needs is not part of that day.');
+            self::assertStringNotContainsString('Renfort', $body, 'The reinforcement nobody needs is not part of anybody\'s changes.');
             self::assertStringNotContainsString('Non attribué', $body);
         }
 
-        // Dr C → Dr B: the reinforcement is now needed and missing — named as such, never "Non attribué — inchangé".
+        // Dr C → Dr B: the reinforcement becomes needed and missing — still nobody's own change: only C and B are told.
         $this->reassignTo($client, $s, $this->dutyOn($s['planningId'], self::TUE), 'alice@example.com');
         $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/republish", [], $s['creator']);
         self::assertResponseIsSuccessful();
-        $bodies = array_map(static fn (Email $m): string => (string) $m->getTextBody(), array_filter(self::getMailerMessages(), static fn ($m): bool => $m instanceof Email));
-        self::assertNotEmpty($bodies);
+        $bodies = $this->bodiesByRecipient();
+        self::assertSame(['alice@example.com', 'bob@example.com'], array_keys($bodies));
         foreach ($bodies as $body) {
-            self::assertMatchesRegularExpression('/^\s*Renfort : Renfort requis — non attribué$/m', $body);
-            self::assertStringNotContainsString('Renfort : Non attribué', $body);
+            self::assertStringNotContainsString('Renfort', $body);
         }
     }
 
@@ -456,11 +472,10 @@ final class ConditionalPublicationTest extends WebTestCase
         self::assertSame([], $preflight['superfluousCoverages']);
         self::assertSame([], $preflight['undeterminedDuties']);
         $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/republish", [], $s['creator']);
-        $bodies = array_map(static fn (Email $m): string => (string) $m->getTextBody(), array_filter(self::getMailerMessages(), static fn ($m): bool => $m instanceof Email));
-        self::assertNotEmpty($bodies);
-        foreach ($bodies as $body) {
-            self::assertStringContainsString('→ Non attribué', $body);
-        }
+        // docs/decisions.md D172: the former holder is told of the removal, nobody else.
+        $bodies = $this->bodiesByRecipient();
+        self::assertCount(1, $bodies);
+        self::assertStringContainsString("GARDE RETIRÉE\n\n- Mardi 5 janvier 2027 — Seniors", array_values($bodies)[0]);
 
         $client->request('POST', "/api/plannings/{$s['planningId']}/export", server: ['HTTP_AUTHORIZATION' => 'Bearer '.$s['creator'], 'CONTENT_TYPE' => 'application/json'], content: (string) json_encode([
             'format' => 'xlsx',

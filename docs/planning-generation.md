@@ -722,7 +722,8 @@ corrections (remplacer / retirer, bloc toujours entier) → gardes non
 attribuées → « Compléter automatiquement » (trous uniquement) → statistiques
 → publier (email + PDF à chaque participant) → planning publié, toujours
 éditable → « Modifications non publiées » → republier (email aux seules
-personnes concernées par les dates modifiées) → rappel du samedi.
+personnes dont les propres gardes changent, avec leurs seuls changements et
+le PDF actualisé — §30, D172) → rappel du samedi.
 
 | Endpoint | Droit | Rôle |
 |---|---|---|
@@ -732,8 +733,8 @@ personnes concernées par les dates modifiées) → rappel du samedi.
 | `POST /api/plannings/{id}/complete` | MANAGE_CALENDAR | comble les trous, affectations existantes fixées (D145) |
 | `GET /api/plannings/{id}/statistics` | VIEW | + `weightedLoad`, `countsByDutyType` |
 | `POST /api/plannings/{id}/publish` | PUBLISH | première diffusion, enregistrée garde par garde (D143) |
-| `POST /api/plannings/{id}/republish` | PUBLISH | diffuse les changements depuis la dernière diffusion |
-| `GET /api/plannings/{id}/publication-state` | VIEW (détails : PUBLISH) | publié ?, dates, changements non diffusés, historique |
+| `POST /api/plannings/{id}/republish` | PUBLISH | diffuse les changements depuis la dernière diffusion (D172 : un email personnel par personne concernée) |
+| `GET /api/plannings/{id}/publication-state` | VIEW (détails : PUBLISH) | publié ?, dates, changements non diffusés, historique (`recipientCount`, `sentCount`, `failedCount`) |
 | `GET /api/plannings/{id}/publication.pdf` | VIEW | PDF de la dernière diffusion |
 | `POST /api/plannings/{id}/export` | VIEW (planning publié) | PDF ou Excel du **calendrier courant** — lignes, ordre, noms, titre, période choisis (`docs/planning-export.md`, D150) |
 | `PUT /api/plannings/{id}/teams/{t}/members/{m}/role` | MANAGE (créateur) | accorde/retire « Gestionnaire » (ADMIN, D147) |
@@ -967,3 +968,34 @@ aujourd'hui.
   cours… » (ou « Calcul en cours… ») et une ligne d'état s'affiche au-dessus
   du calendrier. La complétion reste possible sur un planning `PUBLISHED`
   (D145) ; elle ne corrige jamais une affectation existante devenue invalide.
+
+## 30. Emails de republication personnalisés (docs/decisions.md D172)
+
+- **Référence** : la dernière `PlanningPublication` (entrées figées, D143) —
+  jamais la génération initiale ni les modifications intermédiaires ; A → B
+  → A n'est pas un changement. Comparaison par `User` (identité durable,
+  plusieurs adhésions possibles, D160).
+- **Destinataires** : l'ancien titulaire de chaque garde changée (garde
+  retirée) et son nouveau titulaire (garde ajoutée) — personne d'autre ;
+  comptes désactivés exclus. Aucun email si rien n'a changé (`no_changes`).
+- **Contenu** : un email par personne, « Garde(s) retirée(s) » / « Garde(s)
+  ajoutée(s) » avec ses seuls changements, un bloc une fois avec chacune de
+  ses dates ; PDF joint = planning général de la version republiée.
+- **PDF figé (D173)** : rendu une fois, dans la transaction de la
+  publication, et stocké (`planning_publication_documents` : octets,
+  SHA-256, nom du planning et période publiés, append-only). Tous les emails
+  de cette publication — renvois compris — et « Télécharger le PDF »
+  servent ces octets ; l'objet et la période des emails viennent aussi de
+  là. Une publication antérieure à D173 n'a pas de document : rendu à la
+  volée depuis ses entrées, comme avant (rien n'est reconstruit).
+- **Envoi** : `planning_publication_notifications` (une ligne par
+  publication × personne, changements figés en JSON) écrite dans la
+  transaction de la publication, envoyée juste après le commit par
+  `PublicationNotificationSender` ; réservation atomique avant chaque envoi
+  (jamais d'envoi parallèle, jamais de renvoi d'un email enregistré
+  `SENT`) ; échecs retentés par `app:publication-notifications:retry`
+  (cron, `docs/deployment.md` §5 quater) jusqu'à 5 tentatives, puis
+  visibles (`failedCount`). Doublon possible uniquement si SMTP a accepté
+  le message juste avant une coupure, avant l'enregistrement `SENT` (D172).
+- **Première publication** : inchangée (chaque participant, PDF joint),
+  désormais par la même boîte d'envoi (donc retentée elle aussi).

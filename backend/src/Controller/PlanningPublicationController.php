@@ -15,7 +15,6 @@ use App\Exception\PlanningNotPublishableException;
 use App\Exception\PlanningNotYetPublishedException;
 use App\Exception\PlanningPublicationInProgressException;
 use App\Repository\PlanningLineRepository;
-use App\Repository\PlanningPublicationDeliveryRepository;
 use App\Repository\PlanningPublicationRepository;
 use App\Repository\PlanningRepository;
 use App\Security\Voter\PlanningVoter;
@@ -57,7 +56,6 @@ final class PlanningPublicationController
         private readonly PlanningPublicationPreflightService $preflightService,
         private readonly PlanningPublicationService $publicationService,
         private readonly PlanningPublicationRepository $publicationRepository,
-        private readonly PlanningPublicationDeliveryRepository $deliveryRepository,
         private readonly PlanningPdfRenderer $pdfRenderer,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
         private readonly LiveDemandPresenter $demandPresenter,
@@ -171,8 +169,8 @@ final class PlanningPublicationController
                 'publishedAt' => $publication->getPublishedAt()->format(\DATE_ATOM),
                 'publishedBy' => ['firstName' => $publication->getPublishedBy()->getFirstName(), 'lastName' => $publication->getPublishedBy()->getLastName()],
                 'changedDutyCount' => $publication->getChangedDutyCount(),
-                'recipientCount' => \count($this->deliveryRepository->findByPublication($publication)),
-                'sentCount' => \count(array_filter($this->deliveryRepository->findByPublication($publication), static fn ($delivery): bool => $delivery->isSent())),
+                // docs/decisions.md D172: recipientCount / sentCount / failedCount (still retried, or given up).
+                ...$this->publicationService->deliveryCounts($publication),
             ], $state->history);
         }
 
@@ -197,9 +195,12 @@ final class PlanningPublicationController
             return new JsonResponse(['error' => 'not_yet_published', 'message' => 'This planning has never been published.'], 404);
         }
 
-        return new Response($this->pdfRenderer->render($publication), 200, [
+        // docs/decisions.md D173: the bytes stored with that publication — the very file its emails attached.
+        $document = $this->pdfRenderer->pdfOf($publication);
+
+        return new Response($document->content, 200, [
             'Content-Type' => 'application/pdf',
-            'Content-Disposition' => HeaderUtils::makeDisposition(HeaderUtils::DISPOSITION_ATTACHMENT, $this->pdfRenderer->filename($publication)),
+            'Content-Disposition' => HeaderUtils::makeDisposition(HeaderUtils::DISPOSITION_ATTACHMENT, $document->filename),
             'Cache-Control' => 'private, no-store',
         ]);
     }

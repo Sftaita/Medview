@@ -7,8 +7,10 @@ namespace App\Service;
 use App\Entity\Duty;
 use App\Entity\PlanningLine;
 use App\Entity\PlanningPublication;
+use App\Entity\PlanningPublicationDocument;
 use App\Entity\PlanningTeamMember;
 use App\Repository\PlanningLineRepository;
+use App\Repository\PlanningPublicationDocumentRepository;
 use App\Repository\PlanningPublicationEntryRepository;
 use Dompdf\Dompdf;
 use Dompdf\Options;
@@ -22,17 +24,65 @@ use Twig\Environment;
  *
  * Built exclusively from a PlanningPublication's frozen entries — exactly
  * what was diffused, never an old solver output and never the live
- * calendar (which may already hold unpublished changes). The same bytes
- * are attached to the first-publication email and served by "Télécharger
- * le PDF".
+ * calendar (which may already hold unpublished changes). Rendered once,
+ * when the publication is recorded, and stored (PlanningPublicationDocument,
+ * D173): the same bytes are attached to every email of that publication and
+ * served by "Télécharger le PDF" — see pdfOf().
  */
 final class PlanningPdfRenderer
 {
     public function __construct(
         private readonly PlanningPublicationEntryRepository $entryRepository,
         private readonly PlanningLineRepository $lineRepository,
+        private readonly PlanningPublicationDocumentRepository $documentRepository,
         private readonly Environment $twig,
     ) {
+    }
+
+    /**
+     * The PDF of a publication as it was diffused (docs/decisions.md D173):
+     * the bytes stored when it was recorded — never re-rendered from data
+     * that may have changed since (period, names). A publication recorded
+     * before D173 has no stored PDF: rendered from its frozen entries, as it
+     * always was (its period and names are then the current ones).
+     */
+    public function pdfOf(PlanningPublication $publication): PublishedDocument
+    {
+        $document = $this->documentRepository->findOneByPublication($publication);
+        if (null !== $document) {
+            return new PublishedDocument($document->getContent(), $document->getFilename(), $document->getPlanningName(), $document->getPeriodFirstDay(), $document->getPeriodLastDay());
+        }
+
+        $planning = $publication->getPlanning();
+        [$first, $last] = self::periodDays($publication);
+
+        return new PublishedDocument($this->render($publication), $this->filename($publication), $planning->getName(), $first, $last);
+    }
+
+    /**
+     * Renders the publication's PDF now, to be stored with it (D173) —
+     * called once, when the publication is recorded, from its entries.
+     */
+    public function document(PlanningPublication $publication, \DateTimeImmutable $createdAt): PlanningPublicationDocument
+    {
+        [$first, $last] = self::periodDays($publication);
+
+        return new PlanningPublicationDocument($publication, $this->render($publication), $this->filename($publication), $publication->getPlanning()->getName(), $first, $last, $createdAt);
+    }
+
+    /**
+     * The planning's first and last day (inclusive), as pure calendar dates.
+     *
+     * @return array{0: \DateTimeImmutable, 1: \DateTimeImmutable}
+     */
+    private static function periodDays(PlanningPublication $publication): array
+    {
+        $planning = $publication->getPlanning();
+
+        return [
+            new \DateTimeImmutable($planning->getStartsAt()->format('Y-m-d')),
+            new \DateTimeImmutable($planning->getEndsAt()->modify('-1 day')->format('Y-m-d')),
+        ];
     }
 
     public function render(PlanningPublication $publication): string

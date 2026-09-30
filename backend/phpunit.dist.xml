@@ -13,6 +13,9 @@
     <php>
         <ini name="display_errors" value="1" />
         <ini name="error_reporting" value="-1" />
+        <!-- Test process only (docs/decisions.md D173). Measured on master before D172: PlanningExportControllerTest
+             alone peaks at 213 MB (dompdf), above the CLI default of 128M; the whole suite runs in one process. -->
+        <ini name="memory_limit" value="512M" />
         <server name="APP_ENV" value="test" force="true" />
         <server name="SHELL_VERBOSITY" value="-1" />
     </php>
