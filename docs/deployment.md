@@ -237,30 +237,46 @@ exécute le calcul OR-Tools, aussi long soit-il.
 Vérifier après chaque déploiement (§2) : worker stable, une génération réelle
 aboutit, `messenger:failed:show` vide.
 
-## 5 quater. Reprise des emails de publication (D172)
+## 5 quater. Reprise des emails de publication (D172, D173)
 
-Les emails de publication et de republication sont envoyés juste après la
-publication ; ceux que le transport a refusés (`FAILED`), ceux qu'une
-requête morte après le commit n'a jamais tentés (`PENDING` depuis plus de
-2 min) et ceux dont l'envoi a été interrompu (`SENDING` depuis plus de
-15 min) sont retentés par `app:publication-notifications:retry`, jusqu'à 5
-tentatives par email. Sans risque de doublon : chaque email est réservé
-atomiquement avant l'envoi, un email envoyé ne l'est jamais deux fois ;
-relancer la commande à la main est toujours sans danger. Code de sortie ≠ 0
-si un envoi a encore échoué.
+Les emails de publication et de republication sont envoyés dans la requête,
+juste après l'enregistrement de la publication. Sont retentés par
+`app:publication-notifications:retry`, jusqu'à 5 tentatives par email :
+ceux que le transport a refusés (`FAILED`), ceux qu'une requête morte après
+le commit n'a jamais tentés (`PENDING` depuis plus de 2 min), ceux dont
+l'envoi a été interrompu (`SENDING` depuis plus de 15 min). Chaque renvoi
+garde le contenu et le **PDF stockés avec sa publication** (D173), quoi
+qu'il soit arrivé au planning depuis. Code de sortie ≠ 0 si un envoi a
+encore échoué.
+
+Garantie (D172) : jamais deux envois en parallèle du même email (réservation
+atomique), jamais de renvoi d'un email enregistré `SENT`, donc aucun doublon
+dû à une requête répétée ou à deux exécutions simultanées. **Doublon
+possible** dans un seul cas : un échange SMTP coupé après que le serveur a
+accepté le message mais avant l'enregistrement `SENT` — MedVue ne peut pas
+savoir s'il est parti et le renvoie (compromis assumé contre une perte).
+
+| Sujet | Valeur |
+|---|---|
+| Utilisateur | `deploy` (son crontab, comme §5 bis et `docs/backup.md`) |
+| Répertoire | `/opt/stack/apps/medvue` (le `docker compose -f docker-compose.prod.yml` du service `backend`, conteneur `medvue-backend`) |
+| Fréquence | toutes les 10 min (fuseau indifférent) |
+| Exécutions simultanées | `flock -n` : un passage encore en cours fait sauter le suivant (pas d'empilement si le SMTP est lent) ; même sans lui, la réservation atomique empêche tout envoi parallèle |
+| Mémoire | `-d memory_limit=256M` : un rendu PDF n'est **jamais** fait par la commande pour une publication postérieure à D173 (octets stockés) ; la marge ne sert qu'à une publication antérieure (rendu à la volée, ~100 Mo mesurés en dev) |
+| Logs | `/home/deploy/backups/medvue/publication-notifications.log` (une ligne `[OK] N email(s) retried — …` par passage) ; l'erreur SMTP détaillée est dans les logs du backend (`Could not send the "planning_republished" email`) |
 
 À ajouter **une seule fois** au crontab de `deploy`, mêmes précautions que
-§5 bis (copie de sécurité du crontab, ne rien toucher d'autre), toutes les
-10 minutes :
+§5 bis (copie de sécurité du crontab, ne rien toucher d'autre) :
 
 ```bash
-*/10 * * * * cd /opt/stack/apps/medvue && docker compose -f docker-compose.prod.yml exec -T backend php -d memory_limit=256M bin/console app:publication-notifications:retry >> /home/deploy/backups/medvue/publication-notifications.log 2>&1
+*/10 * * * * cd /opt/stack/apps/medvue && flock -n /tmp/medvue-publication-notifications.lock docker compose -f docker-compose.prod.yml exec -T backend php -d memory_limit=256M bin/console app:publication-notifications:retry >> /home/deploy/backups/medvue/publication-notifications.log 2>&1
 ```
 
-Vérifier : `crontab -l | grep publication-notifications`. Un email
-abandonné après 5 tentatives reste visible (historique des diffusions,
-`failedCount`) et dans `planning_publication_notifications`
-(`status = 'FAILED' AND attempts >= 5`).
+Vérifier : `crontab -l | grep publication-notifications`, puis après 10 min
+la dernière ligne du log. Relancer à la main est toujours sans danger (même
+commande, sans `>>`). Un email abandonné après 5 tentatives reste visible
+(historique des diffusions, `failedCount`) et en base :
+`SELECT id, publication_id, user_id, attempts FROM planning_publication_notifications WHERE status = 'FAILED' AND attempts >= 5;`
 
 ## 6. Historique des déploiements
 

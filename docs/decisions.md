@@ -6105,7 +6105,7 @@ l'ancienne (voir légende).
   réellement indisponible : le calendrier doit le montrer, pas le cacher) ;
   retirer automatiquement l'affectation invalide.
 
-## D172 — Republication : un email personnel aux seules personnes dont les gardes changent, avec le planning actualisé en PDF, envoi au plus une fois et jamais perdu
+## D172 — Republication : un email personnel aux seules personnes dont les gardes changent, avec le planning actualisé en PDF, sans envoi concurrent ni perte silencieuse
 
 - **Audit préalable (code, pas seulement la doc)** : la référence « dernière
   version publiée » existait déjà et est fiable — `PlanningPublication` +
@@ -6155,16 +6155,18 @@ l'ancienne (voir légende).
   destinataire, **enregistrés** avec la publication
   (`PlanningPublicationNotification.changes`, JSON). Une modification
   concurrente attend le verrou ; une modification ultérieure ne change ni
-  le contenu d'un email renvoyé plus tard ni son PDF (rendu depuis les
-  entrées de sa publication).
+  le contenu d'un email renvoyé plus tard ni son PDF (stocké avec sa
+  publication, D173).
 - **Boîte d'envoi `planning_publication_notifications`** (une ligne par
   publication × utilisateur, unique) : écrite dans la même transaction que
   la publication — une diffusion ne peut pas exister sans ses
   notifications. États `PENDING → SENDING → SENT | FAILED | CANCELLED`.
   Chaque envoi est précédé d'une **réservation atomique** (un `UPDATE`
   conditionnel : seul un gagnant) — un double clic, une requête rejouée, la
-  requête de publication et la commande de reprise ne peuvent jamais
-  envoyer deux fois le même email ; une ligne `SENT` n'est jamais renvoyée.
+  requête de publication et des exécutions simultanées de la commande de
+  reprise n'envoient jamais le même email en parallèle ; une ligne
+  enregistrée `SENT` n'est jamais renvoyée. Ce que cela ne couvre pas :
+  l'incertitude SMTP (voir « Garantie réelle » ci-dessous).
   Un double clic est de toute façon déjà refusé en amont (verrou
   consultatif `publication_in_progress`, puis `no_changes`).
 - **Échecs et reprise** : un échec d'envoi n'annule jamais la publication
@@ -6188,16 +6190,26 @@ l'ancienne (voir légende).
   L'historique lit les notifications, sinon cet audit. Aucune notification
   n'est reconstruite pour le passé (le contenu des anciens emails de
   republication n'a jamais été stocké) et rien n'est renvoyé.
-- **Limite connue (au plus une fois, pas exactement une fois)** : si le
-  processus meurt **pendant** l'appel SMTP, après l'acceptation par le
-  serveur mais avant l'écriture `SENT`, la réservation expire au bout de
-  15 min et l'email est renvoyé une fois de plus. Fenêtre de quelques
-  millisecondes ; préférée à une perte silencieuse.
+- **Garantie réelle — ni « au plus une fois » ni « exactement une fois »**
+  (formulation corrigée avant fusion, voir D173) : deux cas distincts.
+  (1) Envois concurrents et requêtes répétées : exclus par la réservation
+  atomique et par le refus en amont (`publication_in_progress`,
+  `no_changes`) — pas de doublon. (2) Incertitude SMTP : si l'échange est
+  coupé **après** que le serveur a accepté le message mais **avant** que
+  `SENT` soit enregistré (processus tué, connexion perdue en lisant la
+  réponse, base indisponible pour l'écriture finale), MedVue ne peut pas
+  savoir si l'email est parti : la ligne reste `SENDING` (reprise après
+  15 min) ou passe `FAILED` (reprise au passage suivant), et l'email est
+  renvoyé — **un doublon est alors possible**. Compromis assumé : un
+  doublon rare plutôt qu'une perte silencieuse ; SMTP seul ne permet pas
+  mieux.
 - **Mémoire** : le PDF est rendu une fois par publication (partagé entre
   les destinataires), comme l'était déjà la première publication ; une
-  republication coûte donc désormais un rendu dompdf dans la requête. La
-  suite PHPUnit, un seul processus, atteignait déjà ~121 MB sur 128 avant
-  D172 : `memory_limit=512M` dans `phpunit.dist.xml` (test uniquement) ;
+  republication coûte donc désormais un rendu dompdf dans la requête. Côté
+  tests, mesuré sur `master` avant D172 : `PlanningExportControllerTest`
+  seul culmine à 213 Mo (au-delà des 128 Mo par défaut du CLI), et la suite
+  tourne en un seul processus : `memory_limit=512M` dans `phpunit.dist.xml`
+  (processus de test uniquement, D173) ;
   la commande de reprise tourne avec `-d memory_limit=256M` (cron).
 - **Rejeté** : garder l'audience par date (des collègues recevaient des
   changements qui ne les concernent pas, avec les noms des autres) ;
@@ -6205,3 +6217,68 @@ l'ancienne (voir légende).
   version jamais publiée) ; un transport Messenger dédié aux emails (worker
   partagé avec les calculs, déploiement modifié) ; renvoyer tous les emails
   d'une publication dès qu'un seul échoue (doublons).
+
+## D173 — PDF de publication stocké tel que généré ; garantie d'envoi formulée sans promesse que SMTP ne permet pas
+
+- **Constat (revue de D172 avant fusion)** : le PDF joint était re-rendu à
+  chaque envoi depuis les entrées figées de la publication, mais le rendu
+  lit aussi des données **courantes** : période du planning (`startsAt` /
+  `endsAt`), nom du planning, noms des lignes et des personnes, noms des
+  blocs et types de garde. Un email renvoyé après un renommage — possible
+  aujourd'hui — portait donc un autre nom ; après une prolongation, des
+  journées vides en plus. Vérifié dans le code : **prolonger un planning
+  dont une ligne est publiée est refusé** (`planning_period_locked`,
+  `PlanningExtensionService`) — la dérive de période n'est donc pas
+  atteignable par l'API aujourd'hui, mais elle le deviendrait au premier
+  assouplissement de ce verrou, et le renommage l'est déjà. L'objet et la
+  période écrits dans l'email de première publication lisaient aussi le
+  planning courant.
+- **Décision — conserver le PDF généré, pas les données pour le refaire** :
+  `planning_publication_documents` (une ligne par publication, append-only
+  par trigger comme les autres tables de publication) : octets du PDF,
+  SHA-256, nom de fichier, nom du planning et période publiés. Rendu
+  **une fois**, dans la transaction de la publication, depuis les entrées
+  qui viennent d'être écrites : une publication n'existe jamais sans son
+  PDF. Les emails (première publication, republication, chaque renvoi) et
+  « Télécharger le PDF » servent ces octets ; l'objet et la période des
+  emails viennent du même enregistrement (`PublishedDocument`). C'est la
+  promesse de D143 (« les mêmes octets en pièce jointe et au
+  téléchargement ») rendue vraie dans le temps. Figer seulement les données
+  du rendu (période, noms) aurait laissé dépendre le fichier du gabarit et
+  de la version de dompdf au moment du renvoi — le fichier stocké est le
+  seul qui soit exactement celui annoncé.
+- **Coût** : ~30 Ko par publication (le PDF d'une période de 4 mois) ; le
+  rendu dompdf a lieu sous le verrou du calendrier (une ou deux secondes :
+  une réaffectation concurrente attend) — il avait déjà lieu dans la
+  requête. Plus aucun rendu dans la commande de reprise.
+- **Publications existantes** : aucune ligne créée. Rendre aujourd'hui le
+  PDF d'une publication passée et l'enregistrer comme « le » PDF publié
+  serait affirmer un fichier qui n'a jamais été envoyé. Leur PDF reste rendu
+  à la volée depuis leurs entrées (comportement antérieur, noms et période
+  courants) — limite documentée ; elle disparaît à leur prochaine
+  republication.
+- **Garantie d'envoi (correction de D172 avant fusion)** : D172 et la
+  documentation disaient « au plus une fois » / « sans risque de doublon »,
+  ce qui contredisait sa propre limite. Formulation corrigée partout (code,
+  migration non encore déployée, docs) : pas d'envoi concurrent ni de
+  doublon dû à une requête répétée ou à deux exécutions de la reprise ;
+  doublon **possible** si SMTP a accepté un message juste avant une
+  coupure, avant l'enregistrement `SENT`. Le code correspond à cette
+  description (réservation par `UPDATE` conditionnel, reprise des `SENDING`
+  après 15 min et des `FAILED`) : il n'a pas été changé sur ce point.
+- **Cron de reprise précisé** (`docs/deployment.md` §5 quater) : `flock -n`
+  (comme la sauvegarde) pour ne pas empiler des passages si le SMTP est lent.
+- **Validation (2026-09-30)** : suite backend complète exécutée **fichier par
+  fichier** (un processus PHPUnit par fichier, séquentiel, dans le
+  conteneur : la machine de développement n'avait pas la mémoire pour un
+  processus unique) — 126/126 fichiers, 1 198 tests, 11 709 assertions,
+  0 échec, 16 skips préexistants (`tests/Deployment/*` : `scripts/` et
+  `.github/` hors du conteneur de dev). Recette navigateur + Mailpit sur la
+  pile de dev (génération OR-Tools réelle, comptes `@example.test`) :
+  première publication (5 destinataires, PDF identique au document stocké),
+  A → B, C non notifié, plusieurs changements = un email, bloc week-end avec
+  ses 3 dates, A → B → A et republication sans différence sans email,
+  échec SMTP (Mailpit arrêté) puis modification + renommage + reprise par
+  deux exécutions simultanées de la commande : chaque email envoyé une fois,
+  contenu, nom et PDF de la version republiée (SHA-256 identique au
+  document stocké et à `publication.pdf`).

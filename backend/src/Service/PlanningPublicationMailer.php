@@ -38,16 +38,19 @@ final class PlanningPublicationMailer
     ) {
     }
 
-    public function sendFirstPublication(User $recipient, Planning $planning, string $periodLabel, string $pdf, string $pdfFilename): bool
+    /**
+     * @param PublishedDocument $document the name, period and PDF frozen with the publication (D173)
+     */
+    public function sendFirstPublication(User $recipient, Planning $planning, PublishedDocument $document): bool
     {
         $email = (new TemplatedEmail())
             ->from(Address::create($this->from))
             ->to($recipient->getEmail())
-            ->subject('Planning de garde disponible — '.$planning->getName())
+            ->subject('Planning de garde disponible — '.$document->planningName)
             ->htmlTemplate('email/planning_published.html.twig')
             ->textTemplate('email/planning_published.txt.twig')
-            ->attach($pdf, $pdfFilename, 'application/pdf')
-            ->context($this->context($recipient, $planning) + ['periodLabel' => $periodLabel]);
+            ->attach($document->content, $document->filename, 'application/pdf')
+            ->context($this->context($recipient, $planning, $document) + ['periodLabel' => $document->periodLabel()]);
 
         return $this->send($email, 'planning_published');
     }
@@ -55,11 +58,11 @@ final class PlanningPublicationMailer
     /**
      * A republication (docs/decisions.md D172): this person's own changes
      * only — never anybody else's — and the whole updated planning as a PDF
-     * (the same publication's frozen entries as "Télécharger le PDF").
+     * (the bytes stored with the publication, D173 — as "Télécharger le PDF").
      *
      * @param list<array{kind: string, line: string, dutyType: ?string, block: ?string, dates: list<string>}> $changes frozen with the publication (PublicationChangeService::personalChanges)
      */
-    public function sendRepublication(User $recipient, Planning $planning, array $changes, string $pdf, string $pdfFilename): bool
+    public function sendRepublication(User $recipient, Planning $planning, array $changes, PublishedDocument $document): bool
     {
         $units = array_map(self::unitView(...), $changes);
         $removed = array_values(array_filter($units, static fn (array $unit): bool => PublicationChangeService::REMOVED === $unit['kind']));
@@ -68,11 +71,11 @@ final class PlanningPublicationMailer
         $email = (new TemplatedEmail())
             ->from(Address::create($this->from))
             ->to($recipient->getEmail())
-            ->subject('Modification de vos gardes — '.$planning->getName())
+            ->subject('Modification de vos gardes — '.$document->planningName)
             ->htmlTemplate('email/planning_republished.html.twig')
             ->textTemplate('email/planning_republished.txt.twig')
-            ->attach($pdf, $pdfFilename, 'application/pdf')
-            ->context($this->context($recipient, $planning) + ['removed' => $removed, 'added' => $added, 'unitCount' => \count($units)]);
+            ->attach($document->content, $document->filename, 'application/pdf')
+            ->context($this->context($recipient, $planning, $document) + ['removed' => $removed, 'added' => $added, 'unitCount' => \count($units)]);
 
         return $this->send($email, 'planning_republished');
     }
@@ -103,11 +106,11 @@ final class PlanningPublicationMailer
     /**
      * @return array<string, mixed>
      */
-    private function context(User $recipient, Planning $planning): array
+    private function context(User $recipient, Planning $planning, PublishedDocument $document): array
     {
         return [
             'firstName' => $recipient->getFirstName(),
-            'planningName' => $planning->getName(),
+            'planningName' => $document->planningName,
             'planningUrl' => rtrim($this->frontendUrl, '/').'/plannings/'.$planning->getStableId(),
             'supportEmail' => $this->supportEmail,
             'supportUrl' => 'mailto:'.$this->supportEmail,

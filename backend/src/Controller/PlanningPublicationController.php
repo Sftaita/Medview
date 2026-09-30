@@ -195,9 +195,12 @@ final class PlanningPublicationController
             return new JsonResponse(['error' => 'not_yet_published', 'message' => 'This planning has never been published.'], 404);
         }
 
-        return new Response($this->pdfRenderer->render($publication), 200, [
+        // docs/decisions.md D173: the bytes stored with that publication — the very file its emails attached.
+        $document = $this->pdfRenderer->pdfOf($publication);
+
+        return new Response($document->content, 200, [
             'Content-Type' => 'application/pdf',
-            'Content-Disposition' => HeaderUtils::makeDisposition(HeaderUtils::DISPOSITION_ATTACHMENT, $this->pdfRenderer->filename($publication)),
+            'Content-Disposition' => HeaderUtils::makeDisposition(HeaderUtils::DISPOSITION_ATTACHMENT, $document->filename),
             'Cache-Control' => 'private, no-store',
         ]);
     }

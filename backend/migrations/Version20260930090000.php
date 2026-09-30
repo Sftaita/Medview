@@ -23,7 +23,7 @@ final class Version20260930090000 extends AbstractMigration
 {
     public function getDescription(): string
     {
-        return 'Publication notifications outbox: per-recipient, retriable, at-most-once republication emails (D172)';
+        return 'Publication notifications outbox: per-recipient, retriable republication emails, atomic claim per send (D172)';
     }
 
     public function up(Schema $schema): void

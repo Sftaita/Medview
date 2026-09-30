@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Service;
 
-use App\Entity\Planning;
 use App\Entity\PlanningPublication;
 use App\Entity\PlanningPublicationKind;
 use App\Entity\PlanningPublicationNotification;
@@ -14,27 +13,36 @@ use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Clock\ClockInterface;
 
 /**
- * Sends the emails a PlanningPublication owes (docs/decisions.md D172),
- * from its PlanningPublicationNotification rows — right after the
+ * Sends the emails a PlanningPublication owes (docs/decisions.md D172,
+ * D173), from its PlanningPublicationNotification rows — right after the
  * publication commits, then again from `app:publication-notifications:retry`
  * for whatever failed or never went out.
  *
- * - At most once per recipient: every send is preceded by an atomic claim
- *   (PlanningPublicationNotificationRepository::claim), so a double request,
- *   a retry run and the publication request itself can never email the same
- *   person twice; a SENT row is never touched again.
- * - Never a silent loss: a failed send stays FAILED (logged by the mailer,
- *   counted in the publication history) and is retried up to MAX_ATTEMPTS.
+ * What is guaranteed, and what is not:
+ * - No concurrent sends, no duplicate from a repeated request: every send
+ *   is preceded by an atomic claim (PlanningPublicationNotificationRepository::claim),
+ *   so a double click, a replayed request, overlapping retry runs and the
+ *   publication request itself never send the same email in parallel, and a
+ *   SENT row is never sent again.
+ * - No silent loss: a failed send stays FAILED (logged by the mailer, counted
+ *   in the publication history) and is retried up to MAX_ATTEMPTS; a row left
+ *   PENDING or SENDING by a process that died is retried too.
+ * - NOT exactly once: SMTP gives no way to know whether a message was
+ *   delivered when the conversation is cut after the server accepted it but
+ *   before this side recorded SENT (process killed, connection lost while
+ *   reading the reply, database unavailable for the final write). Such a row
+ *   is FAILED or stays SENDING, and the retry sends it again — a possible
+ *   duplicate, chosen over a possible loss.
  * - Always the same version: the content is the row's frozen `changes`, the
- *   PDF is rendered from the publication's own frozen entries — a retry
- *   hours later sends exactly what the first attempt would have, whatever
- *   was edited meanwhile.
+ *   PDF, the planning's name and period are the ones stored with the
+ *   publication (PublishedDocument) — a retry hours later sends exactly what
+ *   the first attempt would have, whatever was edited or extended meanwhile.
  */
 final class PublicationNotificationSender
 {
     /** A PENDING row younger than this belongs to the request that is still sending it. */
     private const PENDING_GRACE = '-2 minutes';
-    /** A SENDING row older than this belongs to a sender that died mid-send. */
+    /** A SENDING row older than this belongs to a sender that died mid-send (an SMTP attempt never lasts that long). */
     private const STALE_CLAIM = '-15 minutes';
 
     public function __construct(
@@ -54,9 +62,9 @@ final class PublicationNotificationSender
     public function sendForPublication(PlanningPublication $publication): array
     {
         $notifications = $this->notificationRepository->findByPublication($publication);
-        $pdf = null;
+        $document = null;
         foreach ($notifications as $notification) {
-            $this->attempt($notification, $pdf);
+            $this->attempt($notification, $document);
         }
 
         return [
@@ -76,12 +84,12 @@ final class PublicationNotificationSender
         $due = $this->notificationRepository->findDue($now->modify(self::PENDING_GRACE), $now->modify(self::STALE_CLAIM));
 
         $report = ['attempted' => 0, 'sent' => 0, 'failed' => 0];
-        /** @var array<int, ?array{0: string, 1: string}> $pdfByPublication */
-        $pdfByPublication = [];
+        /** @var array<int, ?PublishedDocument> $documentByPublication */
+        $documentByPublication = [];
         foreach ($due as $notification) {
             $publicationId = (int) $notification->getPublication()->getId();
-            $pdfByPublication[$publicationId] ??= null;
-            $outcome = $this->attempt($notification, $pdfByPublication[$publicationId]);
+            $documentByPublication[$publicationId] ??= null;
+            $outcome = $this->attempt($notification, $documentByPublication[$publicationId]);
             if (null === $outcome) {
                 continue;
             }
@@ -93,11 +101,11 @@ final class PublicationNotificationSender
     }
 
     /**
-     * @param array{0: string, 1: string}|null $pdf rendered once per publication, on the first real send
+     * @param PublishedDocument|null $document loaded once per publication, on the first real send
      *
      * @return bool|null null when this sender did not get the row (already sent, claimed elsewhere, exhausted)
      */
-    private function attempt(PlanningPublicationNotification $notification, ?array &$pdf): ?bool
+    private function attempt(PlanningPublicationNotification $notification, ?PublishedDocument &$document): ?bool
     {
         $now = $this->clock->now();
         if (!$this->notificationRepository->claim($notification, $now, $now->modify(self::STALE_CLAIM))) {
@@ -113,12 +121,12 @@ final class PublicationNotificationSender
         }
 
         $publication = $notification->getPublication();
-        $pdf ??= [$this->pdfRenderer->render($publication), $this->pdfRenderer->filename($publication)];
+        $document ??= $this->pdfRenderer->pdfOf($publication);
         $planning = $publication->getPlanning();
 
         $sent = PlanningPublicationKind::FIRST === $publication->getKind()
-            ? $this->mailer->sendFirstPublication($user, $planning, $this->periodLabel($planning), $pdf[0], $pdf[1])
-            : $this->mailer->sendRepublication($user, $planning, $notification->getChanges() ?? [], $pdf[0], $pdf[1]);
+            ? $this->mailer->sendFirstPublication($user, $planning, $document)
+            : $this->mailer->sendRepublication($user, $planning, $notification->getChanges() ?? [], $document);
 
         if ($sent) {
             $notification->markSent($this->clock->now());
@@ -128,13 +136,5 @@ final class PublicationNotificationSender
         $this->entityManager->flush();
 
         return $sent;
-    }
-
-    /**
-     * "du 1er octobre 2026 au 31 décembre 2026" — the planning's own dates (end exclusive).
-     */
-    private function periodLabel(Planning $planning): string
-    {
-        return 'du '.FrenchDate::long($planning->getStartsAt()).' au '.FrenchDate::long($planning->getEndsAt()->modify('-1 day'));
     }
 }

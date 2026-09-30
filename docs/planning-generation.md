@@ -980,14 +980,22 @@ aujourd'hui.
   comptes désactivés exclus. Aucun email si rien n'a changé (`no_changes`).
 - **Contenu** : un email par personne, « Garde(s) retirée(s) » / « Garde(s)
   ajoutée(s) » avec ses seuls changements, un bloc une fois avec chacune de
-  ses dates ; PDF joint = planning général de la version republiée
-  (`PlanningPdfRenderer`, entrées de la publication).
+  ses dates ; PDF joint = planning général de la version republiée.
+- **PDF figé (D173)** : rendu une fois, dans la transaction de la
+  publication, et stocké (`planning_publication_documents` : octets,
+  SHA-256, nom du planning et période publiés, append-only). Tous les emails
+  de cette publication — renvois compris — et « Télécharger le PDF »
+  servent ces octets ; l'objet et la période des emails viennent aussi de
+  là. Une publication antérieure à D173 n'a pas de document : rendu à la
+  volée depuis ses entrées, comme avant (rien n'est reconstruit).
 - **Envoi** : `planning_publication_notifications` (une ligne par
   publication × personne, changements figés en JSON) écrite dans la
   transaction de la publication, envoyée juste après le commit par
   `PublicationNotificationSender` ; réservation atomique avant chaque envoi
-  (jamais deux fois le même email) ; échecs retentés par
-  `app:publication-notifications:retry` (cron, `docs/deployment.md`
-  §5 quater) jusqu'à 5 tentatives, puis visibles (`failedCount`).
+  (jamais d'envoi parallèle, jamais de renvoi d'un email enregistré
+  `SENT`) ; échecs retentés par `app:publication-notifications:retry`
+  (cron, `docs/deployment.md` §5 quater) jusqu'à 5 tentatives, puis
+  visibles (`failedCount`). Doublon possible uniquement si SMTP a accepté
+  le message juste avant une coupure, avant l'enregistrement `SENT` (D172).
 - **Première publication** : inchangée (chaque participant, PDF joint),
   désormais par la même boîte d'envoi (donc retentée elle aussi).

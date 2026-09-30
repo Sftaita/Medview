@@ -101,6 +101,8 @@ describe('RepublishModal (docs/decisions.md D172)', () => {
   it('never claims everyone was told when an email could not be sent yet', async () => {
     await republishWith(result({ recipientCount: 2, sentCount: 1 }))
 
+    expect(screen.queryByText(/chacune reçoit/)).not.toBeInTheDocument()
+    expect(screen.getByText(/2 personnes concernées : un email personnel/)).toBeInTheDocument()
     expect(screen.getByRole('alert')).toHaveTextContent(
       '1 email n’a pas pu être envoyé pour l’instant : il sera renvoyé automatiquement.',
     )

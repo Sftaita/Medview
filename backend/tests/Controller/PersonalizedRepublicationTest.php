@@ -9,6 +9,7 @@ use App\Entity\PlanningPublication;
 use App\Entity\PlanningPublicationNotification;
 use App\Entity\PublicationNotificationStatus;
 use App\Entity\User;
+use App\Repository\PlanningPublicationDocumentRepository;
 use App\Repository\PlanningPublicationNotificationRepository;
 use App\Repository\PlanningPublicationRepository;
 use App\Repository\PlanningRepository;
@@ -170,11 +171,12 @@ final class PersonalizedRepublicationTest extends WebTestCase
         self::assertNotSame($first->getId(), $republished->getId());
 
         $renderer = static::getContainer()->get(PlanningPdfRenderer::class);
-        $expected = self::normalizedPdf($renderer->render($republished));
-        self::assertNotSame(self::normalizedPdf($renderer->render($first)), $expected, 'Precondition: the two versions differ.');
+        $expected = $this->storedPdf($republished);
+        self::assertNotSame(self::normalizedPdf($this->storedPdf($first)), self::normalizedPdf($expected), 'Precondition: the two versions differ.');
+        self::assertSame(self::normalizedPdf($renderer->render($republished)), self::normalizedPdf($expected), 'Stored = that version\'s rendering.');
         foreach (self::getMailerMessages() as $message) {
             self::assertInstanceOf(Email::class, $message);
-            self::assertSame($expected, self::normalizedPdf($message->getAttachments()[0]->getBody()), 'The republished version, byte for byte.');
+            self::assertSame($expected, $message->getAttachments()[0]->getBody(), 'The republished version, byte for byte.');
         }
 
         // And what that version says: Bob on Wednesday — the PDF lists every date, line and holder, nothing else.
@@ -210,14 +212,72 @@ final class PersonalizedRepublicationTest extends WebTestCase
         self::assertInstanceOf(Email::class, $messages[0]);
         self::assertSame('bob@example.com', $messages[0]->getTo()[0]->getAddress());
         self::assertStringContainsString("GARDE AJOUTÉE\n\n- Mercredi 6 janvier 2027 — Seniors", (string) $messages[0]->getTextBody());
-        self::assertSame(
-            self::normalizedPdf(static::getContainer()->get(PlanningPdfRenderer::class)->render($republished)),
-            self::normalizedPdf($messages[0]->getAttachments()[0]->getBody()),
-            'The PDF of the republished version, not of the live calendar.',
-        );
+        self::assertSame($this->storedPdf($republished), $messages[0]->getAttachments()[0]->getBody(), 'The PDF of the republished version, not of the live calendar.');
     }
 
-    // --- at most once, never lost ------------------------------------------------------------------------------
+    /**
+     * docs/decisions.md D173: the PDF sent by a retry is the one generated with the publication — its period,
+     * dates, lines, holders and planning name — even after the planning was extended, renamed and edited.
+     */
+    public function testARetriedEmailKeepsThePdfAndPeriodOfItsPublicationAfterAnExtensionARenameAndAnEdit(): void
+    {
+        $client = static::createClient();
+        $s = $this->scenario($client);
+        $this->prepareLine($s['planningId'], self::STANDALONE);
+        $this->generate($client, $s);
+        $this->forceHolders($client, $s, ['2027-01-06' => 'alice@example.com']);
+
+        $this->failFor('alice@example.com');
+        $outcome = $this->publicationService()->publish($this->planning($s['planningId']), $this->user('creator@example.com'));
+        self::assertSame(2, $outcome->sentCount);
+        $publication = $outcome->publication;
+        $stored = static::getContainer()->get(PlanningPublicationDocumentRepository::class)->findOneByPublication($publication);
+        self::assertNotNull($stored);
+        $original = $stored->getContent();
+        self::assertSame(hash('sha256', $original), $stored->getSha256());
+        self::assertSame(['2027-01-01', '2027-04-30', 'Gardes Seniors'], [$stored->getPeriodFirstDay()->format('Y-m-d'), $stored->getPeriodLastDay()->format('Y-m-d'), $stored->getPlanningName()]);
+
+        // After the failure: the planning is extended by three months, renamed, and Wednesday changes hands.
+        // Extending a published planning is refused by the API today (planning_period_locked, D122)…
+        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/extensions", ['endsAt' => '2027-08-01'], $s['creator']);
+        self::assertResponseStatusCodeSame(409);
+        // …so its period is moved the way PlanningExtensionService does it: whatever lifts that lock later, the
+        // publication's PDF must not follow.
+        $planning = $this->planning($s['planningId']);
+        $planning->extendTo($planning->getStartsAt(), new \DateTimeImmutable('2027-08-01', $planning->getStartsAt()->getTimezone()));
+        static::getContainer()->get(EntityManagerInterface::class)->flush();
+        $this->api($client, 'PATCH', "/api/plannings/{$s['planningId']}", ['name' => 'Gardes renommées'], $s['creator']);
+        self::assertResponseIsSuccessful();
+        $this->reassignTo($client, $s, $this->dutyOn($s['planningId'], '2027-01-06'), 'bob@example.com');
+        self::assertResponseIsSuccessful();
+
+        // Precondition: rendering it today would give another file — more days, another name.
+        $renderer = static::getContainer()->get(PlanningPdfRenderer::class);
+        $publication = $this->latestPublication($s['planningId']); // re-read: the planning as it is now
+        $today = $renderer->view($publication);
+        self::assertSame('Du 1er janvier 2027 au 31 juillet 2027', $today['periodLabel']);
+        self::assertNotSame(self::normalizedPdf($original), self::normalizedPdf($renderer->render($publication)));
+
+        $this->stopFailing();
+        $before = \count(self::getMailerMessages());
+        self::assertSame(['attempted' => 1, 'sent' => 1, 'failed' => 0], $this->sender()->retryDue());
+        $messages = \array_slice(self::getMailerMessages(), $before);
+        self::assertCount(1, $messages);
+        $email = $messages[0];
+        self::assertInstanceOf(Email::class, $email);
+        self::assertSame('alice@example.com', $email->getTo()[0]->getAddress());
+        self::assertSame($original, $email->getAttachments()[0]->getBody(), 'The PDF generated with the publication, byte for byte.');
+        self::assertSame('planning-gardes-seniors.pdf', $email->getAttachments()[0]->getFilename());
+        self::assertSame('Planning de garde disponible — Gardes Seniors', $email->getSubject(), 'The name it was published under.');
+        self::assertStringContainsString('du 1er janvier 2027 au 30 avril 2027 est disponible', (string) $email->getTextBody(), 'The published period, not the extended one.');
+
+        // "Télécharger le PDF" serves that same file too.
+        $client->request('GET', "/api/plannings/{$s['planningId']}/publication.pdf", server: ['HTTP_AUTHORIZATION' => 'Bearer '.$s['alice']]);
+        self::assertResponseIsSuccessful();
+        self::assertSame($original, (string) $client->getResponse()->getContent());
+    }
+
+    // --- no parallel or repeated send, no silent loss, retry after an uncertain SMTP outcome ---------------------
 
     public function testARepeatedRequestNeverEmailsAnyoneTwice(): void
     {
@@ -341,12 +401,12 @@ final class PersonalizedRepublicationTest extends WebTestCase
         self::assertResponseIsSuccessful();
 
         self::assertSame(['admin@example.com', 'alice@example.com', 'bob@example.com'], $this->emailedAddresses());
-        $expected = self::normalizedPdf(static::getContainer()->get(PlanningPdfRenderer::class)->render($this->latestPublication($s['planningId'])));
+        $expected = $this->storedPdf($this->latestPublication($s['planningId']));
         foreach (self::getMailerMessages() as $message) {
             self::assertInstanceOf(Email::class, $message);
             self::assertStringStartsWith('Planning de garde disponible', (string) $message->getSubject());
             self::assertCount(1, $message->getAttachments());
-            self::assertSame($expected, self::normalizedPdf($message->getAttachments()[0]->getBody()));
+            self::assertSame($expected, $message->getAttachments()[0]->getBody());
             self::assertStringContainsString('vous recevrez un email détaillant vos seuls changements', (string) $message->getTextBody());
         }
     }
@@ -453,6 +513,14 @@ final class PersonalizedRepublicationTest extends WebTestCase
             static::getContainer()->get(EventDispatcherInterface::class)->removeListener(MessageEvent::class, $this->failingListener);
             $this->failingListener = null;
         }
+    }
+
+    private function storedPdf(PlanningPublication $publication): string
+    {
+        $document = static::getContainer()->get(PlanningPublicationDocumentRepository::class)->findOneByPublication($publication);
+        self::assertNotNull($document, 'Every publication stores its PDF (D173).');
+
+        return $document->getContent();
     }
 
     /** dompdf stamps the rendering time and a random file id — everything else is the content. */

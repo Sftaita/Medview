@@ -65,6 +65,7 @@ final class PlanningPublicationService
         private readonly PlanningPeriodLifecycleService $lifecycleService,
         private readonly CurrentCalendarReader $calendarReader,
         private readonly PublicationChangeService $changeService,
+        private readonly PlanningPdfRenderer $pdfRenderer,
         private readonly PublicationNotificationSender $notificationSender,
         private readonly PlanningPublicationNotificationRepository $notificationRepository,
         private readonly PlanningPublicationDeliveryRepository $deliveryRepository,
@@ -247,6 +248,12 @@ final class PlanningPublicationService
             foreach ($recipients as ['user' => $user, 'changes' => $changes]) {
                 $this->entityManager->persist(new PlanningPublicationNotification($publication, $user, $changes, $now));
             }
+            $this->entityManager->flush();
+
+            // docs/decisions.md D173: the PDF of this version, rendered now from the entries just written and
+            // stored — every email of this publication, retries included, attaches these bytes, whatever changes
+            // later (an extension, a rename). Inside the transaction: a publication never exists without its PDF.
+            $this->entityManager->persist($this->pdfRenderer->document($publication, $now));
             $this->entityManager->flush();
 
             $connection->commit();

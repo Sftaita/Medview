@@ -205,6 +205,9 @@ function republishedMessage(result: PublicationResult): string {
     return 'Planning republié. Aucune personne n’est concernée : aucun email envoyé.'
   const people =
     result.recipientCount > 1 ? `${result.recipientCount} personnes concernées` : '1 personne concernée'
+  // Never "each one receives" while some emails are still to be retried: the warning below says which part is late.
+  if (result.sentCount < result.recipientCount)
+    return `Planning republié. ${people} : un email personnel avec ses propres changements et le planning actualisé en PDF.`
   return `Planning republié. ${people} — chacune reçoit le détail de ses propres changements et le planning actualisé en PDF.`
 }
 
