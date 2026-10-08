@@ -35,6 +35,12 @@ pas de colonne `roles` en base. Les rôles par équipe (OWNER/ADMIN/MEMBER)
 viendront de `TeamMember` quand les équipes existeront ; ils ne remplacent
 pas mais s'ajoutent à ce rôle de base.
 
+> **Mis à jour le 2026-10-08** (D174, `docs/admin.md`) : un seul rôle global
+> s'ajoute à `ROLE_USER` — `ROLE_PLATFORM_ADMIN`, porté par la colonne
+> `users.platform_admin` (exposée en lecture seule dans `/api/me` sous
+> `platformAdmin`). Les rôles d'équipe restent vérifiés par des voters. Les
+> rôles sont relus en base à chaque requête, jamais depuis le JWT.
+
 ### Entité `RefreshToken` (`backend/src/Entity/RefreshToken.php`)
 
 Une ligne par refresh token **émis** (une ligne existe même une fois le

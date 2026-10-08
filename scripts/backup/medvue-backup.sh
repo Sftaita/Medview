@@ -95,6 +95,8 @@ backup_postgres() {
   version=$(docker exec "$DB_CONTAINER" psql -U "$user" -d "$db" -Atc \
     "select coalesce(max(version), 'none') from doctrine_migration_versions" 2>/dev/null || echo unknown)
   log "[postgres] OK $(basename "$out") ($(du -h "$out" | cut -f1)), latest migration: ${version}"
+  PG_DUMP_BYTES=$(stat -c %s "$out")
+  PG_LATEST_MIGRATION=$(printf '%s' "$version" | tr -cd 'A-Za-z0-9_\134')
   rotate "$PG_DIR" 'medvue_*.dump'
 }
 
@@ -132,6 +134,27 @@ backup_jwt() {
   rotate "$JWT_DIR" 'jwt-keys_*.tar.gz'
 }
 
+# Machine-readable result for the platform administration (docs/admin.md §7,
+# docs/decisions.md D177): $BACKUP_ROOT/status is mounted READ-ONLY into the
+# backend container. Date, result, dump size and latest migration only — no
+# path, no secret. Written atomically (rename), success or failure.
+STATUS_DIR="$BACKUP_ROOT/status"
+PG_DUMP_BYTES=""
+PG_LATEST_MIGRATION=""
+write_status_file() {
+  mkdir -p "$STATUS_DIR"
+  local migration=null
+  [[ -n "$PG_LATEST_MIGRATION" ]] && migration="\"${PG_LATEST_MIGRATION//\\/\\\\}\""
+  printf '{"finishedAt":"%s","result":"%s","failures":%d,"postgresDumpBytes":%s,"latestMigration":%s}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$failures" "${PG_DUMP_BYTES:-null}" "$migration" \
+    >"$STATUS_DIR/.backup.json.partial"
+  mv -f -- "$STATUS_DIR/.backup.json.partial" "$STATUS_DIR/backup.json"
+}
+# Never turns a good backup into a failed run: the status file is informative.
+write_status() {
+  write_status_file "$1" 2>/dev/null || log "[status] WARNING: could not write $STATUS_DIR/backup.json"
+}
+
 stamp=$(date +%Y%m%d_%H%M%S)
 log "[backup] start (retention ${RETENTION_DAYS}d, always keeping the newest ${MIN_KEEP})"
 
@@ -140,8 +163,10 @@ backup_postgres "$stamp" || failures=$((failures + 1))
 backup_jwt "$stamp" || failures=$((failures + 1))
 
 if [[ "$failures" -eq 0 ]]; then
+  write_status success
   log "[backup] done: all OK"
 else
+  write_status failure
   log "[backup] done: ${failures} failure(s)"
   exit 1
 fi

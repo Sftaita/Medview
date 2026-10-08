@@ -88,6 +88,20 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     private int $credentialsVersion = 1;
 
     /**
+     * The global platform administrator flag (ROLE_PLATFORM_ADMIN,
+     * docs/admin.md, docs/decisions.md D174) — independent of every team
+     * role (OWNER/ADMIN/MEMBER) and of planning creation, and never a
+     * shortcut into anyone's plannings. Never settable through a request
+     * body: granted by the `app:platform-admin:grant` console command or,
+     * by another platform admin, through PlatformAdminService (password
+     * re-confirmed, audited). Read from the database on every request (the
+     * JWT's own `roles` claim is never trusted), so a revocation applies to
+     * the very next request.
+     */
+    #[ORM\Column(options: ['default' => false])]
+    private bool $platformAdmin = false;
+
+    /**
      * Null until the user confirms their address. Reserved for the future
      * email-verification flow (no endpoint sets this yet).
      */
@@ -192,6 +206,22 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
         $this->touch();
     }
 
+    #[Groups(['user:read'])]
+    public function isPlatformAdmin(): bool
+    {
+        return $this->platformAdmin;
+    }
+
+    /**
+     * Only ever called by App\Service\Admin\PlatformAdminService, which
+     * enforces who may grant/revoke and writes the audit entry.
+     */
+    public function setPlatformAdmin(bool $platformAdmin): void
+    {
+        $this->platformAdmin = $platformAdmin;
+        $this->touch();
+    }
+
     public function getEmailVerifiedAt(): ?\DateTimeImmutable
     {
         return $this->emailVerifiedAt;
@@ -247,10 +277,10 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
      */
     public function getRoles(): array
     {
-        // Team-scoped roles (OWNER/ADMIN/MEMBER) are attached via
-        // TeamMember once teams exist; every authenticated user gets this
-        // baseline role in the meantime.
-        return ['ROLE_USER'];
+        // Team-scoped roles (OWNER/ADMIN/MEMBER) are never global roles: they
+        // are checked by voters against PlanningTeamMember. The only global
+        // role beyond the baseline is the platform administrator (D174).
+        return $this->platformAdmin ? ['ROLE_USER', 'ROLE_PLATFORM_ADMIN'] : ['ROLE_USER'];
     }
 
     /**

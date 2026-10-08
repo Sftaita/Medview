@@ -8,6 +8,8 @@ export type CurrentUser = {
   /** E.164 ("+32470123456"); null for accounts created before the field existed. */
   phone?: string | null
   active: boolean
+  /** Global ROLE_PLATFORM_ADMIN (D174) — only decides whether the /admin entry is shown; the API enforces it. */
+  platformAdmin?: boolean
   createdAt: string
   updatedAt: string
 }

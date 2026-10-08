@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace App\Tests\Entity;
 
-use App\Tests\AuthenticationTestHelpers;
+use App\Entity\User;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
+use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 
 /**
@@ -17,17 +18,22 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
  */
 final class PasswordResetTokenConstraintsTest extends WebTestCase
 {
-    use AuthenticationTestHelpers;
-
     private Connection $db;
     private int $userId;
 
     protected function setUp(): void
     {
-        $client = static::createClient();
-        $this->registerUser($client, 'reset.constraints@example.com', 'correct-horse-battery');
+        static::createClient();
+        // Persisted directly, not registered through the API: a registration
+        // now writes an append-only audit entry referencing the user (D176),
+        // which would forbid the DELETE of the cascade test below. Users are
+        // never deleted by the application itself.
+        $em = static::getContainer()->get(EntityManagerInterface::class);
+        $user = new User('reset.constraints@example.com', 'Test', 'User', 'irrelevant-hash');
+        $em->persist($user);
+        $em->flush();
         $this->db = static::getContainer()->get(Connection::class);
-        $this->userId = (int) $this->db->fetchOne("SELECT id FROM users WHERE email = 'reset.constraints@example.com'");
+        $this->userId = (int) $user->getId();
     }
 
     /**

@@ -8,6 +8,7 @@ use App\Dto\RegisterUserRequest;
 use App\Exception\AccountExistsForInvitationException;
 use App\Exception\EmailAlreadyUsedException;
 use App\Repository\UserRepository;
+use App\Service\Admin\PlatformAuditLogger;
 use App\Service\InvitationMailer;
 use App\Service\PhoneNumberNormalizer;
 use App\Service\TeamInvitationService;
@@ -16,6 +17,7 @@ use Doctrine\DBAL\Driver\Exception as DriverException;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+use Symfony\Component\Clock\MockClock;
 use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 
 /**
@@ -76,6 +78,7 @@ final class UserRegistrationServiceTest extends KernelTestCase
             new PhoneNumberNormalizer('BE'),
             self::getContainer()->get(TeamInvitationService::class),
             self::getContainer()->get(InvitationMailer::class),
+            new PlatformAuditLogger($entityManager, new MockClock()),
         );
     }
 

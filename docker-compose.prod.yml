@@ -24,6 +24,10 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.prod
+      args:
+        # The release tag being deployed (docs/deployment.md §3), shown read-only
+        # by the platform administration. Not a secret.
+        APP_VERSION: ${APP_VERSION:-unknown}
     image: medvue-backend:${IMAGE_TAG:-local}
     container_name: medvue-backend
     restart: unless-stopped
@@ -37,6 +41,16 @@ services:
       # access tokens (docs/decisions.md D107). The private key is encrypted
       # with JWT_PASSPHRASE from `.env`: never change one without the other.
       - medvue_jwt_keys:/app/config/jwt
+      # Backup status files written by scripts/backup/*.sh (date, result, size
+      # only), READ-ONLY for the platform administration (docs/admin.md §7,
+      # D177). Never the backups themselves. The directory must exist before
+      # `up` (docs/deployment.md §5 quinquies): not created by Docker as root.
+      - type: bind
+        source: /home/deploy/backups/medvue/status
+        target: /app/var/ops-status
+        read_only: true
+        bind:
+          create_host_path: false
     networks:
       - proxy
       - medvue-internal

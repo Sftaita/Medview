@@ -144,7 +144,7 @@
 # sont jamais supprimés (n'effacer que les fichiers suivis absents de la
 # nouvelle archive).
 cd /opt/stack/apps/medvue
-docker compose -f docker-compose.prod.yml build
+APP_VERSION=v<YYYY.MM.DD>-prod docker compose -f docker-compose.prod.yml build   # version affichée par /admin (§5 quinquies)
 docker compose -f docker-compose.prod.yml up -d --no-build
 # Migrations : séquence complète du §1 étape 6 (status, dry-run + write-sql,
 # relecture, puis migrate). Jamais `migrate` sans relecture préalable.
@@ -277,6 +277,50 @@ la dernière ligne du log. Relancer à la main est toujours sans danger (même
 commande, sans `>>`). Un email abandonné après 5 tentatives reste visible
 (historique des diffusions, `failedCount`) et en base :
 `SELECT id, publication_id, user_id, attempts FROM planning_publication_notifications WHERE status = 'FAILED' AND attempts >= 5;`
+
+## 5 quinquies. Administration de la plateforme (D174-D177)
+
+> **Pas encore déployé** (branche `feature/platform-admin`). Étapes à faire
+> au premier déploiement de ce lot, en plus de la séquence du §3.
+
+1. **Avant `up -d`** — le répertoire des statuts de sauvegarde doit exister,
+   créé par `deploy` (le montage refuse de le créer : `create_host_path:
+   false`, jamais un répertoire `root` que les scripts ne pourraient plus
+   écrire) :
+   ```bash
+   mkdir -p /home/deploy/backups/medvue/status
+   ```
+2. **Construire avec la version** (affichée en lecture seule dans
+   l'administration ; sans elle : « non renseignée ») :
+   ```bash
+   APP_VERSION=v<YYYY.MM.DD>-prod docker compose -f docker-compose.prod.yml build
+   ```
+3. Migration `Version20261008100000` (séquence du §1 étape 6) : ajouts
+   uniquement — colonne `users.platform_admin`, deux index, trois tables, un
+   trigger — plus deux `INSERT … SELECT` de reprise (activité depuis
+   `refresh_tokens`, inscriptions dans l'audit). Aucun `UPDATE`/`DELETE`/`DROP`.
+4. **Premier administrateur** (compte déjà inscrit) :
+   ```bash
+   docker exec medvue-backend php bin/console app:platform-admin grant <email>
+   docker exec medvue-backend php bin/console app:platform-admin list
+   ```
+5. **Cron de rétention** (même précautions que §5 bis : copie du crontab,
+   ajout en fin, rien d'autre modifié) :
+   ```bash
+   CRON_TZ=UTC
+   20 4 * * * cd /opt/stack/apps/medvue && docker compose -f docker-compose.prod.yml exec -T backend php bin/console app:platform:purge-telemetry >> /home/deploy/backups/medvue/purge-telemetry.log 2>&1
+   ```
+6. **Comptes de recette** : à partir de cette migration, un compte ne peut
+   plus être supprimé (inscription dans l'audit append-only, `docs/admin.md`
+   §11). Les comptes jetables `@example.test` créés pour une recette sont
+   **désactivés** à la fin (`POST /api/admin/users/{id}/deactivate`), jamais
+   supprimés, et leur rôle d'administrateur éventuel retiré avant.
+7. **Vérifications** : lancer `scripts/backup/medvue-backup.sh` puis
+   `medvue-restore-test.sh` → `status/backup.json` et
+   `status/restore-test.json` existent ; « Infrastructure » affiche la
+   sauvegarde et le test « Opérationnel » avec leur date, et la version
+   déployée ; un compte sans le rôle reçoit `403` sur
+   `https://api.medvue.be/api/admin/overview`.
 
 ## 6. Historique des déploiements
 

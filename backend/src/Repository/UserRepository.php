@@ -59,6 +59,37 @@ class UserRepository extends ServiceEntityRepository implements PasswordUpgrader
     }
 
     /**
+     * @return list<User> platform administrators, oldest account first
+     */
+    public function findPlatformAdmins(): array
+    {
+        /* @var list<User> */
+        return $this->createQueryBuilder('u')
+            ->andWhere('u.platformAdmin = true')
+            ->orderBy('u.createdAt', 'ASC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * Same list, row-locked (SELECT … FOR UPDATE) for the duration of the
+     * caller's transaction: used before revoking a role, so that "never the
+     * last administrator" holds under concurrency.
+     *
+     * @return list<User>
+     */
+    public function findPlatformAdminsForUpdate(): array
+    {
+        /* @var list<User> */
+        return $this->createQueryBuilder('u')
+            ->andWhere('u.platformAdmin = true')
+            ->orderBy('u.id', 'ASC')
+            ->getQuery()
+            ->setLockMode(\Doctrine\DBAL\LockMode::PESSIMISTIC_WRITE)
+            ->getResult();
+    }
+
+    /**
      * Used by Symfony Security to transparently rehash a password when the
      * hashing algorithm's cost parameters change.
      */

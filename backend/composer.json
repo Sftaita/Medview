@@ -6,6 +6,7 @@
     "require": {
         "php": ">=8.2",
         "ext-ctype": "*",
+        "ext-filter": "*",
         "ext-iconv": "*",
         "ext-intl": "*",
         "ext-mbstring": "*",
@@ -14,6 +15,7 @@
         "doctrine/dbal": "^4.4",
         "doctrine/doctrine-bundle": "^2.19",
         "doctrine/doctrine-migrations-bundle": "^3.7",
+        "doctrine/migrations": "^3.9",
         "doctrine/orm": "^3.7",
         "doctrine/persistence": "^4.2",
         "dompdf/dompdf": "^3.1",
