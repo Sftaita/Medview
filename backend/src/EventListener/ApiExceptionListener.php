@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\EventListener;
 
+use App\Service\Admin\TechnicalErrorLog;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -27,8 +28,10 @@ use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 #[AsEventListener(event: 'kernel.exception', priority: -10)]
 final class ApiExceptionListener
 {
-    public function __construct(private readonly LoggerInterface $logger)
-    {
+    public function __construct(
+        private readonly LoggerInterface $logger,
+        private readonly TechnicalErrorLog $technicalErrors,
+    ) {
     }
 
     public function __invoke(ExceptionEvent $event): void
@@ -53,6 +56,8 @@ final class ApiExceptionListener
                 'message' => $exception->getMessage(),
                 'exception' => $exception,
             ]);
+            // Class and route only, never the message (docs/decisions.md D177).
+            $this->technicalErrors->recordHttp($exception, $request->attributes->get('_route'), $request->getMethod());
             $status = 500;
             $message = 'An unexpected error occurred.';
             $headers = [];

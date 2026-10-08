@@ -81,6 +81,38 @@ final class ProdComposeTest extends TestCase
         self::assertSame([], array_values(array_diff(array_keys($dev), array_keys($prod))));
     }
 
+    /**
+     * docs/decisions.md D177: the platform administration reads the backup
+     * status files, never writes them, never sees the backups themselves —
+     * and Docker must never create that host directory as root.
+     */
+    public function testBackupStatusIsMountedReadOnlyAndNeverCreatedByDocker(): void
+    {
+        $this->requireComposeFile();
+        $compose = Yaml::parseFile($this->composePath());
+
+        $matches = array_values(array_filter(
+            $compose['services']['backend']['volumes'] ?? [],
+            static fn (mixed $volume): bool => \is_array($volume) && '/app/var/ops-status' === ($volume['target'] ?? null),
+        ));
+        self::assertCount(1, $matches);
+        self::assertSame('/home/deploy/backups/medvue/status', $matches[0]['source']);
+        self::assertTrue($matches[0]['read_only']);
+        self::assertFalse($matches[0]['bind']['create_host_path']);
+
+        foreach ($compose['services'] as $name => $service) {
+            foreach ($service['volumes'] ?? [] as $volume) {
+                $spec = \is_array($volume) ? (string) ($volume['source'] ?? '') : (string) $volume;
+                self::assertStringNotContainsString('docker.sock', $spec, "No Docker socket in $name.");
+                self::assertStringNotContainsString('backups/medvue/postgres', $spec, "No backup dump reachable from $name.");
+            }
+        }
+
+        foreach (['medvue-backup.sh' => 'STATUS_DIR/backup.json', 'medvue-restore-test.sh' => 'status/restore-test.json'] as $script => $file) {
+            self::assertStringContainsString($file, (string) file_get_contents(\dirname(__DIR__, 3).'/scripts/backup/'.$script));
+        }
+    }
+
     private function assertServiceMountsNamedVolume(string $service, string $target, string $volumeName): void
     {
         $this->requireComposeFile();

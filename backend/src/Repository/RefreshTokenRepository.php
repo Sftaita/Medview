@@ -58,6 +58,23 @@ class RefreshTokenRepository extends ServiceEntityRepository
      * rationale as revokeFamily(): a bulk UPDATE would never refresh any
      * already-hydrated RefreshToken still held in memory by the caller.
      */
+    /**
+     * Sessions (families) of $user that can still be renewed: at least one
+     * token neither revoked nor expired.
+     */
+    public function countActiveFamilies(User $user): int
+    {
+        return (int) $this->createQueryBuilder('t')
+            ->select('COUNT(DISTINCT t.familyId)')
+            ->where('t.user = :user')
+            ->andWhere('t.revokedAt IS NULL')
+            ->andWhere('t.expiresAt > :now')
+            ->setParameter('user', $user)
+            ->setParameter('now', new \DateTimeImmutable())
+            ->getQuery()
+            ->getSingleScalarResult();
+    }
+
     public function revokeAllForUser(User $user): void
     {
         $tokens = $this->createQueryBuilder('t')

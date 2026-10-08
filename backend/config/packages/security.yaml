@@ -68,6 +68,11 @@ security:
         # JWT: the secret token in the path is the credential (read-only, one
         # person's duties — docs/decisions.md D170).
         - { path: '^/api/calendar-feeds/[0-9a-f]{64}\.ics$', methods: [GET, HEAD], roles: PUBLIC_ACCESS }
+        # Platform administration (docs/admin.md, D174): the global
+        # ROLE_PLATFORM_ADMIN only — never a team OWNER/ADMIN role. Roles are
+        # reloaded from the database on every request, so a revocation
+        # applies to the next one. Each controller re-checks with #[IsGranted].
+        - { path: ^/api/admin, roles: ROLE_PLATFORM_ADMIN }
         - { path: ^/api, roles: IS_AUTHENTICATED_FULLY }
 
 when@test:

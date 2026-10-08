@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Dto\RegisterUserRequest;
+use App\Entity\PlatformAuditEventType;
 use App\Entity\TeamInvitation;
 use App\Entity\User;
 use App\Exception\AccountExistsForInvitationException;
@@ -12,6 +13,7 @@ use App\Exception\EmailAlreadyUsedException;
 use App\Exception\InvitationEmailMismatchException;
 use App\Exception\InvitationNotUsableException;
 use App\Repository\UserRepository;
+use App\Service\Admin\PlatformAuditLogger;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
@@ -42,6 +44,7 @@ final class UserRegistrationService
         private readonly PhoneNumberNormalizer $phoneNormalizer,
         private readonly TeamInvitationService $invitationService,
         private readonly InvitationMailer $mailer,
+        private readonly PlatformAuditLogger $audit,
     ) {
     }
 
@@ -78,6 +81,7 @@ final class UserRegistrationService
 
         $user = $this->buildUser($request, $email);
         $this->entityManager->persist($user);
+        $this->audit->record(PlatformAuditEventType::USER_REGISTERED, $user, $user, ['via' => 'classic']);
 
         try {
             $this->entityManager->flush();
@@ -114,6 +118,7 @@ final class UserRegistrationService
 
                 $user = $this->buildUser($request, $email);
                 $this->entityManager->persist($user);
+                $this->audit->record(PlatformAuditEventType::USER_REGISTERED, $user, $user, ['via' => 'invitation']);
                 $this->entityManager->flush();
 
                 return new RegistrationResult($user, $this->invitationService->consumePendingFor($user));

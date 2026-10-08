@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Entity\PasswordResetToken;
+use App\Entity\PlatformAuditEventType;
 use App\Entity\User;
 use App\Exception\InvalidPasswordResetTokenException;
 use App\Repository\PasswordResetTokenRepository;
 use App\Repository\UserRepository;
 use App\Security\PasswordResetFailureReason;
+use App\Service\Admin\PlatformAuditLogger;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Clock\ClockInterface;
@@ -36,6 +38,7 @@ final class PasswordResetService
         private readonly PasswordResetMailer $mailer,
         private readonly LoggerInterface $logger,
         private readonly ClockInterface $clock,
+        private readonly PlatformAuditLogger $audit,
         #[Autowire(env: 'int:PASSWORD_RESET_TOKEN_TTL')]
         private readonly int $ttlSeconds,
     ) {
@@ -145,6 +148,8 @@ final class PasswordResetService
             $user->setPasswordHash($this->passwordHasher->hashPassword($user, $newPlainPassword));
             $user->bumpCredentialsVersion();
             $token->consume();
+            // Account-security event, visible in the platform activity log (D176).
+            $this->audit->record(PlatformAuditEventType::PASSWORD_RESET_COMPLETED, $user, $user);
 
             // Every OTHER still-usable token for this user becomes moot —
             // this is the "most recent request wins" invariant collapsing

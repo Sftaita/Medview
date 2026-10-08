@@ -49,8 +49,19 @@ name="mvrt-$$-$(date +%s)"
 work=$(mktemp -d)
 failures=0
 cleanup() {
+  local code=$?
   docker rm -f "$name" >/dev/null 2>&1 || true
   rm -rf -- "$work"
+  # Result for the platform administration (docs/admin.md §7), read-only in
+  # the backend container: date and outcome only, whatever path ended the run.
+  {
+    mkdir --parents "$BACKUP_ROOT/status" &&
+      printf '{"finishedAt":"%s","result":"%s","compareLive":%s}\n' \
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$([[ "$code" -eq 0 ]] && echo success || echo failure)" \
+        "$([[ "$compare_live" -eq 1 ]] && echo true || echo false)" >"$BACKUP_ROOT/status/.restore-test.json.partial" &&
+      mv -f -- "$BACKUP_ROOT/status/.restore-test.json.partial" "$BACKUP_ROOT/status/restore-test.json"
+  } 2>/dev/null || echo "  [WARN] could not write the restore-test status file"
+  exit "$code"
 }
 trap cleanup EXIT
 

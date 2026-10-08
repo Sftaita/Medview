@@ -40,6 +40,12 @@ WORKDIR /app
 COPY . .
 COPY --from=vendor /app/vendor ./vendor
 
+# The deployed version shown by the platform administration (docs/admin.md §7):
+# deployments ship a `git archive` without .git, so the tag is passed at build
+# time (APP_VERSION=v… docker compose build). Absent → reported as unknown.
+ARG APP_VERSION=unknown
+RUN printf '%s\n' "$APP_VERSION" > /app/RELEASE
+
 ENV APP_ENV=prod
 ENV SERVER_NAME=:80
 EXPOSE 80

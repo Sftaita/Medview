@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Security;
 
 use App\Entity\User;
+use App\Service\Admin\UserActivityRecorder;
 use App\Service\RefreshTokenService;
 use Lexik\Bundle\JWTAuthenticationBundle\Services\JWTTokenManagerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -25,6 +26,7 @@ final class LoginSuccessHandler implements AuthenticationSuccessHandlerInterface
         private readonly JWTTokenManagerInterface $jwtManager,
         private readonly RefreshTokenService $refreshTokenService,
         private readonly RefreshTokenCookieFactory $cookieFactory,
+        private readonly UserActivityRecorder $activityRecorder,
     ) {
     }
 
@@ -35,6 +37,7 @@ final class LoginSuccessHandler implements AuthenticationSuccessHandlerInterface
 
         $accessToken = $this->jwtManager->create($user);
         $rawRefreshToken = $this->refreshTokenService->issueNewFamily($user, $request);
+        $this->activityRecorder->record($user);
 
         $response = new JsonResponse(['token' => $accessToken]);
         $response->headers->setCookie($this->cookieFactory->create($rawRefreshToken));

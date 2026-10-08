@@ -6,6 +6,7 @@ namespace App\Controller;
 
 use App\Exception\InvalidRefreshTokenException;
 use App\Security\RefreshTokenCookieFactory;
+use App\Service\Admin\UserActivityRecorder;
 use App\Service\RefreshTokenService;
 use Lexik\Bundle\JWTAuthenticationBundle\Services\JWTTokenManagerInterface;
 use Psr\Log\LoggerInterface;
@@ -26,6 +27,7 @@ final class RefreshTokenController
         private readonly RefreshTokenCookieFactory $cookieFactory,
         private readonly JWTTokenManagerInterface $jwtManager,
         private readonly LoggerInterface $logger,
+        private readonly UserActivityRecorder $activityRecorder,
     ) {
     }
 
@@ -50,6 +52,8 @@ final class RefreshTokenController
             return $this->invalidTokenResponse();
         }
 
+        // A renewed session is a day of use (docs/decisions.md D175).
+        $this->activityRecorder->record($user);
         $accessToken = $this->jwtManager->create($user);
 
         $response = new JsonResponse(['token' => $accessToken]);
