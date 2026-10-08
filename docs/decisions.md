@@ -6282,3 +6282,120 @@ l'ancienne (voir légende).
   deux exécutions simultanées de la commande : chaque email envoyé une fois,
   contenu, nom et PDF de la version republiée (SHA-256 identique au
   document stocké et à `publication.pdf`).
+
+## D174 — Administration de la plateforme : un rôle global `ROLE_PLATFORM_ADMIN` distinct des équipes, relu en base à chaque requête
+
+- **Besoin** : un espace d'administration de l'éditeur (comptes, adoption,
+  sécurité, santé technique), sans rapport avec la gestion des plannings,
+  qui reste aux créateurs et OWNER/ADMIN d'équipe (`docs/admin.md`).
+- **Persistance** : une colonne `users.platform_admin` (booléen, `false`
+  partout à la migration). Une table d'attributions datées a été écartée :
+  l'historique des attributions/retraits est déjà dans le journal d'audit
+  append-only (D176), une seconde source aurait pu diverger. `getRoles()`
+  ajoute `ROLE_PLATFORM_ADMIN` à `ROLE_USER` ; les rôles d'équipe restent des
+  voters, jamais des rôles globaux (inchangé, `authentication.md` §13).
+- **Aucun droit sur les plannings** : `PlanningVoter`/`PlanningTeamRoleVoter`
+  ignorent ce rôle. Pas de « contournement administrateur ».
+- **Protection** : `access_control` `^/api/admin` → `ROLE_PLATFORM_ADMIN`
+  **et** `#[IsGranted]` sur chaque contrôleur ; la route frontend `/admin` ne
+  porte aucune donnée.
+- **Révocation** : le fournisseur d'utilisateurs Doctrine recharge le `User`
+  à chaque requête JWT et l'autorisation lit ses rôles courants, jamais la
+  revendication `roles` du jeton : un retrait vaut à la requête suivante, sans
+  toucher aux sessions de la personne (elle garde son compte). Prouvé par un
+  test avec le jeton déjà émis. Aucun `credentialsVersion` n'est incrémenté
+  pour un retrait de rôle (ce serait déconnecter quelqu'un qui reste un
+  utilisateur légitime).
+- **Attribution initiale** : uniquement la console
+  (`app:platform-admin grant <email>`, compte existant et actif) — quiconque
+  peut la lancer opère déjà le serveur. Ensuite, un administrateur peut en
+  nommer un autre en retapant **son** mot de passe (un jeton volé ne suffit
+  pas à créer un administrateur) ; jamais sur son propre compte ; jamais le
+  dernier retiré (verrou `FOR UPDATE` sur les administrateurs). Aucune
+  attribution par inscription ni par corps de requête (champs inconnus
+  refusés, D116).
+- **Actions sur les comptes** : désactiver (= `active=false` + révocation de
+  toutes les familles de refresh tokens + `credentialsVersion`+1, donc jeton
+  courant refusé immédiatement, D142), réactiver, révoquer toutes les
+  sessions. Jamais sur soi ; un administrateur de la plateforme ne peut pas
+  être désactivé tant qu'il a le rôle (pas de mise à l'écart silencieuse d'un
+  pair). Pas de suppression en V1 (`User` n'est jamais supprimé).
+- **Piège rencontré** : un refus levé **dans** `wrapInTransaction` ferme
+  l'EntityManager ; le refus « dernier administrateur » est donc décidé dans
+  la transaction mais levé après elle.
+
+## D175 — Mesure de l'activité : un jour d'activité par utilisateur, écrit au login et au refresh, historique reconstitué depuis `refresh_tokens`
+
+- **Problème** : « utilisateurs réellement actifs », DAU/MAU, taux de retour
+  et « dernière activité » n'avaient aucune source. `users.active` est un état
+  administratif, pas un usage — les deux sont affichés séparément.
+- **Décision** : table `user_activity_days (user_id, activity_date,
+  first_seen_at, last_seen_at)`, clé primaire `(user_id, activity_date)`,
+  alimentée par un `INSERT … ON CONFLICT` dans `LoginSuccessHandler` et
+  `RefreshTokenController` — jamais à chaque requête. Le jeton d'accès vit 15
+  minutes et le frontend renouvelle la session à chaque ouverture : toute
+  utilisation d'un jour passe par l'un des deux. Écart assumé et documenté :
+  une session ouverte avant minuit et utilisée moins de 15 minutes après
+  compte pour la veille. Écriture best-effort (une erreur n'empêche jamais
+  une connexion).
+- **Jours** : jours Europe/Brussels (`PlatformTime`), pas UTC — une
+  connexion à 00 h 30 compte pour le bon jour. Les horodatages restent en UTC.
+- **Historique réel** : chaque ligne de `refresh_tokens` est exactement un
+  login ou une rotation, jamais supprimée ; la migration en dérive
+  l'historique d'activité. Ce n'est pas une estimation.
+- **Écarté** : un événement par requête (coût d'écriture permanent, données
+  de navigation inutiles) ; un outil d'analytics tiers (données personnelles
+  hors de MedVue) ; `MAX(refresh_tokens.created_at)` seul (pas de DAU/MAU
+  sans balayer une table qui contient IP et User-Agent).
+- **Minimisation / rétention** : ni IP, ni page, ni navigateur ; 400 jours
+  (12 mois + une fenêtre MAU), purge par `app:platform:purge-telemetry`.
+- **Définitions figées** (`docs/admin.md` §5) : actif = a ouvert ou prolongé
+  une session ; MAU = distincts sur 30 jours glissants ; DAU/MAU = moyenne des
+  DAU sur 30 j ÷ MAU ; taux de retour = cohorte de 90 jours dont la fenêtre
+  est complète, activité un **autre** jour que l'inscription.
+
+## D176 — Journal d'audit de la plateforme append-only, distinct des journaux techniques
+
+- **Décision** : `platform_audit_events` (type, résultat SUCCESS/DENIED/
+  FAILURE, acteur USER/CONSOLE/SYSTEM, cible, contexte JSON court),
+  append-only par trigger comme les autres audits (D127, D143). Écrite par
+  `PlatformAuditLogger` dans la **même transaction** que l'action ; un refus
+  de règle (soi-même, mot de passe faux, cible administratrice) est écrit
+  `DENIED` puis la réponse d'erreur part.
+- **Contenu** : inscriptions (classique / invitation), désactivations,
+  réactivations, révocations de sessions, attributions/retraits du rôle,
+  réinitialisations de mot de passe. Le contexte ne porte que des faits non
+  sensibles (motif saisi, nombre de sessions fermées, IP de l'administrateur)
+  — jamais mot de passe, jeton, donnée médicale ou contenu de planning.
+- **Reprise** : les inscriptions existantes sont reprises comme
+  `USER_REGISTERED` datées par `users.created_at`, marquées
+  `backfilled: true` et affichées « reconstitué » — une ligne d'audit ne doit
+  jamais faire croire qu'elle a été écrite au moment des faits.
+- **Jamais purgé.**
+
+## D177 — Supervision technique en lecture seule : vérifications réelles, état « non vérifiable », remontée des sauvegardes par fichier de statut
+
+- **Principe** : chaque contrôle est exécuté à l'ouverture de la page, sur les
+  seules ressources de MedVue, et rend `ok`/`warning`/`error`/`unknown` ;
+  « Non vérifiable » plutôt qu'un « opérationnel » par défaut.
+- **Erreurs** : `technical_error_events` (classe d'exception, route, méthode —
+  jamais le message, qui peut contenir des saisies) depuis
+  `ApiExceptionListener` (500 uniquement) et les messages Messenger en échec ;
+  90 jours. Table séparée de l'audit : un journal technique se purge, un audit
+  non.
+- **Sauvegardes** : le backend ne voit ni les dumps ni le crontab.
+  `medvue-backup.sh` / `medvue-restore-test.sh` écrivent un JSON (date,
+  résultat, taille, dernière migration) dans
+  `/home/deploy/backups/medvue/status`, monté **en lecture seule** dans
+  `medvue-backend` (`create_host_path: false` : jamais un répertoire créé par
+  Docker en root). Écriture best-effort : un statut illisible ne fait jamais
+  échouer une sauvegarde.
+- **Version** : argument de construction `APP_VERSION` → fichier `RELEASE`
+  dans l'image (les déploiements sont des `git archive` sans `.git`).
+- **Écarté** : socket Docker, métriques hôte, état des autres applications,
+  commandes ou sauvegardes déclenchables, affichage de variables
+  d'environnement ; mesure des temps de réponse HTTP (une écriture par
+  requête) — la performance affichée se limite à la latence PostgreSQL et à la
+  durée des calculs de planning.
+- **Limite** : si PostgreSQL est en panne, l'administration est inaccessible
+  (l'authentification en dépend) ; `/api/health` reste la sonde externe.

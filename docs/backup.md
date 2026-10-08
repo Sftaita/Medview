@@ -146,6 +146,21 @@ valides : les clients obtiennent de nouveaux access tokens sans se reconnecter.
    restaurer le dump (4.1, sans l'étape 1) et les clés (4.2).
 4. Démarrer le reste, puis les checks de santé (`docs/deployment.md` §2).
 
+## 4 bis. Statut lisible par l'administration (D177)
+
+En fin de run, chaque script écrit un petit JSON dans
+`/home/deploy/backups/medvue/status/` (droits de `deploy`, écriture atomique,
+best-effort : un échec d'écriture n'échoue jamais la sauvegarde) :
+
+- `backup.json` : `finishedAt` (UTC), `result` (`success`/`failure`),
+  `failures`, `postgresDumpBytes`, `latestMigration` ;
+- `restore-test.json` : `finishedAt`, `result`, `compareLive`.
+
+Aucun chemin, aucun secret. Ce répertoire est monté **en lecture seule** dans
+`medvue-backend` (`/app/var/ops-status`) : la page « Infrastructure » de
+`/admin` lit ces fichiers, ne déclenche jamais rien et ne voit pas les dumps
+(`docs/admin.md` §7). Fichier absent → « Non vérifiable ».
+
 ## 5. Limites connues (à connaître, pas à cacher)
 
 - **Aucune copie hors du serveur.** Les sauvegardes sont locales : une perte du
