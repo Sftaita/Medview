@@ -700,6 +700,26 @@ final class DutySwapControllerTest extends WebTestCase
         self::assertSame('duty_not_swappable', $response['error']);
     }
 
+    public function testADeactivatedLineIsNeverSwapped(): void
+    {
+        $client = static::createClient();
+        $s = $this->swapScenario($client);
+        $request = $this->agreedRequest($client, $s, $s['alice'], '2027-01-05', 'bob@example.com', '2027-01-12');
+        $before = $this->holders($s);
+
+        // Deactivated after the request: the check at acceptance must see it, not only the one at creation.
+        $container = static::getContainer();
+        $planning = $container->get(PlanningRepository::class)->findOneByStableId($s['planningId']);
+        $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0]->setActive(false);
+        $container->get(EntityManagerInterface::class)->flush();
+
+        $response = $this->decide($client, $request['proposals'][0]['stableId'], 'accept', $s['bob']);
+        self::assertResponseStatusCodeSame(409);
+        self::assertSame('period_not_published', $response['reason']);
+        self::assertSame($before, $this->holders($s));
+        self::assertSame('OBSOLETE', $this->requestEntity($request['stableId'])->getStatus()->value);
+    }
+
     // --- 20: SMTP failure ----------------------------------------------------------------------
 
     public function testAnSmtpFailureNeverUndoesTheSwapAndTheEmailIsRetried(): void

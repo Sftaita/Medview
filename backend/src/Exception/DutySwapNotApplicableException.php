@@ -13,7 +13,7 @@ namespace App\Exception;
  */
 final class DutySwapNotApplicableException extends \RuntimeException
 {
-    /** The period is not (or no longer) PUBLISHED — draft or archived. */
+    /** The period is not (or no longer) PUBLISHED — draft or archived — or its line was deactivated. */
     public const PERIOD_NOT_PUBLISHED = 'period_not_published';
     /** One of the two units has already started (or ended). */
     public const DUTY_STARTED = 'duty_started';

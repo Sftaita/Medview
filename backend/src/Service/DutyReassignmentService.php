@@ -267,7 +267,8 @@ final class DutyReassignmentService
         if ($counterpartDuty->getPlanningPeriod() !== $period) {
             throw new DutySwapNotApplicableException(DutySwapNotApplicableException::NOT_SWAPPABLE);
         }
-        if (PlanningPeriodStatus::PUBLISHED !== $period->getStatus()) {
+        // A deactivated line is no longer part of the calendar members see (CurrentCalendarReader): nothing to swap there.
+        if (PlanningPeriodStatus::PUBLISHED !== $period->getStatus() || !$request->getLine()->isActive()) {
             throw new DutySwapNotApplicableException(DutySwapNotApplicableException::PERIOD_NOT_PUBLISHED);
         }
 

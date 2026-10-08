@@ -652,7 +652,7 @@ final class DutySwapService
         $request = $proposal->getRequest();
         $line = $request->getLine();
         $message = match ($exception->reason) {
-            DutySwapNotApplicableException::PERIOD_NOT_PUBLISHED => 'Ce planning n\'est plus publié : ses gardes ne peuvent plus être échangées.',
+            DutySwapNotApplicableException::PERIOD_NOT_PUBLISHED => 'Ce planning (ou cette ligne de garde) n\'est plus publié : ses gardes ne peuvent plus être échangées.',
             DutySwapNotApplicableException::DUTY_STARTED => 'Une des deux gardes a déjà commencé : l\'échange n\'est plus possible.',
             DutySwapNotApplicableException::DUTY_CHANGED => 'Une des deux gardes a changé de titulaire depuis la demande : cet échange n\'est plus valable.',
             DutySwapNotApplicableException::DUTY_LOCKED => 'Une des deux gardes est verrouillée par le gestionnaire du planning.',
