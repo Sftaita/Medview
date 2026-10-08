@@ -72,6 +72,8 @@ export type FakeBackendOptions = {
   duties?: unknown[] | null
   /** /api/me/calendar-feed — the subscription address of "Mes gardes" (D170); none by default. */
   calendarFeed?: CalendarFeed | null
+  /** GET /api/duty-swaps/options — the "Échanger ma garde" dialog (D178). */
+  swapOptions?: unknown
 }
 
 export function createFakeBackend(options: FakeBackendOptions = {}) {
@@ -115,6 +117,8 @@ export function createFakeBackend(options: FakeBackendOptions = {}) {
         : respond({ duties: options.duties ?? [] })
     }
 
+    if (path === '/api/duty-swaps/options' && options.swapOptions !== undefined)
+      return respond(options.swapOptions)
     if (path === '/api/me/calendar-feed' && method === 'GET') return respond({ feed: calendarFeed })
     if (path === '/api/me/calendar-feed' && method === 'POST') {
       calendarFeed ??= newFeed()

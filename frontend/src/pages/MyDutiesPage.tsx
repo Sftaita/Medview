@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { Icon } from '../components/Icon'
 import '../features/dashboard/dashboard.css'
 import { startOfDay } from '../features/dashboard/dates'
@@ -9,18 +9,25 @@ import '../features/duties/duties.css'
 import { DutyRow } from '../features/duties/DutyRow'
 import { groupByMonth, splitDuties } from '../features/duties/dutyDates'
 import type { MyDuty } from '../features/duties/types'
+import { SwapRequestDialog } from '../features/swaps/SwapRequestDialog'
+import '../features/swaps/swaps.css'
 
 type Tab = 'upcoming' | 'past'
 
 /**
  * "Mes gardes" (docs/decisions.md D168): every duty the signed-in user holds on a published line, across all
- * their plannings — upcoming first, past ones on demand. Read only: changes happen in each planning.
+ * their plannings — upcoming first, past ones on demand. Each upcoming unit offers "Échanger ma garde"
+ * (docs/decisions.md D178), or shows "Échange demandé" while a request is open — the unit stays listed here,
+ * because its holder remains responsible for it until a swap is confirmed.
  */
 export function MyDutiesPage() {
   const [duties, setDuties] = useState<MyDuty[] | null>(null)
   const [error, setError] = useState(false)
   const [tab, setTab] = useState<Tab>('upcoming')
   const [subscribing, setSubscribing] = useState(false)
+  // The unit (its first duty) whose "Échanger ma garde" dialog is open.
+  const [swapping, setSwapping] = useState<string | null>(null)
+  const navigate = useNavigate()
   const today = useMemo(() => startOfDay(new Date()), [])
 
   useEffect(() => {
@@ -110,8 +117,36 @@ export function MyDutiesPage() {
                   <h2 className="duties-month">{group.label}</h2>
                   <ul className="db-list">
                     {group.duties.map((duty) => (
-                      <li key={duty.key}>
+                      <li key={duty.key} className="duty-item">
                         <DutyRow duty={duty} today={tab === 'upcoming' ? today : undefined} />
+                        {tab === 'upcoming' && (duty.swapRequestStableId || duty.swappable) && (
+                          <div className="duty-item__swap">
+                            {duty.swapRequestStableId ? (
+                              <>
+                                {/* The unit is listed because the user STILL holds it: never shown as transferred. */}
+                                <span className="db-pill swap-pill swap-pill--info">
+                                  <Icon name="swap" size={14} strokeWidth={2} />
+                                  Échange demandé
+                                </span>
+                                <Link
+                                  to={`/swaps?request=${duty.swapRequestStableId}`}
+                                  className="btn btn--ghost btn--sm"
+                                >
+                                  Voir la demande
+                                </Link>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn btn--secondary btn--sm"
+                                onClick={() => setSwapping(duty.dutyStableId)}
+                              >
+                                <Icon name="swap" size={16} strokeWidth={2} />
+                                Échanger ma garde
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -123,6 +158,13 @@ export function MyDutiesPage() {
       )}
 
       {subscribing && <CalendarSubscriptionModal onClose={() => setSubscribing(false)} />}
+      {swapping && (
+        <SwapRequestDialog
+          dutyStableId={swapping}
+          onClose={() => setSwapping(null)}
+          onCreated={(request) => navigate(`/swaps?request=${request.stableId}`)}
+        />
+      )}
     </section>
   )
 }

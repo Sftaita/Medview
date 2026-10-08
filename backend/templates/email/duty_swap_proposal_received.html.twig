@@ -1,0 +1,31 @@
+{# ------------------------------------------------------------------
+   MedVue — Proposition reçue sur votre demande (docs/duty-swaps.md §8)
+   Objet : MedVue — Nouvelle proposition d'échange de <auteur>
+   Contexte : firstName, planningName, lineName, counterpartName,
+     requesterGives (votre garde), counterpartGives (la garde proposée),
+     requestUrl.
+   ------------------------------------------------------------------ #}
+{% extends 'email/_base.html.twig' %}
+{% import  'email/_components.html.twig' as ui %}
+
+{% set preheader  = counterpartName ~ ' vous propose une garde en échange de la vôtre.' %}
+{% set accent     = '#2D7FF9' %}
+{% set eyebrow    = 'Proposition reçue' %}
+{% set h1         = 'Nouvelle proposition<br>d’échange' %}
+{% set panelLabel = 'Planning' %}
+{% set panelTitle = planningName %}
+{% set panelSub   = lineName %}
+{% set ctaLabel   = 'Voir la proposition' %}
+{% set ctaUrl     = requestUrl %}
+{% set footerNote = 'Vous recevez cet email car vous avez demandé un échange de gardes dans MedVue.' %}
+
+{% block title %}Nouvelle proposition d’échange{% endblock %}
+{% block postal %}{% endblock %}
+
+{% block content %}
+{{ ui.p('Bonjour ' ~ firstName|e ~ ',', 24) }}
+{{ ui.p(ui.b(counterpartName) ~ ' répond à votre demande d’échange :', 18) }}
+{{ ui.p('• ' ~ ui.b(counterpartName) ~ ' assurerait ' ~ requesterGives|e ~ ' (actuellement la vôtre).<br>• ' ~ ui.b('Vous') ~ ' assureriez ' ~ counterpartGives|e ~ '.', 10) }}
+{{ ui.p('Vous pouvez accepter ou refuser cette proposition dans MedVue.', 18) }}
+{{ ui.warning('Rien n’est encore modifié.', 'Tant que vous n’avez pas accepté une proposition et que l’échange n’a pas été confirmé dans MedVue, vous restez personnellement responsable de votre garde initiale.') }}
+{% endblock %}

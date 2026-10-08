@@ -1,0 +1,31 @@
+{# ------------------------------------------------------------------
+   MedVue — Un collègue cherche à échanger une garde (docs/duty-swaps.md §8)
+   Objet : MedVue — <demandeur> cherche à échanger une garde
+   Contexte : firstName, planningName, lineName, requesterName,
+     requesterGives, toWholeLine (demande à toute la ligne), requestUrl.
+   Le destinataire peut proposer une de ses gardes ; rien ne change
+   tant que le demandeur n'a pas accepté et que l'échange n'est pas confirmé.
+   ------------------------------------------------------------------ #}
+{% extends 'email/_base.html.twig' %}
+{% import  'email/_components.html.twig' as ui %}
+
+{% set preheader  = requesterName ~ ' cherche quelqu’un avec qui échanger une garde.' %}
+{% set accent     = '#2D7FF9' %}
+{% set eyebrow    = 'Demande d’échange' %}
+{% set h1         = 'Un collègue cherche<br>à échanger une garde' %}
+{% set panelLabel = 'Planning' %}
+{% set panelTitle = planningName %}
+{% set panelSub   = lineName %}
+{% set ctaLabel   = 'Voir la demande' %}
+{% set ctaUrl     = requestUrl %}
+{% set footerNote = toWholeLine ? 'Vous recevez cet email car la demande a été adressée à toute votre ligne de garde.' : 'Vous recevez cet email car un membre de votre équipe vous a adressé une demande d’échange.' %}
+
+{% block title %}Demande d’échange de gardes{% endblock %}
+{% block postal %}{% endblock %}
+
+{% block content %}
+{{ ui.p('Bonjour ' ~ firstName|e ~ ',', 24) }}
+{{ ui.p(ui.b(requesterName) ~ ' cherche quelqu’un avec qui échanger ' ~ requesterGives|e ~ '.', 18) }}
+{{ ui.p('Si vous le souhaitez, vous pouvez lui proposer en échange une de vos gardes dans MedVue. ' ~ requesterName|e ~ ' choisira ensuite la proposition qui lui convient.', 18) }}
+{{ ui.warning('Rien n’est encore modifié.', 'Le planning ne change qu’une fois un échange accepté et confirmé dans MedVue ; jusque-là, chacun reste personnellement responsable de sa garde initiale.') }}
+{% endblock %}

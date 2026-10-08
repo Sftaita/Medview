@@ -6399,3 +6399,125 @@ l'ancienne (voir légende).
   durée des calculs de planning.
 - **Limite** : si PostgreSQL est en panne, l'administration est inaccessible
   (l'authentification en dépend) ; `/api/health` reste la sonde externe.
+
+## D178 — Échanges de gardes entre membres : un workflow à côté du calendrier, jamais une source de vérité des titulaires
+
+- **Contexte** : les membres doivent pouvoir échanger leurs gardes sans le
+  gestionnaire (échange déjà convenu, recherche ciblée, demande à toute la
+  ligne), avec une règle absolue : tant que l'échange n'est pas accepté et
+  enregistré, chacun reste responsable de sa garde initiale.
+- **Décision** : trois entités dédiées — `DutySwapRequest` (garde offerte,
+  `kind` `AGREED`/`SEARCH`, `audience` `SELECTED`/`ALL`),
+  `DutySwapRequestRecipient`, `DutySwapProposal` (une contrepartie) — plus un
+  journal append-only `DutySwapEvent` et une boîte d'envoi
+  `DutySwapNotification` (D180). **Aucune** ne dit qui détient une garde :
+  `DutyAssignment.current` reste la seule vérité (D131) ; une demande, quel
+  que soit son statut, n'écrit rien dans le calendrier.
+- **Un modèle pour les trois parcours** : un échange convenu est une demande
+  `AGREED` portant **une** proposition rédigée par le demandeur ; une
+  recherche reçoit des propositions rédigées par les collègues. Qui décide
+  n'est pas stocké : c'est le participant qui n'a pas rédigé la proposition
+  (`getDecider()`) — nul n'accepte sa propre proposition ni à la place d'un
+  autre, sans table de rôles.
+- **Gel de la ligne d'affectation** : la demande et la proposition gardent la
+  ligne `DutyAssignment` exacte détenue au moment où elles sont faites
+  (`offered_assignment_id`, `counterpart_assignment_id`). Si elle n'est plus
+  courante à l'acceptation (réattribution, autre échange), la décision est
+  obsolète — même si la même personne détient de nouveau la garde par une
+  ligne plus récente. Une décision prise sur un état n'est jamais appliquée
+  à un autre.
+- **Unité = bloc entier** (`DutyGroupInstance`), nommée par son premier
+  jour ; un bloc peut s'échanger contre une garde isolée.
+- **Périmètre** : même ligne seulement, période `PUBLISHED` seulement (les
+  membres ne voient que le calendrier publié ; une période `ARCHIVED` ou un
+  brouillon ne s'échange pas). Pas de solveur, pas de régénération, statut
+  inchangé.
+- **Écriture** : `DutyReassignmentService::applySwap()` — le chemin
+  d'écriture existant du calendrier (verrou D144, ordre d'écriture D131),
+  pas un moteur parallèle ; lignes `source = SWAP`,
+  `DutyAssignmentEvent.swap_proposal_id` relie l'historique du calendrier à
+  la proposition acceptée.
+- **Droits** : membre — ses gardes, les demandes qui lui sont adressées ;
+  `ALL` = membres actuels de la ligne, jamais une autre ligne ; gestionnaires
+  (`MANAGE_CALENDAR`) — historique en lecture seule, aucune approbation. Une
+  demande invisible répond 404.
+- **Avertissement de responsabilité** : affiché avant tout envoi et exigé par
+  l'API (`acknowledgedResponsibility: true`, sinon 422) — le serveur ne
+  compte pas sur l'interface pour l'imposer.
+- **Annulation** : seulement tant que rien n'est enregistré ; un échange
+  conclu ne se « dé-annule » jamais (nouvel échange ou réattribution
+  explicite).
+- **Écarté** : un statut « en cours de transfert » sur l'affectation (aurait
+  fait de la demande une source de vérité) ; une validation du gestionnaire ;
+  un compte « Direction » ; des échanges entre lignes ou à plus de deux.
+- Détail : `docs/duty-swaps.md`.
+
+## D179 — Revalidation d'un échange sur le calendrier après permutation, atomicité, verrous
+
+- **Problème** : valider « A prend la garde de B » et « B prend celle de A »
+  séparément contre l'état courant refuse à tort des échanges valides — B
+  semble en conflit (ou sans repos) avec la garde même qu'il cède (cas
+  testé : deux gardes de 24 h consécutives avec un repos légal de 11 h).
+- **Décision** : `ReassignmentCandidateService::assignabilityError()` /
+  `firstBlockingReason()` acceptent `$releasedDuties` — les gardes que la
+  personne cède dans la même transaction, exclues de ses engagements. Chaque
+  personne est donc contrôlée sur le **calendrier final** : actif, adhésion,
+  snapshot de la génération, indisponibilités et non-participations
+  actuelles, chevauchements, repos légal/d'équipe de la génération, gardes
+  des autres lignes (D161). Le même service sert la liste des candidats et
+  l'écriture du gestionnaire : une seule règle.
+- **Ordre des contrôles** (`applySwap`, sous le verrou) : période publiée,
+  gardes non commencées, lignes gelées toujours courantes et blocs détenus en
+  entier, aucune ligne verrouillée, renforts requis (D165), éligibilité des
+  deux personnes sur le calendrier final ; puis écriture ; puis, si l'état
+  d'un renfort dépendant d'une des deux gardes a changé, **rollback**
+  (`changes_reinforcements`) — un échange entre membres ne laisse jamais un
+  renfort à régler par le gestionnaire.
+- **Contrôle anticipé** : les mêmes vérifications (sans la dernière) quand
+  une proposition est faite, pour refuser tôt un échange impossible ; jamais
+  le dernier mot.
+- **Atomicité** : une transaction ; les lignes courantes des **deux** blocs
+  sont marquées remplacées et flushées avant toute insertion (index unique
+  partiel vérifié instruction par instruction, D131) ; tout ou rien
+  (vérifié par un trigger de test qui fait échouer la dernière insertion).
+- **Concurrence** : toute étape du workflow verrouille la ligne de la
+  demande (`FOR UPDATE`) et la relit ; l'acceptation prend d'abord
+  `CalendarWriteLock` du planning puis la ligne de la demande, et c'est la
+  seule à prendre le verrou du calendrier — pas de cycle d'attente. Deux
+  acceptations concurrentes : la seconde attend, revalide, échoue
+  proprement. La même acceptation rejouée renvoie l'état
+  (`alreadyApplied: true`) sans réécrire. L'échange clôt dans sa transaction
+  les autres demandes / propositions portant sur une ligne remplacée.
+- **Échec** : rollback, puis `SWAP_VALIDATION_FAILED` écrit dans une
+  transaction séparée (la tentative fait partie de l'histoire) et la demande
+  réglée (`settle`) ; 409 avec `reason`, `party` et un message en français.
+- **Piège rencontré** : relire les propositions en attente (`refresh`) après
+  avoir marqué la proposition acceptée en mémoire écrasait ce changement non
+  flushé ; les autres propositions sont lues **avant** toute modification.
+
+## D180 — Emails des échanges : boîte d'envoi transactionnelle, envoi après commit, reprise par `app:duty-swaps:maintain`
+
+- **Décision** : chaque email (proposition reçue, demande reçue, proposition
+  refusée, confirmation) est une ligne `duty_swap_notifications` écrite
+  **dans la transaction de l'étape**, au contenu figé (`payload`), puis
+  envoyée après le commit — mêmes garanties et mêmes limites que les emails
+  de publication (D172/D173) : réservation atomique, jamais de renvoi d'un
+  `SENT`, jusqu'à 5 tentatives, doublon possible uniquement sur incertitude
+  SMTP. `dedup_key` unique (type, demande, proposition, destinataire). Chaque
+  tentative est tracée (`attempts`, `last_attempt_at`, `last_error`) ;
+  `SENT` = accepté par SMTP, jamais « reçu ».
+- **Confirmation** : un email individuel à chacun des deux participants,
+  objet « MedVue — Confirmation de votre échange de gardes », nouvelle
+  répartition, attributions officielles, **prévenir la direction**, aucune
+  validation du gestionnaire nécessaire. Jamais écrite pour un échange
+  annulé par rollback ; un échec SMTP ne défait jamais un échange commité.
+- **Demandes à toute la ligne** : un email par membre actuel et par demande,
+  jamais de relance.
+- **Maintenance** : `app:duty-swaps:maintain` (cron toutes les 10 min, à
+  installer avec ce lot — `docs/deployment.md` §5 sexies) clôt, avec leurs
+  événements, les demandes expirées / devenues obsolètes que personne n'a
+  regardées, puis retente les emails dus. Une commande à part plutôt que
+  d'élargir `app:publication-notifications:retry` : les deux boîtes ont des
+  contenus et des tables distincts.
+- **Écarté** : notifications in-app (hors périmètre), envoi par Messenger
+  (le transport existant est réservé aux calculs de planning, D149).

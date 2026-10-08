@@ -1,0 +1,28 @@
+{# ------------------------------------------------------------------
+   MedVue — Proposition d'échange refusée (docs/duty-swaps.md §8)
+   Objet : MedVue — Votre proposition d'échange a été refusée
+   Contexte : firstName, planningName, lineName, deciderName,
+     yourUnit (votre garde, inchangée), requestUrl.
+   ------------------------------------------------------------------ #}
+{% extends 'email/_base.html.twig' %}
+{% import  'email/_components.html.twig' as ui %}
+
+{% set preheader  = 'Votre proposition d’échange a été refusée : vos gardes restent inchangées.' %}
+{% set accent     = '#2D7FF9' %}
+{% set eyebrow    = 'Échange refusé' %}
+{% set h1         = 'Votre proposition<br>a été refusée' %}
+{% set panelLabel = 'Planning' %}
+{% set panelTitle = planningName %}
+{% set panelSub   = lineName %}
+{% set ctaLabel   = 'Voir mes échanges' %}
+{% set ctaUrl     = requestUrl %}
+{% set footerNote = 'Vous recevez cet email car vous avez proposé un échange de gardes dans MedVue.' %}
+
+{% block title %}Proposition d’échange refusée{% endblock %}
+{% block postal %}{% endblock %}
+
+{% block content %}
+{{ ui.p('Bonjour ' ~ firstName|e ~ ',', 24) }}
+{{ ui.p(ui.b(deciderName) ~ ' a refusé votre proposition d’échange.', 18) }}
+{{ ui.warning('Aucun changement.', 'Vous restez responsable de ' ~ yourUnit|e ~ ', comme prévu dans le planning.') }}
+{% endblock %}

@@ -1,13 +1,16 @@
 import { cap, formatUnavailability, parseISO } from '../dashboard/dates'
 import type { MyDuty } from './types'
 
+/** Anything with the calendar days of a unit — a "Mes gardes" entry or a swap unit (docs/decisions.md D178). */
+type DutyDays = Pick<MyDuty, 'dates'>
+
 /** First and last calendar day of a unit, as local dates. */
-export function dutySpan(duty: MyDuty): { first: Date; last: Date } {
+export function dutySpan(duty: DutyDays): { first: Date; last: Date } {
   return { first: parseISO(duty.dates[0]), last: parseISO(duty.dates[duty.dates.length - 1]) }
 }
 
 /** « Mar. 5 janv. », « Sam. 9 → dim. 10 janv. » — a block's days are consecutive. */
-export function formatDutyDates(duty: MyDuty): string {
+export function formatDutyDates(duty: DutyDays): string {
   const { first, last } = dutySpan(duty)
   return formatUnavailability(first, last)
 }
@@ -44,7 +47,7 @@ export function groupByMonth(duties: MyDuty[]): { label: string; duties: MyDuty[
 }
 
 /** « Bloc Week-end » or the duty type — what the unit is, beside its line. */
-export function dutyWhat(duty: MyDuty): string {
+export function dutyWhat(duty: Pick<MyDuty, 'blockName' | 'dutyTypeName'>): string {
   return duty.blockName !== null ? `Bloc ${duty.blockName}` : duty.dutyTypeName
 }
 

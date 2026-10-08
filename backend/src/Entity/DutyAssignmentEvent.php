@@ -26,6 +26,11 @@ use Symfony\Component\Uid\Uuid;
  * after the fact, whether that change should have triggered a
  * notification email (D131 §5), without ever re-deriving it from the
  * period's current (possibly since-changed) status.
+ *
+ * $swapProposal (docs/decisions.md D178) is set exactly when the change
+ * was a swap between two members: the accepted DutySwapProposal, so the
+ * calendar history and the swap history always point to each other. Its
+ * $author is then the member whose acceptance concluded the swap.
  */
 #[ORM\Entity(repositoryClass: DutyAssignmentEventRepository::class)]
 #[ORM\Table(name: 'duty_assignment_events')]
@@ -72,6 +77,10 @@ class DutyAssignmentEvent
     #[ORM\Column]
     private \DateTimeImmutable $occurredAt;
 
+    #[ORM\ManyToOne(targetEntity: DutySwapProposal::class)]
+    #[ORM\JoinColumn(nullable: true, onDelete: 'RESTRICT')]
+    private ?DutySwapProposal $swapProposal;
+
     public function __construct(
         Planning $planning,
         PlanningGeneration $generation,
@@ -81,10 +90,15 @@ class DutyAssignmentEvent
         User $author,
         bool $wasPublished,
         \DateTimeImmutable $occurredAt,
+        ?DutySwapProposal $swapProposal = null,
     ) {
         if (null === $previousAssignment && null === $newAssignment) {
             throw new \InvalidArgumentException('A DutyAssignmentEvent records a previous or a new assignment, never neither.');
         }
+        if (null !== $swapProposal && (null === $previousAssignment || null === $newAssignment)) {
+            throw new \InvalidArgumentException('A swap always replaces one holder with another.');
+        }
+        $this->swapProposal = $swapProposal;
 
         $this->stableId = Uuid::v7();
         $this->planning = $planning;
@@ -145,5 +159,10 @@ class DutyAssignmentEvent
     public function getOccurredAt(): \DateTimeImmutable
     {
         return $this->occurredAt;
+    }
+
+    public function getSwapProposal(): ?DutySwapProposal
+    {
+        return $this->swapProposal;
     }
 }

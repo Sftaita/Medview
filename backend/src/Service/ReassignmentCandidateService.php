@@ -151,8 +151,11 @@ final class ReassignmentCandidateService
      * @param list<Duty>             $block
      * @param list<PersonCommitment> $virtualCommitments duties not written yet but about to be, on lines solved
      *                                                   earlier in the same completion (docs/decisions.md D161)
+     * @param list<Duty>             $releasedDuties     duties the person holds now but gives up in the same
+     *                                                   transaction (a swap, docs/decisions.md D178): never counted
+     *                                                   against them — the check is on the calendar AFTER the change
      */
-    public function assignabilityError(PlanningGeneration $generation, array $block, PlanningTeamMember $member, array $virtualCommitments = []): ?string
+    public function assignabilityError(PlanningGeneration $generation, array $block, PlanningTeamMember $member, array $virtualCommitments = [], array $releasedDuties = []): ?string
     {
         if ($member->getPlanningTeam() !== $block[0]->getTeam()) {
             return self::NOT_A_LINE_MEMBER;
@@ -163,7 +166,7 @@ final class ReassignmentCandidateService
             return self::NOT_IN_GENERATION_SNAPSHOT;
         }
 
-        return $this->firstBlockingReason($generation, $block, $member, $virtualCommitments)?->value;
+        return $this->firstBlockingReason($generation, $block, $member, $virtualCommitments, $releasedDuties)?->value;
     }
 
     /**
@@ -222,8 +225,9 @@ final class ReassignmentCandidateService
      *
      * @param list<Duty>             $block
      * @param list<PersonCommitment> $virtualCommitments see assignabilityError()
+     * @param list<Duty>             $releasedDuties     see assignabilityError()
      */
-    public function firstBlockingReason(PlanningGeneration $generation, array $block, PlanningTeamMember $member, array $virtualCommitments = []): ?ExclusionReason
+    public function firstBlockingReason(PlanningGeneration $generation, array $block, PlanningTeamMember $member, array $virtualCommitments = [], array $releasedDuties = []): ?ExclusionReason
     {
         if (!$member->getUser()->isActive()) {
             return ExclusionReason::USER_INACTIVE;
@@ -249,7 +253,7 @@ final class ReassignmentCandidateService
             }
         }
 
-        return $this->conflictOrRestReason($generation, $block, $member, $virtualCommitments);
+        return $this->conflictOrRestReason($generation, $block, $member, $virtualCommitments, $releasedDuties);
     }
 
     /**
@@ -265,11 +269,12 @@ final class ReassignmentCandidateService
      *
      * @param list<Duty>             $block
      * @param list<PersonCommitment> $virtualCommitments
+     * @param list<Duty>             $releasedDuties     given up in the same transaction — absent from the final calendar
      */
-    private function conflictOrRestReason(PlanningGeneration $generation, array $block, PlanningTeamMember $member, array $virtualCommitments): ?ExclusionReason
+    private function conflictOrRestReason(PlanningGeneration $generation, array $block, PlanningTeamMember $member, array $virtualCommitments, array $releasedDuties): ?ExclusionReason
     {
         $user = $member->getUser();
-        $blockDutyIds = array_map(static fn (Duty $duty): int => (int) $duty->getId(), $block);
+        $blockDutyIds = array_map(static fn (Duty $duty): int => (int) $duty->getId(), [...$block, ...$releasedDuties]);
 
         $intervals = [];
         foreach ([...$this->commitmentReader->forUser($this->linesToRead($generation), $user), ...$virtualCommitments] as $commitment) {

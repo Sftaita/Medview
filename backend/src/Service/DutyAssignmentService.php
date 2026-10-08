@@ -121,6 +121,22 @@ final class DutyAssignmentService
     }
 
     /**
+     * A swap's replacement row (docs/decisions.md D178) — same shape as
+     * createManualBatchItem(), source SWAP: the row says it came from an
+     * agreement between two members, never from a manager's edit. Used
+     * exclusively by DutyReassignmentService::swap().
+     *
+     * @throws InvalidDutyAssignmentException
+     */
+    public function createSwapBatchItem(PlanningGeneration $generation, PlanningSnapshot $snapshot, Duty $duty, PlanningTeamMember $teamMember): DutyAssignment
+    {
+        $assignment = $this->buildAssignment($generation, $snapshot, $duty, $teamMember, DutyAssignmentSource::SWAP, locked: false);
+        $this->entityManager->persist($assignment);
+
+        return $assignment;
+    }
+
+    /**
      * @throws InvalidDutyAssignmentException
      */
     private function buildAssignment(PlanningGeneration $generation, PlanningSnapshot $snapshot, Duty $duty, PlanningTeamMember $teamMember, DutyAssignmentSource $source, bool $locked): DutyAssignment

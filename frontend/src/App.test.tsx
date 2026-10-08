@@ -100,9 +100,15 @@ describe('App', () => {
     // The brand appears in the sidebar and in the phone top bar (one DOM, switched by CSS).
     expect(screen.getAllByText('MedVue').length).toBeGreaterThan(0)
     expect(screen.getByRole('navigation', { name: 'Navigation principale' })).toBeInTheDocument()
-    // Phone: four short entries, the account behind the top bar's avatar (docs/Design/react_dashboard).
+    // Phone: five short entries ("Échanges" since docs/decisions.md D178), the account behind the top bar's avatar.
     const tabs = within(screen.getByRole('navigation', { name: 'Navigation mobile' })).getAllByRole('link')
-    expect(tabs.map((tab) => tab.textContent)).toEqual(['Accueil', 'Plannings', 'Gardes', 'Indispos'])
+    expect(tabs.map((tab) => tab.textContent)).toEqual([
+      'Accueil',
+      'Plannings',
+      'Gardes',
+      'Échanges',
+      'Indispos',
+    ])
     expect(
       screen.getAllByRole('link', { name: 'Mon compte' }).map((link) => link.getAttribute('href')),
     ).toEqual(['/account', '/account'])

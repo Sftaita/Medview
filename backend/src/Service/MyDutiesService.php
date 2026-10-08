@@ -7,7 +7,9 @@ namespace App\Service;
 use App\Entity\PlanningLine;
 use App\Entity\PlanningPeriodStatus;
 use App\Entity\User;
+use App\Repository\DutySwapRequestRepository;
 use App\Repository\PlanningRepository;
+use Symfony\Component\Clock\ClockInterface;
 
 /**
  * "Mes gardes" (docs/decisions.md D168): every duty $user currently holds,
@@ -25,12 +27,39 @@ final class MyDutiesService
     public function __construct(
         private readonly PlanningRepository $planningRepository,
         private readonly CurrentCalendarReader $calendarReader,
+        private readonly DutySwapRequestRepository $swapRequestRepository,
+        private readonly ClockInterface $clock,
     ) {
+    }
+
+    /**
+     * dutiesOf() plus what "Mes gardes" needs for swaps (docs/decisions.md
+     * D178): `swappable` (not started yet — every listed unit is on a
+     * PUBLISHED line) and `swapRequestStableId`, the caller's OPEN request
+     * on that unit if any — shown as "Échange demandé", never as a
+     * transfer: the unit is listed here because the caller still holds it.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function dutiesWithSwapStateOf(User $user): array
+    {
+        $openByDuty = [];
+        foreach ($this->swapRequestRepository->findOpenByRequester($user) as $request) {
+            $openByDuty[(string) $request->getOfferedDuty()->getStableId()] = (string) $request->getStableId();
+        }
+
+        $now = $this->clock->now();
+
+        return array_map(static fn (array $unit): array => $unit + [
+            'swappable' => new \DateTimeImmutable($unit['startsAt']) > $now,
+            'swapRequestStableId' => $openByDuty[$unit['dutyStableId']] ?? null,
+        ], $this->dutiesOf($user));
     }
 
     /**
      * @return list<array{
      *     key: string,
+     *     dutyStableId: string,
      *     planningStableId: string,
      *     planningName: string,
      *     lineStableId: string,
@@ -60,6 +89,8 @@ final class MyDutiesService
                 if (!isset($units[$key])) {
                     $units[$key] = [
                         'key' => $key,
+                        // The unit's first duty — the one a swap request names (docs/decisions.md D178).
+                        'dutyStableId' => (string) $duty->getStableId(),
                         'planningStableId' => (string) $planning->getStableId(),
                         'planningName' => $planning->getName(),
                         'lineStableId' => (string) $cell->line->getStableId(),
@@ -78,6 +109,7 @@ final class MyDutiesService
                 $unit['dates'][] = $duty->getLocalDate()->format('Y-m-d');
                 if ($duty->getStartsAt() < $unit['startsAt']) {
                     $unit['startsAt'] = $duty->getStartsAt();
+                    $unit['dutyStableId'] = (string) $duty->getStableId();
                 }
                 if ($duty->getEndsAt() > $unit['endsAt']) {
                     $unit['endsAt'] = $duty->getEndsAt();

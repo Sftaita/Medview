@@ -13,6 +13,7 @@ import {
 import { AvailabilityCollectionsPanel } from '../features/planning/AvailabilityCollectionsPanel'
 import { PlanningCalendar } from '../features/planning/calendar/PlanningCalendar'
 import { ActionMenu } from '../features/planning/detail/ActionMenu'
+import { PlanningSwapHistory } from '../features/swaps/PlanningSwapHistory'
 import { LinesTab, type Face } from '../features/planning/detail/LinesTab'
 import { MembersSheet } from '../features/planning/detail/MembersSheet'
 import { LineSettingsDialog } from '../features/planning/coverage/LineSettingsDialog'
@@ -74,7 +75,8 @@ export function PlanningDetailPage() {
   // Bumped after a generation so the per-person view (which reads on mount) shows the new assignments.
   const [generationVersion, setGenerationVersion] = useState(0)
   // The vertical multi-line calendar is the main screen after a generation (docs/decisions.md D148).
-  const [planningView, setPlanningView] = useState<'calendar' | 'person'>('calendar')
+  // "swaps": the managers' read-only swap history (docs/decisions.md D178).
+  const [planningView, setPlanningView] = useState<'calendar' | 'person' | 'swaps'>('calendar')
 
   const pilot = usePlanningPilot(planningId ?? '', planning?.canManageAvailability === true)
   const [jobDetail, setJobDetail] = useState<PlanningJob | null>(null)
@@ -475,8 +477,20 @@ export function PlanningDetailPage() {
                   >
                     Par personne
                   </button>
+                  {planning.canManageCalendar && (
+                    <button
+                      type="button"
+                      aria-pressed={planningView === 'swaps'}
+                      className={`btn btn--sm ${planningView === 'swaps' ? 'btn--primary' : 'btn--secondary'}`}
+                      onClick={() => setPlanningView('swaps')}
+                    >
+                      Échanges
+                    </button>
+                  )}
                 </div>
-                {planningView === 'calendar' ? (
+                {planningView === 'swaps' && planning.canManageCalendar ? (
+                  <PlanningSwapHistory planningStableId={planning.stableId} />
+                ) : planningView === 'calendar' ? (
                   <PlanningCalendar
                     key={generationVersion}
                     planning={planning}
