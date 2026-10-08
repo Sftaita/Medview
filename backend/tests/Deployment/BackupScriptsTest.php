@@ -87,6 +87,30 @@ final class BackupScriptsTest extends TestCase
         self::assertStringContainsString("'^constraint '", $script, 'An empty constraint section must fail the run.');
     }
 
+    /**
+     * 2026-10-08, production: `medvue-restore-test.sh` exited 141 with no output
+     * at all. Under `set -o pipefail`, `sort -rn | head -1` fails whenever `head`
+     * closes the pipe before `sort` has finished writing — a race that became
+     * likely once enough backups had accumulated. `sed -n` reads its whole input,
+     * so the producer never gets SIGPIPE.
+     */
+    public function testProductionScriptsNeverPipeIntoHeadUnderPipefail(): void
+    {
+        $scripts = array_merge(glob($this->root.'/scripts/backup/*.sh') ?: [], glob($this->root.'/scripts/deploy/*.sh') ?: []);
+        self::assertNotEmpty($scripts);
+
+        foreach ($scripts as $path) {
+            $code = implode("\n", array_filter(
+                explode("\n", (string) file_get_contents($path)),
+                static fn (string $line): bool => !str_starts_with(ltrim($line), '#'),
+            ));
+            if (!str_contains($code, 'pipefail')) {
+                continue;
+            }
+            self::assertDoesNotMatchRegularExpression('/\|\s*head\b/', $code, basename($path).': use `sed -n 1p` instead of `| head` under pipefail.');
+        }
+    }
+
     public function testDocumentationStatesTheProductionRules(): void
     {
         $backup = (string) file_get_contents($this->root.'/docs/backup.md');
