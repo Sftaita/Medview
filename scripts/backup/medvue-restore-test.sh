@@ -38,7 +38,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-newest() { find "$1" -maxdepth 1 -type f -name "$2" -printf '%T@ %p\n' | sort -rn | head -1 | cut -d' ' -f2-; }
+newest() { find "$1" -maxdepth 1 -type f -name "$2" -printf '%T@ %p\n' | sort -rn | sed -n 1p | cut -d' ' -f2-; }
 [[ -n "$dump" ]] || dump=$(newest "$BACKUP_ROOT/postgres" 'medvue_*.dump')
 [[ -n "$keys" ]] || keys=$(newest "$BACKUP_ROOT/jwt-keys" 'jwt-keys_*.tar.gz')
 [[ -f "$dump" ]] || { echo "FAIL: no dump found" >&2; exit 1; }
@@ -159,7 +159,7 @@ if [[ "$compare_live" -eq 1 ]]; then
     pass "restored database == live database (tables, row counts, constraints, indexes, migrations)"
   else
     fail "restored database differs from live:"
-    diff "$work/live.txt" "$work/restored.txt" | head -20
+    diff "$work/live.txt" "$work/restored.txt" | sed -n 1,20p
   fi
 fi
 

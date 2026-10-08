@@ -19,7 +19,7 @@ actual=$(docker inspect "$TRAEFIK_CONTAINER" --format "{{(index .NetworkSettings
 
 env_file="$APP_DIR/.env"
 [[ -r "$env_file" ]] || fail "$env_file not readable"
-configured=$(grep -E '^SYMFONY_TRUSTED_PROXIES=' "$env_file" | head -1 | cut -d= -f2- | tr -d "\"' \r" || true)
+configured=$(grep -E '^SYMFONY_TRUSTED_PROXIES=' "$env_file" | sed -n 1p | cut -d= -f2- | tr -d "\"' \r" || true)
 [[ -n "$configured" ]] || fail "SYMFONY_TRUSTED_PROXIES is not set in $env_file"
 [[ "$configured" =~ $IPV4 ]] || fail "SYMFONY_TRUSTED_PROXIES must be ONE exact IPv4 address (got '$configured'; no subnet, no placeholder)"
 
