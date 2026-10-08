@@ -253,7 +253,15 @@ le rôle, graphiques accessibles (tableau, infobulle au focus).
 
 ## 11. Limites connues / suites possibles
 
-- Pas de suppression de compte ni d'export RGPD (V1).
+- Pas de suppression de compte ni d'export RGPD (V1). **Conséquence
+  opérationnelle** : un compte ne peut plus être supprimé en base, même à la
+  main — son inscription est dans `platform_audit_events` (append-only) et son
+  activité dans `user_activity_days`, toutes deux en `ON DELETE RESTRICT`. Les
+  comptes jetables de recette en production (`docs/deployment.md` §6) sont donc
+  **désactivés** après usage, jamais supprimés ; ils restent comptés parmi les
+  inscrits. Un effacement RGPD futur devra être conçu explicitement
+  (pseudonymisation du compte plutôt que suppression), jamais en désactivant le
+  trigger d'audit.
 - La disponibilité d'un worker inactif n'est pas observable (pas de battement
   hors calcul) ; seule une file bloquée l'est.
 - Pas de mesure des temps de réponse HTTP (aurait demandé une écriture par

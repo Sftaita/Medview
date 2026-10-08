@@ -310,7 +310,12 @@ commande, sans `>>`). Un email abandonné après 5 tentatives reste visible
    CRON_TZ=UTC
    20 4 * * * cd /opt/stack/apps/medvue && docker compose -f docker-compose.prod.yml exec -T backend php bin/console app:platform:purge-telemetry >> /home/deploy/backups/medvue/purge-telemetry.log 2>&1
    ```
-6. **Vérifications** : lancer `scripts/backup/medvue-backup.sh` puis
+6. **Comptes de recette** : à partir de cette migration, un compte ne peut
+   plus être supprimé (inscription dans l'audit append-only, `docs/admin.md`
+   §11). Les comptes jetables `@example.test` créés pour une recette sont
+   **désactivés** à la fin (`POST /api/admin/users/{id}/deactivate`), jamais
+   supprimés, et leur rôle d'administrateur éventuel retiré avant.
+7. **Vérifications** : lancer `scripts/backup/medvue-backup.sh` puis
    `medvue-restore-test.sh` → `status/backup.json` et
    `status/restore-test.json` existent ; « Infrastructure » affiche la
    sauvegarde et le test « Opérationnel » avec leur date, et la version
