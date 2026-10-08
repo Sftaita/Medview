@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { Icon } from '../components/Icon'
 import { useAuth } from '../features/auth/useAuth'
 
@@ -40,6 +41,13 @@ export function AccountPage() {
           </div>
         </dl>
       </div>
+
+      {user.platformAdmin && (
+        <Link to="/admin" className="btn btn--secondary account__logout">
+          <Icon name="settings" size={18} />
+          Administration de la plateforme
+        </Link>
+      )}
 
       <button type="button" className="btn btn--secondary account__logout" onClick={logout}>
         <Icon name="logout" size={18} />

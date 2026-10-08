@@ -4,7 +4,16 @@ import { AppShell } from './components/AppShell'
 import { AuthLayout } from './components/AuthLayout'
 import { ProtectedRoute } from './features/auth/ProtectedRoute'
 import { PublicOnlyRoute } from './features/auth/PublicOnlyRoute'
+import { AdminLayout } from './features/admin/AdminLayout'
+import { AdminRoute } from './features/admin/AdminRoute'
 import { GuestHomeGate } from './features/home/GuestHomeGate'
+import { AdminActivityPage } from './pages/admin/AdminActivityPage'
+import { AdminInfrastructurePage } from './pages/admin/AdminInfrastructurePage'
+import { AdminOverviewPage } from './pages/admin/AdminOverviewPage'
+import { AdminSettingsPage } from './pages/admin/AdminSettingsPage'
+import { AdminStatisticsPage } from './pages/admin/AdminStatisticsPage'
+import { AdminUserDetailPage } from './pages/admin/AdminUserDetailPage'
+import { AdminUsersPage } from './pages/admin/AdminUsersPage'
 import { MyAvailabilityProvider } from './features/availability/MyAvailabilityProvider'
 import { AccountPage } from './pages/AccountPage'
 import { AvailabilityCampaignPage } from './pages/AvailabilityCampaignPage'
@@ -80,6 +89,27 @@ function App() {
         <Route path="/plannings/:planningId" element={<PlanningDetailPage />} />
         <Route path="/planning-periods/:planningPeriodId" element={<PlanningPeriodPage />} />
         <Route path="/availability-campaigns/:campaignId" element={<AvailabilityCampaignPage />} />
+      </Route>
+
+      {/* Platform administration (docs/admin.md): its own frame and navigation, platform admins only. The
+          guard is a convenience — every /api/admin endpoint enforces ROLE_PLATFORM_ADMIN itself (D174). */}
+      <Route
+        path="/admin"
+        element={
+          <ProtectedRoute>
+            <AdminRoute>
+              <AdminLayout />
+            </AdminRoute>
+          </ProtectedRoute>
+        }
+      >
+        <Route index element={<AdminOverviewPage />} />
+        <Route path="users" element={<AdminUsersPage />} />
+        <Route path="users/:stableId" element={<AdminUserDetailPage />} />
+        <Route path="statistics" element={<AdminStatisticsPage />} />
+        <Route path="activity" element={<AdminActivityPage />} />
+        <Route path="infrastructure" element={<AdminInfrastructurePage />} />
+        <Route path="settings" element={<AdminSettingsPage />} />
       </Route>
     </Routes>
   )

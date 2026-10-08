@@ -52,6 +52,13 @@ export function AppShell() {
           ))}
         </nav>
 
+        {user?.platformAdmin && (
+          <NavLink to="/admin" className="shell__nav-link shell__nav-link--admin">
+            <Icon name="settings" size={20} strokeWidth={1.9} />
+            Administration
+          </NavLink>
+        )}
+
         {user && (
           <div className="shell__user">
             <span className="shell__avatar">{userInitials}</span>
