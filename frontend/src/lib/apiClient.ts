@@ -210,18 +210,34 @@ export function filenameFromDisposition(header: string | null): string | null {
  * included) as apiFetch. The server's file name is read from
  * Content-Disposition (exposed by the CORS configuration).
  */
-export async function apiDownload(path: string, body: unknown, _isRetry = false): Promise<DownloadedFile> {
-  const headers = new Headers({ 'Content-Type': 'application/json' })
+export function apiDownload(path: string, body: unknown): Promise<DownloadedFile> {
+  return downloadFile(path, { method: 'POST', body: JSON.stringify(body) })
+}
+
+/** A GET whose answer is a file, with the server's file name — same auth, refresh and errors as apiDownload. */
+export function apiDownloadGet(path: string): Promise<DownloadedFile> {
+  return downloadFile(path, { method: 'GET' })
+}
+
+async function downloadFile(
+  path: string,
+  init: { method: 'GET' | 'POST'; body?: string },
+  _isRetry = false,
+): Promise<DownloadedFile> {
+  const headers = new Headers()
+  if (init.body !== undefined) {
+    headers.set('Content-Type', 'application/json')
+  }
   const token = getStoredToken()
   if (token) {
     headers.set('Authorization', `Bearer ${token}`)
   }
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    method: 'POST',
+    method: init.method,
     headers,
     credentials: 'include',
-    body: JSON.stringify(body),
+    body: init.body,
   })
   if (response.status === 401 && !_isRetry) {
     try {
@@ -231,7 +247,7 @@ export async function apiDownload(path: string, body: unknown, _isRetry = false)
       window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
       throw new ApiError(401, null, 'Session expired, please log in again.')
     }
-    return apiDownload(path, body, true)
+    return downloadFile(path, init, true)
   }
   if (!response.ok) {
     const contentType = response.headers.get('content-type') ?? ''

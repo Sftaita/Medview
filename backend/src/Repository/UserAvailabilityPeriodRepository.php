@@ -105,4 +105,34 @@ class UserAvailabilityPeriodRepository extends ServiceEntityRepository
             ->getQuery()
             ->getResult();
     }
+
+    /**
+     * The $type periods of every User of $users intersecting [$from, $to[,
+     * in one query — the absence export reads a whole planning's
+     * participants at once instead of one query per person.
+     *
+     * @param list<User> $users
+     *
+     * @return list<UserAvailabilityPeriod>
+     */
+    public function findByTypeIntersectingForUsers(array $users, UserAvailabilityType $type, \DateTimeImmutable $from, \DateTimeImmutable $to): array
+    {
+        if ([] === $users) {
+            return [];
+        }
+
+        return $this->createQueryBuilder('p')
+            ->andWhere('p.user IN (:users)')
+            ->andWhere('p.type = :type')
+            ->andWhere('p.startsAt < :to')
+            ->andWhere('p.endsAt > :from')
+            ->setParameter('users', $users)
+            ->setParameter('type', $type)
+            ->setParameter('from', $from)
+            ->setParameter('to', $to)
+            ->orderBy('p.startsAt', 'ASC')
+            ->addOrderBy('p.id', 'ASC')
+            ->getQuery()
+            ->getResult();
+    }
 }
