@@ -328,6 +328,31 @@ commande, sans `>>`). Un email abandonné après 5 tentatives reste visible
    déployée ; un compte sans le rôle reçoit `403` sur
    `https://api.medvue.be/api/admin/overview`.
 
+## 5 sexies. Maintenance des échanges de gardes (D178-D180)
+
+> **Pas encore déployé** (branche `feature/duty-swaps`). À faire **au
+> déploiement de ce lot** : migration `Version20261008200000` (création de
+> tables + une colonne nullable sur `duty_assignment_events`, aucune donnée
+> existante réécrite), puis ce cron.
+
+`app:duty-swaps:maintain` clôt les demandes d'échange qui ne peuvent plus
+aboutir (garde commencée → `EXPIRED`, garde passée à quelqu'un d'autre →
+`OBSOLETE`, avec leurs événements) et retente les emails d'échange `FAILED`,
+`PENDING` depuis plus de 2 min ou `SENDING` depuis plus de 15 min, jusqu'à 5
+tentatives — mêmes garanties et même limite (doublon possible sur
+incertitude SMTP) que §5 quater. Sans danger à tout moment ; code de sortie
+≠ 0 si un envoi a encore échoué.
+
+```bash
+*/10 * * * * cd /opt/stack/apps/medvue && flock -n /tmp/medvue-duty-swaps.lock docker compose -f docker-compose.prod.yml exec -T backend php bin/console app:duty-swaps:maintain >> /home/deploy/backups/medvue/duty-swaps.log 2>&1
+```
+
+Mêmes précautions que §5 quater (copie du crontab, une seule ligne ajoutée).
+Vérifier : `crontab -l | grep duty-swaps`, puis la dernière ligne du log
+(`[OK] N swap request(s)/proposal(s) closed; N email(s) retried — …`).
+Emails abandonnés :
+`SELECT id, request_id, recipient_id, kind, attempts, last_error FROM duty_swap_notifications WHERE status = 'FAILED' AND attempts >= 5;`
+
 ## 6. Historique des déploiements
 
 | Date | Tag | Commit | Notes |

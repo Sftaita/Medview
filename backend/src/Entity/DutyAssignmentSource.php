@@ -5,10 +5,10 @@ declare(strict_types=1);
 namespace App\Entity;
 
 /**
- * Never chosen by the client (docs/planning-generation.md) — the server
- * always forces MANUAL for the one write path this lot exposes.
- * AUTO/SWAP are reserved for the future generation engine and swap
- * workflow (docs/allocation-algorithm.md §19), out of scope here.
+ * Never chosen by the client (docs/planning-generation.md): AUTO for the
+ * solver's rows, MANUAL for a manager's edit (D131), SWAP for a swap two
+ * members concluded themselves (docs/decisions.md D178,
+ * DutyReassignmentService::swap()).
  */
 enum DutyAssignmentSource: string
 {

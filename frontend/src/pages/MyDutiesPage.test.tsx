@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthProvider } from '../features/auth/AuthContext'
 import { createFakeBackend } from '../testUtils/fakeBackend'
 import { makeMyDuty } from '../testUtils/myDuty'
+import { makeOptions, makeUnit } from '../testUtils/swapFixtures'
 import { MyDutiesPage } from './MyDutiesPage'
 
 function renderPage() {
@@ -103,6 +104,36 @@ describe('MyDutiesPage', () => {
 
     expect(await screen.findByText('Aucune garde à venir')).toBeInTheDocument()
     expect(screen.getByText(/dès la publication d'un planning/)).toBeInTheDocument()
+  })
+
+  it('offers "Échanger ma garde" on an upcoming duty and opens the dialog with its responsibility warning', async () => {
+    createFakeBackend({
+      duties: [makeMyDuty(['2026-10-08']), makeMyDuty(['2026-10-06'], { swappable: false })],
+      swapOptions: makeOptions({ offered: makeUnit(['2026-10-08']) }),
+    }).install()
+    renderPage()
+
+    const buttons = await screen.findAllByRole('button', { name: 'Échanger ma garde' })
+    expect(buttons).toHaveLength(1)
+    fireEvent.click(buttons[0])
+
+    const dialog = await screen.findByRole('dialog', { name: 'Échanger ma garde' })
+    expect(await within(dialog).findByText('Jeu. 8 oct. · Garde')).toBeInTheDocument()
+    fireEvent.click(within(dialog).getByLabelText(/Je cherche quelqu’un avec qui échanger/))
+    expect(within(dialog).getByRole('note', { name: 'Responsabilité de votre garde' })).toBeInTheDocument()
+  })
+
+  it('marks a duty with an open request "Échange demandé" — still listed as the user’s own', async () => {
+    createFakeBackend({ duties: [makeMyDuty(['2026-10-08'], { swapRequestStableId: 'req-1' })] }).install()
+    renderPage()
+
+    expect(await screen.findByText('Échange demandé')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Voir la demande' })).toHaveAttribute(
+      'href',
+      '/swaps?request=req-1',
+    )
+    expect(screen.queryByRole('button', { name: 'Échanger ma garde' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Jeu\. 8 oct\./ })).toBeInTheDocument()
   })
 
   it('reports a failed load', async () => {

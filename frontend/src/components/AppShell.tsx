@@ -17,6 +17,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/', icon: 'home', label: 'Tableau de bord', shortLabel: 'Accueil', end: true },
   { to: '/plannings', icon: 'layers', label: 'Plannings', shortLabel: 'Plannings' },
   { to: '/my-duties', icon: 'moon', label: 'Mes gardes', shortLabel: 'Gardes' },
+  { to: '/swaps', icon: 'swap', label: 'Échanges', shortLabel: 'Échanges' },
   { to: '/my-availability', icon: 'calendarX', label: 'Mes indisponibilités', shortLabel: 'Indispos' },
 ]
 
@@ -26,7 +27,7 @@ function initials(firstName: string, lastName: string): string {
 
 /**
  * Authenticated frame (docs/Design/react_dashboard): a left sidebar from 760px,
- * a brand bar with the account avatar on top and a four-entry bottom navigation
+ * a brand bar with the account avatar on top and a five-entry bottom navigation ("Échanges", D178)
  * on a phone (one DOM, switched by CSS).
  */
 export function AppShell() {

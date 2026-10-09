@@ -25,6 +25,6 @@ final class MyDutiesController
     #[Route('/api/me/duties', name: 'api_me_duties', methods: ['GET'])]
     public function list(#[CurrentUser] User $user): JsonResponse
     {
-        return new JsonResponse(['duties' => $this->service->dutiesOf($user)]);
+        return new JsonResponse(['duties' => $this->service->dutiesWithSwapStateOf($user)]);
     }
 }

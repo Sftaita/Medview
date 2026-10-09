@@ -4,6 +4,7 @@ import type { MyDuty } from '../features/duties/types'
 export function makeMyDuty(dates: string[], overrides: Partial<MyDuty> = {}): MyDuty {
   return {
     key: dates.join('|'),
+    dutyStableId: `duty-${dates[0]}`,
     planningStableId: 'p1',
     planningName: 'Gardes 2026-2027',
     lineStableId: 'l1',
@@ -15,6 +16,8 @@ export function makeMyDuty(dates: string[], overrides: Partial<MyDuty> = {}): My
     endsAt: `${dates[dates.length - 1]}T23:59:00+02:00`,
     conditional: false,
     coverageState: null,
+    swappable: true,
+    swapRequestStableId: null,
     ...overrides,
   }
 }

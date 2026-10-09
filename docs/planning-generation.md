@@ -171,9 +171,11 @@ utilisateur (`DutyAssignmentService` valide déjà tout avant construction
 et produit les exceptions typées ci-dessus).
 
 **Source forcée** : `DutyAssignmentSource::MANUAL` est toujours imposé
-côté serveur (`CreateDutyAssignmentRequest` n'a pas de champ `source`) —
-`AUTO`/`SWAP` restent réservés au futur moteur et au futur workflow
-d'échange.
+côté serveur (`CreateDutyAssignmentRequest` n'a pas de champ `source`).
+Depuis, `AUTO` est écrit par la génération (§13-16) et `SWAP` par un
+échange conclu entre deux membres (`DutyReassignmentService::applySwap()`,
+`docs/duty-swaps.md`, `docs/decisions.md` D178) — le client ne choisit
+jamais la source.
 
 **Unicité** : `UNIQUE(generation_id, duty_id)` — un `Duty` ne peut avoir
 qu'une affectation active par génération, mais peut être affecté

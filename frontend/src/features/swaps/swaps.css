@@ -1,0 +1,253 @@
+/* Duty swaps (docs/duty-swaps.md §9) — on top of the dashboard's cards and rows (dashboard.css) and ui.css. */
+
+.swap-pill--info {
+  background: var(--blue-50);
+  color: var(--blue-700);
+}
+.swap-pill--live {
+  background: var(--amber-50);
+  color: var(--amber-700);
+}
+.swap-pill--done {
+  background: var(--green-50);
+  color: var(--green-800);
+}
+.swap-pill--warn {
+  background: var(--red-50);
+  color: var(--red-700);
+}
+.swap-pill--muted {
+  background: var(--gray-100);
+  color: var(--text-muted);
+}
+
+/* The responsibility warning must be impossible to miss, on a phone as on a desktop. */
+.swap-notice {
+  border-width: 2px;
+}
+.swap-notice strong {
+  font-size: var(--text-md);
+}
+.swap-notice p {
+  margin: 0;
+}
+
+.swap-tabs {
+  margin-bottom: 16px;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.swap-tabs .segmented__option {
+  white-space: nowrap;
+}
+.swap-tabs__badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--amber-500);
+  color: var(--white);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.swap-row {
+  width: 100%;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.swap-row__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.swap-row__todo {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--amber-700);
+}
+
+.swap-form,
+.swap-panel {
+  display: grid;
+  gap: 16px;
+}
+.swap-fieldset {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.swap-fieldset legend {
+  margin-bottom: 8px;
+  padding: 0;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+.swap-choices {
+  display: grid;
+  gap: 8px;
+}
+.swap-segmented {
+  flex-wrap: wrap;
+}
+.swap-unit-card {
+  display: grid;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+.swap-unit-card__label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.swap-summary {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--blue-50);
+  color: var(--blue-700);
+}
+.swap-summary p,
+.swap-confirm p {
+  margin: 0;
+}
+.swap-summary svg {
+  vertical-align: -3px;
+}
+.swap-ack {
+  border-color: var(--amber-100);
+}
+
+.swap-panel__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.swap-panel__section h3 {
+  margin: 0 0 8px;
+  font-size: var(--text-md);
+}
+.swap-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+  margin: 10px 0 0;
+}
+.swap-facts dt {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.swap-facts dd {
+  margin: 0;
+  font-weight: 600;
+}
+.swap-proposals {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.swap-proposal {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+}
+.swap-proposal__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.swap-proposal__line {
+  margin: 0;
+}
+.swap-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.swap-confirm {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+.swap-hint {
+  margin: 8px 0;
+  font-size: var(--text-sm);
+}
+.swap-history {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0 0 0 14px;
+  border-left: 2px solid var(--border-default);
+  list-style: none;
+}
+.swap-history li {
+  display: grid;
+  gap: 2px;
+}
+.swap-history__when {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* "Mes gardes": the swap action beside each upcoming unit. */
+.duty-item {
+  display: grid;
+}
+.duty-item__swap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 0 20px 12px 76px;
+}
+@media (max-width: 520px) {
+  .duty-item__swap {
+    padding-left: 20px;
+  }
+}
+
+/* A planning's swap history (managers, read-only). */
+.swap-history-card {
+  display: grid;
+  gap: 12px;
+}
+.swap-history-card p {
+  margin: 0;
+}
+.swap-history-card__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0;
+}

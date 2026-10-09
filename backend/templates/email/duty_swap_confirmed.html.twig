@@ -1,0 +1,37 @@
+{# ------------------------------------------------------------------
+   MedVue — Confirmation d'un échange de gardes (docs/duty-swaps.md §8)
+   Objet : MedVue — Confirmation de votre échange de gardes
+   Contexte : firstName, planningName, lineName, requesterName,
+     counterpartName, requesterTakes (ce que le demandeur assurera),
+     counterpartTakes (ce que l'autre membre assurera), swapsUrl.
+   Envoyé à chacun des deux participants, uniquement APRÈS
+   l'enregistrement de l'échange (transaction validée).
+   ------------------------------------------------------------------ #}
+{% extends 'email/_base.html.twig' %}
+{% import  'email/_components.html.twig' as ui %}
+
+{% set preheader  = 'Votre échange de gardes a été accepté et enregistré dans MedVue.' %}
+{% set eyebrow    = 'Échange confirmé' %}
+{% set h1         = 'Votre échange de gardes<br>est enregistré' %}
+{% set panelLabel = 'Planning' %}
+{% set panelTitle = planningName %}
+{% set panelSub   = lineName %}
+{% set ctaLabel   = 'Voir mes échanges' %}
+{% set ctaUrl     = swapsUrl %}
+{% set footerNote = 'Vous recevez cet email car vous avez participé à un échange de gardes dans MedVue.' %}
+
+{% block title %}Confirmation de votre échange de gardes{% endblock %}
+{% block postal %}{% endblock %}
+
+{% block content %}
+{{ ui.p('Bonjour ' ~ firstName|e ~ ',', 24) }}
+{{ ui.p('Votre échange de gardes a été accepté et enregistré dans MedVue.', 18) }}
+{{ ui.divider() }}
+{{ ui.p(ui.b('Nouvelle répartition :'), 18) }}
+{{ ui.p('• ' ~ ui.b(requesterName) ~ ' assurera ' ~ requesterTakes|e ~ '.<br>• ' ~ ui.b(counterpartName) ~ ' assurera ' ~ counterpartTakes|e ~ '.', 10) }}
+{{ ui.divider() }}
+{{ ui.p('Ces nouvelles attributions sont désormais officielles et visibles dans votre planning MedVue.', 18) }}
+{{ ui.warning('Important :', 'merci de prévenir la direction de cet échange afin qu’elle soit informée de la modification de l’organisation des gardes.') }}
+{{ ui.p('Aucune validation supplémentaire du gestionnaire des gardes n’est nécessaire dans MedVue.', 18) }}
+{{ ui.p('Vous pouvez consulter les détails et l’historique de l’échange dans votre espace personnel.') }}
+{% endblock %}

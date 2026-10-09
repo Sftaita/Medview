@@ -28,6 +28,7 @@ import { PlanningPeriodPage } from './pages/PlanningPeriodPage'
 import { PlanningsPage } from './pages/PlanningsPage'
 import { RegisterPage } from './pages/RegisterPage'
 import { ResetPasswordPage } from './pages/ResetPasswordPage'
+import { SwapsPage } from './pages/SwapsPage'
 
 function App() {
   return (
@@ -85,6 +86,7 @@ function App() {
         <Route path="/account" element={<AccountPage />} />
         <Route path="/my-availability" element={<MyAvailabilityPage />} />
         <Route path="/my-duties" element={<MyDutiesPage />} />
+        <Route path="/swaps" element={<SwapsPage />} />
         <Route path="/plannings" element={<PlanningsPage />} />
         <Route path="/plannings/:planningId" element={<PlanningDetailPage />} />
         <Route path="/planning-periods/:planningPeriodId" element={<PlanningPeriodPage />} />

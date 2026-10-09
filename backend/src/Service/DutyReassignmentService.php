@@ -7,13 +7,17 @@ namespace App\Service;
 use App\Entity\Duty;
 use App\Entity\DutyAssignment;
 use App\Entity\DutyAssignmentEvent;
+use App\Entity\DutySwapProposal;
 use App\Entity\PlanningGeneration;
+use App\Entity\PlanningPeriodStatus;
+use App\Entity\PlanningSnapshot;
 use App\Entity\PlanningTeamMember;
 use App\Entity\User;
 use App\Exception\CoverageNotRequiredException;
 use App\Exception\CoverageUndeterminedException;
 use App\Exception\DutyAlreadyUncoveredException;
 use App\Exception\DutyNotGeneratedException;
+use App\Exception\DutySwapNotApplicableException;
 use App\Exception\InvalidReassignmentCandidateException;
 use App\Exception\PlanningGenerationNotSnapshottedException;
 use App\Exception\StaleReassignmentException;
@@ -153,6 +157,187 @@ final class DutyReassignmentService
 
             return $this->conditionalCoverage->impactsSince($dependents);
         });
+    }
+
+    /**
+     * A swap two members concluded (docs/decisions.md D178): the requester's
+     * whole unit goes to the counterpart and the counterpart's whole unit to
+     * the requester — both or neither. Must be called inside the caller's
+     * transaction (DutySwapService, which also records the workflow step in
+     * it); takes the Planning's CalendarWriteLock itself (re-entrant within
+     * one transaction), so a swap is serialized with every other write to
+     * the calendar: manager edits, completion, publication, other swaps.
+     *
+     * Everything is revalidated here, against the live state read under the
+     * lock — never what was true when the request or proposal was made:
+     * the period is PUBLISHED, neither unit has started, each unit is still
+     * held through the very DutyAssignment row frozen in the request /
+     * proposal (any change since — a manager edit, another swap — makes it
+     * DUTY_CHANGED, never silently re-applied), no row is locked, and each
+     * person can take the other's unit on the calendar AFTER the swap: the
+     * unit they give up is excluded from their own commitments (it would
+     * otherwise read as a false CONFLICT / rest violation with the very
+     * duty they are handing over), everything else they hold on every line
+     * still counts.
+     *
+     * The writes follow the D131 statement order (supersede every current
+     * row of both units first, flushed, then insert the SWAP rows): the
+     * partial unique index on current rows is checked per statement. If the
+     * swap changed what a dependent conditional line requires
+     * (D165), it is refused AFTER the writes — the caller's rollback undoes
+     * them; a swap between members never leaves a reinforcement for a
+     * manager to fix.
+     *
+     * @throws DutySwapNotApplicableException
+     */
+    public function applySwap(DutySwapProposal $proposal, User $author, \DateTimeImmutable $now): SwapApplication
+    {
+        if (!$this->entityManager->getConnection()->isTransactionActive()) {
+            throw new \LogicException('DutyReassignmentService::applySwap() must be called inside a transaction.');
+        }
+
+        $request = $proposal->getRequest();
+        $this->calendarWriteLock->acquire($request->getPlanning());
+
+        [$generation, $snapshot, $offeredBlock, $counterpartBlock, $offeredCurrent, $counterpartCurrent] = $this->validateSwap($proposal, $now);
+        $requesterMember = $request->getRequesterMember();
+        $counterpartMember = $proposal->getCounterpartMember();
+
+        $dependents = $this->conditionalCoverage->captureDependents([...$offeredBlock, ...$counterpartBlock]);
+
+        // Phase 1 — supersede every current row of BOTH units, flushed on its own (D131 statement order).
+        $this->supersede($offeredBlock, $offeredCurrent);
+        $this->supersede($counterpartBlock, $counterpartCurrent);
+
+        // Phase 2 — one SWAP row + one DutyAssignmentEvent (linked to the proposal) per constituent Duty.
+        $planning = $request->getPlanning();
+        $created = [];
+        foreach ([[$offeredBlock, $offeredCurrent, $counterpartMember], [$counterpartBlock, $counterpartCurrent, $requesterMember]] as [$block, $current, $newHolder]) {
+            foreach ($block as $duty) {
+                $previous = $current[(int) $duty->getId()];
+                $new = $this->dutyAssignmentService->createSwapBatchItem($generation, $snapshot, $duty, $newHolder);
+                $created[] = $new;
+                $this->entityManager->persist(new DutyAssignmentEvent($planning, $generation, $duty, $previous, $new, $author, true, $now, $proposal));
+            }
+        }
+        $this->entityManager->flush();
+
+        foreach ($this->conditionalCoverage->impactsSince($dependents) as $impact) {
+            if ($impact->changed()) {
+                throw new DutySwapNotApplicableException(DutySwapNotApplicableException::CHANGES_REINFORCEMENTS);
+            }
+        }
+
+        return new SwapApplication(
+            $offeredBlock,
+            $counterpartBlock,
+            $requesterMember,
+            $counterpartMember,
+            [...array_values($offeredCurrent), ...array_values($counterpartCurrent)],
+            $created,
+        );
+    }
+
+    /**
+     * The same checks as applySwap(), without writing anything — the early
+     * feedback given when a proposal is made (docs/duty-swaps.md §6). Never
+     * a substitute for applySwap()'s own revalidation at acceptance time,
+     * and it cannot foresee CHANGES_REINFORCEMENTS (which needs the write).
+     * $proposal may be a not-yet-persisted object.
+     *
+     * @throws DutySwapNotApplicableException
+     */
+    public function checkSwap(DutySwapProposal $proposal, \DateTimeImmutable $now): void
+    {
+        $this->validateSwap($proposal, $now);
+    }
+
+    /**
+     * @return array{0: PlanningGeneration, 1: PlanningSnapshot, 2: list<Duty>, 3: list<Duty>, 4: array<int, DutyAssignment>, 5: array<int, DutyAssignment>}
+     *
+     * @throws DutySwapNotApplicableException
+     */
+    private function validateSwap(DutySwapProposal $proposal, \DateTimeImmutable $now): array
+    {
+        $request = $proposal->getRequest();
+        $offeredDuty = $request->getOfferedDuty();
+        $counterpartDuty = $proposal->getCounterpartDuty();
+
+        $period = $offeredDuty->getPlanningPeriod();
+        if ($counterpartDuty->getPlanningPeriod() !== $period) {
+            throw new DutySwapNotApplicableException(DutySwapNotApplicableException::NOT_SWAPPABLE);
+        }
+        // A deactivated line is no longer part of the calendar members see (CurrentCalendarReader): nothing to swap there.
+        if (PlanningPeriodStatus::PUBLISHED !== $period->getStatus() || !$request->getLine()->isActive()) {
+            throw new DutySwapNotApplicableException(DutySwapNotApplicableException::PERIOD_NOT_PUBLISHED);
+        }
+
+        $generation = $this->generationRepository->findMostRecentCompletedByPlanningPeriod($period);
+        if (null === $generation || $request->getOfferedAssignment()->getGeneration() !== $generation || $proposal->getCounterpartAssignment()->getGeneration() !== $generation) {
+            throw new DutySwapNotApplicableException(DutySwapNotApplicableException::DUTY_CHANGED);
+        }
+
+        $offeredBlock = $this->candidateService->blockDuties($offeredDuty);
+        $counterpartBlock = $this->candidateService->blockDuties($counterpartDuty);
+        if ([] !== array_uintersect($offeredBlock, $counterpartBlock, static fn (Duty $a, Duty $b): int => $a->getId() <=> $b->getId())) {
+            throw new DutySwapNotApplicableException(DutySwapNotApplicableException::NOT_SWAPPABLE);
+        }
+
+        foreach ([['requester', $offeredBlock], ['counterpart', $counterpartBlock]] as [$party, $block]) {
+            foreach ($block as $duty) {
+                if ($duty->getStartsAt() <= $now) {
+                    throw new DutySwapNotApplicableException(DutySwapNotApplicableException::DUTY_STARTED, $party);
+                }
+            }
+        }
+
+        $offeredCurrent = $this->assignmentRepository->findCurrentByGenerationAndDuties($generation, $offeredBlock);
+        $counterpartCurrent = $this->assignmentRepository->findCurrentByGenerationAndDuties($generation, $counterpartBlock);
+        $requesterMember = $request->getRequesterMember();
+        $counterpartMember = $proposal->getCounterpartMember();
+        if (
+            ($offeredCurrent[(int) $offeredDuty->getId()] ?? null) !== $request->getOfferedAssignment()
+            || $this->candidateService->currentBlockTeamMember($offeredBlock, $offeredCurrent) !== $requesterMember
+        ) {
+            throw new DutySwapNotApplicableException(DutySwapNotApplicableException::DUTY_CHANGED, 'requester');
+        }
+        if (
+            ($counterpartCurrent[(int) $counterpartDuty->getId()] ?? null) !== $proposal->getCounterpartAssignment()
+            || $this->candidateService->currentBlockTeamMember($counterpartBlock, $counterpartCurrent) !== $counterpartMember
+        ) {
+            throw new DutySwapNotApplicableException(DutySwapNotApplicableException::DUTY_CHANGED, 'counterpart');
+        }
+
+        foreach ([['requester', $offeredCurrent], ['counterpart', $counterpartCurrent]] as [$party, $rows]) {
+            foreach ($rows as $row) {
+                if ($row->isLocked()) {
+                    throw new DutySwapNotApplicableException(DutySwapNotApplicableException::DUTY_LOCKED, $party);
+                }
+            }
+        }
+
+        foreach ([['requester', $offeredBlock], ['counterpart', $counterpartBlock]] as [$party, $block]) {
+            try {
+                $this->conditionalCoverage->assertCanBeNewlyCovered($block);
+            } catch (CoverageNotRequiredException|CoverageUndeterminedException) {
+                throw new DutySwapNotApplicableException(DutySwapNotApplicableException::COVERAGE_NOT_REQUIRED, $party);
+            }
+        }
+
+        // The calendar AFTER the swap: each person is checked without the unit they hand over.
+        $counterpartError = $this->candidateService->assignabilityError($generation, $offeredBlock, $counterpartMember, [], $counterpartBlock);
+        if (null !== $counterpartError) {
+            throw new DutySwapNotApplicableException($counterpartError, 'counterpart');
+        }
+        $requesterError = $this->candidateService->assignabilityError($generation, $counterpartBlock, $requesterMember, [], $offeredBlock);
+        if (null !== $requesterError) {
+            throw new DutySwapNotApplicableException($requesterError, 'requester');
+        }
+
+        $snapshot = $this->snapshotRepository->findOneByGeneration($generation)
+            ?? throw new DutySwapNotApplicableException(DutySwapNotApplicableException::DUTY_CHANGED);
+
+        return [$generation, $snapshot, $offeredBlock, $counterpartBlock, $offeredCurrent, $counterpartCurrent];
     }
 
     /**
