@@ -120,7 +120,11 @@ final class PlanningAbsenceExportDataBuilder
     }
 
     /**
-     * The distinct lines of the person's stints, in the planning's line order.
+     * The distinct lines of the person's stints, in the planning's line order,
+     * then — for a stint whose line was deleted — its team's own name: deleting
+     * a secondary line keeps its PlanningTeam and memberships (PlanningLineService::
+     * deleteLine(), docs/planning-domain.md §14), so the person still takes part
+     * and their historical team is the only thing left to name.
      *
      * @param list<PlanningTeamMember> $stints
      * @param array<int, PlanningLine> $lineByTeamId
@@ -130,14 +134,19 @@ final class PlanningAbsenceExportDataBuilder
     private function lineNames(array $stints, array $lineByTeamId): array
     {
         $lines = [];
+        $teamsWithoutLine = [];
         foreach ($stints as $stint) {
-            $line = $lineByTeamId[$stint->getPlanningTeam()->getId()] ?? null;
+            $team = $stint->getPlanningTeam();
+            $line = $lineByTeamId[$team->getId()] ?? null;
             if (null !== $line) {
                 $lines[$line->getId()] = $line;
+            } else {
+                $teamsWithoutLine[$team->getId()] = $team->getName();
             }
         }
         usort($lines, static fn (PlanningLine $a, PlanningLine $b): int => [$a->getPosition(), $a->getId()] <=> [$b->getPosition(), $b->getId()]);
+        ksort($teamsWithoutLine);
 
-        return array_map(static fn (PlanningLine $line): string => $line->getName(), $lines);
+        return [...array_map(static fn (PlanningLine $line): string => $line->getName(), $lines), ...array_values(array_unique($teamsWithoutLine))];
     }
 }

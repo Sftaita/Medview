@@ -341,7 +341,10 @@ Jamais de snapshot : l'état des calendriers au moment du téléchargement.
 **Participants** : toute adhésion (`PlanningTeamMember`) du planning qui
 intersecte la période — une seule entrée par `User` (identifiant stable),
 quel que soit le nombre de ses adhésions ou de ses lignes ; colonne
-« Équipe / Ligne » = ses lignes distinctes dans l'ordre du planning. Les
+« Équipe / Ligne » = ses lignes distinctes dans l'ordre du planning, puis,
+pour une adhésion dont la ligne a été supprimée (`deleteLine()` conserve
+l'équipe et les adhésions, `docs/planning-domain.md` §14), le nom de
+l'équipe historique — jamais « — » pour quelqu'un qui participe. Les
 personnes sans absence figurent avec « Aucune absence déclarée » / « 0 jour ».
 Le créateur n'apparaît que s'il participe.
 

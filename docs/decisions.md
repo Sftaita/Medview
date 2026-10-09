@@ -6547,6 +6547,12 @@ l'ancienne (voir légende).
   planning (avant son arrivée, après son départ). La synthèse indique alors
   ses dates d'adhésion. Pour un membre présent sur toute la période, les deux
   lectures coïncident.
+- **Ligne supprimée** (complément, `v2026.10.09-prod-3`) : la suppression
+  d'une ligne secondaire conserve son équipe et ses adhésions ouvertes
+  (`docs/planning-domain.md` §14) ; ces personnes restent des participants,
+  comme dans le suivi de collecte, et la colonne « Équipe / Ligne » affiche
+  alors le nom de leur équipe historique au lieu de « — ». Affichage
+  seulement : participants, absences, droits et règles de collecte inchangés.
 - **Toujours live** : jamais un snapshot de génération, et aucune
   publication requise (contrairement à D150) — les absences précèdent la
   génération.

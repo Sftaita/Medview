@@ -155,6 +155,33 @@ final class PlanningAbsenceExportDataBuilderTest extends KernelTestCase
         self::assertSame('2027-01-10', $data->last);
     }
 
+    public function testAMemberOfADeletedLineIsNamedByTheirHistoricalTeam(): void
+    {
+        $planning = $this->planning('2027-01-15', '2027-04-15');
+        $lineService = self::getContainer()->get(PlanningLineService::class);
+        $membership = self::getContainer()->get(PlanningTeamMembershipService::class);
+        $urgences = $lineService->addLine($planning, 'Urgences', PlanningLineType::SECONDARY);
+        // The line is renamed before being deleted: the team keeps its own name.
+        $lineService->rename($urgences, 'Renfort urgences');
+
+        $kept = $this->person('Karim', 'Reste');
+        $orphan = $this->person('Olga', 'Sansligne');
+        $membership->addMember($this->lines($planning)[0]->getPlanningTeam(), $kept, TeamMemberRole::MEMBER, $this->date('2027-01-15'));
+        $membership->addMember($urgences->getPlanningTeam(), $orphan, TeamMemberRole::MEMBER, $this->date('2027-01-15'));
+        $membership->addMember($urgences->getPlanningTeam(), $kept, TeamMemberRole::MEMBER, $this->date('2027-01-15'));
+        $this->absent($orphan, '2027-02-01T00:00:00+01:00', '2027-02-04T00:00:00+01:00');
+        $lineService->deleteLine($urgences);
+
+        $data = $this->build($planning);
+
+        $member = $this->memberOf($data, $orphan);
+        self::assertSame(['Urgences'], $member->lineNames, 'Their line is gone: the historical team is named, never "—".');
+        self::assertSame([['2027-02-01', '2027-02-03']], $member->absenceRuns(), 'Participants, absences and days are unchanged by the fix.');
+        self::assertSame([['2027-01-15', '2027-04-14']], $member->membershipRuns);
+        self::assertSame(['Ligne principale', 'Urgences'], $this->memberOf($data, $kept)->lineNames, 'Existing lines first, in order, then the historical team.');
+        self::assertCount(2, $data->members);
+    }
+
     public function testAnExtensionIsTakenIntoAccount(): void
     {
         $planning = $this->planning('2027-01-15', '2027-02-01');
