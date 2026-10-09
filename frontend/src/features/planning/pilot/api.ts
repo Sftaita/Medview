@@ -1,4 +1,4 @@
-import { apiFetch } from '../../../lib/apiClient'
+import { apiDownloadGet, apiFetch, type DownloadedFile } from '../../../lib/apiClient'
 import type {
   CollectionStatus,
   GenerationPreflight,
@@ -85,4 +85,13 @@ export function activateRuleSet(lineStableId: string): Promise<RuleSetStatus> {
     method: 'POST',
     body: {},
   })
+}
+
+/**
+ * "Exporter les absences (PDF)" (docs/decisions.md D181): everyone's declared
+ * unavailabilities over the planning period, as of now. The server decides who
+ * is in it and checks the right; only the planning is sent.
+ */
+export function downloadAbsencesPdf(planningStableId: string): Promise<DownloadedFile> {
+  return apiDownloadGet(`/api/plannings/${planningStableId}/availability-export.pdf`)
 }

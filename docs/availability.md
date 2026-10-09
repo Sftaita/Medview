@@ -310,3 +310,82 @@ s'appuieront.
   ouvertes concernées — information de workflow, jamais d'éligibilité (D120).
 - "Avoir revu ses disponibilités" pour une tranche de planning n'est **pas** déduit des périodes présentes :
   c'est la confirmation explicite décrite dans `docs/availability-collection.md`.
+
+## 11. Export PDF des absences d'un planning (D181)
+
+« Exporter les absences (PDF) », dans l'onglet « Indisponibilités » d'un
+planning (suivi de collecte). Lecture seule : rien n'est écrit, ni audit, ni
+copie des périodes.
+
+**Endpoint** : `GET /api/plannings/{planningStableId}/availability-export.pdf`
+(`PlanningAbsenceExportController`). Aucun paramètre : les participants sont
+toujours déduits du planning côté serveur, jamais fournis par le client
+(un `POST` répond 405). Réponse `application/pdf`, `Content-Disposition:
+attachment; filename=MedVue_Absences_<Nom>_<premier jour>_<dernier jour>.pdf`
+(nom translittéré en ASCII, lettres/chiffres/« - » seulement),
+`Cache-Control: private, no-store`, `Pragma: no-cache`,
+`X-Content-Type-Options: nosniff`. 404 planning inconnu, 401 anonyme.
+
+**Droits** : `PlanningVoter::MANAGE_AVAILABILITY` — le créateur, ou un
+OWNER/ADMIN **ouvert** d'une équipe du planning (D124), soit exactement
+l'audience qui voit déjà les indisponibilités de chacun dans le suivi de
+collecte. Jamais un membre simple (403), jamais un gestionnaire d'un autre
+planning (403) ; le retrait du droit « Gestionnaire » s'applique
+immédiatement.
+
+**Périmètre temporel** : `[Planning.startsAt, Planning.endsAt[` (dates,
+`endsAt` exclusive), prolongations comprises (elles déplacent ces mêmes
+champs, D122). Les jours sont des dates civiles du **fuseau du planning**.
+Jamais de snapshot : l'état des calendriers au moment du téléchargement.
+
+**Participants** : toute adhésion (`PlanningTeamMember`) du planning qui
+intersecte la période — une seule entrée par `User` (identifiant stable),
+quel que soit le nombre de ses adhésions ou de ses lignes ; colonne
+« Équipe / Ligne » = ses lignes distinctes dans l'ordre du planning. Les
+personnes sans absence figurent avec « Aucune absence déclarée » / « 0 jour ».
+Le créateur n'apparaît que s'il participe.
+
+**Règles de calcul des journées** (`AbsenceDays`, `PlanningAbsenceExportDataBuilder`) :
+
+1. seules les périodes `UNAVAILABLE` — jamais `PREFER_DUTY`, jamais la
+   non-participation administrative (§3) ;
+2. une période `[startsAt, endsAt[` touche les jours civils allant du jour
+   local de `startsAt` au jour local du dernier instant avant `endsAt` : une
+   fin exactement au début d'un jour local (minuit, ou le premier instant
+   existant quand un changement d'heure saute minuit) n'inclut pas ce jour ;
+   une fin à 00:01 l'inclut. C'est la règle du calendrier personnel
+   (`periodToRange()` côté frontend). Une journée **partiellement**
+   indisponible compte pour une journée ; aucune heure n'est affichée ;
+3. ces jours sont limités à la période du planning **et aux jours où la
+   personne est membre** (union de ses adhésions `[membershipStart,
+   membershipEnd[`) : l'export ne montre jamais le calendrier de quelqu'un
+   pour des jours où il ne faisait pas partie du planning. Quand l'adhésion
+   ne couvre pas toute la période, le récapitulatif l'indique
+   (« Membre 15 janvier – 14 mars ») ;
+4. le total est le nombre de **jours distincts** ainsi obtenus (deux périodes
+   touchant le même jour le comptent une fois) — ce n'est pas un solde de
+   congés. Les périodes affichées sont les suites de jours consécutifs,
+   regroupées pour la présentation seulement : rien de stocké n'est
+   tronqué ni fusionné.
+
+Les participants (avec leur `User`), les lignes et toutes les périodes sont
+lus en 3 requêtes, quel que soit le nombre de personnes.
+
+**Document** (`PlanningAbsenceExportPdfRenderer`, dompdf, gabarit
+`templates/pdf/planning_absences.html.twig`) : A4 paysage ; un mois par page,
+lundi → dimanche, jours hors période grisés et toujours vides ; dans chaque
+case, le nom complet de chaque absent (jamais tronqué : la case grandit, et
+la police diminue au-delà de 6 absents un même jour du mois) ; une légende
+par mois (personnes absentes ce mois-là, nombre de jours) ; week-ends
+légèrement teintés ; chaque semaine est un bloc jamais coupé entre deux
+pages. Puis « Récapitulatif des absences par membre » (nouvelle page, en-tête
+de tableau répété), trié par nom puis prénom (ordre alphabétique français,
+`Collator fr_FR`). Une couleur par personne, la même partout ; 12 couleurs,
+qui se répètent au-delà — le nom écrit en entier reste l'identifiant. Dates
+en français, année indiquée quand le planning couvre deux années civiles.
+
+**Limites** : un jour avec un très grand nombre d'absents (plusieurs
+dizaines) peut donner une semaine plus haute qu'une page, que dompdf coupe
+alors ; aucune limite de taille n'est imposée (contrairement à l'export du
+calendrier, D150 : le volume dépend ici du nombre de semaines et de
+personnes, pas de lignes × semaines).

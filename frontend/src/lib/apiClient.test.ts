@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   apiDownload,
+  apiDownloadGet,
   apiFetch,
   ApiError,
   clearStoredToken,
@@ -180,6 +181,56 @@ describe('apiDownload', () => {
     expect(init.method).toBe('POST')
     expect(init.body).toBe('{"format":"pdf"}')
     expect(new Headers(init.headers).get('Authorization')).toBe('Bearer access')
+    vi.unstubAllGlobals()
+  })
+
+  it('GETs a file without a body and returns it with its name', async () => {
+    setStoredToken('access')
+    const fetchMock = vi.fn(
+      async () =>
+        new Response('%PDF', {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/pdf',
+            'Content-Disposition':
+              "attachment; filename=A.pdf; filename*=UTF-8''Absences%20%C3%A9t%C3%A9.pdf",
+          },
+        }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const file = await apiDownloadGet('/api/x/availability-export.pdf')
+
+    expect(file.filename).toBe('Absences été.pdf')
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
+    expect(init.method).toBe('GET')
+    expect(init.body).toBeUndefined()
+    expect(new Headers(init.headers).get('Content-Type')).toBeNull()
+    expect(new Headers(init.headers).get('Authorization')).toBe('Bearer access')
+    vi.unstubAllGlobals()
+  })
+
+  it('refreshes the session once on a 401, then downloads', async () => {
+    setStoredToken('expired')
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/api/token/refresh')) {
+        return new Response(JSON.stringify({ token: 'fresh' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return fetchMock.mock.calls.filter(([url]) => !String(url).endsWith('/api/token/refresh')).length === 1
+        ? new Response(null, { status: 401 })
+        : new Response('%PDF', { status: 200, headers: { 'Content-Type': 'application/pdf' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const file = await apiDownloadGet('/api/x/availability-export.pdf')
+
+    expect(await file.blob.text()).toBe('%PDF')
+    expect(file.filename).toBeNull()
+    const last = fetchMock.mock.calls[fetchMock.mock.calls.length - 1] as unknown as [string, RequestInit]
+    expect(new Headers(last[1].headers).get('Authorization')).toBe('Bearer fresh')
     vi.unstubAllGlobals()
   })
 

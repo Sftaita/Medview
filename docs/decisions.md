@@ -6521,3 +6521,35 @@ l'ancienne (voir légende).
   contenus et des tables distincts.
 - **Écarté** : notifications in-app (hors périmètre), envoi par Messenger
   (le transport existant est réservé aux calculs de planning, D149).
+
+## D181 — Export PDF des absences d'un planning : lecture live, jours civils du fuseau du planning, limité aux adhésions
+
+- **Contexte** : le créateur ou un gestionnaire veut un PDF récapitulant les
+  indisponibilités de tous les participants sur la période du planning — un
+  calendrier collectif mensuel puis une synthèse par personne.
+- **Décision** : un endpoint dédié `GET /api/plannings/{id}/availability-export.pdf`
+  sous `PlanningVoter::MANAGE_AVAILABILITY` (la population qui voit déjà ces
+  données une personne à la fois dans le suivi de collecte, D124 — aucun
+  élargissement). Données préparées par `PlanningAbsenceExportDataBuilder`
+  (le rendu ne lit jamais la base), calcul des jours isolé dans `AbsenceDays`
+  (testé sans PDF), rendu par `PlanningAbsenceExportPdfRenderer` (dompdf, déjà
+  en place depuis D150 — aucune dépendance ajoutée, aucune migration).
+- **Jours** : une période `[startsAt, endsAt[` couvre du jour local de
+  `startsAt` au jour local du dernier instant avant `endsAt`, dans le **fuseau
+  du planning** — la règle du calendrier personnel ; une journée
+  partiellement indisponible compte pour une journée ; total = jours
+  distincts. Les périodes stockées ne sont jamais modifiées : tronquage et
+  regroupement n'existent que dans les données de présentation.
+- **Limité aux adhésions** : en plus de la période du planning, les jours
+  sont limités à l'union des adhésions de la personne. Écart assumé avec une
+  lecture littérale « période du planning » : sinon l'export révélerait le
+  calendrier personnel de quelqu'un pour des jours où il n'était pas dans le
+  planning (avant son arrivée, après son départ). La synthèse indique alors
+  ses dates d'adhésion. Pour un membre présent sur toute la période, les deux
+  lectures coïncident.
+- **Toujours live** : jamais un snapshot de génération, et aucune
+  publication requise (contrairement à D150) — les absences précèdent la
+  génération.
+- **Écarté** : réutiliser `POST .../export` (D150) — autre audience (VIEW),
+  autre contenu, prérequis de publication ; accepter une liste d'utilisateurs
+  venant du client ; une colonne « motif » (le modèle n’en a volontairement pas, `docs/availability.md` §1).

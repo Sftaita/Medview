@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { Icon } from '../../../components/Icon'
+import { AbsenceExportButton } from './AbsenceExportButton'
 import { remindPendingMembers } from './api'
 import { formatDateOnly, formatLongDate, overdueMessage, plural } from './format'
 import { COLLECTION_STATE_TAG, ROLE_LABEL } from './labels'
@@ -21,7 +22,8 @@ type Sort = 'name' | 'unavailabilities'
  * (docs/availability-collection.md §15), laid out as the "Indisponibilités" tab
  * of docs/Design/react_planning_detail: the "X / Y ont confirmé" summary, the
  * (informative) deadline, "Relancer les membres en attente", then one row per
- * participant — searchable, sortable, click a row for the drawer. Nothing here
+ * participant — searchable, sortable, click a row for the drawer — and
+ * "Exporter les absences (PDF)" (docs/decisions.md D181). Nothing here
  * is ever disabled by the deadline: it only ever raises a visual warning.
  */
 export function CollectionStatusPanel({ status, onChanged, onEditDeadline }: Props) {
@@ -145,26 +147,25 @@ export function CollectionStatusPanel({ status, onChanged, onEditDeadline }: Pro
             </div>
           </div>
         ) : (
-          (summary.pendingCount > 0 || onEditDeadline) && (
-            <div className="pd-row-actions">
-              {summary.pendingCount > 0 && (
-                <button
-                  type="button"
-                  className="pd-btn pd-btn-secondary"
-                  onClick={() => setConfirmingBulk(true)}
-                >
-                  <Icon name="mail" size={18} strokeWidth={2} />
-                  Relancer les membres en attente
-                </button>
-              )}
-              {onEditDeadline && (
-                <button type="button" className="pd-btn pd-btn-ghost" onClick={onEditDeadline}>
-                  <Icon name="calendar" size={18} strokeWidth={2} />
-                  {status.availabilityDeadline ? 'Modifier la date souhaitée' : 'Fixer une date souhaitée'}
-                </button>
-              )}
-            </div>
-          )
+          <div className="pd-row-actions">
+            {summary.pendingCount > 0 && (
+              <button
+                type="button"
+                className="pd-btn pd-btn-secondary"
+                onClick={() => setConfirmingBulk(true)}
+              >
+                <Icon name="mail" size={18} strokeWidth={2} />
+                Relancer les membres en attente
+              </button>
+            )}
+            {onEditDeadline && (
+              <button type="button" className="pd-btn pd-btn-ghost" onClick={onEditDeadline}>
+                <Icon name="calendar" size={18} strokeWidth={2} />
+                {status.availabilityDeadline ? 'Modifier la date souhaitée' : 'Fixer une date souhaitée'}
+              </button>
+            )}
+            <AbsenceExportButton planningStableId={planning.stableId} planningName={planning.name} />
+          </div>
         )}
       </div>
 

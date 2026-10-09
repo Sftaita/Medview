@@ -797,6 +797,12 @@
   flex-wrap: wrap;
   gap: 8px;
 }
+
+/* "Exporter les absences (PDF)" failure: on its own line below the buttons (docs/decisions.md D181). */
+.pd-row-actions .pd-export-error {
+  flex-basis: 100%;
+  margin: 0;
+}
 .pd-toolbar {
   display: flex;
   flex-wrap: wrap;
