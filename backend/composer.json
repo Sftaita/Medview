@@ -34,6 +34,7 @@
         "symfony/flex": "^2",
         "symfony/framework-bundle": "7.4.*",
         "symfony/http-client": "7.4.*",
+        "symfony/http-client-contracts": "^3.7",
         "symfony/http-foundation": "7.4.*",
         "symfony/http-kernel": "7.4.*",
         "symfony/mailer": "7.4.*",
