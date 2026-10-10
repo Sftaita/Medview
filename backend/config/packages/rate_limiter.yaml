@@ -46,3 +46,22 @@ framework:
             policy: 'sliding_window'
             limit: 3
             interval: '1 hour'
+        # SurgicalHub association codes (docs/surgicalhub-integration.md §4.2).
+        # Generating one, keyed by user: a person needs a handful at most.
+        surgicalhub_link_code:
+            policy: 'sliding_window'
+            limit: 10
+            interval: '1 hour'
+        # POST /api/integrations/surgicalhub/v1/link-codes/redeem, keyed by client
+        # IP — in practice SurgicalHub's server (which also limits each of its users).
+        # With 60 random bits per code valid 10 minutes, it only caps abuse.
+        surgicalhub_redeem:
+            policy: 'sliding_window'
+            limit: 60
+            interval: '1 minute'
+        # « Synchroniser SurgicalHub », keyed by user: the cron already runs every
+        # 30 minutes, a person rarely needs more than a few manual refreshes.
+        surgicalhub_manual_sync:
+            policy: 'sliding_window'
+            limit: 10
+            interval: '1 hour'

@@ -36,6 +36,15 @@ class PlanningSnapshotAvailabilityPeriod
     #[ORM\Column(length: 20, enumType: UserAvailabilityType::class)]
     private UserAvailabilityType $type;
 
+    /**
+     * Manual entry or SurgicalHub leave, as it was when the snapshot was
+     * taken — for explaining an exclusion only. Deliberately not part of
+     * SnapshotHasher's input: where a period came from does not change the
+     * problem that was solved.
+     */
+    #[ORM\Column(length: 20, enumType: UserAvailabilitySource::class, options: ['default' => 'MANUAL'])]
+    private UserAvailabilitySource $provenance;
+
     #[ORM\Column(type: 'datetimetz_immutable')]
     private \DateTimeImmutable $startsAt;
 
@@ -59,10 +68,12 @@ class PlanningSnapshotAvailabilityPeriod
         \DateTimeImmutable $endsAt,
         \DateTimeImmutable $sourceCreatedAt,
         \DateTimeImmutable $sourceUpdatedAt,
+        UserAvailabilitySource $provenance = UserAvailabilitySource::MANUAL,
     ) {
         $this->snapshotMember = $snapshotMember;
         $this->sourceAvailabilityStableId = $sourceAvailabilityStableId;
         $this->type = $type;
+        $this->provenance = $provenance;
         $this->startsAt = $startsAt;
         $this->endsAt = $endsAt;
         $this->sourceCreatedAt = $sourceCreatedAt;
@@ -74,6 +85,11 @@ class PlanningSnapshotAvailabilityPeriod
     public function getId(): ?int
     {
         return $this->id;
+    }
+
+    public function getProvenance(): UserAvailabilitySource
+    {
+        return $this->provenance;
     }
 
     public function getSnapshotMember(): PlanningSnapshotMember

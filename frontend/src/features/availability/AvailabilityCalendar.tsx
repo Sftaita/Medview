@@ -28,6 +28,8 @@ type Props = {
   visible: number
   /** Ranges to draw, drag preview included. */
   ranges: DayRange[]
+  /** SurgicalHub leave, drawn as unavailability, hatched, under the editable ranges. */
+  imported?: DayRange[]
   drag: DragPreview
   todayIndex: number
   /** Days [start, end] (inclusive) an availability collection is asking about, marked lightly. */
@@ -62,6 +64,7 @@ export function AvailabilityCalendar({
   page,
   visible,
   ranges,
+  imported = [],
   drag,
   todayIndex,
   highlight = null,
@@ -143,7 +146,11 @@ export function AvailabilityCalendar({
                   }
                   const day = month.start + relative
                   const outside = relative >= month.days
-                  const range = rangeAt(ranges, day)
+                  const own = rangeAt(ranges, day)
+                  const leave = rangeAt(imported, day)
+                  // A day of SurgicalHub leave shows the leave, unless the person's own unavailability is on it
+                  // too; a preference of their own stays stored there, simply drawn under the leave.
+                  const range = own?.type === 'UNAVAILABLE' ? own : (leave ?? own)
                   const holiday = holidayName(day)
                   const weekend = isWeekend(day)
                   const isStart = range !== null && day === range.start
@@ -152,13 +159,14 @@ export function AvailabilityCalendar({
                   const continued = range !== null && !isStart && day === month.start
                   const list = range ? periodsByType[range.type] : []
                   const badge =
-                    range && isStart && range.end > range.start && list.length > 1
-                      ? `${range.type === 'PREFER_DUTY' ? 'G' : 'P'}${list.findIndex((r) => r.start === range.start) + 1}`
+                    own && range === own && isStart && own.end > own.start && list.length > 1
+                      ? `${own.type === 'PREFER_DUTY' ? 'G' : 'P'}${list.findIndex((r) => r.start === own.start) + 1}`
                       : null
 
                   const classes = [
                     'day',
                     range ? `day--selected ${TYPE_CLASS[range.type]}` : '',
+                    leave ? 'day--imported' : '',
                     isStart ? 'day--start' : '',
                     isEnd ? 'day--end' : '',
                     single ? 'day--single' : '',
@@ -177,6 +185,7 @@ export function AvailabilityCalendar({
                   const label = [
                     formatDayFull(day),
                     range ? TYPE_LABEL[range.type].toLowerCase() : null,
+                    leave ? 'congé SurgicalHub' : null,
                     holiday ? `jour férié : ${holiday}` : weekend ? 'week-end' : null,
                   ]
                     .filter(Boolean)
@@ -189,7 +198,7 @@ export function AvailabilityCalendar({
                       className={classes}
                       data-day={day}
                       aria-label={label}
-                      aria-pressed={range !== null}
+                      aria-pressed={own !== null}
                       // The trailing days of the next month are drawn again in its own panel.
                       aria-hidden={outside || undefined}
                       tabIndex={outside ? -1 : undefined}
@@ -216,7 +225,7 @@ export function AvailabilityCalendar({
   )
 }
 
-export function CalendarLegend() {
+export function CalendarLegend({ withImported = false }: { withImported?: boolean }) {
   return (
     <ul className="list cal__legend">
       <li>
@@ -227,6 +236,12 @@ export function CalendarLegend() {
         <span className="cal__swatch cal__swatch--unavailable" />
         Indisponibilité
       </li>
+      {withImported && (
+        <li>
+          <span className="cal__swatch cal__swatch--imported" />
+          Congé SurgicalHub
+        </li>
+      )}
       <li>
         <span className="cal__swatch cal__swatch--prefer" />
         Préférence de garde

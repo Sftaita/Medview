@@ -54,6 +54,10 @@ class UserAvailabilityPeriod
     #[ORM\Column(length: 20, enumType: UserAvailabilityType::class)]
     private UserAvailabilityType $type;
 
+    /** Never changes after creation: an imported period never becomes manual, nor the reverse. */
+    #[ORM\Column(length: 20, enumType: UserAvailabilitySource::class, options: ['default' => 'MANUAL'])]
+    private UserAvailabilitySource $source;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -65,6 +69,7 @@ class UserAvailabilityPeriod
         UserAvailabilityType $type,
         \DateTimeImmutable $startsAt,
         \DateTimeImmutable $endsAt,
+        UserAvailabilitySource $source = UserAvailabilitySource::MANUAL,
     ) {
         if ($endsAt <= $startsAt) {
             throw new \InvalidArgumentException('endsAt must be strictly after startsAt.');
@@ -73,6 +78,7 @@ class UserAvailabilityPeriod
         $this->stableId = Uuid::v7();
         $this->user = $user;
         $this->type = $type;
+        $this->source = $source;
         $this->startsAt = $startsAt;
         $this->endsAt = $endsAt;
         $this->createdAt = new \DateTimeImmutable();
@@ -107,6 +113,17 @@ class UserAvailabilityPeriod
     public function getType(): UserAvailabilityType
     {
         return $this->type;
+    }
+
+    public function getSource(): UserAvailabilitySource
+    {
+        return $this->source;
+    }
+
+    /** Mirrors SurgicalHub leave: read-only for its owner, changed only by the synchronisation. */
+    public function isImported(): bool
+    {
+        return UserAvailabilitySource::MANUAL !== $this->source;
     }
 
     /**

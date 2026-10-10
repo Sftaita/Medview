@@ -6559,3 +6559,145 @@ l'ancienne (voir légende).
 - **Écarté** : réutiliser `POST .../export` (D150) — autre audience (VIEW),
   autre contenu, prérequis de publication ; accepter une liste d'utilisateurs
   venant du client ; une colonne « motif » (le modèle n’en a volontairement pas, `docs/availability.md` §1).
+
+## D182 — Association MedVue ↔ SurgicalHub : code à usage unique généré dans MedVue, échangé par SurgicalHub, deux secrets machine
+
+- **Contexte** : MedVue doit reprendre les congés encodés dans SurgicalHub
+  (`docs/surgicalhub-integration.md`). Les deux applications ont leurs
+  propres comptes, bases et authentifications ; aucune ne doit accéder aux
+  ressources privées de l'autre, même sur le même VPS.
+- **Décision** : le titulaire génère dans MedVue (« Mon compte ») un code de
+  12 caractères Crockford base32 (60 bits), valable 10 min, à usage unique,
+  remplacé par le suivant, **stocké haché** (SHA-256, comme
+  `PasswordResetToken`) et jamais journalisé. Il le saisit dans SurgicalHub
+  (Profil → Intégration MedVue) ou le donne à un administrateur SurgicalHub ;
+  SurgicalHub l'échange par `POST /api/integrations/surgicalhub/v1/link-codes/redeem`
+  contre un `linkId` — réponse sans aucune donnée MedVue.
+- **Authentification machine** : un secret Bearer par sens ; MedVue ne
+  connaît que l'empreinte du secret entrant (`SURGICALHUB_INBOUND_TOKEN_SHA256`,
+  plusieurs empreintes pendant une rotation), comparée en temps constant ;
+  firewall dédié avant `^/api` (un JWT MedVue y est refusé, ce secret n'ouvre
+  rien d'autre). Vide = intégration fermée.
+- **Invariants** : au plus une association `ACTIVE` par compte MedVue et
+  par compte SurgicalHub (index uniques partiels + contrôle applicatif) ; la
+  même paire qui échange un nouveau code reçoit le même `linkId` ; un compte
+  SurgicalHub déjà lié ailleurs → `409 already_linked` **sans consommer le
+  code** (l'administrateur a pu se tromper de cible) ; un compte MedVue déjà
+  lié ailleurs → `409 medvue_account_already_linked`. Journal append-only
+  `surgical_hub_link_events` (trigger), jamais le code.
+- **Garde-fou administrateur** (décision utilisateur D3) : le code prouve
+  le consentement du titulaire MedVue, pas que le compte SurgicalHub choisi
+  est le bon → email au titulaire à chaque association (nom SurgicalHub,
+  acteur, date) et dissociation possible à tout moment dans MedVue. Les
+  emails des deux comptes ne sont pas comparés (ils peuvent différer).
+- **Anti-force brute** : 60 échanges/min par IP appelante côté MedVue, 10
+  codes/h par compte, et limites par acteur/cible côté SurgicalHub ; un code
+  inconnu, expiré, remplacé, consommé ou d'un compte désactivé donne la même
+  réponse.
+- **Écarté** : un JWT ou une session utilisateur partagée ; un accès SQL ou
+  réseau interne ; une association à partir d'un simple email.
+
+## D183 — Congés SurgicalHub dans le calendrier : provenance sur la période, contrainte de non-chevauchement partielle, réconciliation sur instantané complet
+
+- **Provenance** : `UserAvailabilityPeriod.source` (`MANUAL` | `SURGICAL_HUB`)
+  plutôt qu'une table de correspondance seule : chaque lecteur (API,
+  calendrier, contrainte SQL, snapshot) en a besoin sans jointure. La
+  correspondance absence ↔ période (`surgical_hub_imported_leaves`) est
+  unique par (utilisateur, compte SurgicalHub, id d'absence) : une absence
+  ne peut jamais être importée deux fois, même après révocation puis
+  nouvelle association de la même paire (les imports sont repris).
+- **Chevauchements** : la contrainte `excl_user_availability_periods_no_overlap`
+  devient partielle (`WHERE source = 'MANUAL'`), le contrôle applicatif
+  aussi : l'invariant historique reste entier entre périodes manuelles ; un
+  congé importé peut chevaucher une période manuelle ou un autre congé
+  (SurgicalHub n'interdit pas les chevauchements) — la personne est
+  indisponible sur l'union, ce que l'éligibilité calcule déjà période par
+  période.
+- **Écriture** : uniquement par `UserAvailabilityService::import*()` (pas de
+  second moteur) — toujours `UNAVAILABLE`, notées par les collectes ouvertes
+  (`lastAvailabilityChangeAt`) mais jamais comme une réponse. Les écritures
+  du titulaire refusent une période importée (`409 imported_period_read_only`),
+  et `import*()` refuse une période manuelle.
+- **Synchronisation** : lecture HTTP d'un instantané **complet** de la
+  fenêtre, sans pagination, entièrement validé avant toute écriture
+  (`apiVersion`, `linkId`, fenêtre, `complete`, dates, unicité des ids) ;
+  puis une transaction, association verrouillée : créer, déplacer, retirer
+  — seulement parmi les imports qui intersectent la fenêtre ; rien n'est
+  écrit pour une absence inchangée. Toute erreur (réseau, statut, corps
+  hors contrat) n'écrit que l'échec sur l'association. Seuls `404
+  link_not_found` / `410 link_revoked` au format exact v1 révoquent (une
+  page 404 d'un proxy n'efface rien).
+- **Statuts** (décision utilisateur D1) : SurgicalHub n'a pas de statut —
+  toute absence est `CONFIRMED` ; toute autre valeur est ignorée (donc
+  retirée si elle était importée).
+- **Fenêtre ≠ rétention** (D5/D6) : `[aujourd'hui − 90 j, aujourd'hui + 24
+  mois]` ; un import sorti de la fenêtre n'est plus réconcilié mais n'est
+  jamais supprimé pour cette raison.
+- **Révocation** (D9) : dans la même transaction que le statut, retrait des
+  imports de la paire qui commencent aujourd'hui ou plus tard (fuseau
+  `Europe/Brussels`) ; passé et période en cours conservés entiers ;
+  `MANUAL` jamais touché ; depuis MedVue, `DELETE` technique vers
+  SurgicalHub après commit, au mieux (D4).
+- **Snapshots** (D10) : la provenance est copiée (`provenance`) pour
+  l'explication (`EligibilityService` l'ajoute à la cause `UNAVAILABLE`)
+  mais **n'entre pas** dans `snapshotHash` : elle ne change pas le problème
+  résolu.
+- **Interface** : le calendrier n'édite que la couche manuelle (`planSync`
+  ignore toute période importée) ; les congés importés sont dessinés rayés,
+  non modifiables, listés à part ; une préférence de garde n'est jamais
+  conservée sur un jour de congé importé.
+- **Planification** : `app:surgicalhub:sync` toutes les 30 min (crontab de
+  `deploy`, `flock`, comme les autres tâches) et « Synchroniser SurgicalHub » ;
+  jamais dans le worker OR-Tools (occupé par des résolutions longues).
+- **Horloge** : les services de l'intégration normalisent l'heure en UTC
+  avant de l'écrire (colonnes `TIMESTAMP WITHOUT TIME ZONE`) — sans cela,
+  une horloge dans un autre fuseau décalait `lastSuccessfulSyncAt` d'une
+  heure (trouvé par les tests, horloge simulée en `Europe/Brussels`).
+
+- **Révision après relecture (2026-10-10)** : `404 link_not_found` ne
+  révoque plus — il **suspend** (`SUSPENDED` : plus de lecture, rien de
+  supprimé, l'association occupe toujours les deux comptes), car c'est aussi
+  ce que répondrait un SurgicalHub restauré depuis une sauvegarde
+  antérieure ; seul le titulaire en sort (nouveau code de la même paire →
+  reprise, ou « Dissocier » → D9), et le cron s'arrête et alerte au-delà
+  d'une association inconnue par passe. Une période importée qu'aucune
+  association courante ne tient plus à jour devient **retirable** par son
+  titulaire (jamais modifiable). Le calendrier n'écarte plus que les
+  préférences *ajoutées* par un geste sur un congé importé, jamais une
+  préférence existante. D6 (conservation hors fenêtre) et D9 (futur
+  retiré, en cours conservé et retirable) reconfirmées par l'utilisateur le
+  2026-10-10, après présentation des options et de leurs impacts.
+  Relecture finale : une période importée est « synchronisée » dès que sa
+  **paire de comptes** a une association courante (et non seulement
+  l'association qui l'a importée) — sinon, juste après une nouvelle
+  association, une période conservée restait retirable puis aurait été
+  réimportée.
+
+## D184 — Congés SurgicalHub avant une génération : synchronisation toujours tentée, blocage au-delà de 24 h, dérogation du seul créateur
+
+- **Décision** (décision utilisateur D8) : au lancement d'une génération
+  (`PlanningJobService::requestGeneration()`, côté requête HTTP, avant la
+  mise en file — le snapshot que le worker prend ensuite lit donc des congés
+  aussi frais que possible ; le worker n'appelle jamais SurgicalHub), une
+  synchronisation est tentée pour chaque participant **associé**. En cas
+  d'échec : dernière réussite < `SURGICALHUB_FRESHNESS_HOURS` (24 h) →
+  avertissement dans la réponse `202`, la génération part ; ≥ 24 h ou jamais
+  → `409 surgicalhub_data_stale` avec les personnes concernées.
+- **Durée bornée** (relecture du 2026-10-10) : délai de 4 s par appel au
+  lancement, arrêt des appels dès la première panne de SurgicalHub (les
+  personnes suivantes sont classées selon leur dernière réussite), budget
+  global de 20 s ; une association suspendue n'est jamais appelée et suit
+  la même règle des 24 h.
+- **Dérogation** : `overrideStaleSurgicalHubData: true` (strictement `true`),
+  acceptée du seul **créateur du planning** (un « Gestionnaire » ou un ADMIN
+  d'équipe reçoit `403 surgicalhub_override_forbidden`) ; journalisée par
+  personne (`STALE_DATA_OVERRIDDEN`, détails : planning, job, dernière
+  réussite, erreur) une fois le job créé ; jamais enregistrée comme une
+  synchronisation réussie.
+- **Jamais concernés** : les participants sans association, même si
+  SurgicalHub est indisponible.
+- **Préflight** : affiche les participants associés et la date de leur
+  dernière reprise, sans appeler SurgicalHub (c'est un `GET`).
+- **Écarté** : bloquer sans dérogation (une panne SurgicalHub bloquerait les
+  plannings) ; un simple avertissement (proche d'une génération silencieuse
+  sur des données périmées) ; synchroniser dans le worker.

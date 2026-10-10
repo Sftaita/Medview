@@ -11,6 +11,8 @@ import type {
   PlanningJob,
   PreflightIssue,
   RestPolicyChoice,
+  SurgicalHubParticipant,
+  SurgicalHubStaleRefusal,
   StructuralDiagnosticEntry,
   UnsatDiagnosticsPayload,
 } from './types'
@@ -48,6 +50,14 @@ export function GenerationModal({ planningStableId, onClose, onLaunched }: Props
   const [launching, setLaunching] = useState(false)
   const [launchError, setLaunchError] = useState<string | null>(null)
   const [restPolicy, setRestPolicy] = useState<RestPolicyChoice>(NO_REST_POLICY)
+  // docs/surgicalhub-integration.md §7.5 (D8): outdated SurgicalHub leave blocks; only the creator may go on, explicitly.
+  const [stale, setStale] = useState<SurgicalHubStaleRefusal | null>(null)
+  const [override, setOverride] = useState(false)
+  // Launched, but with SurgicalHub caveats the manager must read before the dialog closes.
+  const [launchedCaveats, setLaunchedCaveats] = useState<{
+    warnings: SurgicalHubParticipant[]
+    overridden: SurgicalHubParticipant[]
+  } | null>(null)
   // A ref, not state: two clicks in the same tick both read the state as "idle".
   const inFlight = useRef(false)
 
@@ -73,17 +83,39 @@ export function GenerationModal({ planningStableId, onClose, onLaunched }: Props
     setLaunching(true)
     setLaunchError(null)
     try {
-      const { job } = await launchGeneration(planningStableId, restPolicy)
+      const { job, surgicalHub } = await launchGeneration(
+        planningStableId,
+        restPolicy,
+        stale !== null && override,
+      )
       onLaunched(job)
-      onClose()
+      if (surgicalHub && surgicalHub.warnings.length + surgicalHub.overridden.length > 0) {
+        setStale(null)
+        setLaunchedCaveats(surgicalHub)
+      } else {
+        onClose()
+      }
     } catch (err) {
-      setLaunchError(launchErrorMessage(err))
+      const refusal = surgicalHubRefusal(err)
+      if (refusal) {
+        setStale(refusal)
+        setOverride(false)
+        if (refusal.error === 'surgicalhub_override_forbidden') {
+          setLaunchError(
+            'Seul le créateur du planning peut générer avec des congés SurgicalHub non actualisés.',
+          )
+        }
+      } else {
+        setLaunchError(launchErrorMessage(err))
+      }
     } finally {
       inFlight.current = false
       setLaunching(false)
     }
   }
 
+  // SurgicalHub dates are shown in the planning's own timezone, like every other date of this dialog.
+  const zone = preflight?.planning.timezone ?? 'Europe/Brussels'
   const everybodyConfirmed = preflight !== null && preflight.pendingCount === 0
   const confirmLabel =
     everybodyConfirmed && preflight.warnings.length === 0 ? 'Générer' : 'Générer quand même'
@@ -95,18 +127,31 @@ export function GenerationModal({ planningStableId, onClose, onLaunched }: Props
       dismissible={!launching}
       footer={
         <>
-          <button type="button" className="btn btn--secondary" onClick={onClose} disabled={launching}>
-            Annuler
-          </button>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={generate}
-            disabled={!preflight || !preflight.canGenerate || launching}
-            aria-busy={launching}
-          >
-            {launching ? 'Envoi…' : confirmLabel}
-          </button>
+          {launchedCaveats ? (
+            <button type="button" className="btn btn--primary" onClick={onClose}>
+              Fermer
+            </button>
+          ) : (
+            <>
+              <button type="button" className="btn btn--secondary" onClick={onClose} disabled={launching}>
+                Annuler
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={generate}
+                disabled={
+                  !preflight ||
+                  !preflight.canGenerate ||
+                  launching ||
+                  (stale !== null && (!stale.canOverride || !override))
+                }
+                aria-busy={launching}
+              >
+                {launching ? 'Envoi…' : stale ? 'Générer avec ces données' : confirmLabel}
+              </button>
+            </>
+          )}
         </>
       }
     >
@@ -122,7 +167,35 @@ export function GenerationModal({ planningStableId, onClose, onLaunched }: Props
         </p>
       )}
 
-      {preflight && (
+      {launchedCaveats && <SurgicalHubCaveats caveats={launchedCaveats} timeZone={zone} />}
+      {!launchedCaveats && stale && (
+        <div role="alert" className="alert alert--error sh-stale">
+          <Icon name="alert" size={18} strokeWidth={2} />
+          <div>
+            <p>
+              Les congés SurgicalHub de ces personnes n’ont pas pu être actualisés et datent de plus de 24
+              heures (ou n’ont jamais été repris) :
+            </p>
+            <SurgicalHubPeople people={stale.participants} timeZone={zone} />
+            {stale.canOverride ? (
+              <label className="sh-stale__override">
+                <input
+                  type="checkbox"
+                  checked={override}
+                  onChange={(event) => setOverride(event.target.checked)}
+                />
+                Je génère quand même avec leurs derniers congés connus (ce choix est enregistré).
+              </label>
+            ) : (
+              <p>
+                Seul le créateur du planning peut générer malgré tout. Réessayez plus tard ou prévenez-le.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {preflight && !launchedCaveats && (
         <PreflightBody
           preflight={preflight}
           restPolicy={restPolicy}
@@ -187,14 +260,19 @@ function PreflightBody({
         {familyCounts.length > 0 &&
           familyCounts.map(([name, count]) => (
             <li key={name || '__no_family'}>
-              {plural(count, reinforcementLines.length > 0 ? 'garde indépendante à répartir' : 'garde à répartir', reinforcementLines.length > 0 ? 'gardes indépendantes à répartir' : 'gardes à répartir')}{' '}
+              {plural(
+                count,
+                reinforcementLines.length > 0 ? 'garde indépendante à répartir' : 'garde à répartir',
+                reinforcementLines.length > 0 ? 'gardes indépendantes à répartir' : 'gardes à répartir',
+              )}{' '}
               — {name || 'Sans famille'}
             </li>
           ))}
         {/* docs/decisions.md D167: never a guessed number — a reinforcement exists only once its source is assigned. */}
         {reinforcementLines.map((line) => (
           <li key={`reinforcement-${line.stableId}`}>
-            Ligne « {line.name} » : renforts déterminés après l’attribution de la ligne « {line.demandSourceLineName} »
+            Ligne « {line.name} » : renforts déterminés après l’attribution de la ligne «{' '}
+            {line.demandSourceLineName} »
           </li>
         ))}
       </ul>
@@ -218,6 +296,17 @@ function PreflightBody({
             </li>
           ))}
         </ul>
+      )}
+
+      {preflight.surgicalHub && preflight.surgicalHub.length > 0 && (
+        <p className="muted">
+          {plural(
+            preflight.surgicalHub.length,
+            'participant reprend ses congés de SurgicalHub',
+            'participants reprennent leurs congés de SurgicalHub',
+          )}{' '}
+          : ils seront actualisés au lancement.
+        </p>
       )}
 
       <RestPolicyFields value={restPolicy} onChange={onRestPolicyChange} disabled={disabled} />
@@ -541,6 +630,64 @@ function warningText(issue: PreflightIssue, preflight: GenerationPreflight): str
     default:
       return issue.code
   }
+}
+
+function surgicalHubRefusal(err: unknown): SurgicalHubStaleRefusal | null {
+  if (!(err instanceof ApiError) || (err.status !== 409 && err.status !== 403)) {
+    return null
+  }
+  const body = err.body as Partial<SurgicalHubStaleRefusal> | null
+  return body?.error === 'surgicalhub_data_stale' || body?.error === 'surgicalhub_override_forbidden'
+    ? (body as SurgicalHubStaleRefusal)
+    : null
+}
+
+function SurgicalHubPeople({ people, timeZone }: { people: SurgicalHubParticipant[]; timeZone: string }) {
+  return (
+    <ul className="list">
+      {people.map((person) => (
+        <li key={person.userStableId}>
+          {person.firstName} {person.lastName} —{' '}
+          {person.lastSuccessfulSyncAt
+            ? `dernière reprise ${formatDateTime(person.lastSuccessfulSyncAt, timeZone)}`
+            : 'jamais reprise'}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** The generation is queued; what the manager must still know about SurgicalHub leave (decision D8). */
+function SurgicalHubCaveats({
+  caveats,
+  timeZone,
+}: {
+  caveats: { warnings: SurgicalHubParticipant[]; overridden: SurgicalHubParticipant[] }
+  timeZone: string
+}) {
+  return (
+    <div role="status" className="alert alert--warning sh-stale">
+      <Icon name="alert" size={18} strokeWidth={2} />
+      <div>
+        <p>La génération est lancée.</p>
+        {caveats.warnings.length > 0 && (
+          <>
+            <p>
+              SurgicalHub n’a pas répondu : ces congés récents (moins de 24 heures) ont été utilisés tels
+              quels.
+            </p>
+            <SurgicalHubPeople people={caveats.warnings} timeZone={timeZone} />
+          </>
+        )}
+        {caveats.overridden.length > 0 && (
+          <>
+            <p>Générée malgré des congés SurgicalHub non actualisés, par votre choix (enregistré) :</p>
+            <SurgicalHubPeople people={caveats.overridden} timeZone={timeZone} />
+          </>
+        )}
+      </div>
+    </div>
+  )
 }
 
 function launchErrorMessage(err: unknown): string {

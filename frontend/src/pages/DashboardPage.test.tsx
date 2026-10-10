@@ -32,6 +32,8 @@ function period(
   return {
     stableId,
     type,
+    source: 'MANUAL',
+    editable: true,
     startsAt: from.toISOString(),
     endsAt: to.toISOString(),
     createdAt: '',
@@ -246,6 +248,35 @@ describe('DashboardPage', () => {
 
     await screen.findByText('Trauma Delta')
     expect(screen.queryByRole('region', { name: 'Prochaine garde' })).not.toBeInTheDocument()
+  })
+
+  it('counts SurgicalHub leave with the person’s own unavailability, as their union', async () => {
+    frozenMockupDay()
+    createFakeBackend({
+      periods: [
+        days('u1', 'UNAVAILABLE', '2026-10-03', '2026-10-04'),
+        // Imported leave overlapping the manual one, and another of its own.
+        {
+          ...days('sh1', 'UNAVAILABLE', '2026-10-04', '2026-10-06'),
+          source: 'SURGICAL_HUB',
+          editable: false,
+        },
+        {
+          ...days('sh2', 'UNAVAILABLE', '2026-11-26', '2026-11-26'),
+          source: 'SURGICAL_HUB',
+          editable: false,
+        },
+      ],
+    }).install()
+
+    renderDashboard()
+
+    const card = await screen.findByRole('region', { name: 'Mes indisponibilités' })
+    await waitFor(() => expect(within(card).getAllByRole('listitem')).toHaveLength(2))
+    const rows = within(card).getAllByRole('listitem')
+    expect(rows[0]).toHaveTextContent('Sam. 3 → mar. 6 oct.')
+    expect(rows[1]).toHaveTextContent('Jeu. 26 nov.')
+    expect(within(card).getByText('2 périodes · 5 jours au total')).toBeInTheDocument()
   })
 
   it('lists upcoming unavailabilities only, the next one with its countdown', async () => {

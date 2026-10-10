@@ -11,8 +11,10 @@ use App\Entity\RestPolicyOptions;
 use App\Entity\User;
 use App\Exception\PlanningJobInProgressException;
 use App\Exception\PlanningNotLaunchableException;
+use App\Exception\SurgicalHubDataStaleException;
 use App\Message\RunPlanningJob;
 use App\Repository\PlanningJobRepository;
+use App\Service\SurgicalHub\SurgicalHubFreshnessGate;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\Persistence\ManagerRegistry;
@@ -40,14 +42,20 @@ final class PlanningJobService
         private readonly MessageBusInterface $bus,
         private readonly EntityManagerInterface $entityManager,
         private readonly ManagerRegistry $registry,
+        private readonly SurgicalHubFreshnessGate $surgicalHubGate,
     ) {
     }
 
     /**
+     * SurgicalHub leave is refreshed last, just before queuing — the snapshot
+     * the worker takes next reads it (docs/surgicalhub-integration.md §7.5, D8);
+     * the worker itself never calls SurgicalHub.
+     *
      * @throws PlanningNotLaunchableException
      * @throws PlanningJobInProgressException
+     * @throws SurgicalHubDataStaleException  outdated SurgicalHub leave and no allowed override
      */
-    public function requestGeneration(Planning $planning, User $requestedBy, RestPolicyOptions $restPolicy): PlanningJob
+    public function requestGeneration(Planning $planning, User $requestedBy, RestPolicyOptions $restPolicy, bool $overrideStaleSurgicalHubData = false): RequestedGeneration
     {
         $this->recovery->recover((int) $planning->getId());
 
@@ -61,12 +69,17 @@ final class PlanningJobService
             throw new PlanningNotLaunchableException($preflight);
         }
 
-        return $this->enqueue(new PlanningJob($planning, PlanningJobKind::GENERATE, $requestedBy, [
+        $surgicalHub = $this->surgicalHubGate->check($planning, $requestedBy, $overrideStaleSurgicalHubData);
+
+        $job = $this->enqueue(new PlanningJob($planning, PlanningJobKind::GENERATE, $requestedBy, [
             'legalMinRestEnabled' => $restPolicy->legalMinRestEnabled,
             'legalMinRestHours' => $restPolicy->legalMinRestHours,
             'teamMinRestEnabled' => $restPolicy->teamMinRestEnabled,
             'teamMinRestHours' => $restPolicy->teamMinRestHours,
         ]));
+        $this->surgicalHubGate->recordOverride($surgicalHub, $planning, $requestedBy, (string) $job->getStableId());
+
+        return new RequestedGeneration($job, $surgicalHub);
     }
 
     /**

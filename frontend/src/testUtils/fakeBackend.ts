@@ -2,6 +2,7 @@ import { vi } from 'vitest'
 import type { AvailabilityCollection } from '../features/availability/collectionTypes'
 import type { UserAvailabilityPeriod } from '../features/availability/types'
 import type { CalendarFeed } from '../features/duties/calendarFeed'
+import type { SurgicalHubState, SurgicalHubSyncOutcome } from '../features/surgicalhub/types'
 
 /**
  * A tiny in-memory backend for the availability screens: the personal
@@ -74,6 +75,10 @@ export type FakeBackendOptions = {
   calendarFeed?: CalendarFeed | null
   /** GET /api/duty-swaps/options — the "Échanger ma garde" dialog (D178). */
   swapOptions?: unknown
+  /** /api/me/surgicalhub — no association by default (docs/surgicalhub-integration.md). */
+  surgicalHub?: SurgicalHubState
+  /** What POST /api/me/surgicalhub/sync answers; a SYNCED with no change by default. */
+  surgicalHubSyncOutcome?: SurgicalHubSyncOutcome
 }
 
 export function createFakeBackend(options: FakeBackendOptions = {}) {
@@ -81,6 +86,7 @@ export function createFakeBackend(options: FakeBackendOptions = {}) {
   let collections = [...(options.collections ?? [])]
   const plannings = options.plannings ?? []
   let calendarFeed = options.calendarFeed ?? null
+  let surgicalHub: SurgicalHubState = options.surgicalHub ?? { available: true, link: null }
   let nextFeedToken = 1
   const newFeed = (): CalendarFeed => ({
     token: String(nextFeedToken++).padStart(64, '0'),
@@ -119,6 +125,31 @@ export function createFakeBackend(options: FakeBackendOptions = {}) {
 
     if (path === '/api/duty-swaps/options' && options.swapOptions !== undefined)
       return respond(options.swapOptions)
+    if (path === '/api/me/surgicalhub' && method === 'GET') return respond(surgicalHub)
+    if (path === '/api/me/surgicalhub/link-code' && method === 'POST') {
+      return respond({ code: 'K7QM-2XPA-9DRT', expiresAt: new Date(Date.now() + 600_000).toISOString() }, 201)
+    }
+    if (path === '/api/me/surgicalhub/link' && method === 'DELETE') {
+      if (surgicalHub.link?.status !== 'ACTIVE' && surgicalHub.link?.status !== 'SUSPENDED')
+        return respond({ error: 'not_linked' }, 404)
+      surgicalHub = {
+        ...surgicalHub,
+        link: { ...surgicalHub.link, status: 'REVOKED_LOCAL', revokedAt: new Date().toISOString() },
+      }
+      return respond(null, 204)
+    }
+    if (path === '/api/me/surgicalhub/sync' && method === 'POST') {
+      return respond({
+        outcome: options.surgicalHubSyncOutcome ?? {
+          status: 'SYNCED',
+          error: null,
+          created: 0,
+          updated: 0,
+          removed: 0,
+        },
+        link: surgicalHub.link,
+      })
+    }
     if (path === '/api/me/calendar-feed' && method === 'GET') return respond({ feed: calendarFeed })
     if (path === '/api/me/calendar-feed' && method === 'POST') {
       calendarFeed ??= newFeed()
@@ -139,6 +170,8 @@ export function createFakeBackend(options: FakeBackendOptions = {}) {
       const created: UserAvailabilityPeriod = {
         stableId: `p-${nextId++}`,
         ...input,
+        source: 'MANUAL',
+        editable: true,
         createdAt: '',
         updatedAt: '',
       }

@@ -355,6 +355,75 @@ Vérifier : `crontab -l | grep duty-swaps`, puis la dernière ligne du log
 Emails abandonnés :
 `SELECT id, request_id, recipient_id, kind, attempts, last_error FROM duty_swap_notifications WHERE status = 'FAILED' AND attempts >= 5;`
 
+## 5 septies. Synchronisation des congés SurgicalHub (D182-D184)
+
+> **Pas encore déployé.** Référence pour le déploiement, à valider
+> explicitement avant toute exécution (`docs/surgicalhub-integration.md` §14).
+
+**Ordre** : SurgicalHub d'abord (association et API, inertes tant que
+MedVue ne les appelle pas), puis MedVue.
+
+**Secrets** (générés sur le serveur, jamais dans Git, jamais dans un
+rapport) — deux secrets aléatoires de 256 bits, un par sens :
+
+```bash
+openssl rand -hex 32   # secret SurgicalHub → MedVue
+openssl rand -hex 32   # secret MedVue → SurgicalHub
+printf '%s' '<secret>' | sha256sum   # empreinte à poser côté serveur appelé
+```
+
+`.env` MedVue : `SURGICALHUB_INBOUND_TOKEN_SHA256` (empreinte du secret
+SurgicalHub → MedVue), `SURGICALHUB_API_BASE_URL=https://api.surgicalhub.be`,
+`SURGICALHUB_API_TOKEN` (secret MedVue → SurgicalHub, en clair),
+`SURGICALHUB_LINK_CODE_TTL=600`, `SURGICALHUB_SYNC_PAST_DAYS=90`,
+`SURGICALHUB_SYNC_FUTURE_MONTHS=24`, `SURGICALHUB_FRESHNESS_HOURS=24`.
+Côté SurgicalHub : `MEDVUE_INBOUND_TOKEN_SHA256`, `MEDVUE_API_BASE_URL`,
+`MEDVUE_REDEEM_TOKEN` (voir sa propre documentation). Rotation : ajouter la
+nouvelle empreinte (liste séparée par des virgules), changer le secret de
+l'appelant, puis retirer l'ancienne empreinte.
+
+**Avant tout** : vérifier en lecture seule que chaque conteneur joint
+l'autre par son domaine public (Traefik), par exemple
+`docker exec medvue-backend curl -s -o /dev/null -w '%{http_code}' https://api.surgicalhub.be/api/integrations/medvue/v1/links/x/absences`
+→ `401` attendu (sans secret).
+
+**Migrations** : `Version20261010090000` (tables d'association, trigger
+append-only) et `Version20261010120000` (`source`, contrainte partielle,
+table de correspondance, `provenance` du snapshot) — relire le SQL ; la
+seule instruction non additive est le `DROP`/`ADD CONSTRAINT` de l'exclusion
+dans la même transaction, sans perte (toutes les lignes existantes sont
+`MANUAL`).
+
+**Cron** (installé en dernier, après une synchronisation manuelle réussie
+d'un compte de test ; mêmes précautions que §5 quater) :
+
+```bash
+*/30 * * * * cd /opt/stack/apps/medvue && flock -n /tmp/medvue-surgicalhub-sync.lock docker compose -f docker-compose.prod.yml exec -T backend php bin/console app:surgicalhub:sync >> /home/deploy/backups/medvue/surgicalhub-sync.log 2>&1
+```
+
+Vérifier : `crontab -l | grep surgicalhub-sync`, puis la dernière ligne du
+log (`[OK] N association(s) synchronised, …`). Le journal ne contient que
+l'identifiant d'association et un code d'erreur court, jamais une réponse.
+
+**Restauration d'une sauvegarde SurgicalHub antérieure à des associations**
+: SurgicalHub répond alors `404 link_not_found` pour ces associations.
+MedVue ne supprime rien : chaque association concernée passe en
+`SUSPENDED` (plus de lecture, congés conservés, titulaire prévenu) et le
+cron s'arrête et alerte dès la deuxième (`[ERROR] … possibly a restored
+backup`, sortie ≠ 0), puis refuse de tourner tant que deux associations ou
+plus sont suspendues. Vérifier SurgicalHub ; ensuite chaque titulaire
+saisit un nouveau code (association reprise, mêmes congés) ou dissocie.
+Lister : `SELECT stable_id, user_id, suspended_at FROM surgical_hub_links WHERE status = 'SUSPENDED';`
+
+**Retour arrière** : retirer la ligne du crontab ; restaurer le code
+précédent de MedVue (les colonnes et tables ajoutées sont ignorées par
+l'ancien code, et la contrainte partielle reste compatible car l'ancien
+code n'écrit que des périodes manuelles — mais l'ancien calendrier
+afficherait les congés importés comme des périodes éditables : vider
+`SURGICALHUB_API_TOKEN` d'abord, et ne revenir en arrière qu'avec la
+migration `down` de `Version20261010120000`, qui supprime les périodes
+importées). Côté SurgicalHub, retirer l'empreinte désactive son API.
+
 ## 6. Historique des déploiements
 
 | Date | Tag | Commit | Notes |

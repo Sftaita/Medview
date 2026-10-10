@@ -167,6 +167,8 @@ export type GenerationPreflight = {
   blockers: PreflightIssue[]
   warnings: PreflightIssue[]
   canGenerate: boolean
+  /** Participants whose SurgicalHub leave is imported, and how fresh it is (docs/surgicalhub-integration.md §7.5). */
+  surgicalHub?: SurgicalHubPreflightParticipant[]
 }
 
 /** What the "Règles de repos" section of the generation dialog sends
@@ -268,7 +270,31 @@ export type PlanningJob = {
 }
 
 /** POST .../generations and .../complete: 202 with the queued job. */
-export type PlanningJobResponse = { job: PlanningJob }
+/** One associated participant in the SurgicalHub check of a launch (decision D8). */
+export type SurgicalHubParticipant = {
+  userStableId: string
+  firstName: string
+  lastName: string
+  lastSuccessfulSyncAt: string | null
+  error: string | null
+}
+
+export type SurgicalHubPreflightParticipant = Omit<SurgicalHubParticipant, 'error'> & {
+  lastSyncError: string | null
+}
+
+export type PlanningJobResponse = {
+  job: PlanningJob
+  /** Refreshing SurgicalHub failed for these people: generated with their last leave (warnings) or by override. */
+  surgicalHub?: { warnings: SurgicalHubParticipant[]; overridden: SurgicalHubParticipant[] }
+}
+
+/** 409 surgicalhub_data_stale / 403 surgicalhub_override_forbidden of a launch. */
+export type SurgicalHubStaleRefusal = {
+  error: 'surgicalhub_data_stale' | 'surgicalhub_override_forbidden'
+  participants: SurgicalHubParticipant[]
+  canOverride: boolean
+}
 
 /** GET/POST .../rule-set(/activate) — never DRAFT/ACTIVE/RETIRED, version or
  * stableId: a manager only ever sees whether generation rules are active. */

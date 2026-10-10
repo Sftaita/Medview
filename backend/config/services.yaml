@@ -110,3 +110,7 @@ when@test:
             autowire: true
         App\Fairness\PlanningSolver:
             alias: App\Tests\FaultInjectingPlanningSolver
+        # docs/surgicalhub-integration.md: SurgicalHub's API, faked — the test
+        # http_client answers through it (framework.yaml), nothing leaves the machine.
+        App\Tests\FakeSurgicalHub:
+            public: true

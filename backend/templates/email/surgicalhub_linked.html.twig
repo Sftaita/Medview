@@ -1,0 +1,32 @@
+{# ------------------------------------------------------------------
+   MedVue — Compte associé à SurgicalHub (docs/decisions.md D182)
+   Objet : Votre compte MedVue est associé à SurgicalHub
+   Contexte : firstName, surgicalHubName, actorLabel, byAdministrator,
+              linkedAtLabel, accountUrl
+   Aucun code ni secret : envoyé après l'association, pour que le
+   titulaire vérifie que c'est le bon compte SurgicalHub.
+   ------------------------------------------------------------------ #}
+{% extends 'email/_base.html.twig' %}
+{% import  'email/_components.html.twig' as ui %}
+
+{% set preheader  = 'Vos congés SurgicalHub seront repris dans votre calendrier MedVue.' %}
+{% set accent     = '#2D7FF9' %}
+{% set eyebrow    = 'Sécurité du compte' %}
+{% set h1         = 'Votre compte est associé<br>à SurgicalHub' %}
+{% set panel      = false %}
+{% set ctaLabel   = 'Voir mon compte' %}
+{% set ctaUrl     = accountUrl %}
+{% set footerNote = 'Vous recevez cet email suite à l’association de votre compte MedVue avec SurgicalHub.' %}
+
+{% block title %}Votre compte est associé à SurgicalHub{% endblock %}
+{% block postal %}{% endblock %}
+
+{% block content %}
+{{ ui.p('Bonjour ' ~ firstName|e ~ ',', 24) }}
+{{ ui.p('Votre compte MedVue a été associé au compte SurgicalHub de ' ~ ui.b(surgicalHubName) ~ ' le ' ~ linkedAtLabel ~ (byAdministrator ? ', par ' ~ actorLabel|e ~ ' (administrateur SurgicalHub)' : '') ~ '.') }}
+{{ ui.p('Vos congés enregistrés dans SurgicalHub apparaîtront automatiquement comme indisponibilités dans votre calendrier MedVue. MedVue ne modifie jamais vos congés et n’envoie aucune donnée de planning à SurgicalHub.') }}
+{% endblock %}
+
+{% block after_cta %}
+{{ ui.warning('Ce n’est pas votre compte SurgicalHub ?', 'Dissociez-le depuis « Mon compte » dans MedVue, puis contactez le support à l’adresse ci-dessous.') }}
+{% endblock %}

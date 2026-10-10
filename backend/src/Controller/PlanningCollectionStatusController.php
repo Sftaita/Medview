@@ -287,6 +287,8 @@ final class PlanningCollectionStatusController
         return [
             'stableId' => (string) $period->getStableId(),
             'type' => $period->getType()->value,
+            // MANUAL or SURGICAL_HUB (docs/surgicalhub-integration.md §10).
+            'source' => $period->getSource()->value,
             'startsAt' => $period->getStartsAt()->format(\DATE_ATOM),
             'endsAt' => $period->getEndsAt()->format(\DATE_ATOM),
         ];

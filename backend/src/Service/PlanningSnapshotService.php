@@ -153,6 +153,7 @@ final class PlanningSnapshotService
                     $period->getEndsAt(),
                     $period->getCreatedAt(),
                     $period->getUpdatedAt(),
+                    $period->getSource(),
                 ));
             }
 

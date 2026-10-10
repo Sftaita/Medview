@@ -9,6 +9,7 @@ use App\Entity\RestPolicyOptions;
 use App\Entity\User;
 use App\Exception\PlanningJobInProgressException;
 use App\Exception\PlanningNotLaunchableException;
+use App\Exception\SurgicalHubDataStaleException;
 use App\Repository\PlanningRepository;
 use App\Security\Voter\PlanningVoter;
 use App\Service\LaunchLineReadiness;
@@ -18,6 +19,8 @@ use App\Service\PlanningJobPresenter;
 use App\Service\PlanningJobService;
 use App\Service\PreflightIssue;
 use App\Service\RestPolicyRequestParser;
+use App\Service\SurgicalHub\SurgicalHubFreshnessGate;
+use App\Service\SurgicalHub\SurgicalHubParticipantFreshness;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -46,6 +49,7 @@ final class PlanningLaunchController
         private readonly PlanningGenerationLauncher $launcher,
         private readonly PlanningJobService $jobService,
         private readonly PlanningJobPresenter $jobPresenter,
+        private readonly SurgicalHubFreshnessGate $surgicalHubGate,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
         private readonly RestPolicyRequestParser $restPolicyParser,
     ) {
@@ -71,8 +75,21 @@ final class PlanningLaunchController
             return $errorResponse;
         }
 
+        // D8 (docs/surgicalhub-integration.md §7.5): an explicit, creator-only choice — never implied.
+        $body = json_decode($request->getContent() ?: '{}', true);
+        $override = \is_array($body) && true === ($body['overrideStaleSurgicalHubData'] ?? null);
+
         try {
-            $job = $this->jobService->requestGeneration($planning, $user, $restPolicy ?? RestPolicyOptions::none());
+            $requested = $this->jobService->requestGeneration($planning, $user, $restPolicy ?? RestPolicyOptions::none(), $override);
+        } catch (SurgicalHubDataStaleException $exception) {
+            return new JsonResponse([
+                'error' => $exception->overrideRefused ? 'surgicalhub_override_forbidden' : 'surgicalhub_data_stale',
+                'message' => $exception->overrideRefused
+                    ? 'Seul le créateur du planning peut générer avec des congés SurgicalHub non actualisés.'
+                    : 'Les congés SurgicalHub de certains participants n’ont pas pu être actualisés et datent de plus de 24 heures.',
+                'participants' => $this->surgicalHubParticipants($exception->report->blocking()),
+                'canOverride' => $planning->getCreator() === $user,
+            ], $exception->overrideRefused ? 403 : 409);
         } catch (PlanningNotLaunchableException $exception) {
             return new JsonResponse([
                 'error' => 'not_launchable',
@@ -88,7 +105,31 @@ final class PlanningLaunchController
         }
 
         // 202: accepted — the worker runs it; the screen follows GET .../jobs/latest (docs/decisions.md D149).
-        return new JsonResponse(['job' => $this->jobPresenter->toArray($job)], 202);
+        return new JsonResponse([
+            'job' => $this->jobPresenter->toArray($requested->job),
+            'surgicalHub' => [
+                // Refresh failed, data under the threshold: generated anyway, said explicitly.
+                'warnings' => $this->surgicalHubParticipants($requested->surgicalHub->warnings()),
+                // Refresh failed, data too old, launched by the creator's explicit choice (journaled).
+                'overridden' => $this->surgicalHubParticipants($requested->surgicalHub->blocking()),
+            ],
+        ], 202);
+    }
+
+    /**
+     * @param list<SurgicalHubParticipantFreshness> $participants
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function surgicalHubParticipants(array $participants): array
+    {
+        return array_map(static fn (SurgicalHubParticipantFreshness $p): array => [
+            'userStableId' => (string) $p->user->getStableId(),
+            'firstName' => $p->user->getFirstName(),
+            'lastName' => $p->user->getLastName(),
+            'lastSuccessfulSyncAt' => $p->link->getLastSuccessfulSyncAt()?->setTimezone(new \DateTimeZone('UTC'))->format(\DATE_ATOM),
+            'error' => $p->error?->value,
+        ], $participants);
     }
 
     private function resolvePlanning(string $stableId): Planning
@@ -151,6 +192,15 @@ final class PlanningLaunchController
             'blockers' => array_map($this->issueToArray(...), $preflight->blockers),
             'warnings' => array_map($this->issueToArray(...), $preflight->warnings),
             'canGenerate' => $preflight->canGenerate(),
+            // docs/surgicalhub-integration.md §7.5: who has SurgicalHub leave, and how fresh it is.
+            // Read only — the synchronisation itself happens at launch.
+            'surgicalHub' => array_map(static fn (array $pair): array => [
+                'userStableId' => (string) $pair[0]->getStableId(),
+                'firstName' => $pair[0]->getFirstName(),
+                'lastName' => $pair[0]->getLastName(),
+                'lastSuccessfulSyncAt' => $pair[1]->getLastSuccessfulSyncAt()?->setTimezone(new \DateTimeZone('UTC'))->format(\DATE_ATOM),
+                'lastSyncError' => $pair[1]->getLastSyncError(),
+            ], $this->surgicalHubGate->associatedParticipants($planning)),
         ];
     }
 
