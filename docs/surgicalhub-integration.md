@@ -857,11 +857,20 @@ Commande : `app:surgicalhub:sync` (cron 30 min, `docs/deployment.md` §5 septies
   « Mon compte » non associé et associé, calendrier avec deux congés
   importés qui se chevauchent (union rayée, hors récapitulatif éditable,
   listée sous « Congés SurgicalHub »), « Synchroniser SurgicalHub » avec
-  SurgicalHub arrêté (message clair, congés conservés). Non vérifiés dans un
-  navigateur : largeur téléphone, et le dialogue de génération (couvert par
-  les tests). Pendant la vérification, le serveur Vite de dev ne voyait
-  pas les fichiers modifiés (montage Windows) : un redémarrage du conteneur
-  `frontend` a suffi.
+  SurgicalHub arrêté (message clair, congés conservés). Le dialogue de
+  génération l'a été ensuite par la recette ci-dessus. Pendant la
+  vérification, le serveur Vite de dev ne voyait pas les fichiers modifiés
+  (montage Windows) : un redémarrage du conteneur `frontend` a suffi.
+- Largeur téléphone vérifiée le 2026-10-10 (Chrome, cadre de 390 × 844 px,
+  pile de dev, données jetables supprimées ensuite) : tableau de bord
+  (congés importés comptés), « Mes indisponibilités » (barre de
+  synchronisation, congés rayés, préférence manuelle, liste « Congés
+  SurgicalHub »), « Mon compte » associé, dialogue de génération (ligne
+  SurgicalHub, puis refus pour données de plus de 24 h avec la case du
+  créateur, bouton désactivé tant qu'elle n'est pas cochée, aucun job créé).
+  Aucun défilement horizontal sur ces écrans. Seul débordement relevé :
+  l'encart de collecte du tableau de bord (`CollectionCallout`, 482 px),
+  **préexistant** et étranger à cette intégration, laissé hors de ce lot.
 - Le suivi de collecte compte des **périodes** d'indisponibilité : un jour
   couvert par une saisie manuelle et un congé importé compte deux périodes
   (chacune affichée avec sa provenance).
