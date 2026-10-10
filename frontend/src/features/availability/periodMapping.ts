@@ -1,5 +1,5 @@
 import { dateOfDayIndex, dayIndexOfDate } from './calendarAxis'
-import { cutRange, mergeRanges, type DayRange } from './selection'
+import { cutRange, mergeRanges, rangeAt, type DayRange } from './selection'
 import type { UpsertUserAvailabilityPeriodInput, UserAvailabilityPeriod } from './types'
 
 /**
@@ -28,6 +28,56 @@ export function periodsToRanges(periods: UserAvailabilityPeriod[]): DayRange[] {
   }
 
   return mergeRanges([...unavailable, ...preferences])
+}
+
+/** The person's own entries — the only ones the calendar edits. */
+export function manualPeriods(periods: UserAvailabilityPeriod[]): UserAvailabilityPeriod[] {
+  return periods.filter((period) => period.source !== 'SURGICAL_HUB')
+}
+
+/**
+ * The days covered by leave imported from SurgicalHub, merged into runs —
+ * a read-only layer drawn under the editable one
+ * (docs/surgicalhub-integration.md §10). Several imported periods may
+ * overlap: the person is unavailable on their union.
+ */
+export function importedRanges(periods: UserAvailabilityPeriod[]): DayRange[] {
+  return mergeRanges(
+    periods
+      .filter((period) => period.source === 'SURGICAL_HUB' && period.type === 'UNAVAILABLE')
+      .map(periodToRange),
+  )
+}
+
+/**
+ * The days of `next` newly marked PREFER_DUTY by this edit that fall on
+ * SurgicalHub leave are dropped — a gesture cannot *add* a preference there
+ * (the hard signal wins, the calendar shows one nature per day). Preferences
+ * that already existed are left exactly as they are, even on imported days:
+ * an import never changes the person's own data (docs/surgicalhub-integration.md §10).
+ */
+export function blockNewPreferencesOn(
+  previous: DayRange[],
+  next: DayRange[],
+  imported: DayRange[],
+): DayRange[] {
+  const before = new Set<number>()
+  for (const range of previous) {
+    if (range.type !== 'PREFER_DUTY') continue
+    for (let day = range.start; day <= range.end; day++) before.add(day)
+  }
+
+  let result = next
+  for (const leave of imported) {
+    for (let day = leave.start; day <= leave.end; day++) {
+      const current = rangeAt(result, day)
+      if (current?.type === 'PREFER_DUTY' && !before.has(day)) {
+        result = mergeRanges(cutRange(result, day, day))
+      }
+    }
+  }
+
+  return result
 }
 
 /** API payload for a whole-day run: local midnight of the first day → local midnight after the last. */
@@ -62,7 +112,12 @@ function overlapDays(a: DayRange, b: DayRange): number {
  */
 export function planSync(stored: UserAvailabilityPeriod[], screen: DayRange[]): SyncPlan {
   const runs = mergeRanges(screen).map((range) => ({ range, matched: false }))
-  const periods = stored.map((period) => ({ period, covered: periodToRange(period), matched: false }))
+  // Imported SurgicalHub leave is never the screen's to change: it can be neither matched, edited nor deleted.
+  const periods = manualPeriods(stored).map((period) => ({
+    period,
+    covered: periodToRange(period),
+    matched: false,
+  }))
 
   for (const entry of periods) {
     const match = runs.find(

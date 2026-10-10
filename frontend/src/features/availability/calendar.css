@@ -858,3 +858,23 @@
   color: var(--green-700);
   font-size: var(--text-sm);
 }
+
+/* Congé importé de SurgicalHub (docs/surgicalhub-integration.md §10) :
+   même ton que l'indisponibilité, rayé, non modifiable depuis MedVue. */
+.day--imported .day__band {
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 4px,
+    color-mix(in srgb, var(--unavailable-edge) 28%, transparent) 4px 6px
+  );
+}
+
+.cal__swatch--imported {
+  border-color: var(--unavailable-mark);
+  background-color: var(--unavailable-band);
+  background-image: repeating-linear-gradient(
+    135deg,
+    transparent 0 3px,
+    color-mix(in srgb, var(--unavailable-edge) 35%, transparent) 3px 5px
+  );
+}

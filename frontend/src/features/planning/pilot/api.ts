@@ -60,11 +60,15 @@ export function fetchGenerationPreflight(planningStableId: string): Promise<Gene
 export function launchGeneration(
   planningStableId: string,
   restPolicy?: RestPolicyChoice,
+  overrideStaleSurgicalHubData = false,
 ): Promise<PlanningJobResponse> {
   // Answers at once with a QUEUED job (docs/decisions.md D149): the worker runs the solve.
+  // The SurgicalHub override is only ever sent when the creator ticked it (decision D8).
   return apiFetch<PlanningJobResponse>(`/api/plannings/${planningStableId}/generations`, {
     method: 'POST',
-    body: restPolicy ?? {},
+    body: overrideStaleSurgicalHubData
+      ? { ...(restPolicy ?? {}), overrideStaleSurgicalHubData: true }
+      : (restPolicy ?? {}),
   })
 }
 

@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { Icon } from '../components/Icon'
 import { useAuth } from '../features/auth/useAuth'
+import { SurgicalHubAccountSection } from '../features/surgicalhub/SurgicalHubAccountSection'
 
 export function AccountPage() {
   const { user, logout } = useAuth()
@@ -41,6 +42,8 @@ export function AccountPage() {
           </div>
         </dl>
       </div>
+
+      <SurgicalHubAccountSection />
 
       {user.platformAdmin && (
         <Link to="/admin" className="btn btn--secondary account__logout">

@@ -310,7 +310,9 @@ describe('GenerationModal', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Générer le planning ?' })
     expect(await within(dialog).findByText(/20 gardes indépendantes à répartir/)).toBeInTheDocument()
     expect(
-      within(dialog).getByText('Ligne « Renfort » : renforts déterminés après l’attribution de la ligne « Seniors »'),
+      within(dialog).getByText(
+        'Ligne « Renfort » : renforts déterminés après l’attribution de la ligne « Seniors »',
+      ),
     ).toBeInTheDocument()
     expect(within(dialog).queryByText(/30 gardes/)).not.toBeInTheDocument()
   })
@@ -797,5 +799,115 @@ describe('Règles de génération (docs/decisions.md D137)', () => {
 
     expect(await within(dialog).findByRole('alert')).toHaveTextContent(/Impossible d’activer/)
     expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+})
+
+describe('GenerationModal — SurgicalHub leave (docs/surgicalhub-integration.md §7.5, D8)', () => {
+  const preflightUrl = 'GET /api/plannings/plan-1/generation-preflight'
+  const launchUrl = 'POST /api/plannings/plan-1/generations'
+  const BOB = {
+    userStableId: 'user-bob',
+    firstName: 'Bob',
+    lastName: 'Lambert',
+    lastSuccessfulSyncAt: '2026-09-26T08:00:00+00:00',
+    error: 'unreachable',
+  }
+
+  it('says in the preflight who takes their leave from SurgicalHub', async () => {
+    stubApi({
+      [preflightUrl]: () =>
+        makePreflight({
+          surgicalHub: [
+            {
+              userStableId: 'user-bob',
+              firstName: 'Bob',
+              lastName: 'Lambert',
+              lastSuccessfulSyncAt: null,
+              lastSyncError: null,
+            },
+          ],
+        }),
+    })
+    renderActions()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(
+      await within(dialog).findByText(/1 participant reprend ses congés de SurgicalHub/),
+    ).toBeInTheDocument()
+  })
+
+  it('blocks on outdated leave and lets the creator go on only by ticking an explicit choice', async () => {
+    const calls = stubApi({
+      [preflightUrl]: () => makePreflight(),
+      [launchUrl]: ({ body }) =>
+        (body as { overrideStaleSurgicalHubData?: boolean }).overrideStaleSurgicalHubData === true
+          ? httpStatus(202, { ...QUEUED, surgicalHub: { warnings: [], overridden: [BOB] } })
+          : httpStatus(409, { error: 'surgicalhub_data_stale', participants: [BOB], canOverride: true }),
+    })
+    const { onLaunched } = renderActions()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(await enabledConfirm())
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Bob Lambert — dernière reprise 26/09/2026 à 10:00')
+    const go = screen.getByRole('button', { name: 'Générer avec ces données' })
+    expect(go).toBeDisabled()
+    expect(onLaunched).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /Je génère quand même/ }))
+    fireEvent.click(go)
+
+    expect(
+      await screen.findByText(/Générée malgré des congés SurgicalHub non actualisés/),
+    ).toBeInTheDocument()
+    expect(onLaunched).toHaveBeenCalledWith(QUEUED.job)
+    const launches = calls.calls.filter(
+      (call) => call.method === 'POST' && call.path.endsWith('/generations'),
+    )
+    expect(
+      launches.map(
+        (call) => (call.body as { overrideStaleSurgicalHubData?: boolean }).overrideStaleSurgicalHubData,
+      ),
+    ).toEqual([undefined, true])
+    fireEvent.click(screen.getByRole('button', { name: 'Fermer' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+
+  it('offers no override to someone who is not the creator', async () => {
+    stubApi({
+      [preflightUrl]: () => makePreflight(),
+      [launchUrl]: () =>
+        httpStatus(409, { error: 'surgicalhub_data_stale', participants: [BOB], canOverride: false }),
+    })
+    renderActions()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(await enabledConfirm())
+
+    expect(
+      await screen.findByText(/Seul le créateur du planning peut générer malgré tout/),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: /Je génère quand même/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Générer avec ces données' })).toBeDisabled()
+  })
+
+  it('keeps the dialog open after the launch to show leave used without a fresh refresh', async () => {
+    stubApi({
+      [preflightUrl]: () => makePreflight(),
+      [launchUrl]: () => httpStatus(202, { ...QUEUED, surgicalHub: { warnings: [BOB], overridden: [] } }),
+    })
+    const { onLaunched } = renderActions()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(await enabledConfirm())
+
+    expect(
+      await screen.findByText(/ces congés récents \(moins de 24 heures\) ont été utilisés tels quels/),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Bob Lambert/)).toBeInTheDocument()
+    expect(onLaunched).toHaveBeenCalled()
   })
 })

@@ -6,6 +6,7 @@ import { useAuth } from '../features/auth/useAuth'
 import { dateOfDayIndex, dayIndexOfDate } from '../features/availability/calendarAxis'
 import { CollectionCallout } from '../features/availability/CollectionCallout'
 import { upcomingRanges } from '../features/availability/periodMapping'
+import { mergeRanges } from '../features/availability/selection'
 import { useMyAvailability } from '../features/availability/useMyAvailability'
 import '../features/dashboard/dashboard.css'
 import {
@@ -37,7 +38,7 @@ const plural = (n: number, s: string, p = s + 's') => `${n} ${n > 1 ? p : s}`
 /** Home page of a signed-in user (docs/Design/react_dashboard): their plannings and their upcoming unavailabilities. */
 export function DashboardPage() {
   const { user } = useAuth()
-  const { ranges, loadError, collections } = useMyAvailability()
+  const { ranges, imported, loadError, collections } = useMyAvailability()
   const [joinedTeams] = useState(readJoinedTeamsFlash)
   const [plannings, setPlannings] = useState<PlanningSummary[] | null>(null)
   const [duties, setDuties] = useState<MyDuty[] | null>(null)
@@ -45,9 +46,14 @@ export function DashboardPage() {
 
   // Read from the shared store, never fetched here: whatever was just changed in the calendar is already in it.
   // A failed load simply leaves the list empty: the dashboard is a summary, never a gate.
+  // The person's own unavailability and their SurgicalHub leave together: they are unavailable on the union
+  // (docs/surgicalhub-integration.md §10).
   const upcoming = useMemo<Upcoming[]>(
     () =>
-      upcomingRanges(ranges ?? [], dayIndexOfDate(today))
+      upcomingRanges(
+        mergeRanges([...(ranges ?? []).filter((range) => range.type === 'UNAVAILABLE'), ...imported]),
+        dayIndexOfDate(today),
+      )
         .filter((range) => range.type === 'UNAVAILABLE')
         .map((range) => ({
           id: String(range.start),
@@ -55,7 +61,7 @@ export function DashboardPage() {
           b: dateOfDayIndex(range.end),
         }))
         .sort((x, y) => x.a.getTime() - y.a.getTime()),
-    [ranges, today],
+    [ranges, imported, today],
   )
   // What is still to do comes first, then what has been confirmed.
   const openCollections = useMemo(

@@ -17,6 +17,8 @@ import { SelectionSummary } from '../features/availability/SelectionSummary'
 import type { UserAvailabilityType } from '../features/availability/types'
 import { useDaySelection } from '../features/availability/useDaySelection'
 import { useMyAvailability } from '../features/availability/useMyAvailability'
+import { SurgicalHubSyncBar } from '../features/surgicalhub/SurgicalHubSyncBar'
+import { ImportedLeaveList } from '../features/surgicalhub/ImportedLeaveList'
 import { useVisibleMonths } from '../features/availability/useVisibleMonths'
 
 /** Months offered ahead of the current one. */
@@ -109,6 +111,10 @@ export function MyAvailabilityPage() {
 function AvailabilityEditor({ collection }: { collection: AvailabilityCollection | null }) {
   const {
     ranges: storedRanges,
+    imported,
+    importedPeriods,
+    removeImported,
+    reload,
     editRanges,
     syncing,
     syncError,
@@ -121,7 +127,7 @@ function AvailabilityEditor({ collection }: { collection: AvailabilityCollection
   const todayIndex = dayIndexOfDate(today)
   const windowDays = useMemo(() => (collection ? collectionDays(collection) : null), [collection])
   // The axis is fixed for the life of the editor, so an edit never moves the rail under the user.
-  const [months] = useState(() => buildAxis(ranges, today, windowDays))
+  const [months] = useState(() => buildAxis([...ranges, ...imported], today, windowDays))
   const visible = useVisibleMonths()
 
   const selection = useDaySelection({
@@ -158,6 +164,8 @@ function AvailabilityEditor({ collection }: { collection: AvailabilityCollection
     <>
       {collection && <CollectionCallout collection={collection} mode="calendar" />}
 
+      <SurgicalHubSyncBar onSynced={() => void reload()} />
+
       <div className={`nature${selection.type === 'PREFER_DUTY' ? ' nature--prefer' : ''}`}>
         <div role="group" aria-label="Nature de la sélection" className="nature__group">
           {(['UNAVAILABLE', 'PREFER_DUTY'] as const).map((type) => (
@@ -183,6 +191,7 @@ function AvailabilityEditor({ collection }: { collection: AvailabilityCollection
             page={selection.page}
             visible={visible}
             ranges={selection.effectiveRanges}
+            imported={imported}
             drag={selection.drag}
             todayIndex={todayIndex}
             highlight={windowDays}
@@ -193,7 +202,7 @@ function AvailabilityEditor({ collection }: { collection: AvailabilityCollection
             onRailPointerMove={selection.trackRailPointer}
             onDayKeyboardToggle={selection.toggleFromKeyboard}
           />
-          <CalendarLegend />
+          <CalendarLegend withImported={imported.length > 0} />
           <p className="cal__help cal__help--mobile">
             Touchez une date pour l&apos;ajouter ou la retirer · Glissez pour tracer une période · Glissez
             jusqu&apos;au bord pour passer au mois suivant
@@ -207,6 +216,7 @@ function AvailabilityEditor({ collection }: { collection: AvailabilityCollection
 
         <div className="availability__aside">
           <SelectionSummary ranges={ranges} activeType={selection.type} onRemove={selection.removeRange} />
+          <ImportedLeaveList periods={importedPeriods} todayIndex={todayIndex} onRemove={removeImported} />
 
           <div className="availability__actions">
             <button

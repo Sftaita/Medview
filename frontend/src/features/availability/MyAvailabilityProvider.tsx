@@ -4,7 +4,14 @@ import { createCalendarPeriod, deleteCalendarPeriod, fetchMyCalendar, updateCale
 import { acknowledgeCollection, fetchMyCollections } from './collectionApi'
 import type { AcknowledgementKind, AvailabilityCollection } from './collectionTypes'
 import { MyAvailabilityContext, type MyAvailabilityContextValue } from './context'
-import { periodsToRanges, planSync, rangeToInput } from './periodMapping'
+import {
+  blockNewPreferencesOn,
+  importedRanges,
+  manualPeriods,
+  periodsToRanges,
+  planSync,
+  rangeToInput,
+} from './periodMapping'
 import { sameRanges, type DayRange } from './selection'
 import type { UserAvailabilityPeriod } from './types'
 
@@ -37,9 +44,15 @@ function syncErrorMessage(err: unknown): string {
  *   surfaced. Edits batched into the same round are rolled back together.
  * - It lives above the routes, so navigating away from the calendar page
  *   never cancels a save in flight.
+ * - **Two layers** (docs/surgicalhub-integration.md §10): `ranges` is the
+ *   person's own, editable entries; `imported` is SurgicalHub leave,
+ *   read-only — never planned, never sent back; a gesture cannot add a
+ *   preference on one of its days, but an existing one is never touched.
  */
 export function MyAvailabilityProvider({ children }: { children: ReactNode }) {
   const [ranges, setRanges] = useState<DayRange[] | null>(null)
+  const [imported, setImported] = useState<DayRange[]>([])
+  const [importedPeriods, setImportedPeriods] = useState<UserAvailabilityPeriod[]>([])
   const [loadError, setLoadError] = useState<string | null>(null)
   const [syncing, setSyncing] = useState(false)
   const [syncError, setSyncError] = useState<string | null>(null)
@@ -47,6 +60,7 @@ export function MyAvailabilityProvider({ children }: { children: ReactNode }) {
   const [collections, setCollections] = useState<AvailabilityCollection[] | null>(null)
 
   const rangesRef = useRef<DayRange[] | null>(null)
+  const importedRef = useRef<DayRange[]>([])
   /** What the server is known to hold, updated after every successful request. */
   const serverRef = useRef<UserAvailabilityPeriod[]>([])
   const runningRef = useRef(false)
@@ -57,6 +71,23 @@ export function MyAvailabilityProvider({ children }: { children: ReactNode }) {
     rangesRef.current = next
     setRanges(next)
   }, [])
+
+  /** What the server holds, split into the editable layer and the imported one. */
+  const adoptServer = useCallback(
+    (periods: UserAvailabilityPeriod[]) => {
+      setImportedPeriods(periods.filter((period) => period.source === 'SURGICAL_HUB'))
+      const nextImported = importedRanges(periods)
+      if (!sameRanges(importedRef.current, nextImported)) {
+        importedRef.current = nextImported
+        setImported(nextImported)
+      }
+      const next = periodsToRanges(manualPeriods(periods))
+      if (rangesRef.current === null || !sameRanges(rangesRef.current, next)) {
+        adopt(next)
+      }
+    },
+    [adopt],
+  )
 
   const refreshCollections = useCallback(async () => {
     try {
@@ -75,17 +106,14 @@ export function MyAvailabilityProvider({ children }: { children: ReactNode }) {
         return
       }
       serverRef.current = periods
-      const next = periodsToRanges(periods)
-      if (rangesRef.current === null || !sameRanges(rangesRef.current, next)) {
-        adopt(next)
-      }
+      adoptServer(periods)
       setLoadError(null)
     } catch {
       if (rangesRef.current === null) {
         setLoadError('Impossible de charger votre calendrier.')
       }
     }
-  }, [adopt])
+  }, [adoptServer])
 
   useEffect(() => {
     // Initial load, once per authenticated session.
@@ -139,13 +167,14 @@ export function MyAvailabilityProvider({ children }: { children: ReactNode }) {
       } catch {
         // Offline: fall back on what we knew after the last successful request.
       }
-      adopt(periodsToRanges(serverRef.current))
+      rangesRef.current = null
+      adoptServer(serverRef.current)
       setSyncError(syncErrorMessage(err))
     } finally {
       runningRef.current = false
       setSyncing(false)
     }
-  }, [adopt, refreshCollections])
+  }, [adoptServer, refreshCollections])
 
   const editRanges = useCallback(
     (updater: (previous: DayRange[]) => DayRange[]) => {
@@ -153,7 +182,7 @@ export function MyAvailabilityProvider({ children }: { children: ReactNode }) {
       if (current === null) {
         return
       }
-      const next = updater(current)
+      const next = blockNewPreferencesOn(current, updater(current), importedRef.current)
       if (sameRanges(current, next)) {
         return
       }
@@ -174,9 +203,21 @@ export function MyAvailabilityProvider({ children }: { children: ReactNode }) {
 
   const dismissSyncError = useCallback(() => setSyncError(null), [])
 
+  const removeImported = useCallback(
+    async (stableId: string) => {
+      await deleteCalendarPeriod(stableId)
+      serverRef.current = serverRef.current.filter((known) => known.stableId !== stableId)
+      adoptServer(serverRef.current)
+    },
+    [adoptServer],
+  )
+
   const value = useMemo<MyAvailabilityContextValue>(
     () => ({
       ranges,
+      imported,
+      importedPeriods,
+      removeImported,
       loadError,
       syncing,
       syncError,
@@ -190,6 +231,9 @@ export function MyAvailabilityProvider({ children }: { children: ReactNode }) {
     }),
     [
       ranges,
+      imported,
+      importedPeriods,
+      removeImported,
       loadError,
       syncing,
       syncError,
