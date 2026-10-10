@@ -392,3 +392,33 @@ dizaines) peut donner une semaine plus haute qu'une page, que dompdf coupe
 alors ; aucune limite de taille n'est imposée (contrairement à l'export du
 calendrier, D150 : le volume dépend ici du nombre de semaines et de
 personnes, pas de lignes × semaines).
+
+## 12. Congés importés de SurgicalHub (D182-D184)
+
+Depuis l'intégration SurgicalHub (`docs/surgicalhub-integration.md`), une
+période porte une provenance `source` : `MANUAL` (saisie par la personne,
+tout ce qui précède s'applique) ou `SURGICAL_HUB` (congé repris de
+SurgicalHub). Différences pour une période importée :
+
+- toujours `UNAVAILABLE`, en lecture seule pour son titulaire (`PATCH` et
+  `DELETE` → `409 imported_period_read_only`), modifiée uniquement par la
+  synchronisation ;
+- **non soumise à la règle du §4** : elle peut chevaucher ou toucher une
+  période manuelle ou une autre période importée (contrainte SQL désormais
+  partielle `WHERE source = 'MANUAL'`) ; entre périodes manuelles, la règle
+  est inchangée ;
+- `GET /api/me/calendar` expose `source` et `editable` ; le calendrier
+  `/my-availability` les dessine rayées, à part de la sélection éditable, et
+  ne conserve jamais une préférence de garde sur ces jours ;
+- elles comptent comme toute indisponibilité pour l'éligibilité, le
+  snapshot (avec `provenance`), le suivi de collecte (`source` visible),
+  l'export PDF et `lastAvailabilityChangeAt` — jamais comme une réponse à
+  une collecte.
+
+Divergences de ce document relevées pendant l'audit (2026-10-09), sans
+impact : l'en-tête et le §9 annoncent `EligibilityService`/snapshot comme
+« pas encore » (livrés depuis), le §8 décrit encore le bouton
+« Enregistrer » (supprimé par D126, voir §10), et le §6 « pas de rôle
+global » ne mentionne pas `ROLE_PLATFORM_ADMIN` (D174, sans droit sur les
+calendriers).
+
