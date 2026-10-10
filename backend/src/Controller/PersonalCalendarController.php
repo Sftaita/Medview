@@ -7,7 +7,9 @@ namespace App\Controller;
 use App\Dto\UpsertUserAvailabilityPeriodRequest;
 use App\Entity\User;
 use App\Entity\UserAvailabilityPeriod;
+use App\Exception\ImportedAvailabilityPeriodException;
 use App\Exception\OverlappingUserAvailabilityPeriodException;
+use App\Repository\SurgicalHubImportedLeaveRepository;
 use App\Repository\UserAvailabilityPeriodRepository;
 use App\Service\UserAvailabilityService;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -30,6 +32,7 @@ final class PersonalCalendarController
     public function __construct(
         private readonly UserAvailabilityPeriodRepository $repository,
         private readonly UserAvailabilityService $service,
+        private readonly SurgicalHubImportedLeaveRepository $importRepository,
         private readonly ValidatorInterface $validator,
     ) {
     }
@@ -38,8 +41,9 @@ final class PersonalCalendarController
     public function list(#[CurrentUser] User $user): JsonResponse
     {
         $periods = $this->repository->findByUser($user);
+        $synchronised = $this->importRepository->findSynchronisedPeriodIds($user);
 
-        return new JsonResponse(array_map($this->toArray(...), $periods));
+        return new JsonResponse(array_map(fn (UserAvailabilityPeriod $p): array => $this->toArray($p, $synchronised), $periods));
     }
 
     #[Route('/api/me/calendar', name: 'api_me_calendar_create', methods: ['POST'])]
@@ -61,7 +65,7 @@ final class PersonalCalendarController
             return new JsonResponse(['error' => 'overlapping_period', 'message' => $exception->getMessage()], 409);
         }
 
-        return new JsonResponse($this->toArray($period), 201);
+        return new JsonResponse($this->toArray($period, []), 201);
     }
 
     #[Route('/api/me/calendar/{stableId}', name: 'api_me_calendar_update', methods: ['PATCH'])]
@@ -83,18 +87,33 @@ final class PersonalCalendarController
             $this->service->reschedule($period, $dto->typeEnum(), $startsAt, $endsAt);
         } catch (OverlappingUserAvailabilityPeriodException $exception) {
             return new JsonResponse(['error' => 'overlapping_period', 'message' => $exception->getMessage()], 409);
+        } catch (ImportedAvailabilityPeriodException) {
+            return self::importedReadOnly();
         }
 
-        return new JsonResponse($this->toArray($period));
+        return new JsonResponse($this->toArray($period, []));
     }
 
     #[Route('/api/me/calendar/{stableId}', name: 'api_me_calendar_delete', methods: ['DELETE'])]
     public function delete(string $stableId, #[CurrentUser] User $user): Response
     {
         $period = $this->findOwnPeriod($stableId, $user);
-        $this->service->delete($period);
+
+        try {
+            $this->service->delete($period);
+        } catch (ImportedAvailabilityPeriodException) {
+            return self::importedReadOnly();
+        }
 
         return new Response(status: 204);
+    }
+
+    private static function importedReadOnly(): JsonResponse
+    {
+        return new JsonResponse(
+            ['error' => 'imported_period_read_only', 'message' => 'Ce congé vient de SurgicalHub : il se modifie dans SurgicalHub.'],
+            409,
+        );
     }
 
     private function findOwnPeriod(string $stableId, User $user): UserAvailabilityPeriod
@@ -173,13 +192,21 @@ final class PersonalCalendarController
     }
 
     /**
+     * @param array<int, true> $synchronised ids of imported periods a current association keeps in sync
+     *
      * @return array<string, mixed>
      */
-    private function toArray(UserAvailabilityPeriod $period): array
+    private function toArray(UserAvailabilityPeriod $period, array $synchronised): array
     {
         return [
             'stableId' => (string) $period->getStableId(),
             'type' => $period->getType()->value,
+            // MANUAL | SURGICAL_HUB — an imported period is read-only here
+            // (docs/surgicalhub-integration.md §10).
+            'source' => $period->getSource()->value,
+            'editable' => !$period->isImported(),
+            // An imported period no current association keeps in sync anymore can be removed (§9).
+            'deletable' => !$period->isImported() || !isset($synchronised[(int) $period->getId()]),
             'startsAt' => $period->getStartsAt()->format(\DATE_ATOM),
             'endsAt' => $period->getEndsAt()->format(\DATE_ATOM),
             'createdAt' => $period->getCreatedAt()->format(\DATE_ATOM),

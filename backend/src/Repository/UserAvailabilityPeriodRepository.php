@@ -6,6 +6,7 @@ namespace App\Repository;
 
 use App\Entity\User;
 use App\Entity\UserAvailabilityPeriod;
+use App\Entity\UserAvailabilitySource;
 use App\Entity\UserAvailabilityType;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
@@ -55,7 +56,9 @@ class UserAvailabilityPeriodRepository extends ServiceEntityRepository
      * §Chevauchement — stricter than Duty's plain overlap: two periods
      * that merely touch are still rejected). Only compares periods of the
      * same $type: UNAVAILABLE and PREFER_DUTY may legitimately coexist on
-     * the same dates.
+     * the same dates. Only MANUAL periods: a period imported from
+     * SurgicalHub may overlap anything (docs/surgicalhub-integration.md §6.1),
+     * exactly like the partial database constraint.
      *
      * @return list<UserAvailabilityPeriod>
      */
@@ -68,6 +71,8 @@ class UserAvailabilityPeriodRepository extends ServiceEntityRepository
     ): array {
         $qb = $this->createQueryBuilder('p')
             ->andWhere('p.user = :user')
+            ->andWhere('p.source = :manual')
+            ->setParameter('manual', UserAvailabilitySource::MANUAL)
             ->andWhere('p.type = :type')
             ->andWhere('p.startsAt <= :endsAt')
             ->andWhere('p.endsAt >= :startsAt')

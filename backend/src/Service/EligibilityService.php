@@ -91,6 +91,9 @@ final class EligibilityService
                     'dutyStableId' => (string) $duty->getStableId(),
                     'reason' => ExclusionReason::UNAVAILABLE,
                     'sourceAvailabilityStableId' => (string) $period->getSourceAvailabilityStableId(),
+                    // MANUAL or SURGICAL_HUB (docs/surgicalhub-integration.md): the
+                    // explanation says whether a SurgicalHub leave excluded the person.
+                    'provenance' => $period->getProvenance()->value,
                 ];
             }
 

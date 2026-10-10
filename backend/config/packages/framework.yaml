@@ -11,5 +11,9 @@ framework:
 when@test:
     framework:
         test: true
+        # Every outgoing HTTP request in tests (SurgicalHub) is answered by
+        # App\Tests\FakeSurgicalHub — never the network.
+        http_client:
+            mock_response_factory: App\Tests\FakeSurgicalHub
         session:
             storage_factory_id: session.storage.factory.mock_file

@@ -297,6 +297,8 @@ final class PlanningGenerationController
                 $availabilityPeriods[] = [
                     'sourceAvailabilityStableId' => (string) $period->getSourceAvailabilityStableId(),
                     'type' => $period->getType()->value,
+                    // MANUAL or SURGICAL_HUB, frozen with the snapshot (docs/surgicalhub-integration.md §6.1).
+                    'provenance' => $period->getProvenance()->value,
                     'startsAt' => $period->getStartsAt()->format(\DATE_ATOM),
                     'endsAt' => $period->getEndsAt()->format(\DATE_ATOM),
                 ];

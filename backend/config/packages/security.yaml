@@ -37,6 +37,16 @@ security:
                 success_handler: App\Security\LoginSuccessHandler
                 failure_handler: App\Security\LoginFailureHandler
 
+        # SurgicalHub's server, machine-to-machine (docs/surgicalhub-integration.md
+        # §3.1): a dedicated Bearer secret, never a JWT and never a User. Placed
+        # before `api` so these routes never accept a MedVue access token, and
+        # this secret is meaningless anywhere else.
+        surgicalhub_integration:
+            pattern: ^/api/integrations/surgicalhub/
+            stateless: true
+            custom_authenticators:
+                - App\Security\SurgicalHubIntegrationAuthenticator
+
         # Every other /api route must present a valid JWT. /api/token/refresh
         # and /api/token/logout are carved out below (access_control) since
         # they authenticate via the HttpOnly cookie instead, checked
@@ -73,6 +83,7 @@ security:
         # reloaded from the database on every request, so a revocation
         # applies to the next one. Each controller re-checks with #[IsGranted].
         - { path: ^/api/admin, roles: ROLE_PLATFORM_ADMIN }
+        - { path: ^/api/integrations/surgicalhub/, roles: ROLE_SURGICALHUB_INTEGRATION }
         - { path: ^/api, roles: IS_AUTHENTICATED_FULLY }
 
 when@test:
