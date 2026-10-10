@@ -837,9 +837,22 @@ Commande : `app:surgicalhub:sync` (cron 30 min, `docs/deployment.md` §5 septies
 
 ### Non vérifié / limites
 
-- Production : rien n'est déployé ; joignabilité HTTPS entre conteneurs par
-  les domaines publics à vérifier (§13) ; migrations vérifiées sur une
-  restauration jetable du dump de production (§12).
+- Production : déployé le 2026-10-10 (`v2026.10.10-prod`, `docs/deployment.md`
+  §6), après SurgicalHub. Joignabilité HTTPS entre conteneurs par les
+  domaines publics vérifiée dans les deux sens. Recette conjointe en
+  production (compte MedVue jetable `@example.test`, comptes SurgicalHub
+  jetables, `MAIL_SAFE_MODE` côté SurgicalHub) : sondes avec secret
+  (`404 link_not_found` pour un lien inexistant, `422 invalid_code` pour un
+  faux code), import de 3 congés sans motif, modification, création puis
+  suppression, `410` → `REVOKED_REMOTE` (futur retiré, passé et en cours
+  conservés), nouvelle association (réimport sans doublon), « Dissocier »
+  (`revoked_via MEDVUE` côté SurgicalHub), saisies manuelles identiques à
+  chaque étape ; données retirées ensuite par l'API du titulaire. **Non
+  exercée de bout en bout en production : la suspension (`404` sur une
+  association réelle)**, qui suppose une base SurgicalHub restaurée — aucun
+  mécanisme de simulation sans écriture directe en base ; couverte par les
+  tests (`SurgicalHubSyncTest`). L'avis d'association n'a pas été remis
+  (domaine `.test` refusé par le SMTP, association non affectée).
 - Recette navigateur complète le 2026-10-10 (Chrome, bureau, pile de dev,
   compte et planning jetables `@example.test`, SurgicalHub de dev arrêté) :
   congés importés rayés et préférence manuelle existante intacte dessous ;
