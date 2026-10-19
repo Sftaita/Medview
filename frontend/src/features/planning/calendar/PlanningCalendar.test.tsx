@@ -129,6 +129,13 @@ function setup(
   })
 }
 
+/** The completion button once the calendar is read — rendered disabled before, so a click then is ignored. */
+async function completionButton() {
+  const button = await screen.findByRole('button', { name: 'Compléter automatiquement' })
+  await waitFor(() => expect(button).toBeEnabled())
+  return button
+}
+
 describe('PlanningCalendar', () => {
   it('lays out dates vertically with one column per line, weeks, blocks and uncovered duties', async () => {
     setup()
@@ -216,7 +223,7 @@ describe('PlanningCalendar', () => {
     const onRequestCompletion = vi.fn(() => new Promise<void>((resolve) => (accept = resolve)))
     render(<PlanningCalendar planning={MANAGER} onRequestCompletion={onRequestCompletion} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Compléter automatiquement' }))
+    fireEvent.click(await completionButton())
     expect(onRequestCompletion).toHaveBeenCalledTimes(1)
     expect(await screen.findByRole('button', { name: 'Envoi…' })).toBeDisabled()
     accept()
@@ -244,7 +251,7 @@ describe('PlanningCalendar', () => {
     )
     render(<PlanningCalendar planning={MANAGER} onRequestCompletion={onRequestCompletion} />)
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Compléter automatiquement' }))
+    fireEvent.click(await completionButton())
     const message = await screen.findByText(/Une génération ou une complétion est déjà en cours/)
     expect(message.closest('[role="alert"]')).not.toBeNull()
   })
