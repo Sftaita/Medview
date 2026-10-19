@@ -27,7 +27,14 @@ Exactement ce que montre « Mes gardes » (`MyDutiesService::dutiesOf()`) :
   renfort non requis actuellement ou à confirmer est **provisoire**
   (`STATUS:TENTATIVE`) et le dit dans son titre ;
 - description : planning, ligne, type ou bloc ; lien vers le planning dans
-  MedVue.
+  MedVue ;
+- planning à plusieurs périodes (D198) : les gardes de **chaque période
+  publiée**, selon son propre statut (une période en brouillon reste
+  absente). L'UID est l'identifiant stable du bloc ou de la garde
+  (`{stableId}@medvue`, plus la date de début pour une fraction non
+  contiguë) : il ne dépend ni de la période ni de la génération, reste le
+  même après une réaffectation, une republication ou la publication d'une
+  autre période, et reste unique dans le flux.
 
 Code : `App\Calendar\DutyCalendarEvents` (gardes → événements, pur),
 `App\Calendar\IcsWriter` (RFC 5545 : CRLF, échappement, pliage 75 octets),

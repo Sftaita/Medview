@@ -130,7 +130,9 @@ Tout est revérifié dans `DutyReassignmentService::applySwap()`, **sous le
 verrou du calendrier**, à partir de l'état réel courant — jamais de ce qui
 était vrai à la création :
 
-1. période `PUBLISHED` (pas brouillon, pas `ARCHIVED`), ligne active ;
+1. les deux gardes de la même période (D198 : deux périodes d'un planning
+   ne s'échangent pas en V1, `other_period`), période `PUBLISHED` relue en
+   base sous le verrou (pas brouillon, pas `ARCHIVED`), ligne active ;
 2. aucune des deux gardes (bloc entier) n'a commencé ;
 3. chaque garde est encore détenue **via la ligne `DutyAssignment` gelée**
    dans la demande / la proposition, et le bloc l'est en entier par la même
@@ -288,6 +290,12 @@ reçoivent alors aussi l'email de republication, D172).
   pas de relance automatique, pas de notifications in-app (emails seulement).
 - Échange limité à deux gardes d'une même ligne ; pas d'échange à trois ni
   entre lignes.
+- Planning à plusieurs périodes (D198) : une garde est échangeable quand sa
+  propre période est publiée ; les deux gardes doivent être de la même
+  période (422 `other_period` à la demande et à la proposition) ; les
+  options de création et `proposableUnits` ne proposent que des unités de
+  cette période ; le contrôle sur le calendrier après permutation lit les
+  gardes de toutes les périodes (repos et chevauchements à la frontière).
 - Un échange qui modifierait les renforts nécessaires d'une ligne
   conditionnelle est refusé (le gestionnaire peut toujours réattribuer).
 - La direction n'est pas un acteur de MedVue : l'email demande aux

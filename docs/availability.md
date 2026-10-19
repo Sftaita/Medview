@@ -318,7 +318,8 @@ planning (suivi de collecte). Lecture seule : rien n'est écrit, ni audit, ni
 copie des périodes.
 
 **Endpoint** : `GET /api/plannings/{planningStableId}/availability-export.pdf`
-(`PlanningAbsenceExportController`). Aucun paramètre : les participants sont
+(`PlanningAbsenceExportController`). Aucun paramètre hormis la plage
+facultative (voir « Période ou plage ») : les participants sont
 toujours déduits du planning côté serveur, jamais fournis par le client
 (un `POST` répond 405). Réponse `application/pdf`, `Content-Disposition:
 attachment; filename=MedVue_Absences_<Nom>_<premier jour>_<dernier jour>.pdf`
@@ -337,6 +338,19 @@ immédiatement.
 `endsAt` exclusive), prolongations comprises (elles déplacent ces mêmes
 champs, D122). Les jours sont des dates civiles du **fuseau du planning**.
 Jamais de snapshot : l'état des calendriers au moment du téléchargement.
+
+**Période ou plage** (D200, lot L4f) : paramètres facultatifs
+`?period={stableId}` (les bornes d'une période du planning) ou
+`?from=YYYY-MM-DD&to=YYYY-MM-DD` (`to` exclusif), jamais les deux, toujours
+dans les bornes du planning ; sans paramètre : tout le planning, comme
+avant. Plage invalide : 422 `validation_failed` + `violations` (`period`,
+`from`, `to`). Les droits sont vérifiés **avant** toute lecture de la plage
+(un membre simple reçoit 403 quels que soient les paramètres). Participants,
+jours et adhésions sont ceux de la plage ; le nom de fichier porte ses
+premier et dernier jours ; sur un planning à plusieurs périodes, l'en-tête
+nomme les périodes couvertes (« Période 2 », « Périodes 1 à 2 »). Le suivi
+des disponibilités exporte la période qu'il affiche. Tests :
+`PlanningCycleAbsenceExportTest`, `SinglePeriodCompatibilityTest`.
 
 **Participants** : toute adhésion (`PlanningTeamMember`) du planning qui
 intersecte la période — une seule entrée par `User` (identifiant stable),
