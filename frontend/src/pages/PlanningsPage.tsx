@@ -1,26 +1,22 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
 import { Field } from '../components/Field'
 import { Icon } from '../components/Icon'
-import {
-  addDays,
-  cap,
-  daysBetween,
-  formatDay,
-  inclusiveDays,
-  monthSegments,
-  parseISO,
-  startOfDay,
-} from '../features/dashboard/dates'
+import { addDays, parseISO, startOfDay } from '../features/dashboard/dates'
+import { PlanningCard } from '../features/periods/components/PlanningCard'
+import { toCardData } from '../features/periods/model'
+import '../features/periods/periodes.css'
 import { createPlanning, fetchPlannings } from '../features/planning/api'
 import '../features/planning/plannings.css'
 import type { PlanningSummary } from '../features/planning/types'
 import { ApiError } from '../lib/apiClient'
 
-/** Maquette docs/Design/react_mes_plannings (docs/decisions.md D169). */
+/**
+ * Maquette docs/Design/react_mes_plannings (docs/decisions.md D169) — each
+ * card is now the one of docs/Design/medvue-periodes (lot L6): one card per
+ * planning, its current and next periods, each with its own status.
+ */
 
 type Phase = 'live' | 'upcoming' | 'done'
-type Step = 'draft' | 'collect' | 'published'
 
 const GROUPS: { phase: Phase; title: string }[] = [
   { phase: 'live', title: 'En cours' },
@@ -28,17 +24,15 @@ const GROUPS: { phase: Phase; title: string }[] = [
   { phase: 'done', title: 'Terminés' },
 ]
 
-const STEP_LABEL: Record<Step, string> = {
-  draft: 'À générer',
-  collect: 'Collecte des indispos ouverte',
-  published: 'Publié',
-}
-
-const plural = (n: number, s: string, p = s + 's') => `${n} ${n > 1 ? p : s}`
-
 /** First and last day of the planning, both included — the API's end date is exclusive. */
 function rangeOf(planning: PlanningSummary): [Date, Date] {
   return [parseISO(planning.startsAt), addDays(parseISO(planning.endsAt), -1)]
+}
+
+/** "YYYY-MM-DD" of a local date — only when the server sends no `today` of the planning. */
+function localDate(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
 
 function phaseOf(planning: PlanningSummary, today: Date): Phase {
@@ -46,11 +40,6 @@ function phaseOf(planning: PlanningSummary, today: Date): Phase {
   if (s > today) return 'upcoming'
   if (e >= today) return 'live'
   return 'done'
-}
-
-function stepOf(planning: PlanningSummary): Step {
-  if (planning.published) return 'published'
-  return planning.collecting ? 'collect' : 'draft'
 }
 
 export function PlanningsPage() {
@@ -135,7 +124,7 @@ export function PlanningsPage() {
       <section className="mp-head">
         <div className="mp-head-text">
           <h1>Mes plannings</h1>
-          <p>Une période de garde et ses lignes. Chaque ligne appartient à une équipe.</p>
+          <p>Chaque planning regroupe ses périodes de gardes successives, ses lignes et ses membres.</p>
         </div>
         {!showForm && (
           <button type="button" className="mp-btn" onClick={() => setShowForm(true)}>
@@ -258,132 +247,19 @@ export function PlanningsPage() {
                 </h2>
               )}
               <ul className="mp-list">
-                {g.items.map((p) => (
-                  <li key={p.stableId}>
-                    <PlanningCard planning={p} today={today} />
-                  </li>
-                ))}
+                {g.items.map((p) => {
+                  const card = toCardData(p)
+                  return card ? (
+                    <li key={p.stableId}>
+                      <PlanningCard planning={card} today={p.today ?? localDate(today)} />
+                    </li>
+                  ) : null
+                })}
               </ul>
             </section>
           ))}
         </div>
       )}
     </div>
-  )
-}
-
-function PlanningCard({ planning, today }: { planning: PlanningSummary; today: Date }) {
-  const [s, e] = rangeOf(planning)
-  const len = inclusiveDays(s, e)
-  const until = daysBetween(today, s)
-  const left = daysBetween(today, e)
-  const phase = phaseOf(planning, today)
-  const step = stepOf(planning)
-  const elapsed = phase === 'done' ? len : phase === 'live' ? daysBetween(s, today) + 1 : 0
-
-  const status =
-    phase === 'upcoming'
-      ? until === 1
-        ? 'Commence demain'
-        : `Commence dans ${until} jours`
-      : phase === 'live'
-        ? `En cours · jour ${elapsed} sur ${len}`
-        : 'Terminé'
-  const [bigNum, bigLabel] =
-    phase === 'upcoming'
-      ? [`J-${until}`, 'avant le début']
-      : phase === 'live'
-        ? [String(left + 1), left === 0 ? 'dernier jour' : 'jours restants']
-        : [String(len), 'jours']
-
-  const months = monthSegments(s, e)
-  // Day offset of each month from the start of the planning.
-  const offsets = months.map((_, i) => months.slice(0, i).reduce((n, m) => n + m.days, 0))
-
-  return (
-    <Link to={`/plannings/${planning.stableId}`} className={`mp-card mp-card-${phase}`}>
-      <div className="mp-card-top">
-        <div className="mp-card-info">
-          <div className="mp-card-title">
-            <span className="mp-card-name">{planning.name}</span>
-            <span className={`mp-pill mp-pill-${phase}`}>
-              <span className="mp-dot" />
-              {status}
-            </span>
-          </div>
-          <div className="mp-card-range">
-            <Icon name="calendar" size={17} className="mp-muted-icon" />
-            <span className="mp-long">
-              {cap(formatDay(s, { year: true }))} → {formatDay(e, { year: true })}
-            </span>
-            <span className="mp-short">
-              {formatDay(s, { year: true, weekday: false })} → {formatDay(e, { year: true, weekday: false })}
-            </span>
-          </div>
-        </div>
-        <div className="mp-card-aside">
-          <div className="mp-stat">
-            <span className="mp-stat-num">{bigNum}</span>
-            <span className="mp-stat-label">{bigLabel}</span>
-          </div>
-          <span className="mp-chevron">
-            <Icon name="right" size={20} strokeWidth={2.2} />
-          </span>
-        </div>
-      </div>
-
-      <div className="mp-timeline" aria-hidden="true">
-        <div className="mp-timeline-bar">
-          {months.map((m, i) => {
-            const pct = Math.max(0, Math.min(1, (elapsed - offsets[i]) / m.days)) * 100
-            const first = i === 0
-            const last = i === months.length - 1
-            const style = {
-              flex: m.days,
-              '--fill': `${pct}%`,
-              borderRadius: `${first ? 999 : 2}px ${last ? 999 : 2}px ${last ? 999 : 2}px ${first ? 999 : 2}px`,
-            } as CSSProperties
-            return <span key={m.key} className="mp-seg" style={style} />
-          })}
-          {phase === 'live' && (
-            <span
-              className="mp-today"
-              title="Aujourd'hui"
-              style={{ left: `calc(${(elapsed / len) * 100}% - 1.5px)` }}
-            />
-          )}
-        </div>
-        <div className="mp-timeline-labels">
-          {months.map((m) => (
-            <span key={m.key} style={{ flex: m.days }}>
-              {m.label}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      <div className="mp-card-foot">
-        <span className="mp-meta">
-          <Icon name="clock" size={16} />
-          {len} jours
-        </span>
-        {planning.lineCount !== undefined && (
-          <span className="mp-meta">
-            <Icon name="rows" size={16} />
-            {plural(planning.lineCount, 'ligne')}
-          </span>
-        )}
-        {planning.memberCount !== undefined && (
-          <span className="mp-meta">
-            <Icon name="users" size={16} />
-            {plural(planning.memberCount, 'membre')}
-          </span>
-        )}
-        <span className={`mp-step mp-step-${step}`}>
-          <span className="mp-step-dot" />
-          {STEP_LABEL[step]}
-        </span>
-      </div>
-    </Link>
   )
 }

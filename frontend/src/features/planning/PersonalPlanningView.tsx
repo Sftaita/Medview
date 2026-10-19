@@ -10,6 +10,8 @@ import type { PlanningAssignment, PlanningAssignments, PlanningDetail, PlanningT
 
 type Props = {
   planning: PlanningDetail
+  /** The selected period (docs/planning-cycles.md §7.4): its months only, named in every read. */
+  period?: { stableId: string; startsAt: string; endsAt: string }
 }
 
 const WHOLE_TEAM = ''
@@ -49,9 +51,9 @@ function dayBefore(date: string): string {
 const firstOfMonth = (date: string) => `${date.slice(0, 7)}-01`
 
 /** The month to open on: the current one, kept inside the months the planning covers. */
-function initialMonth(planning: PlanningDetail): string {
-  const first = firstOfMonth(planning.startsAt)
-  const last = firstOfMonth(dayBefore(planning.endsAt))
+function initialMonth(range: { startsAt: string; endsAt: string }): string {
+  const first = firstOfMonth(range.startsAt)
+  const last = firstOfMonth(dayBefore(range.endsAt))
   const current = firstOfMonth(new Date().toISOString())
   return current < first ? first : current > last ? last : current
 }
@@ -75,10 +77,12 @@ type FlatResultDuty = PlanningResultDuty & { lineName: string; lineStableId: str
  * editing, completion, statistics and publication live in the calendar
  * (PlanningCalendar) — one path for each action, never two.
  */
-export function PersonalPlanningView({ planning }: Props) {
+export function PersonalPlanningView({ planning, period }: Props) {
+  const range = period ?? planning
+  const periodStableId = period?.stableId
   const [people, setPeople] = useState<PlanningTeamMember[]>([])
   const [selected, setSelected] = useState(WHOLE_TEAM)
-  const [month, setMonth] = useState(() => initialMonth(planning))
+  const [month, setMonth] = useState(() => initialMonth(range))
   const [result, setResult] = useState<PlanningAssignments | null>(null)
   const [teamResult, setTeamResult] = useState<PlanningResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -111,7 +115,7 @@ export function PersonalPlanningView({ planning }: Props) {
     let cancelled = false
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setTeamResult(null)
-    fetchPlanningResult(planning.stableId, { from: month, to: monthStart(month, 1) })
+    fetchPlanningResult(planning.stableId, { from: month, to: monthStart(month, 1), period: periodStableId })
       .then((data) => {
         if (!cancelled) {
           setTeamResult(data)
@@ -124,7 +128,7 @@ export function PersonalPlanningView({ planning }: Props) {
     return () => {
       cancelled = true
     }
-  }, [planning.stableId, selected, month])
+  }, [planning.stableId, selected, month, periodStableId])
 
   // One person: their own duties and workload summary — unchanged.
   useEffect(() => {
@@ -138,6 +142,7 @@ export function PersonalPlanningView({ planning }: Props) {
       userStableId: selected,
       from: month,
       to: monthStart(month, 1),
+      period: periodStableId,
     })
       .then((data) => {
         if (!cancelled) {
@@ -151,10 +156,10 @@ export function PersonalPlanningView({ planning }: Props) {
     return () => {
       cancelled = true
     }
-  }, [planning.stableId, selected, month])
+  }, [planning.stableId, selected, month, periodStableId])
 
-  const firstMonth = firstOfMonth(planning.startsAt)
-  const lastMonth = firstOfMonth(dayBefore(planning.endsAt))
+  const firstMonth = firstOfMonth(range.startsAt)
+  const lastMonth = firstOfMonth(dayBefore(range.endsAt))
   const selectedPerson = people.find((person) => person.userStableId === selected) ?? null
 
   const byDay = useMemo(() => {

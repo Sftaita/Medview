@@ -174,15 +174,16 @@ describe('PlanningCalendar', () => {
     expect(screen.getByText('Novembre 2026')).toBeInTheDocument()
   })
 
-  it('is read-only for a member: no edit, no completion, no publication', async () => {
+  it('is read-only for a member: no edit, no completion, no publication — statistics of what is published only', async () => {
     setup()
     render(<PlanningCalendar planning={PLANNING} />)
 
     await screen.findByRole('table')
     expect(screen.queryByRole('button', { name: /Modifier :/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Compléter automatiquement' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Statistiques' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Publier le planning' })).not.toBeInTheDocument()
+    // docs/decisions.md D201: the server gives a member published statistics only — the button is no protection.
+    expect(screen.getByRole('button', { name: 'Statistiques' })).toBeInTheDocument()
   })
 
   it('opens the editor of a duty for a manager — any day of a block opens the block', async () => {
@@ -220,6 +221,20 @@ describe('PlanningCalendar', () => {
     expect(await screen.findByRole('button', { name: 'Envoi…' })).toBeDisabled()
     accept()
     expect(await screen.findByRole('button', { name: 'Compléter automatiquement' })).toBeEnabled()
+  })
+
+  it('offers to publish a line generated since the last diffusion, even without any change (docs/decisions.md D196)', async () => {
+    setup({
+      ...NOT_PUBLISHED,
+      published: true,
+      lastPublishedAt: '2026-10-01T08:00:00+00:00',
+      linesAwaitingPublication: [{ lineStableId: 'l2', lineName: 'Juniors' }],
+    })
+    render(<PlanningCalendar planning={MANAGER} onRequestCompletion={vi.fn()} />)
+
+    const button = await screen.findByRole('button', { name: 'Publier les nouvelles lignes' })
+    expect(button).toBeEnabled()
+    expect(screen.queryByRole('button', { name: 'Republier les modifications' })).not.toBeInTheDocument()
   })
 
   it('says so when a completion cannot be requested because a job is already running', async () => {
@@ -444,12 +459,20 @@ describe('PlanningCalendar', () => {
     const REFUSED = {
       publishable: false,
       republishable: false,
-      lines: [{ lineStableId: 'l1', lineName: 'Ligne principale', periodStatus: 'PUBLISHED', hasGeneration: true }],
+      lines: [
+        { lineStableId: 'l1', lineName: 'Ligne principale', periodStatus: 'PUBLISHED', hasGeneration: true },
+      ],
       uncoveredDuties: [],
       inconsistentGroups: [],
       invalidAssignments: [
         {
-          duty: { dutyStableId: 'n5', date: '2026-11-05', dutyTypeName: 'Garde', lineStableId: 'l1', lineName: 'Ligne principale' },
+          duty: {
+            dutyStableId: 'n5',
+            date: '2026-11-05',
+            dutyTypeName: 'Garde',
+            lineStableId: 'l1',
+            lineName: 'Ligne principale',
+          },
           unitStableKey: 'n5',
           dates: ['2026-11-05'],
           dutyStableIds: ['n5'],
@@ -470,14 +493,22 @@ describe('PlanningCalendar', () => {
       const panel = await screen.findByRole('region', { name: 'Affectations à corriger' })
       expect(within(panel).getByText('1 affectation à corriger avant de republier')).toBeInTheDocument()
       expect(within(panel).getByText('Jeudi 5 novembre · ligne « Ligne principale »')).toBeInTheDocument()
-      expect(within(panel).getByText('Carol Petit a déclaré une indisponibilité ce jour-là.')).toBeInTheDocument()
-      expect(within(panel).getByText(/Règle : personne n’est de garde un jour où elle s’est déclarée indisponible/)).toBeInTheDocument()
+      expect(
+        within(panel).getByText('Carol Petit a déclaré une indisponibilité ce jour-là.'),
+      ).toBeInTheDocument()
+      expect(
+        within(panel).getByText(
+          /Règle : personne n’est de garde un jour où elle s’est déclarée indisponible/,
+        ),
+      ).toBeInTheDocument()
       expect(screen.getByText('Octobre 2026')).toBeInTheDocument()
 
       fireEvent.click(within(panel).getByRole('button', { name: 'Voir dans le calendrier' }))
 
       expect(screen.getByText('Novembre 2026')).toBeInTheDocument()
-      const cell = screen.getByRole('button', { name: /Modifier : Carol Petit, 2026-11-05 — à corriger : indisponible/ })
+      const cell = screen.getByRole('button', {
+        name: /Modifier : Carol Petit, 2026-11-05 — à corriger : indisponible/,
+      })
       expect(cell).toHaveClass('cal-item--invalid')
       expect(cell).toHaveClass('cal-item--located')
       expect(cell).toHaveTextContent('⚠ À corriger : indisponible')
@@ -490,10 +521,14 @@ describe('PlanningCalendar', () => {
 
       fireEvent.click(await screen.findByRole('button', { name: 'Republier les modifications' }))
       const dialog = await screen.findByRole('dialog')
-      expect(await within(dialog).findByText('Republication impossible : 1 point à corriger d’abord.')).toBeInTheDocument()
+      expect(
+        await within(dialog).findByText('Republication impossible : 1 point à corriger d’abord.'),
+      ).toBeInTheDocument()
       const blockers = within(dialog).getByRole('list', { name: 'Points bloquants' })
       expect(within(blockers).getByText('Jeudi 5 novembre · ligne « Ligne principale »')).toBeInTheDocument()
-      expect(within(blockers).getByText('Carol Petit a déclaré une indisponibilité ce jour-là.')).toBeInTheDocument()
+      expect(
+        within(blockers).getByText('Carol Petit a déclaré une indisponibilité ce jour-là.'),
+      ).toBeInTheDocument()
       expect(within(dialog).queryByRole('button', { name: 'Republier' })).not.toBeInTheDocument()
       // Above the list of changes — with dozens of them (91 in production), a refusal below goes unseen.
       const changes = within(dialog).getByRole('list', { name: 'Modifications non publiées' })
@@ -502,7 +537,9 @@ describe('PlanningCalendar', () => {
       fireEvent.click(within(blockers).getByRole('button', { name: 'Voir dans le calendrier' }))
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
       expect(screen.getByText('Novembre 2026')).toBeInTheDocument()
-      expect(screen.getByRole('button', { name: /Carol Petit, 2026-11-05 — à corriger/ })).toHaveClass('cal-item--located')
+      expect(screen.getByRole('button', { name: /Carol Petit, 2026-11-05 — à corriger/ })).toHaveClass(
+        'cal-item--located',
+      )
     })
 
     it('never delays the calendar on a slow check, and never shows a failed check as "nothing to fix"', async () => {
@@ -520,7 +557,9 @@ describe('PlanningCalendar', () => {
 
       // A failed check: the calendar is there, and it says the check could not run — never a clean calendar.
       expect(await screen.findByRole('table')).toBeInTheDocument()
-      expect(await screen.findByText(/Le contrôle des incohérences n’a pas pu être effectué/)).toBeInTheDocument()
+      expect(
+        await screen.findByText(/Le contrôle des incohérences n’a pas pu être effectué/),
+      ).toBeInTheDocument()
       expect(screen.queryByRole('region', { name: 'Affectations à corriger' })).not.toBeInTheDocument()
 
       // Retried, and slow: the calendar stays usable while the check runs, and says it is running.
@@ -544,11 +583,15 @@ describe('PlanningCalendar', () => {
           'GET /api/plannings/plan-1/duties/n5/reassignment-candidates': () => ({
             groupInstanceStableId: null,
             groupLabel: null,
-            blockDuties: [{ dutyStableId: 'n5', date: '2026-11-05', startsAt: '', endsAt: '', dutyTypeName: 'Garde' }],
+            blockDuties: [
+              { dutyStableId: 'n5', date: '2026-11-05', startsAt: '', endsAt: '', dutyTypeName: 'Garde' },
+            ],
             generationStableId: 'g-l1',
             currentTeamMemberStableId: 'm-Carol',
             currentAssignee: { teamMemberStableId: 'm-Carol', firstName: 'Carol', lastName: 'Petit' },
-            candidates: [{ teamMemberStableId: 'm-Denis', firstName: 'Denis', lastName: 'Roux', reasons: [] }],
+            candidates: [
+              { teamMemberStableId: 'm-Denis', firstName: 'Denis', lastName: 'Roux', reasons: [] },
+            ],
           }),
           'POST /api/plannings/plan-1/duties/n5/reassign': () => {
             current = { ...REFUSED, invalidAssignments: [], republishable: true }
@@ -567,12 +610,19 @@ describe('PlanningCalendar', () => {
       fireEvent.click(within(candidates).getByRole('button', { name: 'Choisir' }))
       fireEvent.click(screen.getByRole('button', { name: 'Remplacer' }))
 
-      await waitFor(() => expect(screen.queryByRole('region', { name: 'Affectations à corriger' })).not.toBeInTheDocument())
+      await waitFor(() =>
+        expect(screen.queryByRole('region', { name: 'Affectations à corriger' })).not.toBeInTheDocument(),
+      )
     })
 
     it('marks nothing when the preflight is clean, and never reads it for a member', async () => {
       const calls = setup(NOT_PUBLISHED, {
-        'GET /api/plannings/plan-1/publication-preflight': () => ({ ...REFUSED, invalidAssignments: [], publishable: true, republishable: true }),
+        'GET /api/plannings/plan-1/publication-preflight': () => ({
+          ...REFUSED,
+          invalidAssignments: [],
+          publishable: true,
+          republishable: true,
+        }),
       })
       render(<PlanningCalendar planning={MANAGER} />)
       await screen.findByRole('table')
@@ -601,5 +651,171 @@ describe('PlanningCalendar', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Exporter' }))
     expect(await screen.findByRole('dialog', { name: 'Exporter le planning' })).toBeInTheDocument()
+  })
+
+  // --- lot L6: one period of a planning with several (docs/planning-cycles.md §7.4) -----------------
+
+  const PERIOD_2 = {
+    stableId: 'c2',
+    number: 2,
+    startsAt: '2026-11-01',
+    endsAt: '2026-12-01',
+    lastDay: '2026-11-30',
+  }
+  /** A clean preflight of period 2: nothing to fix. */
+  const CLEAN = {
+    publishable: true,
+    republishable: true,
+    lines: [],
+    uncoveredDuties: [],
+    inconsistentGroups: [],
+    invalidAssignments: [],
+    conflicts: [],
+    undeterminedDuties: [],
+    superfluousCoverages: [],
+    period: { stableId: 'c2', number: 2 },
+  }
+  const NOVEMBER_RESULT = {
+    planningStableId: 'plan-1',
+    period: PERIOD_2,
+    lines: [line('l1', 'Ligne principale', [duty('n3', '2026-11-03', 'Anne Dupont')])],
+  }
+
+  it('names the selected period in every read, shows its months only and says which period it publishes', async () => {
+    const api = setup(
+      { ...NOT_PUBLISHED, period: { stableId: 'c2', number: 2 } },
+      {
+        'GET /api/plannings/plan-1/publication-preflight': () => CLEAN,
+      },
+      NOVEMBER_RESULT,
+    )
+    render(<PlanningCalendar planning={MANAGER} period={PERIOD_2} showPeriodNumber />)
+
+    expect(await screen.findByText('Novembre 2026')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Mois précédent' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Mois suivant' })).toBeDisabled()
+    expect(screen.getByText('Période 2 non publiée')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Publier la période 2' })).toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.queryByText('Contrôle des incohérences en cours…')).not.toBeInTheDocument(),
+    )
+    expect(
+      screen.queryByText(/Le contrôle des incohérences n’a pas pu être effectué/),
+    ).not.toBeInTheDocument()
+    for (const path of ['result', 'publication-state', 'publication-preflight']) {
+      const requests = api.requests('GET', `/api/plannings/plan-1/${path}`)
+      expect(requests.length).toBeGreaterThan(0)
+      expect(requests.every((request) => request.query.get('period') === 'c2')).toBe(true)
+    }
+  })
+
+  it('never shows an answer that describes another period', async () => {
+    setup(NOT_PUBLISHED, {}, { ...NOVEMBER_RESULT, period: { ...PERIOD_2, stableId: 'c1', number: 1 } })
+    render(<PlanningCalendar planning={PLANNING} period={PERIOD_2} showPeriodNumber />)
+
+    expect(await screen.findByText('Chargement du planning…')).toBeInTheDocument()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+    expect(screen.getByText('Chargement du planning…')).toBeInTheDocument()
+  })
+
+  it('lists the diffusions of the period for a publisher, each with the PDF stored when it was sent', async () => {
+    vi.stubGlobal(
+      'URL',
+      Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:pdf-1'), revokeObjectURL: vi.fn() }),
+    )
+    const api = setup(
+      {
+        published: true,
+        period: { stableId: 'c2', number: 2 },
+        firstPublishedAt: '2026-10-01T08:00:00+00:00',
+        lastPublishedAt: '2026-10-05T08:00:00+00:00',
+        lastPublishedBy: null,
+        hasUnpublishedChanges: false,
+        changes: [],
+        linesAwaitingPublication: [],
+        history: [
+          {
+            stableId: 'pub-2',
+            kind: 'UPDATE',
+            publishedAt: '2026-10-05T08:00:00+00:00',
+            publishedBy: { firstName: 'Camille', lastName: 'Laurent' },
+            changedDutyCount: 1,
+            recipientCount: 1,
+            sentCount: 1,
+            failedCount: 0,
+          },
+          {
+            stableId: 'pub-1',
+            kind: 'FIRST',
+            publishedAt: '2026-10-01T08:00:00+00:00',
+            publishedBy: { firstName: 'Camille', lastName: 'Laurent' },
+            changedDutyCount: 0,
+            recipientCount: 3,
+            sentCount: 3,
+            failedCount: 0,
+            lines: [
+              {
+                lineStableId: 'l1',
+                lineName: 'Ligne principale',
+                kind: 'FIRST_FOR_LINE',
+                dutyCount: 1,
+                changedDutyCount: 0,
+                reconstructed: false,
+              },
+            ],
+          },
+        ],
+      },
+      {
+        'GET /api/plannings/plan-1/publication-preflight': () => CLEAN,
+        'GET /api/plannings/plan-1/publications/pub-1/pdf': () => new Response(new Blob(['%PDF-1.4'])),
+      },
+      NOVEMBER_RESULT,
+    )
+    render(<PlanningCalendar planning={MANAGER} period={PERIOD_2} showPeriodNumber />)
+
+    expect(await screen.findByText('Période 2 publiée')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Diffusions de la période 2 \(2\)/ }))
+    const list = screen.getByRole('list', { name: 'Diffusions de la période 2' })
+    expect(within(list).getAllByRole('listitem')).toHaveLength(2)
+    expect(within(list).getByText(/Republication du/)).toBeInTheDocument()
+    fireEvent.click(within(list).getAllByRole('button', { name: 'PDF diffusé' })[1])
+    await waitFor(() =>
+      expect(api.requests('GET', '/api/plannings/plan-1/publications/pub-1/pdf')).toHaveLength(1),
+    )
+  })
+
+  it('never lists the diffusions for a member (the server gives no history)', async () => {
+    setup(
+      {
+        published: true,
+        firstPublishedAt: '2026-10-01T08:00:00+00:00',
+        lastPublishedAt: '2026-10-01T08:00:00+00:00',
+        lastPublishedBy: null,
+      },
+      {},
+      NOVEMBER_RESULT,
+    )
+    render(<PlanningCalendar planning={PLANNING} period={PERIOD_2} showPeriodNumber />)
+    expect(await screen.findByText('Période 2 publiée')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Diffusions/ })).not.toBeInTheDocument()
+  })
+
+  it('says when the period is only partly published (lot L7, D196)', async () => {
+    setup(
+      {
+        published: true,
+        cycleComplete: false,
+        firstPublishedAt: '2026-10-01T08:00:00+00:00',
+        lastPublishedAt: '2026-10-01T08:00:00+00:00',
+        lastPublishedBy: null,
+      },
+      {},
+      NOVEMBER_RESULT,
+    )
+    render(<PlanningCalendar planning={PLANNING} period={PERIOD_2} showPeriodNumber />)
+    expect(await screen.findByText('Période 2 partiellement publiée')).toBeInTheDocument()
+    expect(screen.queryByText('Période 2 publiée')).not.toBeInTheDocument()
   })
 })

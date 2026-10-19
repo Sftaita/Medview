@@ -1,4 +1,5 @@
 import { dutyWhat, formatDutyDates } from '../duties/dutyDates'
+import { periodLabel } from '../duties/periodLabel'
 import type { SwapEvent, SwapPerson, SwapProposal, SwapRequest, SwapUnit } from './types'
 
 /** French labels of the swap workflow (docs/duty-swaps.md §9) — the codes come from the server, the words from here. */
@@ -7,9 +8,13 @@ export function personName(person: SwapPerson): string {
   return `${person.firstName} ${person.lastName}`
 }
 
-/** « Mar. 5 janv. · Garde » / « Sam. 9 → dim. 10 janv. · Bloc Week-end ». */
+/**
+ * « Mar. 5 janv. · Garde » / « Sam. 9 → dim. 10 janv. · Bloc Week-end » — and « · Période 1 » once the planning
+ * has several periods (lots L6/L7, docs/decisions.md D198): a swap never crosses two periods, the screen says which.
+ */
 export function unitLabel(unit: SwapUnit): string {
-  return `${formatDutyDates(unit)} · ${dutyWhat(unit)}`
+  const period = periodLabel(unit.period)
+  return `${formatDutyDates(unit)} · ${dutyWhat(unit)}${period ? ` · ${period}` : ''}`
 }
 
 type Tone = 'info' | 'live' | 'done' | 'warn' | 'muted'

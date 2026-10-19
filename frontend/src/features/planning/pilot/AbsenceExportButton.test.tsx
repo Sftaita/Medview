@@ -75,6 +75,24 @@ describe('Exporter les absences (PDF)', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 
+  it('exports the period the follow-up shows, when it has one (docs/decisions.md D200)', async () => {
+    const api = stubApi({ [EXPORT]: () => pdf() })
+    const base = makeStatus()
+    render(
+      <CollectionStatusPanel
+        status={{ ...base, period: { stableId: 'cycle-2', number: 2 } }}
+        onChanged={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Exporter les absences (PDF)' }))
+
+    await waitFor(() => expect(clicked).toHaveLength(1))
+    expect(api.requests('GET', '/api/plannings/plan-1/availability-export.pdf')[0].query.get('period')).toBe(
+      'cycle-2',
+    )
+  })
+
   it('says so when the PDF cannot be produced, and lets the user try again', async () => {
     let fail = true
     stubApi({ [EXPORT]: () => (fail ? httpStatus(500, { error: 'server_error' }) : pdf()) })

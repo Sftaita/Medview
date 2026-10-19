@@ -5,11 +5,17 @@ import type { PlanningStatistics, StatisticsScope, Weekday } from './types'
 
 type Props = {
   planningStableId: string
+  /**
+   * The selected period (docs/decisions.md D201): always sent, required by the
+   * server on a planning with several periods. An answer for another period is
+   * dropped.
+   */
+  periodStableId?: string
   /** Bump this to force a refetch (e.g. after a reassignment is saved). */
   refreshKey: number
 }
 
-type ScopeKey = 'currentPeriod' | 'cumulative'
+type ScopeKey = 'currentPeriod' | 'cumulative' | 'provisional'
 
 const WEEKDAY_ORDER: Weekday[] = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
 const WEEKDAY_LABEL: Record<Weekday, string> = {
@@ -20,6 +26,13 @@ const WEEKDAY_LABEL: Record<Weekday, string> = {
   FRI: 'V',
   SAT: 'S',
   SUN: 'D',
+}
+
+const PUBLICATION_LABEL: Record<string, string> = {
+  PUBLISHED: 'publiée',
+  UNPUBLISHED: 'non publiée',
+  // No generation in the period: not generated yet, or nothing demanded (docs/decisions.md D194) — never "to do".
+  NOT_GENERATED: 'non générée',
 }
 
 const DATE_FORMAT = new Intl.DateTimeFormat('fr-BE', { day: 'numeric', month: 'long', year: 'numeric' })
@@ -34,35 +47,55 @@ function formatDate(date: string): string {
   return DATE_FORMAT.format(new Date(`${date}T00:00:00Z`))
 }
 
+/** The API's end dates are exclusive: the last day shown is the day before. */
+function dayBefore(date: string): string {
+  const day = new Date(`${date}T00:00:00Z`)
+  day.setUTCDate(day.getUTCDate() - 1)
+  return day.toISOString().slice(0, 10)
+}
+
+function periodList(numbers: number[]): string {
+  if (numbers.length === 0) return 'aucune période'
+  return numbers.length === 1 ? `période ${numbers[0]} incluse` : `périodes ${numbers.join(', ')} incluses`
+}
+
 /**
- * Two statistics perimeters, never confused (docs/decisions.md D132): "this
- * period" is never presented as a complete measure of fairness by itself —
- * "cumulative" is the whole Planning's real current state. Both read the
- * live current calendar, purely descriptive (§45: no "balanced"/
- * "unbalanced" verdict here). Defaults to "this period" (§36): right after
- * a generation, the manager wants to inspect what the engine just produced.
+ * Three statistics perimeters, never confused (docs/decisions.md D132, D201):
+ * "Période" — the selected period only, never a complete measure of fairness
+ * by itself; "Cumul publié" — the published line periods of periods 1 to the
+ * selected one; "En préparation" — the generated line periods not published
+ * yet, never added to the cumulative, shown only to a manager when there are
+ * some. All read the live current calendar, purely descriptive (§45: no
+ * "balanced"/"unbalanced" verdict here). Defaults to the period (§36): right
+ * after a generation, the manager wants to inspect what the engine produced.
  */
-export function StatisticsPanel({ planningStableId, refreshKey }: Props) {
-  const [statistics, setStatistics] = useState<PlanningStatistics | null>(null)
-  const [error, setError] = useState<string | null>(null)
+export function StatisticsPanel({ planningStableId, periodStableId, refreshKey }: Props) {
+  const [loaded, setLoaded] = useState<{
+    key: string
+    statistics: PlanningStatistics | null
+    error: string | null
+  }>({ key: '', statistics: null, error: null })
   const [scopeKey, setScopeKey] = useState<ScopeKey>('currentPeriod')
+  const key = `${planningStableId}|${periodStableId ?? ''}|${refreshKey}`
 
   useEffect(() => {
     let cancelled = false
-    fetchPlanningStatistics(planningStableId)
+    fetchPlanningStatistics(planningStableId, periodStableId)
       .then((data) => {
-        if (!cancelled) {
-          setStatistics(data)
-          setError(null)
-        }
+        // A late answer for a period no longer selected is never shown.
+        if (cancelled || (periodStableId && data.period && data.period.stableId !== periodStableId)) return
+        setLoaded({ key, statistics: data, error: null })
       })
       .catch(() => {
-        if (!cancelled) setError('Impossible de charger les statistiques.')
+        if (!cancelled) setLoaded({ key, statistics: null, error: 'Impossible de charger les statistiques.' })
       })
     return () => {
       cancelled = true
     }
-  }, [planningStableId, refreshKey])
+  }, [planningStableId, periodStableId, key])
+
+  const statistics = loaded.key === key ? loaded.statistics : null
+  const error = loaded.key === key ? loaded.error : null
 
   if (error) {
     return (
@@ -81,7 +114,20 @@ export function StatisticsPanel({ planningStableId, refreshKey }: Props) {
     )
   }
 
-  const scope = statistics[scopeKey]
+  // "En préparation": a manager only (null for a member), and only when something is provisional.
+  const provisional =
+    statistics.provisional && statistics.provisional.groups.length > 0 ? statistics.provisional : null
+  const shownKey: ScopeKey = scopeKey === 'provisional' && !provisional ? 'currentPeriod' : scopeKey
+  const scope =
+    shownKey === 'provisional' && provisional
+      ? provisional
+      : statistics[shownKey === 'cumulative' ? 'cumulative' : 'currentPeriod']
+  const number = statistics.period?.number
+  const tabs: { key: ScopeKey; label: string }[] = [
+    { key: 'currentPeriod', label: number ? `Période ${number}` : 'Cette période' },
+    { key: 'cumulative', label: 'Cumul publié' },
+    ...(provisional ? [{ key: 'provisional' as const, label: 'En préparation' }] : []),
+  ]
 
   return (
     <section className="card stats-panel" aria-label="Statistiques de répartition">
@@ -90,37 +136,63 @@ export function StatisticsPanel({ planningStableId, refreshKey }: Props) {
       </div>
 
       <div className="stats-panel__tabs" role="tablist" aria-label="Périmètre des statistiques">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={scopeKey === 'currentPeriod'}
-          className={`btn btn--sm ${scopeKey === 'currentPeriod' ? 'btn--primary' : 'btn--secondary'}`}
-          onClick={() => setScopeKey('currentPeriod')}
-        >
-          Cette période
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={scopeKey === 'cumulative'}
-          className={`btn btn--sm ${scopeKey === 'cumulative' ? 'btn--primary' : 'btn--secondary'}`}
-          onClick={() => setScopeKey('cumulative')}
-        >
-          Cumul du planning
-        </button>
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            role="tab"
+            aria-selected={shownKey === tab.key}
+            className={`btn btn--sm ${shownKey === tab.key ? 'btn--primary' : 'btn--secondary'}`}
+            onClick={() => setScopeKey(tab.key)}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       <p className="muted stats-panel__bounds tnum">
-        {formatDate(scope.startsAt)} → {formatDate(scope.endsAt)} · calculées sur les affectations actuelles,
-        corrections comprises
+        {formatDate(scope.startsAt)} → {formatDate(dayBefore(scope.endsAt))}
+        {shownKey !== 'currentPeriod' && scope.periodNumbers && ` · ${periodList(scope.periodNumbers)}`} ·
+        calculées sur les affectations actuelles, corrections comprises
       </p>
 
-      {scope.groups.length === 0 && <p className="muted">Aucune garde générée pour le moment.</p>}
+      {shownKey === 'cumulative' && (
+        <p className="muted stats-panel__note">
+          Le cumul publié additionne les affectations opérationnelles actuelles des lignes publiées,
+          corrections faites après publication comprises : il peut différer des PDF diffusés.
+        </p>
+      )}
+      {shownKey === 'provisional' && (
+        <p className="muted stats-panel__note">
+          Lignes générées mais pas encore publiées : provisoire, jamais ajouté au cumul publié.
+        </p>
+      )}
+      {shownKey === 'currentPeriod' && statistics.period && statistics.period.lines.length > 0 && (
+        <ul className="stats-panel__lines" aria-label="Lignes de la période">
+          {statistics.period.lines.map((line) => (
+            <li key={line.lineStableId} data-publication={line.publication}>
+              {line.lineName} : {PUBLICATION_LABEL[line.publication] ?? line.publication}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {scope.groups.length === 0 && (
+        <p className="muted">
+          {shownKey === 'cumulative'
+            ? 'Aucune garde publiée pour le moment.'
+            : 'Aucune garde générée pour le moment.'}
+        </p>
+      )}
 
       {scope.groups.map((group) => (
         <StatisticsTable
           key={group.groupStableId}
-          label={group.groupLabel}
+          label={
+            group.provisional && shownKey !== 'provisional'
+              ? `${group.groupLabel} — provisoire (non publiée)`
+              : group.groupLabel
+          }
           scope={scope}
           groupStableId={group.groupStableId}
         />
@@ -153,7 +225,9 @@ function StatisticsTable({
 
   return (
     <div className="stats-panel__group">
-      {scope.groups.length > 1 && <h3 className="stats-panel__group-title">{label}</h3>}
+      {(scope.groups.length > 1 || group.provisional) && (
+        <h3 className="stats-panel__group-title">{label}</h3>
+      )}
       {group.members.length === 0 ? (
         <p className="muted">Aucune garde attribuée pour cette ligne.</p>
       ) : (

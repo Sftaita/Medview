@@ -15,6 +15,20 @@
   margin: 0 auto;
 }
 
+/* Lot L6 : tout ce qui appartient à la période sélectionnée (remonté à chaque changement de période). */
+.pd-period-content {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(18px, 2.4vw, 28px);
+}
+
+/* La barre « Créer la période suivante » (mobile) est fixe au-dessus de la navigation : le contenu ne passe pas dessous. */
+@media (max-width: 720px) {
+  .pd-page--with-action {
+    padding-bottom: 76px;
+  }
+}
+
 /* ---------- Primitives ---------- */
 .pd-card {
   background: var(--surface-card);

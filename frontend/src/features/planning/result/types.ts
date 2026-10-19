@@ -122,6 +122,8 @@ export type PlanningResultLine = {
 /** GET /api/plannings/{id}/result. */
 export type PlanningResult = {
   planningStableId: string
+  /** The period read (docs/planning-cycles.md §7.4, D194). */
+  period?: { stableId: string; number: number; startsAt: string; endsAt: string; lastDay: string }
   lines: PlanningResultLine[]
 }
 
@@ -205,6 +207,19 @@ export type PublicationHistoryItem = {
   sentCount: number
   /** docs/decisions.md D172: emails not delivered yet (retried automatically) or given up. */
   failedCount: number
+  /** docs/decisions.md D196: frozen with the publication. */
+  cycleComplete?: boolean
+  lines?: PublicationLineRecord[]
+}
+
+/** docs/decisions.md D196: what one publication did to one line of its period. */
+export type PublicationLineRecord = {
+  lineStableId: string | null
+  lineName: string | null
+  kind: 'FIRST_FOR_LINE' | 'UPDATED'
+  dutyCount: number
+  changedDutyCount: number
+  reconstructed: boolean
 }
 
 /**
@@ -212,13 +227,19 @@ export type PublicationHistoryItem = {
  * `changes` and `history` are only present for someone who can publish.
  */
 export type PublicationState = {
+  /** The period read (docs/planning-cycles.md §7.4). */
+  period?: { stableId: string; number: number }
   published: boolean
+  /** docs/decisions.md D196: whether the last diffusion covered every line that counts in the period. */
+  cycleComplete?: boolean | null
   firstPublishedAt: string | null
   lastPublishedAt: string | null
   lastPublishedBy: PersonName | null
   hasUnpublishedChanges?: boolean
   changes?: PublicationChange[]
   history?: PublicationHistoryItem[]
+  /** docs/decisions.md D196: generated lines of the period never published in it — published only when chosen. */
+  linesAwaitingPublication?: { lineStableId: string; lineName: string }[]
 }
 
 // --- Statistics (docs/decisions.md D132) -------------------------------------------
@@ -248,6 +269,11 @@ export type StatisticsGroup = {
   groupStableId: string
   groupLabel: string
   members: StatisticsMemberRow[]
+  /** docs/decisions.md D201: the line period's state; UNPUBLISHED = provisional. */
+  publication?: 'PUBLISHED' | 'UNPUBLISHED' | null
+  provisional?: boolean
+  /** The planning periods this group sums. */
+  periodNumbers?: number[]
 }
 
 /** One statistics perimeter, with the exact dates it actually covers. */
@@ -255,12 +281,33 @@ export type StatisticsScope = {
   startsAt: string
   endsAt: string
   groups: StatisticsGroup[]
+  /** docs/decisions.md D201: the periods at least one group sums, and the selected period's number. */
+  periodNumbers?: number[]
+  throughPeriodNumber?: number | null
 }
 
-/** GET /api/plannings/{id}/statistics. */
+/**
+ * GET /api/plannings/{id}/statistics[?period=] (docs/decisions.md D201):
+ * `currentPeriod` = the selected period; `cumulative` = the **published**
+ * line periods of periods 1 to the selected one; `provisional` = the
+ * unpublished ones, apart (null for a reader who does not manage the
+ * calendar).
+ */
 export type PlanningStatistics = {
+  period?: {
+    stableId: string
+    number: number
+    startsAt: string
+    endsAt: string
+    lines: {
+      lineStableId: string
+      lineName: string
+      publication: 'PUBLISHED' | 'UNPUBLISHED' | 'NOT_GENERATED'
+    }[]
+  }
   currentPeriod: StatisticsScope
   cumulative: StatisticsScope
+  provisional?: StatisticsScope | null
 }
 
 // --- Publication (docs/decisions.md D133) -------------------------------------------
@@ -270,7 +317,22 @@ export type PublicationLineReadiness = {
   lineName: string
   periodStatus: PlanningPeriodStatus
   hasGeneration: boolean
+  /** docs/decisions.md D196: the line's own verdict in the period. */
+  published?: boolean
+  firstPublishable?: boolean
+  blockers?: PublicationLineBlocker[]
+  /** The line it reinforces (conditional line): published with or after it, never before. */
+  sourceLineStableId?: string | null
 }
+
+export type PublicationLineBlocker =
+  | 'NOT_GENERATED'
+  | 'INCOMPLETE'
+  | 'UNCOVERED_DUTIES'
+  | 'INCONSISTENT_GROUPS'
+  | 'INVALID_ASSIGNMENTS'
+  | 'CONFLICTS'
+  | 'UNDETERMINED_REINFORCEMENTS'
 
 export type PublicationDutyRef = {
   dutyStableId: string
@@ -335,6 +397,10 @@ export type PublicationPreflight = {
   undeterminedDuties: ConditionalPublicationItem[]
   /** Reinforcements not required any more but still held — a warning, never a blocker (D165/D166). */
   superfluousCoverages: ConditionalPublicationItem[]
+  /** docs/decisions.md D196: e.g. EARLIER_PERIOD_UNPUBLISHED — said, never blocking. */
+  warnings?: { code: string; periodNumbers?: number[] }[]
+  /** The period checked (docs/planning-cycles.md §7.4). */
+  period?: { stableId: string; number: number } | null
 }
 
 /** One conditional unit reported by the publication preflight (docs/decisions.md D166), a block once. */
@@ -361,6 +427,8 @@ export type PublicationLineResult = {
   lineName: string
   periodStatus: PlanningPeriodStatus
   alreadyPublished: boolean
+  /** docs/decisions.md D196: what this publication did to the line — null: unchanged, or left as it was. */
+  kind?: 'FIRST_FOR_LINE' | 'UPDATED' | null
 }
 
 /** POST /api/plannings/{id}/publish and /republish. */

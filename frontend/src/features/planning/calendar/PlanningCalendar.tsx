@@ -5,6 +5,7 @@ import { Sheet } from '../detail/Sheet'
 import { ExportModal } from '../export/ExportModal'
 import {
   fetchPlanningResult,
+  fetchPublicationHistoryPdf,
   fetchPublicationPdf,
   fetchPublicationPreflight,
   fetchPublicationState,
@@ -21,8 +22,25 @@ import { blockingIssues, issuesByDuty, type PreflightIssue } from './preflightIs
 import { RepublishModal } from './RepublishModal'
 import './calendar.css'
 
+/** The period shown (docs/planning-cycles.md §7.4). `endsAt` is exclusive, `lastDay` included. */
+export type CalendarPeriod = {
+  stableId: string
+  number: number
+  startsAt: string
+  endsAt: string
+  lastDay: string
+}
+
 type Props = {
   planning: PlanningDetail
+  /**
+   * The selected period: every read and write names it, and an answer for
+   * another period is dropped. Absent on a planning whose single period the
+   * server finds by itself.
+   */
+  period?: CalendarPeriod
+  /** Several periods: the actions say which one ("Publier la période 2"). */
+  showPeriodNumber?: boolean
   /** A publication changed the planning's status: the page re-reads it. */
   onPublished?: () => void
   /**
@@ -87,11 +105,15 @@ function initialMonth(keys: string[]): string | undefined {
  * the holes automatically, open the statistics, publish, republish the
  * changes and download the PDF of the last diffusion (frozen); a member
  * only reads. Once the planning is published, anyone who reads it can also
- * export the calendar as it is now (PDF or Excel, docs/planning-export.md)
- * — two different documents, labelled so they are not confused.
+ * export it (PDF or Excel, docs/planning-export.md): a manager the calendar
+ * as it is now, a member what was diffused (docs/decisions.md D200) — two
+ * different documents from the PDF of the last diffusion, labelled so they
+ * are not confused.
  */
 export function PlanningCalendar({
   planning,
+  period,
+  showPeriodNumber = false,
   onPublished,
   onRequestCompletion,
   jobActive = false,
@@ -114,6 +136,14 @@ export function PlanningCalendar({
     canPublish ? 'loading' : 'idle',
   )
   const preflightRequest = useRef(0)
+  const periodStableId = period?.stableId
+  // An answer is kept only when it describes the period on screen (docs/planning-cycles.md §7).
+  const forThisPeriod = useCallback(
+    (answer: { period?: { stableId: string } | null }) =>
+      !periodStableId || !answer.period || answer.period.stableId === periodStableId,
+    [periodStableId],
+  )
+  const [historyOpen, setHistoryOpen] = useState(false)
   // `seq` makes a second "Voir" on the same duty scroll to it again.
   const [located, setLocated] = useState<{ dutyStableId: string; seq: number } | null>(null)
   const tableRef = useRef<HTMLDivElement>(null)
@@ -123,9 +153,9 @@ export function PlanningCalendar({
   const loadPreflight = useCallback(() => {
     if (!canPublish) return
     const request = ++preflightRequest.current
-    fetchPublicationPreflight(planning.stableId)
+    fetchPublicationPreflight(planning.stableId, periodStableId)
       .then((value) => {
-        if (request !== preflightRequest.current) return
+        if (request !== preflightRequest.current || !forThisPeriod(value)) return
         setPreflight(value)
         setPreflightStatus('ready')
       })
@@ -134,21 +164,24 @@ export function PlanningCalendar({
         setPreflight(null)
         setPreflightStatus('error')
       })
-  }, [planning.stableId, canPublish])
+  }, [planning.stableId, canPublish, periodStableId, forThisPeriod])
 
   // Every read always comes from the server — the current calendar, its publication state, its preflight.
   const fetchAll = useCallback(() => {
-    fetchPlanningResult(planning.stableId)
+    fetchPlanningResult(planning.stableId, periodStableId ? { period: periodStableId } : {})
       .then((value) => {
+        if (!forThisPeriod(value)) return
         setResult(value)
         setError(null)
       })
       .catch(() => setError('Impossible de charger le planning.'))
-    fetchPublicationState(planning.stableId)
-      .then(setState)
+    fetchPublicationState(planning.stableId, periodStableId)
+      .then((value) => {
+        if (forThisPeriod(value)) setState(value)
+      })
       .catch(() => setState(null))
     loadPreflight()
-  }, [planning.stableId, loadPreflight])
+  }, [planning.stableId, periodStableId, forThisPeriod, loadPreflight])
 
   useEffect(() => {
     fetchAll()
@@ -161,10 +194,10 @@ export function PlanningCalendar({
     setStatsKey((key) => key + 1)
   }, [fetchAll, canPublish])
 
-  const model = useMemo(
-    () => (result ? buildCalendar(result.lines, planning.startsAt, planning.endsAt) : null),
-    [result, planning.startsAt, planning.endsAt],
-  )
+  // The period's own days — never the planning's whole envelope (docs/planning-cycles.md §7.4).
+  const from = period?.startsAt ?? planning.startsAt
+  const to = period?.endsAt ?? planning.endsAt
+  const model = useMemo(() => (result ? buildCalendar(result.lines, from, to) : null), [result, from, to])
   const monthKeys = useMemo(() => model?.months.map((m) => m.key) ?? [], [model])
   const shownMonth = month && monthKeys.includes(month) ? month : initialMonth(monthKeys)
   const monthIndex = shownMonth ? monthKeys.indexOf(shownMonth) : -1
@@ -227,20 +260,43 @@ export function PlanningCalendar({
 
   async function handleDownload() {
     try {
-      const blob = await fetchPublicationPdf(planning.stableId)
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `planning-${planning.name}.pdf`
-      link.click()
-      URL.revokeObjectURL(url)
+      const blob = await fetchPublicationPdf(planning.stableId, periodStableId)
+      save(blob, pdfName())
     } catch {
       setNotice({ tone: 'error', text: 'Le PDF n’a pas pu être téléchargé.' })
     }
   }
 
+  /** A past diffusion of this period, exactly as it was sent (docs/decisions.md D173). */
+  async function handleHistoryDownload(publicationStableId: string, publishedAt: string) {
+    try {
+      const blob = await fetchPublicationHistoryPdf(planning.stableId, publicationStableId)
+      save(blob, pdfName(publishedAt.slice(0, 10)))
+    } catch {
+      setNotice({ tone: 'error', text: 'Le PDF n’a pas pu être téléchargé.' })
+    }
+  }
+
+  function pdfName(suffix?: string): string {
+    const periodPart = showPeriodNumber && period ? `-periode-${period.number}` : ''
+    return `planning-${planning.name}${periodPart}${suffix ? `-${suffix}` : ''}.pdf`
+  }
+
+  function save(blob: Blob, name: string) {
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = name
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
   const dirty = state?.hasUnpublishedChanges === true
   const changeCount = state?.changes?.length ?? 0
+  // docs/decisions.md D196: a line generated since, never published — published only when chosen in the dialog.
+  const awaitingLines = state?.linesAwaitingPublication?.length ?? 0
+  const subject = showPeriodNumber && period ? `la période ${period.number}` : 'le planning'
+  const history = state?.history ?? []
 
   return (
     <section className="cal" aria-label="Calendrier du planning">
@@ -250,7 +306,14 @@ export function PlanningCalendar({
             <>
               <span className="pd-badge" data-status="PUBLISHED">
                 <span className="pd-dot" />
-                Planning publié
+                {/* docs/decisions.md D196: the last diffusion did not cover every line of the period. */}
+                {state?.cycleComplete === false
+                  ? showPeriodNumber && period
+                    ? `Période ${period.number} partiellement publiée`
+                    : 'Planning partiellement publié'
+                  : showPeriodNumber && period
+                    ? `Période ${period.number} publiée`
+                    : 'Planning publié'}
               </span>
               {state?.lastPublishedAt && (
                 <span className="pd-muted">
@@ -267,7 +330,7 @@ export function PlanningCalendar({
           ) : (
             <span className="pd-badge" data-status="GENERATED">
               <span className="pd-dot" />
-              Non publié
+              {showPeriodNumber && period ? `Période ${period.number} non publiée` : 'Non publié'}
             </span>
           )}
         </div>
@@ -299,11 +362,9 @@ export function PlanningCalendar({
               )}
             </button>
           )}
-          {canEdit && (
-            <button type="button" className="pd-btn pd-btn-secondary" onClick={() => setDialog('stats')}>
-              Statistiques
-            </button>
-          )}
+          <button type="button" className="pd-btn pd-btn-secondary" onClick={() => setDialog('stats')}>
+            Statistiques
+          </button>
           {published && (
             <button
               type="button"
@@ -319,7 +380,11 @@ export function PlanningCalendar({
               type="button"
               className="pd-btn pd-btn-secondary"
               onClick={() => setDialog('export')}
-              title="PDF ou Excel du calendrier tel qu’il est maintenant"
+              title={
+                canEdit
+                  ? 'PDF ou Excel du calendrier tel qu’il est maintenant'
+                  : 'PDF ou Excel du planning diffusé'
+              }
             >
               Exporter
             </button>
@@ -330,16 +395,16 @@ export function PlanningCalendar({
                 type="button"
                 className="pd-btn pd-btn-primary"
                 onClick={() => setDialog('republish')}
-                disabled={!dirty || jobActive}
+                disabled={(!dirty && awaitingLines === 0) || jobActive}
                 title={
                   jobActive
                     ? 'Un calcul est en cours sur ce planning'
-                    : dirty
+                    : dirty || awaitingLines > 0
                       ? undefined
                       : 'Aucune modification depuis la dernière diffusion'
                 }
               >
-                Republier les modifications
+                {!dirty && awaitingLines > 0 ? 'Publier les nouvelles lignes' : 'Republier les modifications'}
               </button>
             ) : (
               <button
@@ -349,11 +414,50 @@ export function PlanningCalendar({
                 disabled={jobActive}
                 title={jobActive ? 'Un calcul est en cours sur ce planning' : undefined}
               >
-                Publier le planning
+                {showPeriodNumber && period ? `Publier la période ${period.number}` : 'Publier le planning'}
               </button>
             ))}
         </div>
       </div>
+
+      {canPublish && history.length > 0 && (
+        <div className="cal-history">
+          <button
+            type="button"
+            className="pd-link"
+            aria-expanded={historyOpen}
+            onClick={() => setHistoryOpen((value) => !value)}
+          >
+            <Icon name={historyOpen ? 'down' : 'right'} size={16} strokeWidth={2} />
+            Diffusions de {subject} ({history.length})
+          </button>
+          {historyOpen && (
+            <ul className="cal-history__list" aria-label={`Diffusions de ${subject}`}>
+              {history.map((item) => (
+                <li key={item.stableId}>
+                  <span>
+                    {item.kind === 'FIRST' ? 'Publication' : 'Republication'} du{' '}
+                    {publishedAtLabel(item.publishedAt, planning.timezone)}
+                    {item.lines && item.lines.length > 0 && (
+                      <span className="pd-muted">
+                        {' '}
+                        · {item.lines.map((line) => line.lineName ?? 'Ligne supprimée').join(', ')}
+                      </span>
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn--sm btn--secondary"
+                    onClick={() => void handleHistoryDownload(item.stableId, item.publishedAt)}
+                  >
+                    PDF diffusé
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {notice && (
         <p
@@ -566,13 +670,18 @@ export function PlanningCalendar({
 
       {dialog === 'stats' && (
         <Sheet title="Statistiques" wide onClose={() => setDialog(null)}>
-          <StatisticsPanel planningStableId={planning.stableId} refreshKey={statsKey} />
+          <StatisticsPanel
+            planningStableId={planning.stableId}
+            periodStableId={periodStableId}
+            refreshKey={statsKey}
+          />
         </Sheet>
       )}
 
       {dialog === 'publish' && (
         <PublishModal
           planningStableId={planning.stableId}
+          periodStableId={periodStableId}
           onClose={() => setDialog(null)}
           onLocate={(dutyStableId) => {
             setDialog(null)
@@ -585,11 +694,18 @@ export function PlanningCalendar({
         />
       )}
 
-      {dialog === 'export' && <ExportModal planning={planning} onClose={() => setDialog(null)} />}
+      {dialog === 'export' && (
+        <ExportModal
+          planning={planning}
+          period={showPeriodNumber ? period : undefined}
+          onClose={() => setDialog(null)}
+        />
+      )}
 
       {dialog === 'republish' && state?.changes && (
         <RepublishModal
           planningStableId={planning.stableId}
+          periodStableId={periodStableId}
           changes={state.changes}
           onClose={() => setDialog(null)}
           onLocate={(dutyStableId) => {

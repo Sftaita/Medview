@@ -1,4 +1,5 @@
 import { apiFetch, apiFetchBlob } from '../../../lib/apiClient'
+import { withPeriod } from '../../periods/api'
 import type {
   DependentImpact,
   PlanningResult,
@@ -19,7 +20,7 @@ import type { PlanningJobResponse } from '../pilot/types'
  */
 export function fetchPlanningResult(
   planningStableId: string,
-  filter: { from?: string; to?: string } = {},
+  filter: { from?: string; to?: string; period?: string } = {},
 ): Promise<PlanningResult> {
   const query = new URLSearchParams()
   for (const [name, value] of Object.entries(filter)) {
@@ -83,38 +84,75 @@ export function unassignDuty(
  * "Compléter automatiquement" (docs/decisions.md D145): fills the holes only, every existing
  * assignment kept. Answers at once with a QUEUED job run by the worker (D149).
  */
-export function completePlanning(planningStableId: string): Promise<PlanningJobResponse> {
-  return apiFetch<PlanningJobResponse>(`/api/plannings/${planningStableId}/complete`, {
-    method: 'POST',
-    body: {},
-  })
+export function completePlanning(
+  planningStableId: string,
+  periodStableId?: string,
+): Promise<PlanningJobResponse> {
+  return apiFetch<PlanningJobResponse>(
+    withPeriod(`/api/plannings/${planningStableId}/complete`, periodStableId),
+    {
+      method: 'POST',
+      body: {},
+    },
+  )
 }
 
 /** Published or not, since when, and — for a manager — what changed since the last diffusion. */
-export function fetchPublicationState(planningStableId: string): Promise<PublicationState> {
-  return apiFetch<PublicationState>(`/api/plannings/${planningStableId}/publication-state`)
-}
-
-/** "Republier les modifications": emails only the people concerned by an impacted date. */
-export function republishPlanning(planningStableId: string): Promise<PublicationResult> {
-  return apiFetch<PublicationResult>(`/api/plannings/${planningStableId}/republish`, {
-    method: 'POST',
-    body: {},
-  })
-}
-
-/** The PDF of the last diffusion, exactly as it was published. */
-export function fetchPublicationPdf(planningStableId: string): Promise<Blob> {
-  return apiFetchBlob(`/api/plannings/${planningStableId}/publication.pdf`)
+export function fetchPublicationState(
+  planningStableId: string,
+  periodStableId?: string,
+): Promise<PublicationState> {
+  return apiFetch<PublicationState>(
+    withPeriod(`/api/plannings/${planningStableId}/publication-state`, periodStableId),
+  )
 }
 
 /**
- * Duty counts by weekday, two perimeters — "this period" and "cumulative"
- * (docs/decisions.md D132). Purely descriptive, read from the live current
- * calendar state; never a fairness judgment.
+ * "Republier les modifications": emails only the people concerned by an
+ * impacted date. `newLines`: lines never published yet, published with it —
+ * only when chosen explicitly (docs/decisions.md D196).
  */
-export function fetchPlanningStatistics(planningStableId: string): Promise<PlanningStatistics> {
-  return apiFetch<PlanningStatistics>(`/api/plannings/${planningStableId}/statistics`)
+export function republishPlanning(
+  planningStableId: string,
+  newLines: string[] = [],
+  periodStableId?: string,
+): Promise<PublicationResult> {
+  return apiFetch<PublicationResult>(
+    withPeriod(`/api/plannings/${planningStableId}/republish`, periodStableId),
+    {
+      method: 'POST',
+      body: newLines.length > 0 ? { newLines } : {},
+    },
+  )
+}
+
+/** The PDF of the last diffusion, exactly as it was published. */
+export function fetchPublicationPdf(planningStableId: string, periodStableId?: string): Promise<Blob> {
+  return apiFetchBlob(withPeriod(`/api/plannings/${planningStableId}/publication.pdf`, periodStableId))
+}
+
+/** The stored PDF of one past publication, byte for byte (docs/decisions.md D173, D196). */
+export function fetchPublicationHistoryPdf(
+  planningStableId: string,
+  publicationStableId: string,
+): Promise<Blob> {
+  return apiFetchBlob(`/api/plannings/${planningStableId}/publications/${publicationStableId}/pdf`)
+}
+
+/**
+ * Duty counts by weekday — the selected period, the published cumulative and
+ * the provisional line periods (docs/decisions.md D132, D201). Purely
+ * descriptive, read from the live current calendar state; never a fairness
+ * judgment. `periodStableId` is required by the server on a planning with
+ * several periods.
+ */
+export function fetchPlanningStatistics(
+  planningStableId: string,
+  periodStableId?: string,
+): Promise<PlanningStatistics> {
+  return apiFetch<PlanningStatistics>(
+    withPeriod(`/api/plannings/${planningStableId}/statistics`, periodStableId),
+  )
 }
 
 /**
@@ -122,19 +160,32 @@ export function fetchPlanningStatistics(planningStableId: string): Promise<Plann
  * historical result) can really be published right now (docs/decisions.md
  * D133).
  */
-export function fetchPublicationPreflight(planningStableId: string): Promise<PublicationPreflight> {
-  return apiFetch<PublicationPreflight>(`/api/plannings/${planningStableId}/publication-preflight`)
+export function fetchPublicationPreflight(
+  planningStableId: string,
+  periodStableId?: string,
+): Promise<PublicationPreflight> {
+  return apiFetch<PublicationPreflight>(
+    withPeriod(`/api/plannings/${planningStableId}/publication-preflight`, periodStableId),
+  )
 }
 
 /**
  * Publishes the planning — the server always re-runs the real preflight
- * here, never trusting a GET loaded moments earlier.
+ * here, never trusting a GET loaded moments earlier. Without `lines`, all or
+ * nothing; with `lines`, those lines only (docs/decisions.md D196).
  */
-export function publishPlanning(planningStableId: string): Promise<PublicationResult> {
-  return apiFetch<PublicationResult>(`/api/plannings/${planningStableId}/publish`, {
-    method: 'POST',
-    body: {},
-  })
+export function publishPlanning(
+  planningStableId: string,
+  lines?: string[],
+  periodStableId?: string,
+): Promise<PublicationResult> {
+  return apiFetch<PublicationResult>(
+    withPeriod(`/api/plannings/${planningStableId}/publish`, periodStableId),
+    {
+      method: 'POST',
+      body: lines ? { lines } : {},
+    },
+  )
 }
 
 /**

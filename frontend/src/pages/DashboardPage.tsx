@@ -229,6 +229,18 @@ function PlanningRow({
   const months = monthSegments(s, e)
   const inside = upcoming.filter((u) => u.b >= s && u.a <= e)
   const role = planning.myLineName ? ` · ${planning.myLineName}` : ''
+  // docs/planning-cycles.md §7.1 (lot L6): the status of the period that matters now — never one global "published"
+  // once the planning has several periods.
+  const shown = planning.currentPeriod ?? planning.nextPeriod ?? planning.latestPeriod
+  const severalPeriods = (planning.periodCount ?? 1) > 1 && shown !== undefined && shown !== null
+  const published = shown
+    ? shown.status === 'published' || shown.status === 'partially_published'
+    : planning.published === true
+  const subject = severalPeriods ? `Période ${shown.number}` : 'Planning'
+  const publishedLabel =
+    severalPeriods && shown.status === 'partially_published'
+      ? `${subject} partiellement publiée.`
+      : `${subject} ${severalPeriods ? 'publiée' : 'publié'}.`
 
   return (
     <Link to={`/plannings/${planning.stableId}`} className="db-planning">
@@ -310,9 +322,9 @@ function PlanningRow({
 
       <div className="db-note">
         <Icon name="moon" size={18} strokeWidth={2} className="db-note-icon" />
-        {planning.published ? (
+        {published ? (
           <span>
-            Planning publié. {/* Not a nested <a>: the whole row already is one. */}
+            {publishedLabel} {/* Not a nested <a>: the whole row already is one. */}
             <span
               className="db-note-link"
               onClick={(event) => {
@@ -325,7 +337,7 @@ function PlanningRow({
             </span>
           </span>
         ) : (
-          <span>Planning en préparation. Vos gardes apparaîtront ici dès sa publication.</span>
+          <span>{subject} en préparation. Vos gardes apparaîtront ici dès sa publication.</span>
         )}
       </div>
     </Link>

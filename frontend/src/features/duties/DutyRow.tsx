@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { Icon } from '../../components/Icon'
 import { daysBetween, monthShort, relativeDays } from '../dashboard/dates'
 import { dutySpan, dutyWhat, formatDutyDates, reinforcementLabel } from './dutyDates'
+import { periodLabel } from './periodLabel'
 import type { MyDuty } from './types'
 
 /**
@@ -20,7 +21,10 @@ export function DutyRow({ duty, today }: { duty: MyDuty; today?: Date }) {
       <span className="db-row-text">
         <span className="db-row-title db-num">{formatDutyDates(duty)}</span>
         <span className="db-muted">
-          {duty.planningName} · {duty.lineName} · {dutyWhat(duty)}
+          {duty.planningName}
+          {/* Lots L6/L7 (D198): the period is named once the planning has several. */}
+          {periodLabel(duty.period) ? ` · ${periodLabel(duty.period)}` : ''} · {duty.lineName} ·{' '}
+          {dutyWhat(duty)}
         </span>
         {reinforcement && (
           <span className={`db-pill db-pill-${reinforcement.tone} duty-reinforcement`}>

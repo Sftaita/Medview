@@ -22,6 +22,8 @@ type Props = {
   planningStableId: string
   /** Bumped by the parent when something changed elsewhere (an extension opened a collection): reloads the list. */
   reloadToken?: number
+  /** Only the collections of this period (docs/planning-cycles.md §5.9); every one without it. */
+  periodStableId?: string
 }
 
 type Filter = 'ALL' | 'ACKNOWLEDGED' | 'PENDING'
@@ -44,18 +46,22 @@ function openedLabel(collection: AvailabilityCollection): string {
  * closed ones stay listed as history and are never recomputed. For a plain
  * member: only their own answer to each collection.
  */
-export function AvailabilityCollectionsPanel({ planningStableId, reloadToken = 0 }: Props) {
+export function AvailabilityCollectionsPanel({ planningStableId, reloadToken = 0, periodStableId }: Props) {
   const [collections, setCollections] = useState<AvailabilityCollection[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(() => {
     fetchPlanningCollections(planningStableId)
       .then((result) => {
-        setCollections(result)
+        setCollections(
+          periodStableId
+            ? result.filter((collection) => collection.period?.stableId === periodStableId)
+            : result,
+        )
         setError(null)
       })
       .catch(() => setError('Impossible de charger les collectes de disponibilités.'))
-  }, [planningStableId])
+  }, [planningStableId, periodStableId])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -82,7 +88,11 @@ export function AvailabilityCollectionsPanel({ planningStableId, reloadToken = 0
         </p>
       )}
       {collections !== null && collections.length === 0 && (
-        <p className="muted">Aucune collecte de disponibilités pour ce planning.</p>
+        <p className="muted">
+          {periodStableId
+            ? 'Aucune collecte de disponibilités pour cette période.'
+            : 'Aucune collecte de disponibilités pour ce planning.'}
+        </p>
       )}
       <ul className="list collections">
         {(collections ?? []).map((collection, index) => (

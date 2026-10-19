@@ -10,6 +10,8 @@ import type { MemberPeriod, MemberStatusDetail } from './types'
 type Props = {
   planningStableId: string
   memberStableId: string
+  /** The period followed (docs/planning-cycles.md §7.4): its collections, its reminders. */
+  periodStableId?: string
   timezone: string
   /** Periods show their year only when it differs from this one (the planning's first year). */
   referenceYear: number
@@ -30,6 +32,7 @@ type Feedback = { tone: 'success' | 'error'; text: string }
 export function MemberDrawer({
   planningStableId,
   memberStableId,
+  periodStableId,
   timezone,
   referenceYear,
   onClose,
@@ -44,13 +47,13 @@ export function MemberDrawer({
 
   const load = useCallback(
     () =>
-      fetchMemberStatus(planningStableId, memberStableId)
+      fetchMemberStatus(planningStableId, memberStableId, periodStableId)
         .then((result) => {
           setDetail(result)
           setError(null)
         })
         .catch(() => setError('Impossible de charger ce membre.')),
-    [planningStableId, memberStableId],
+    [planningStableId, memberStableId, periodStableId],
   )
 
   useEffect(() => {
@@ -66,7 +69,7 @@ export function MemberDrawer({
     setSending(true)
     setFeedback(null)
     try {
-      await remindMember(planningStableId, memberStableId)
+      await remindMember(planningStableId, memberStableId, periodStableId)
       setFeedback({ tone: 'success', text: 'Rappel envoyé.' })
       await load()
       onReminderSent()

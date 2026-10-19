@@ -400,3 +400,27 @@ button.cal-block:hover {
   color: var(--text-muted);
   font-weight: 600;
 }
+/* Lot L6: the diffusions of the period, each with the PDF stored when it was sent (docs/decisions.md D173). */
+.cal-history {
+  margin: 0 0 12px;
+}
+
+.cal-history__list {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cal-history__list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+}

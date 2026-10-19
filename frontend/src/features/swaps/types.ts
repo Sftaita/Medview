@@ -13,6 +13,8 @@ export type SwapUnit = {
   dates: string[]
   startsAt: string
   endsAt: string
+  /** The planning period of the unit (D198); a swap never crosses two. */
+  period: { stableId: string; number: number; count?: number } | null
 }
 
 export type SwapPerson = { userStableId: string; firstName: string; lastName: string }

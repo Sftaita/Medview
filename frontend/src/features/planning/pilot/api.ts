@@ -1,4 +1,5 @@
 import { apiDownloadGet, apiFetch, type DownloadedFile } from '../../../lib/apiClient'
+import { withPeriod } from '../../periods/api'
 import type {
   CollectionStatus,
   GenerationPreflight,
@@ -12,16 +13,26 @@ import type {
   RuleSetStatus,
 } from './types'
 
-export function fetchCollectionStatus(planningStableId: string): Promise<CollectionStatus> {
-  return apiFetch<CollectionStatus>(`/api/plannings/${planningStableId}/collection-status`)
+/** The follow-up of one period's collections (`periodStableId`, docs/planning-cycles.md §7.4). */
+export function fetchCollectionStatus(
+  planningStableId: string,
+  periodStableId?: string,
+): Promise<CollectionStatus> {
+  return apiFetch<CollectionStatus>(
+    withPeriod(`/api/plannings/${planningStableId}/collection-status`, periodStableId),
+  )
 }
 
 export function fetchMemberStatus(
   planningStableId: string,
   memberStableId: string,
+  periodStableId?: string,
 ): Promise<MemberStatusDetail> {
   return apiFetch<MemberStatusDetail>(
-    `/api/plannings/${planningStableId}/members/${memberStableId}/availability-status`,
+    withPeriod(
+      `/api/plannings/${planningStableId}/members/${memberStableId}/availability-status`,
+      periodStableId,
+    ),
   )
 }
 
@@ -29,29 +40,52 @@ export function fetchMemberStatus(
 export function updatePlanningSettings(
   planningStableId: string,
   availabilityDeadline: string | null,
+  periodStableId?: string,
 ): Promise<PlanningSettingsResult> {
-  return apiFetch<PlanningSettingsResult>(`/api/plannings/${planningStableId}/settings`, {
-    method: 'PATCH',
-    body: { availabilityDeadline },
-  })
+  return apiFetch<PlanningSettingsResult>(
+    withPeriod(`/api/plannings/${planningStableId}/settings`, periodStableId),
+    {
+      method: 'PATCH',
+      body: { availabilityDeadline },
+    },
+  )
 }
 
-export function remindMember(planningStableId: string, memberStableId: string): Promise<ReminderSent> {
-  return apiFetch<ReminderSent>(`/api/plannings/${planningStableId}/members/${memberStableId}/reminders`, {
-    method: 'POST',
-    body: {},
-  })
+export function remindMember(
+  planningStableId: string,
+  memberStableId: string,
+  periodStableId?: string,
+): Promise<ReminderSent> {
+  return apiFetch<ReminderSent>(
+    withPeriod(`/api/plannings/${planningStableId}/members/${memberStableId}/reminders`, periodStableId),
+    { method: 'POST', body: {} },
+  )
 }
 
-export function remindPendingMembers(planningStableId: string): Promise<PendingRemindersResult> {
-  return apiFetch<PendingRemindersResult>(`/api/plannings/${planningStableId}/reminders/pending`, {
-    method: 'POST',
-    body: {},
-  })
+export function remindPendingMembers(
+  planningStableId: string,
+  periodStableId?: string,
+): Promise<PendingRemindersResult> {
+  return apiFetch<PendingRemindersResult>(
+    withPeriod(`/api/plannings/${planningStableId}/reminders/pending`, periodStableId),
+    { method: 'POST', body: {} },
+  )
 }
 
-export function fetchGenerationPreflight(planningStableId: string): Promise<GenerationPreflight> {
-  return apiFetch<GenerationPreflight>(`/api/plannings/${planningStableId}/generation-preflight`)
+/**
+ * Which period, and which scope: `unlocked_lines` generates only the lines not
+ * locked yet (docs/decisions.md D195) — always chosen explicitly, never deduced.
+ */
+export type GenerationTarget = { periodStableId?: string; scope?: 'unlocked_lines' }
+
+export function fetchGenerationPreflight(
+  planningStableId: string,
+  target: GenerationTarget = {},
+): Promise<GenerationPreflight> {
+  const path = withPeriod(`/api/plannings/${planningStableId}/generation-preflight`, target.periodStableId)
+  return apiFetch<GenerationPreflight>(
+    target.scope ? `${path}${path.includes('?') ? '&' : '?'}scope=${target.scope}` : path,
+  )
 }
 
 /** `restPolicy` omitted (or every field left at its disabled default) means
@@ -61,15 +95,17 @@ export function launchGeneration(
   planningStableId: string,
   restPolicy?: RestPolicyChoice,
   overrideStaleSurgicalHubData = false,
+  target: GenerationTarget = {},
 ): Promise<PlanningJobResponse> {
   // Answers at once with a QUEUED job (docs/decisions.md D149): the worker runs the solve.
   // The SurgicalHub override is only ever sent when the creator ticked it (decision D8).
-  return apiFetch<PlanningJobResponse>(`/api/plannings/${planningStableId}/generations`, {
-    method: 'POST',
-    body: overrideStaleSurgicalHubData
-      ? { ...(restPolicy ?? {}), overrideStaleSurgicalHubData: true }
-      : (restPolicy ?? {}),
-  })
+  const body: Record<string, unknown> = { ...(restPolicy ?? {}) }
+  if (overrideStaleSurgicalHubData) body.overrideStaleSurgicalHubData = true
+  if (target.scope) body.scope = target.scope
+  return apiFetch<PlanningJobResponse>(
+    withPeriod(`/api/plannings/${planningStableId}/generations`, target.periodStableId),
+    { method: 'POST', body },
+  )
 }
 
 /** The active engine job of the planning, or its most recent one, or null. */
@@ -94,8 +130,13 @@ export function activateRuleSet(lineStableId: string): Promise<RuleSetStatus> {
 /**
  * "Exporter les absences (PDF)" (docs/decisions.md D181): everyone's declared
  * unavailabilities over the planning period, as of now. The server decides who
- * is in it and checks the right; only the planning is sent.
+ * is in it and checks the right; only the planning — and, on a planning with
+ * periods, the period followed (docs/decisions.md D200) — is sent.
  */
-export function downloadAbsencesPdf(planningStableId: string): Promise<DownloadedFile> {
-  return apiDownloadGet(`/api/plannings/${planningStableId}/availability-export.pdf`)
+export function downloadAbsencesPdf(
+  planningStableId: string,
+  periodStableId?: string,
+): Promise<DownloadedFile> {
+  const query = periodStableId ? `?period=${encodeURIComponent(periodStableId)}` : ''
+  return apiDownloadGet(`/api/plannings/${planningStableId}/availability-export.pdf${query}`)
 }

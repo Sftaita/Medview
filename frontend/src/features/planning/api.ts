@@ -133,7 +133,7 @@ export function revokeTeamInvitation(
  */
 export function fetchAssignments(
   planningStableId: string,
-  filter: { userStableId?: string; from?: string; to?: string } = {},
+  filter: { userStableId?: string; from?: string; to?: string; period?: string } = {},
 ): Promise<PlanningAssignments> {
   const query = new URLSearchParams()
   for (const [name, value] of Object.entries(filter)) {

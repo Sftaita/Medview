@@ -89,7 +89,8 @@ describe('PublishModal', () => {
             member: { teamMemberStableId: 'm-carol', firstName: 'Carol', lastName: 'Dubois' },
             source: { dutyStableId: 's1', date: '2027-01-05', holder: null },
             reason: 'HOLDER_HAS_NO_TRIGGER',
-            explanation: 'Renfort non requis : Anne Admin (garde source du 5 janvier 2027) ne déclenche pas de renfort. Carol Dubois reste affecté ; son retrait n’est pas obligatoire.',
+            explanation:
+              'Renfort non requis : Anne Admin (garde source du 5 janvier 2027) ne déclenche pas de renfort. Carol Dubois reste affecté ; son retrait n’est pas obligatoire.',
           },
         ],
       }),
@@ -98,7 +99,9 @@ describe('PublishModal', () => {
 
     expect(await screen.findByText(/complet et cohérent/)).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /ils n’empêchent pas la publication/ })).toBeInTheDocument()
-    expect(within(screen.getByRole('list', { name: 'Avertissements' })).getByText(/Carol Dubois reste affecté/)).toBeInTheDocument()
+    expect(
+      within(screen.getByRole('list', { name: 'Avertissements' })).getByText(/Carol Dubois reste affecté/),
+    ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Publier' })).toBeInTheDocument()
   })
 
@@ -107,9 +110,30 @@ describe('PublishModal', () => {
       preflight({
         publishable: false,
         uncoveredDuties: [
-          { dutyStableId: 'd1', date: '2027-01-05', dutyTypeName: 'Garde', lineStableId: 'l1', lineName: 'Seniors', conditional: false },
-          { dutyStableId: 'r1', date: '2027-01-06', dutyTypeName: 'Garde', lineStableId: 'l2', lineName: 'Renfort', conditional: true },
-          { dutyStableId: 'r2', date: '2027-01-07', dutyTypeName: 'Garde', lineStableId: 'l2', lineName: 'Renfort', conditional: true },
+          {
+            dutyStableId: 'd1',
+            date: '2027-01-05',
+            dutyTypeName: 'Garde',
+            lineStableId: 'l1',
+            lineName: 'Seniors',
+            conditional: false,
+          },
+          {
+            dutyStableId: 'r1',
+            date: '2027-01-06',
+            dutyTypeName: 'Garde',
+            lineStableId: 'l2',
+            lineName: 'Renfort',
+            conditional: true,
+          },
+          {
+            dutyStableId: 'r2',
+            date: '2027-01-07',
+            dutyTypeName: 'Garde',
+            lineStableId: 'l2',
+            lineName: 'Renfort',
+            conditional: true,
+          },
         ],
       }),
     )
@@ -118,7 +142,9 @@ describe('PublishModal', () => {
     expect(await screen.findByText('Publication impossible.')).toBeInTheDocument()
     const blockers = screen.getByRole('list', { name: 'Points bloquants' })
     expect(within(blockers).getByText(/1 garde obligatoire reste non couverte/)).toBeInTheDocument()
-    expect(within(blockers).getByText(/2 renforts requis ne sont pas attribués \(ligne « Renfort »\)/)).toBeInTheDocument()
+    expect(
+      within(blockers).getByText(/2 renforts requis ne sont pas attribués \(ligne « Renfort »\)/),
+    ).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Publier' })).not.toBeInTheDocument()
   })
 
@@ -138,7 +164,8 @@ describe('PublishModal', () => {
             member: null,
             source: { dutyStableId: 's1', date: '2027-01-05', holder: null },
             reason: 'SOURCE_UNASSIGNED',
-            explanation: 'La garde source du 5 janvier 2027 n’a pas de titulaire : impossible de savoir si ce renfort est requis.',
+            explanation:
+              'La garde source du 5 janvier 2027 n’a pas de titulaire : impossible de savoir si ce renfort est requis.',
           },
         ],
       }),
@@ -156,7 +183,13 @@ describe('PublishModal', () => {
         republishable: false,
         invalidAssignments: [
           {
-            duty: { dutyStableId: 'd29', date: '2026-10-29', dutyTypeName: 'Garde', lineStableId: 'l1', lineName: 'Seniors' },
+            duty: {
+              dutyStableId: 'd29',
+              date: '2026-10-29',
+              dutyTypeName: 'Garde',
+              lineStableId: 'l1',
+              lineName: 'Seniors',
+            },
             unitStableKey: 'd29',
             dates: ['2026-10-29'],
             dutyStableIds: ['d29'],
@@ -168,12 +201,16 @@ describe('PublishModal', () => {
       }),
     )
     const onLocate = vi.fn()
-    render(<PublishModal planningStableId="plan-1" onClose={vi.fn()} onPublished={vi.fn()} onLocate={onLocate} />)
+    render(
+      <PublishModal planningStableId="plan-1" onClose={vi.fn()} onPublished={vi.fn()} onLocate={onLocate} />,
+    )
 
     const list = await screen.findByRole('list', { name: 'Affectations à corriger' })
     expect(within(list).getByText('Jeudi 29 octobre · ligne « Seniors »')).toBeInTheDocument()
     expect(within(list).getByText('Membre Un a déclaré une indisponibilité ce jour-là.')).toBeInTheDocument()
-    expect(within(list).getByText(/Règle : personne n’est de garde un jour où elle s’est déclarée indisponible/)).toBeInTheDocument()
+    expect(
+      within(list).getByText(/Règle : personne n’est de garde un jour où elle s’est déclarée indisponible/),
+    ).toBeInTheDocument()
     fireEvent.click(within(list).getByRole('button', { name: 'Voir dans le calendrier' }))
     expect(onLocate).toHaveBeenCalledWith('d29')
     expect(screen.queryByRole('button', { name: 'Publier' })).not.toBeInTheDocument()
@@ -220,5 +257,89 @@ describe('PublishModal', () => {
 
     expect(onClose).toHaveBeenCalledOnce()
     expect(api.requests('POST', '/api/plannings/plan-1/publish')).toHaveLength(0)
+  })
+})
+
+describe('PublishModal — partial publication (docs/decisions.md D196)', () => {
+  function line(id: string, name: string, ready: boolean): PublicationPreflight['lines'][number] {
+    return {
+      lineStableId: id,
+      lineName: name,
+      periodStatus: ready ? 'GENERATED' : 'DRAFT',
+      hasGeneration: ready,
+      published: false,
+      firstPublishable: ready,
+      blockers: ready ? [] : ['NOT_GENERATED'],
+      sourceLineStableId: null,
+    }
+  }
+
+  it('all ready: all or nothing, as before — no line list sent', async () => {
+    const api = stubPreflight(preflight({ publishable: true, lines: [line('l1', 'Seniors', true)] }))
+    renderModal()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Publier' }))
+
+    await screen.findByText('Planning publié')
+    expect(api.requests('POST', '/api/plannings/plan-1/publish')[0].body).toEqual({})
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+  })
+
+  it('some lines not ready: they are shown, and only the lines explicitly checked are published', async () => {
+    const api = stubPreflight(
+      preflight({
+        publishable: false,
+        lines: [line('l1', 'Seniors', true), line('l2', 'Juniors', false), line('l3', 'Internes', true)],
+      }),
+      publicationResult({
+        lines: [
+          {
+            lineStableId: 'l1',
+            lineName: 'Seniors',
+            periodStatus: 'PUBLISHED',
+            alreadyPublished: false,
+            kind: 'FIRST_FOR_LINE',
+          },
+          {
+            lineStableId: 'l2',
+            lineName: 'Juniors',
+            periodStatus: 'DRAFT',
+            alreadyPublished: false,
+            kind: null,
+          },
+        ],
+      }),
+    )
+    renderModal()
+
+    expect(await screen.findByText(/Toutes les lignes ne sont pas prêtes/)).toBeInTheDocument()
+    const send = screen.getByRole('button', { name: 'Publier les lignes cochées' })
+    expect(send).toBeDisabled()
+    expect(screen.getByRole('checkbox', { name: /Juniors/ })).toBeDisabled()
+    expect(screen.getByText(/pas encore générée/)).toBeInTheDocument()
+    const seniors = screen.getByRole('checkbox', { name: /Seniors/ })
+    expect(seniors).not.toBeChecked()
+    // Ready too, but never chosen: a partial publication never adds a line by itself.
+    expect(screen.getByRole('checkbox', { name: /Internes/ })).not.toBeChecked()
+    fireEvent.click(seniors)
+    fireEvent.click(send)
+
+    await screen.findByText('Planning publié')
+    expect(api.requests('POST', '/api/plannings/plan-1/publish')[0].body).toEqual({ lines: ['l1'] })
+    expect(screen.getByLabelText('Résultat de la publication')).toHaveTextContent('Juniors — non publiée.')
+  })
+
+  it('checks and publishes the selected period — named in both requests (lot L6)', async () => {
+    const api = stubPreflight(preflight())
+    render(
+      <PublishModal planningStableId="plan-1" periodStableId="c2" onClose={vi.fn()} onPublished={vi.fn()} />,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Publier' }))
+    await waitFor(() => expect(api.requests('POST', '/api/plannings/plan-1/publish')).toHaveLength(1))
+    expect(api.requests('GET', '/api/plannings/plan-1/publication-preflight')[0].query.get('period')).toBe(
+      'c2',
+    )
+    expect(api.requests('POST', '/api/plannings/plan-1/publish')[0].query.get('period')).toBe('c2')
   })
 })
