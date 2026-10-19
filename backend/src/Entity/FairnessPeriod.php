@@ -102,6 +102,21 @@ class FairnessPeriod
         $this->endsAt = $endsAt;
     }
 
+    /**
+     * Moves the end when the last cycle of the Planning gets a new end or is
+     * deleted (docs/planning-cycles.md §3.5, §5.2, §5.3): the registry of the
+     * team follows its periods. The caller checks that no period of the team
+     * lies beyond the new end.
+     */
+    public function changeEnd(\DateTimeImmutable $endsAt): void
+    {
+        if ($endsAt <= $this->startsAt) {
+            throw new \InvalidArgumentException('endsAt must be strictly after startsAt.');
+        }
+
+        $this->endsAt = $endsAt;
+    }
+
     public function contains(\DateTimeImmutable $date): bool
     {
         return $date >= $this->startsAt && $date < $this->endsAt;

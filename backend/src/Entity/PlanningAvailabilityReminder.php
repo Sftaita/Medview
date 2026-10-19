@@ -24,6 +24,7 @@ use Symfony\Component\Uid\Uuid;
  */
 #[ORM\Entity(repositoryClass: PlanningAvailabilityReminderRepository::class)]
 #[ORM\Table(name: 'planning_availability_reminders')]
+#[ORM\Index(columns: ['planning_cycle_id'], name: 'idx_planning_availability_reminders_planning_cycle_id')]
 #[ORM\UniqueConstraint(name: 'uniq_planning_availability_reminders_stable_id', columns: ['stable_id'])]
 #[ORM\Index(columns: ['planning_id', 'recipient_id', 'sent_at'], name: 'idx_planning_availability_reminders_lookup')]
 class PlanningAvailabilityReminder
@@ -39,6 +40,15 @@ class PlanningAvailabilityReminder
     #[ORM\ManyToOne(targetEntity: Planning::class)]
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
     private Planning $planning;
+
+    /**
+     * The "période" of the Planning this row belongs to (docs/planning-cycles.md).
+     * Nullable until lot L2 only, so that the previous release keeps writing on
+     * this schema; this release always sets it before the first flush.
+     */
+    #[ORM\ManyToOne(targetEntity: PlanningCycle::class)]
+    #[ORM\JoinColumn(name: 'planning_cycle_id', nullable: true, onDelete: 'RESTRICT')]
+    private ?PlanningCycle $cycle = null;
 
     #[ORM\ManyToOne(targetEntity: User::class)]
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
@@ -89,6 +99,27 @@ class PlanningAvailabilityReminder
     public function getStableId(): Uuid
     {
         return $this->stableId;
+    }
+
+    public function getCycle(): ?PlanningCycle
+    {
+        return $this->cycle;
+    }
+
+    /** Set once, before the row is first written: a row never changes cycle. */
+    public function assignToCycle(PlanningCycle $cycle): void
+    {
+        if (null !== $this->cycle) {
+            if ($this->cycle === $cycle) {
+                return;
+            }
+            throw new \LogicException('A row never changes cycle.');
+        }
+        if ($cycle->getPlanning() !== $this->planning) {
+            throw new \InvalidArgumentException('The cycle must belong to the same Planning.');
+        }
+
+        $this->cycle = $cycle;
     }
 
     public function getPlanning(): Planning
