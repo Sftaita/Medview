@@ -61,7 +61,7 @@ final class WeeklyDutyCalendarServiceTest extends KernelTestCase
             [],
         ));
 
-        $period = $line->getPlanningPeriod();
+        $period = $line->requireSingleCyclePeriod();
         self::getContainer()->get(WeeklyDutyCalendarService::class)->ensureMaterialized($period, $period->getEndsAt());
 
         $duties = self::getContainer()->get(DutyRepository::class)->findByPlanningPeriod($period);
@@ -92,7 +92,7 @@ final class WeeklyDutyCalendarServiceTest extends KernelTestCase
             [],
         ));
 
-        $period = $line->getPlanningPeriod();
+        $period = $line->requireSingleCyclePeriod();
         self::getContainer()->get(WeeklyDutyCalendarService::class)->ensureMaterialized($period, $period->getEndsAt());
 
         $duties = self::getContainer()->get(DutyRepository::class)->findByPlanningPeriod($period);
@@ -129,7 +129,7 @@ final class WeeklyDutyCalendarServiceTest extends KernelTestCase
             ['DIM'],
         ));
 
-        $period = $line->getPlanningPeriod();
+        $period = $line->requireSingleCyclePeriod();
         self::getContainer()->get(WeeklyDutyCalendarService::class)->ensureMaterialized($period, $period->getEndsAt());
 
         $duties = self::getContainer()->get(DutyRepository::class)->findByPlanningPeriod($period);
@@ -163,13 +163,13 @@ final class WeeklyDutyCalendarServiceTest extends KernelTestCase
         // Secondary line: no structure configured at all.
 
         $calendarService = self::getContainer()->get(WeeklyDutyCalendarService::class);
-        $calendarService->ensureMaterialized($primary->getPlanningPeriod(), $primary->getPlanningPeriod()->getEndsAt());
-        $calendarService->ensureMaterialized($secondary->getPlanningPeriod(), $secondary->getPlanningPeriod()->getEndsAt());
+        $calendarService->ensureMaterialized($primary->requireSingleCyclePeriod(), $primary->requireSingleCyclePeriod()->getEndsAt());
+        $calendarService->ensureMaterialized($secondary->requireSingleCyclePeriod(), $secondary->requireSingleCyclePeriod()->getEndsAt());
 
         $dutyRepository = self::getContainer()->get(DutyRepository::class);
-        self::assertCount(7, $dutyRepository->findByPlanningPeriod($primary->getPlanningPeriod()));
+        self::assertCount(7, $dutyRepository->findByPlanningPeriod($primary->requireSingleCyclePeriod()));
         // Never guessed a default structure for the unconfigured line.
-        self::assertCount(0, $dutyRepository->findByPlanningPeriod($secondary->getPlanningPeriod()));
+        self::assertCount(0, $dutyRepository->findByPlanningPeriod($secondary->requireSingleCyclePeriod()));
     }
 
     /**
@@ -205,12 +205,12 @@ final class WeeklyDutyCalendarServiceTest extends KernelTestCase
         }
 
         $calendarService = self::getContainer()->get(WeeklyDutyCalendarService::class);
-        $calendarService->ensureMaterialized($primary->getPlanningPeriod(), $primary->getPlanningPeriod()->getEndsAt());
-        $calendarService->ensureMaterialized($secondary->getPlanningPeriod(), $secondary->getPlanningPeriod()->getEndsAt());
+        $calendarService->ensureMaterialized($primary->requireSingleCyclePeriod(), $primary->requireSingleCyclePeriod()->getEndsAt());
+        $calendarService->ensureMaterialized($secondary->requireSingleCyclePeriod(), $secondary->requireSingleCyclePeriod()->getEndsAt());
 
         $dutyRepository = self::getContainer()->get(DutyRepository::class);
-        $primaryDuties = $dutyRepository->findByPlanningPeriod($primary->getPlanningPeriod());
-        $secondaryDuties = $dutyRepository->findByPlanningPeriod($secondary->getPlanningPeriod());
+        $primaryDuties = $dutyRepository->findByPlanningPeriod($primary->requireSingleCyclePeriod());
+        $secondaryDuties = $dutyRepository->findByPlanningPeriod($secondary->requireSingleCyclePeriod());
 
         self::assertCount(1, $primaryDuties, 'The primary line got its own Monday Duty.');
         self::assertCount(1, $secondaryDuties, 'The secondary line got its own Monday Duty — never blocked by the primary line already having one on the exact same date.');
@@ -237,7 +237,7 @@ final class WeeklyDutyCalendarServiceTest extends KernelTestCase
             $em,
             self::getContainer()->get(DutyMaterializationService::class),
             $line->getPlanningTeam(),
-            $line->getPlanningPeriod(),
+            $line->requireSingleCyclePeriod(),
             '2027-01-09',
             '2027-01-09',
             '2027-01-10',
@@ -245,7 +245,7 @@ final class WeeklyDutyCalendarServiceTest extends KernelTestCase
             '2027-01-11',
         );
 
-        $period = $line->getPlanningPeriod();
+        $period = $line->requireSingleCyclePeriod();
         self::getContainer()->get(WeeklyDutyCalendarService::class)->ensureMaterialized($period, $period->getEndsAt());
 
         // Exactly the 2 Duties the fixture itself created — never re-anchored
@@ -264,7 +264,7 @@ final class WeeklyDutyCalendarServiceTest extends KernelTestCase
             [],
         ));
 
-        $period = $line->getPlanningPeriod();
+        $period = $line->requireSingleCyclePeriod();
         $service = self::getContainer()->get(WeeklyDutyCalendarService::class);
         $service->ensureMaterialized($period, $period->getEndsAt());
         $service->ensureMaterialized($period, $period->getEndsAt());
@@ -285,7 +285,7 @@ final class WeeklyDutyCalendarServiceTest extends KernelTestCase
         $line = $this->newLine('2027-01-04', '2027-01-11'); // exactly 1 week
         $structureService = self::getContainer()->get(WeekStructureService::class);
         $calendarService = self::getContainer()->get(WeeklyDutyCalendarService::class);
-        $period = $line->getPlanningPeriod();
+        $period = $line->requireSingleCyclePeriod();
 
         $structureService->replace($line, new WeekStructureUpdateRequest(
             [new WeekStructureBlockInput('Week-end', ['VEN', 'SAM', 'DIM'], 'Week-end')],

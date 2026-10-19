@@ -232,7 +232,7 @@ final class AssignmentConflictAnalyzerTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
 
         $configuration = new \App\Dto\PlanningRuleSetConfiguration();
         $configuration->teamMinRestHours = 11;
@@ -279,7 +279,7 @@ final class AssignmentConflictAnalyzerTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $user = $this->createUser($em);
@@ -333,7 +333,7 @@ final class AssignmentConflictAnalyzerTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $userA = $this->createUser($em);
@@ -379,7 +379,7 @@ final class AssignmentConflictAnalyzerTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $user = $this->createUser($em);
@@ -452,7 +452,7 @@ final class AssignmentConflictAnalyzerTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $user = $this->createUser($em);
@@ -503,7 +503,7 @@ final class AssignmentConflictAnalyzerTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $user = $this->createUser($em);

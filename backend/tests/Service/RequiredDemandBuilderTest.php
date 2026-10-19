@@ -37,7 +37,7 @@ final class RequiredDemandBuilderTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
 
         $typeAWeighted = new DutyType($team, 'TYPE_A_WEIGHTED', 'Type A', 1.5);
         $em->persist($typeAWeighted);
@@ -78,7 +78,7 @@ final class RequiredDemandBuilderTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
 
         // Friday (offset 0) + Saturday (offset 1), both REQUIRED by default.
         $this->createTwoDutyGroup(
@@ -118,12 +118,12 @@ final class RequiredDemandBuilderTest extends KernelTestCase
         $typeA = $this->createDutyType($em, $lineA->getPlanningTeam(), 'TYPE_A');
         $typeB = $this->createDutyType($em, $lineB->getPlanningTeam(), 'TYPE_B');
 
-        $this->createDuty($dutyMaterialization, $lineA->getPlanningPeriod(), $typeA, '2027-03-12 08:00', '2027-03-12 20:00');
-        $this->createDuty($dutyMaterialization, $lineB->getPlanningPeriod(), $typeB, '2027-03-12 08:00', '2027-03-12 20:00');
-        $this->createDuty($dutyMaterialization, $lineB->getPlanningPeriod(), $typeB, '2027-03-13 08:00', '2027-03-13 20:00');
+        $this->createDuty($dutyMaterialization, $lineA->requireSingleCyclePeriod(), $typeA, '2027-03-12 08:00', '2027-03-12 20:00');
+        $this->createDuty($dutyMaterialization, $lineB->requireSingleCyclePeriod(), $typeB, '2027-03-12 08:00', '2027-03-12 20:00');
+        $this->createDuty($dutyMaterialization, $lineB->requireSingleCyclePeriod(), $typeB, '2027-03-13 08:00', '2027-03-13 20:00');
 
-        $demandA = $requiredDemandBuilder->build($lineA->getPlanningPeriod());
-        $demandB = $requiredDemandBuilder->build($lineB->getPlanningPeriod());
+        $demandA = $requiredDemandBuilder->build($lineA->requireSingleCyclePeriod());
+        $demandB = $requiredDemandBuilder->build($lineB->requireSingleCyclePeriod());
 
         self::assertSame(1.0, $demandA->get(FairnessDimensionKey::totalDuties()), 'line A must never see line B\'s duties');
         self::assertSame(2.0, $demandB->get(FairnessDimensionKey::totalDuties()));

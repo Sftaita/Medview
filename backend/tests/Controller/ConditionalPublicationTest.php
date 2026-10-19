@@ -337,7 +337,9 @@ final class ConditionalPublicationTest extends WebTestCase
 
         // Load: the superfluous reinforcement is a real assignment, in both tabs.
         $statistics = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/statistics", token: $s['creator']);
-        foreach (['currentPeriod', 'cumulative'] as $tab) {
+        // docs/decisions.md D201: generated, not published — the period and the provisional scope, never the cumulative.
+        self::assertSame([], $statistics['cumulative']['groups']);
+        foreach (['currentPeriod', 'provisional'] as $tab) {
             $groups = array_column($statistics[$tab]['groups'], null, 'groupLabel');
             $rows = array_column($groups['Renfort']['members'], null, 'teamMemberStableId');
             $row = $rows[$this->memberStableIdIn($s['planningId'], $holder, 1)];

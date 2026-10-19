@@ -40,8 +40,8 @@ final class PlanningServiceTest extends KernelTestCase
         // client-supplied Team — it is always created inline, bound to
         // this exact Planning.
         self::assertSame($planning, $lines[0]->getPlanningTeam()->getPlanning());
-        self::assertSame($planning->getStartsAt(), $lines[0]->getPlanningPeriod()->getStartsAt());
-        self::assertSame($planning->getEndsAt(), $lines[0]->getPlanningPeriod()->getEndsAt());
+        self::assertSame($planning->getStartsAt(), $lines[0]->requireSingleCyclePeriod()->getStartsAt());
+        self::assertSame($planning->getEndsAt(), $lines[0]->requireSingleCyclePeriod()->getEndsAt());
     }
 
     /**

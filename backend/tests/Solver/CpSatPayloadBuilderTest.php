@@ -53,7 +53,7 @@ final class CpSatPayloadBuilderTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $eligibleUser = $this->createUser($em);
@@ -98,7 +98,7 @@ final class CpSatPayloadBuilderTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $user = $this->createUser($em);
@@ -145,7 +145,7 @@ final class CpSatPayloadBuilderTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         // A member joining after every Duty of the period has structural
@@ -187,7 +187,7 @@ final class CpSatPayloadBuilderTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $user = $this->createUser($em);
@@ -220,7 +220,7 @@ final class CpSatPayloadBuilderTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $problem = $this->buildOptimizationProblem($em, $snapshotService, $matrixBuilder, $contextBuilder, $problemBuilder, $planningPeriod);

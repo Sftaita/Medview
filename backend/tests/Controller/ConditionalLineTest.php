@@ -131,7 +131,7 @@ final class ConditionalLineTest extends WebTestCase
     {
         static::getContainer()->get(EntityManagerInterface::class)->clear();
         $duties = [];
-        foreach (static::getContainer()->get(DutyRepository::class)->findByPlanningPeriod($this->line($planningStableId, 1)->getPlanningPeriod()) as $duty) {
+        foreach (static::getContainer()->get(DutyRepository::class)->findByPlanningPeriod($this->line($planningStableId, 1)->requireSingleCyclePeriod()) as $duty) {
             $duties[$duty->getLocalDate()->format('Y-m-d')] = $duty;
         }
         ksort($duties);
@@ -261,8 +261,8 @@ final class ConditionalLineTest extends WebTestCase
         $primary = $container->get(PlanningLineRepository::class)->find($primary->getId());
 
         foreach ([
-            'an intrinsic duty on a conditional line' => fn () => $materializer->createStandaloneDuty($renfort->getPlanningPeriod(), $renfortType, new \DateTimeImmutable('2027-01-17'), new \DateTimeImmutable('2027-01-18')),
-            'a conditional duty on an independent line' => fn () => $materializer->createStandaloneDuty($primary->getPlanningPeriod(), $primarySunday->getDutyType(), new \DateTimeImmutable('2027-01-17'), new \DateTimeImmutable('2027-01-18'), DutyDemandType::CONDITIONAL, coverageSource: $this->renfortDuties($s['planningId'])['2027-01-05']),
+            'an intrinsic duty on a conditional line' => fn () => $materializer->createStandaloneDuty($renfort->requireSingleCyclePeriod(), $renfortType, new \DateTimeImmutable('2027-01-17'), new \DateTimeImmutable('2027-01-18')),
+            'a conditional duty on an independent line' => fn () => $materializer->createStandaloneDuty($primary->requireSingleCyclePeriod(), $primarySunday->getDutyType(), new \DateTimeImmutable('2027-01-17'), new \DateTimeImmutable('2027-01-18'), DutyDemandType::CONDITIONAL, coverageSource: $this->renfortDuties($s['planningId'])['2027-01-05']),
         ] as $case => $attempt) {
             try {
                 $attempt();
@@ -288,7 +288,7 @@ final class ConditionalLineTest extends WebTestCase
 
         $this->expectException(InvalidConditionalDutyException::class);
         $this->expectExceptionMessage('source line');
-        $container->get(DutyMaterializationService::class)->createStandaloneDuty($renfort->getPlanningPeriod(), $type, new \DateTimeImmutable('2027-01-12'), new \DateTimeImmutable('2027-01-13'), DutyDemandType::CONDITIONAL, coverageSource: $other);
+        $container->get(DutyMaterializationService::class)->createStandaloneDuty($renfort->requireSingleCyclePeriod(), $type, new \DateTimeImmutable('2027-01-12'), new \DateTimeImmutable('2027-01-13'), DutyDemandType::CONDITIONAL, coverageSource: $other);
     }
 
     public function testTheDatabaseRefusesAConditionalDutyWithoutSourceAndASelfReference(): void
@@ -344,7 +344,7 @@ final class ConditionalLineTest extends WebTestCase
         self::assertSame(DutyDemandType::CONDITIONAL, $this->renfortDuties($s['planningId'])['2027-01-05']->getDemandType());
         self::assertSame(['CONDITIONAL'], array_values(array_unique(static::getContainer()->get(Connection::class)->fetchFirstColumn(
             'SELECT demand_type FROM duties WHERE planning_period_id = ?',
-            [$this->line($s['planningId'], 1)->getPlanningPeriod()->getId()],
+            [$this->line($s['planningId'], 1)->requireSingleCyclePeriod()->getId()],
         ))));
     }
 
@@ -412,7 +412,7 @@ final class ConditionalLineTest extends WebTestCase
         $container->get(EntityManagerInterface::class)->clear();
         $renfort = $this->line($s['planningId'], 1);
         $this->activateRuleSet($container->get(PlanningRuleSetService::class), $renfort->getPlanningTeam());
-        $generation = $container->get(PlanningGenerationService::class)->create($renfort->getPlanningPeriod(), null);
+        $generation = $container->get(PlanningGenerationService::class)->create($renfort->requireSingleCyclePeriod(), null);
         $snapshot = $container->get(PlanningSnapshotService::class)->createSnapshot($generation);
         $block = array_values(array_filter($this->renfortDuties($s['planningId']), static fn (Duty $d): bool => null !== $d->getGroupInstance()));
         $block = array_map(static fn (Duty $d): Duty => $container->get(DutyRepository::class)->find($d->getId()), $block);

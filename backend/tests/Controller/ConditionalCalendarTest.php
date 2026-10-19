@@ -262,15 +262,15 @@ final class ConditionalCalendarTest extends WebTestCase
         self::assertResponseStatusCodeSame(409);
         self::assertSame('coverage_not_required', $refused['error']);
 
-        // The low-level assignment endpoint (a team OWNER/ADMIN's) enforces the same rule.
+        // The former low-level assignment endpoint (a team OWNER/ADMIN's) is closed (D197): no way around the rule.
         $renfortTeamId = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}", token: $s['creator'])['lines'][1]['team']['stableId'];
         $this->addMemberAs($client, $s['creator'], $s['planningId'], $renfortTeamId, 'admin@example.com', 'ADMIN');
         $raw = $this->api($client, 'POST', "/api/planning-generations/{$this->currentGeneration($s, 1)->getStableId()}/assignments", [
             'dutyStableId' => $tuesday,
             'teamMemberStableId' => $this->memberStableIdIn($s['planningId'], 'carol@example.com', 1),
         ], $s['admin']);
-        self::assertResponseStatusCodeSame(409);
-        self::assertSame('coverage_not_required', $raw['error']);
+        self::assertResponseStatusCodeSame(410);
+        self::assertSame('endpoint_removed', $raw['error']);
 
         self::assertSame(0, $this->renfortAssignmentRowCount($s));
     }

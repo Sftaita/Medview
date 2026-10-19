@@ -144,7 +144,7 @@ trait PlanningPilotTestHelpers
         $this->activateRuleSet($container->get(PlanningRuleSetService::class), $line->getPlanningTeam());
         $dutyType = $this->createDutyType($em, $line->getPlanningTeam());
         foreach ($dutyRanges as [$from, $to]) {
-            $this->createDuty($container->get(DutyMaterializationService::class), $line->getPlanningPeriod(), $dutyType, $from, $to);
+            $this->createDuty($container->get(DutyMaterializationService::class), $line->requireSingleCyclePeriod(), $dutyType, $from, $to);
         }
     }
 
@@ -168,7 +168,7 @@ trait PlanningPilotTestHelpers
             $em,
             $container->get(DutyMaterializationService::class),
             $line->getPlanningTeam(),
-            $line->getPlanningPeriod(),
+            $line->requireSingleCyclePeriod(),
             $anchorDate,
             $day0StartsAt,
             $day0EndsAt,
@@ -182,7 +182,7 @@ trait PlanningPilotTestHelpers
         $container = static::getContainer();
         $planning = $container->get(PlanningRepository::class)->findOneByStableId($planningStableId);
 
-        return $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0]->getPlanningPeriod()->getStatus();
+        return $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0]->requireSingleCyclePeriod()->getStatus();
     }
 
     private function userOf(string $email): User

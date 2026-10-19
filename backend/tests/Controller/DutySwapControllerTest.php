@@ -685,7 +685,7 @@ final class DutySwapControllerTest extends WebTestCase
 
         $container = static::getContainer();
         $planning = $container->get(PlanningRepository::class)->findOneByStableId($s['planningId']);
-        $period = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0]->getPlanningPeriod();
+        $period = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0]->requireSingleCyclePeriod();
         $container->get(PlanningPeriodLifecycleService::class)->transition($period, PlanningPeriodStatus::ARCHIVED);
         $container->get(EntityManagerInterface::class)->flush();
 
@@ -695,9 +695,10 @@ final class DutySwapControllerTest extends WebTestCase
         self::assertSame('alice@example.com', $this->holders($s)['2027-01-05']);
         self::assertSame('OBSOLETE', $this->requestEntity($request['stableId'])->getStatus()->value);
 
+        // docs/decisions.md D204: an unpublished duty answers like an unknown one.
         $response = $this->searchRequest($client, $s, $s['bob'], '2027-01-12', null);
-        self::assertResponseStatusCodeSame(409);
-        self::assertSame('duty_not_swappable', $response['error']);
+        self::assertResponseStatusCodeSame(404);
+        self::assertSame('not_found', $response['error']);
     }
 
     public function testADeactivatedLineIsNeverSwapped(): void

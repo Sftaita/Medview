@@ -61,7 +61,7 @@ final class PlanningPublicationWorkflowTest extends WebTestCase
         $email = $messages[0];
         self::assertInstanceOf(Email::class, $email);
         self::assertStringContainsString('Planning de garde disponible', (string) $email->getSubject());
-        self::assertStringContainsString('du 1er janvier 2027 au 30 avril 2027 est disponible', (string) $email->getTextBody());
+        self::assertStringContainsString('période 1, du 1er janvier 2027 au 30 avril 2027) est disponible', (string) $email->getTextBody());
         self::assertStringContainsString('Gardes Seniors', (string) $email->getTextBody());
         $attachments = $email->getAttachments();
         self::assertCount(1, $attachments);
@@ -128,7 +128,7 @@ final class PlanningPublicationWorkflowTest extends WebTestCase
         self::assertResponseIsSuccessful();
         self::assertResponseHeaderSame('Content-Type', 'application/pdf');
         self::assertStringStartsWith('%PDF', (string) $client->getResponse()->getContent());
-        self::assertStringContainsString('attachment; filename=planning-gardes-seniors.pdf', (string) $client->getResponse()->headers->get('Content-Disposition'));
+        self::assertStringContainsString('attachment; filename=planning-gardes-seniors-periode-1.pdf', (string) $client->getResponse()->headers->get('Content-Disposition'));
     }
 
     public function testThePdfIsThePublishedStateNeverTheUnpublishedEdits(): void
@@ -406,7 +406,7 @@ final class PlanningPublicationWorkflowTest extends WebTestCase
             self::assertStringNotContainsString('Juniors', (string) $message->getTextBody(), 'Nothing about the other line.');
             self::assertStringNotContainsString('Mardi 5 janvier', (string) $message->getTextBody(), 'Nothing about unchanged duties.');
             self::assertCount(1, $message->getAttachments(), 'The updated planning, as a PDF.');
-            self::assertSame('planning-gardes-seniors.pdf', $message->getAttachments()[0]->getFilename());
+            self::assertSame('planning-gardes-seniors-periode-1.pdf', $message->getAttachments()[0]->getFilename());
         }
     }
 
@@ -535,6 +535,8 @@ final class PlanningPublicationWorkflowTest extends WebTestCase
         $this->unassignDuty($client, $s, $this->dutyOn($s['planningId'], '2027-01-06'));
 
         $memberView = $this->state($client, $s, $s['alice']);
+        // Diagnosis of a one-off failure in a full run (docs/decisions.md D192): the whole response if it ever recurs.
+        self::assertResponseIsSuccessful();
         self::assertTrue($memberView['published']);
         self::assertNotNull($memberView['lastPublishedAt']);
         self::assertArrayNotHasKey('changes', $memberView);

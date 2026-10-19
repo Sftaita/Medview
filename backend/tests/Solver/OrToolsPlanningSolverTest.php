@@ -422,7 +422,7 @@ final class OrToolsPlanningSolverTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Team');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $userA = $this->createUser($em);
@@ -482,7 +482,7 @@ final class OrToolsPlanningSolverTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Team');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $userA = $this->createUser($em);
@@ -675,7 +675,7 @@ final class OrToolsPlanningSolverTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $activeUser = $this->createUser($em);
@@ -717,7 +717,7 @@ final class OrToolsPlanningSolverTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $userA = $this->createUser($em);
@@ -763,7 +763,7 @@ final class OrToolsPlanningSolverTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $user = $this->createUser($em);
@@ -799,7 +799,7 @@ final class OrToolsPlanningSolverTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $userA = $this->createUser($em);
@@ -837,7 +837,7 @@ final class OrToolsPlanningSolverTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $userA = $this->createUser($em);
@@ -880,7 +880,7 @@ final class OrToolsPlanningSolverTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         // No members at all -> zero eligible candidates for a REQUIRED duty.
@@ -919,7 +919,7 @@ final class OrToolsPlanningSolverTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $userA = $this->createUser($em);

@@ -177,7 +177,7 @@ trait ConditionalLineTestHelpers
 
     private function currentGeneration(array $s, int $lineIndex): ?PlanningGeneration
     {
-        return static::getContainer()->get(PlanningGenerationRepository::class)->findMostRecentCompletedByPlanningPeriod($this->line($s['planningId'], $lineIndex)->getPlanningPeriod());
+        return static::getContainer()->get(PlanningGenerationRepository::class)->findMostRecentCompletedByPlanningPeriod($this->line($s['planningId'], $lineIndex)->requireSingleCyclePeriod());
     }
 
     private function snapshotOf(PlanningGeneration $generation): PlanningSnapshot
@@ -191,7 +191,7 @@ trait ConditionalLineTestHelpers
     private function renfortDuties(array $s): array
     {
         $duties = [];
-        foreach (static::getContainer()->get(DutyRepository::class)->findByPlanningPeriod($this->line($s['planningId'], 1)->getPlanningPeriod()) as $duty) {
+        foreach (static::getContainer()->get(DutyRepository::class)->findByPlanningPeriod($this->line($s['planningId'], 1)->requireSingleCyclePeriod()) as $duty) {
             $duties[$duty->getLocalDate()->format('Y-m-d')] = $duty;
         }
         ksort($duties);
@@ -218,7 +218,7 @@ trait ConditionalLineTestHelpers
     /** The problem the solver received for the Renfort line, if any. */
     private function renfortProblem(array $s): ?OptimizationProblem
     {
-        $renfortPeriodId = $this->line($s['planningId'], 1)->getPlanningPeriod()->getId();
+        $renfortPeriodId = $this->line($s['planningId'], 1)->requireSingleCyclePeriod()->getId();
         foreach (array_reverse(FaultInjectingPlanningSolver::$solvedProblems) as $problem) {
             $units = [...$problem->getRequiredDutyUnits(), ...$problem->getOptionalDutyUnits()];
             if ([] === $units) {

@@ -73,7 +73,9 @@ final class PlanningExportControllerTest extends WebTestCase
         self::assertResponseHeaderSame('Content-Disposition', 'attachment; filename=Gardes-Seniors_2027-01_2027-04.xlsx');
 
         $sheets = $this->readXlsx($bytes);
-        self::assertSame(['Planning', 'Par personne'], array_keys($sheets));
+        self::assertSame(['Planning', 'Par personne', 'Informations'], array_keys($sheets));
+        self::assertSame('Nature', $sheets['Informations'][2][0]);
+        self::assertStringStartsWith('Planning diffusé — dernière diffusion le ', $sheets['Informations'][2][1], 'A member: what was diffused (docs/decisions.md D200).');
 
         $planning = $sheets['Planning'];
         self::assertSame(['Date', 'Jour', 'Seniors'], $planning[0]);
@@ -116,11 +118,19 @@ final class PlanningExportControllerTest extends WebTestCase
         $this->unassignDuty($client, $s, $this->dutyOn($s['planningId'], '2027-01-07'));
         self::assertResponseIsSuccessful();
 
-        $planning = $this->readXlsx($this->export($client, $s, $this->body($s, ['format' => 'xlsx']), $s['alice']))['Planning'];
+        // A manager: the current calendar, labelled as operational (docs/decisions.md D200).
+        $sheets = $this->readXlsx($this->export($client, $s, $this->body($s, ['format' => 'xlsx']), $s['admin']));
         self::assertResponseIsSuccessful();
+        $planning = $sheets['Planning'];
         self::assertSame($this->safe($before['2027-01-05']), $planning[5][2], 'Untouched.');
         self::assertSame($this->safe(implode(' ', self::NAMES[$replacement])), $planning[6][2], 'The new holder, not the published one.');
         self::assertSame('Non attribué', $planning[7][2], 'Removed after publication: uncovered now.');
+        self::assertContains(['Nature', 'Calendrier opérationnel — modifications non publiées possibles'], $sheets['Informations']);
+
+        // A plain member: what was diffused, never the changes made since.
+        $planning = $this->readXlsx($this->export($client, $s, $this->body($s, ['format' => 'xlsx']), $s['alice']))['Planning'];
+        self::assertResponseIsSuccessful();
+        self::assertSame([$this->safe($before['2027-01-05']), $this->safe($before['2027-01-06']), $this->safe($before['2027-01-07'])], [$planning[5][2], $planning[6][2], $planning[7][2]]);
 
         $publications = static::getContainer()->get(PlanningPublicationRepository::class)->findByPlanning($this->planning($s['planningId']));
         self::assertCount(1, $publications, 'An export is never a publication.');
@@ -345,6 +355,45 @@ final class PlanningExportControllerTest extends WebTestCase
         $response = $this->exportJson($client, $s, $this->body($s, ['lines' => [['stableId' => $juniors, 'label' => 'Juniors']]]));
         self::assertResponseStatusCodeSame(422);
         self::assertArrayHasKey('lines[0].stableId', $response['violations']);
+    }
+
+    public function testANeverPublishedLineIsUnknownToAMemberAndLeftOutVisiblyForAManager(): void
+    {
+        $client = static::createClient();
+        $s = $this->pilotScenario($client);
+        $this->addSecondaryLine($client, $s, []);
+        [$seniors, $juniors] = $this->lineIds($s);
+        $this->prepareLine($s['planningId'], self::STANDALONE);
+        $this->generate($client, $s);
+        // Only the primary line is published (docs/decisions.md D196): "Juniors" keeps its DRAFT period.
+        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/publish", ['lines' => [$seniors]], $s['creator']);
+        self::assertResponseIsSuccessful((string) $client->getResponse()->getContent());
+        $both = ['format' => 'xlsx', 'lines' => [['stableId' => $seniors, 'label' => 'Seniors'], ['stableId' => $juniors, 'label' => 'Juniors']]];
+
+        // docs/decisions.md D200: a plain member — a draft line reads exactly like a line that does not exist.
+        foreach ([['lines' => [['stableId' => $juniors, 'label' => 'Juniors']]], $both] as $index => $override) {
+            $response = $this->exportJson($client, $s, $this->body($s, $override), $s['alice']);
+            self::assertResponseStatusCodeSame(422);
+            self::assertSame('Not an active line of this planning.', $response['violations']['lines['.$index.'].stableId']);
+        }
+        [$foreignPlanning] = $this->createPlanningWithTeam($client, $s['outsider']);
+        $foreignLine = $this->api($client, 'GET', "/api/plannings/{$foreignPlanning}", token: $s['outsider'])['lines'][0]['stableId'];
+        foreach (['alice', 'admin'] as $who) {
+            $response = $this->exportJson($client, $s, $this->body($s, ['lines' => [['stableId' => $foreignLine, 'label' => 'X']]]), $s[$who]);
+            self::assertResponseStatusCodeSame(422);
+            self::assertSame('Not an active line of this planning.', $response['violations']['lines[0].stableId'], "{$who}: another planning's line");
+        }
+
+        // A manager may choose it: never its calendar — "Non publiée", and said so.
+        $sheets = $this->readXlsx($this->export($client, $s, $this->body($s, $both), $s['admin']));
+        self::assertResponseIsSuccessful();
+        self::assertSame(['Date', 'Jour', 'Seniors', 'Juniors'], $sheets['Planning'][0]);
+        self::assertSame(['Non publiée'], array_values(array_unique(array_column(\array_slice($sheets['Planning'], 1), 3))));
+        self::assertContains(['Non inclus car non publiés', 'Juniors'], $sheets['Informations']);
+
+        $response = $this->exportJson($client, $s, $this->body($s, ['lines' => [['stableId' => $juniors, 'label' => 'Juniors']]]), $s['admin']);
+        self::assertResponseStatusCodeSame(409);
+        self::assertSame('not_published_in_range', $response['error']);
     }
 
     // --- access and status -------------------------------------------------------------

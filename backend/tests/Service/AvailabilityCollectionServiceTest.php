@@ -192,7 +192,7 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
 
         $userStableIds = [];
         foreach ([$planningIn, $planningOut] as $planning) {
-            $period = $lineRepository->findByPlanning($planning)[0]->getPlanningPeriod();
+            $period = $lineRepository->findByPlanning($planning)[0]->requireSingleCyclePeriod();
             $this->activateRuleSet($ruleSetService, $period->getTeam());
             $generation = new PlanningGeneration($period);
             $this->em->persist($generation);
@@ -632,9 +632,9 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
 
         self::assertSame('2027-04-01', $planning->getEndsAt()->format('Y-m-d'));
         foreach (self::getContainer()->get(PlanningLineRepository::class)->findByPlanning($planning) as $line) {
-            self::assertSame('2027-04-01', $line->getPlanningPeriod()->getEndsAt()->format('Y-m-d'));
-            self::assertSame('2027-04-01', $line->getPlanningPeriod()->getFairnessPeriod()->getEndsAt()->format('Y-m-d'));
-            self::assertSame('2026-09-01', $line->getPlanningPeriod()->getStartsAt()->format('Y-m-d'));
+            self::assertSame('2027-04-01', $line->requireSingleCyclePeriod()->getEndsAt()->format('Y-m-d'));
+            self::assertSame('2027-04-01', $line->requireSingleCyclePeriod()->getFairnessPeriod()->getEndsAt()->format('Y-m-d'));
+            self::assertSame('2026-09-01', $line->requireSingleCyclePeriod()->getStartsAt()->format('Y-m-d'));
         }
         self::assertCount(1, $collections);
         self::assertCount(2, $this->collectionRepository->findByPlanning($planning));
@@ -735,7 +735,7 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
     public function testAValidatedLineBlocksTheExtensionAndLeavesEverythingUntouched(): void
     {
         $planning = $this->planning('2026-09-01', '2027-01-01');
-        $period = self::getContainer()->get(PlanningLineRepository::class)->findByPlanning($planning)[0]->getPlanningPeriod();
+        $period = self::getContainer()->get(PlanningLineRepository::class)->findByPlanning($planning)[0]->requireSingleCyclePeriod();
         $period->transitionTo(PlanningPeriodStatus::GENERATED);
         $period->transitionTo(PlanningPeriodStatus::VALIDATED);
         $this->em->flush();
@@ -753,7 +753,7 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
     public function testAGeneratedButNotValidatedLineCanBeExtended(): void
     {
         $planning = $this->planning('2026-09-01', '2027-01-01');
-        $period = self::getContainer()->get(PlanningLineRepository::class)->findByPlanning($planning)[0]->getPlanningPeriod();
+        $period = self::getContainer()->get(PlanningLineRepository::class)->findByPlanning($planning)[0]->requireSingleCyclePeriod();
         $period->transitionTo(PlanningPeriodStatus::GENERATED);
         $this->em->flush();
 
@@ -840,7 +840,7 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
         $this->availabilityService->create($silent, UserAvailabilityType::UNAVAILABLE, $this->brussels('2027-03-01 00:00'), $this->brussels('2027-03-05 00:00'));
         $this->collectionService->acknowledge($collection, $answered, AvailabilityAcknowledgementKind::CONFIRMED);
 
-        $period = self::getContainer()->get(PlanningLineRepository::class)->findByPlanning($planning)[0]->getPlanningPeriod();
+        $period = self::getContainer()->get(PlanningLineRepository::class)->findByPlanning($planning)[0]->requireSingleCyclePeriod();
         $this->activateRuleSet(self::getContainer()->get(PlanningRuleSetService::class), $period->getTeam());
         $generation = new PlanningGeneration($period);
         $this->em->persist($generation);
@@ -865,8 +865,8 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
         $planning = $this->planning('2026-09-01', '2027-04-01');
         $connection = $this->em->getConnection();
         $insert = static fn (string $stableId, string $from, string $to) => $connection->executeStatement(
-            'INSERT INTO availability_collections (stable_id, starts_at, ends_at, opened_at, status, created_at, updated_at, planning_id, created_by_id) VALUES (?, ?, ?, NOW(), \'OPEN\', NOW(), NOW(), ?, ?)',
-            [$stableId, $from, $to, $planning->getId(), $planning->getCreator()->getId()],
+            'INSERT INTO availability_collections (stable_id, starts_at, ends_at, opened_at, status, created_at, updated_at, planning_id, created_by_id, planning_cycle_id) VALUES (?, ?, ?, NOW(), \'OPEN\', NOW(), NOW(), ?, ?, (SELECT id FROM planning_cycles WHERE planning_id = ? AND number = 1))',
+            [$stableId, $from, $to, $planning->getId(), $planning->getCreator()->getId(), $planning->getId()],
         );
 
         $this->expectException(DbalException::class);

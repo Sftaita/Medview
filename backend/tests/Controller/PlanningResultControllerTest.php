@@ -260,8 +260,12 @@ final class PlanningResultControllerTest extends WebTestCase
 
         // Both active lines must be launchable at once (PlanningGenerationLauncher checks every
         // active line): the primary gets its real members and a coverable duty; the freshly
-        // created "Renfort" team has a rule set and a duty of its own but deliberately no member
-        // at all — a real, independent LINE_WITHOUT_MEMBERS/INCOMPLETE outcome, never a blocker.
+        // created "Renfort" team has a rule set, a duty of its own and a single member, away that
+        // day — a real, independent INCOMPLETE outcome, never a blocker. (A line with no member
+        // at all is no longer generated: NO_MEMBER_IN_PERIOD, docs/decisions.md D195.)
+        $carol = $this->userToken($client, 'carol@example.com');
+        $this->addMemberAs($client, $s['creator'], $s['planningId'], $this->api($client, 'GET', "/api/plannings/{$s['planningId']}", token: $s['creator'])['lines'][1]['team']['stableId'], 'carol@example.com', 'MEMBER');
+        $this->declareRange($client, $carol, '2027-01-05', '2027-01-06');
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-06']], lineIndex: 0);
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-06']], lineIndex: 1);
 
@@ -278,7 +282,7 @@ final class PlanningResultControllerTest extends WebTestCase
         self::assertSame('COMPLETE', $primary['coverageStatus']);
         self::assertSame(1, $primary['requiredDutyCount']);
         self::assertNotSame($primary['generationStableId'], $secondary['generationStableId'], 'Each line follows D125 independently, on its own generation.');
-        self::assertSame('INCOMPLETE', $secondary['coverageStatus'], 'A line without any member cannot cover its duty — a real outcome, never a blocker.');
+        self::assertSame('INCOMPLETE', $secondary['coverageStatus'], 'A line whose only member is away cannot cover its duty — a real outcome, never a blocker.');
         self::assertSame(1, $secondary['requiredDutyCount']);
         self::assertSame(0, $secondary['coveredRequiredDutyCount']);
         self::assertFalse($this->dutyOn($secondary, '2027-01-05')['covered']);

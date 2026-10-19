@@ -25,11 +25,15 @@ use App\Repository\PlanningSnapshotRepository;
 use App\Repository\PlanningSnapshotRuleSetRepository;
 use App\Repository\PlanningTeamMemberRepository;
 use App\Repository\SolverParameterSetRepository;
+use App\Service\CalendarWriteLock;
 use App\Service\DutyAssignmentService;
 use App\Service\DutyMaterializationService;
 use App\Service\EligibilityMatrixBuilder;
 use App\Service\FairnessContextBuilder;
+use App\Service\NeighbourCommitmentCollector;
 use App\Service\OptimizationProblemBuilder;
+use App\Service\PersonCommitmentChecker;
+use App\Service\PersonCommitmentReader;
 use App\Service\PlanningGenerationService;
 use App\Service\PlanningRuleSetService;
 use App\Service\PlanningService;
@@ -139,7 +143,7 @@ final class PlanningGenerationServiceTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $user = $this->createUser($em);
@@ -211,7 +215,9 @@ final class PlanningGenerationServiceTest extends KernelTestCase
         // will independently choose to cover this same duty during
         // generate(), so the batch's createAuto() for it collides with this
         // row's (generation_id, duty_id) unique constraint at flush() time.
-        $assignmentService->createManual($generation, $duties[0], $anyMember, false);
+        $snapshot = self::getContainer()->get(PlanningSnapshotRepository::class)->findOneByGeneration($generation) ?? self::fail('no snapshot');
+        $assignmentService->createManualBatchItem($generation, $snapshot, $duties[0], $anyMember);
+        $em->flush();
 
         $generationId = $generation->getId();
 
@@ -319,7 +325,7 @@ final class PlanningGenerationServiceTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $user = $this->createUser($em);
@@ -364,7 +370,7 @@ final class PlanningGenerationServiceTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $user = $this->createUser($em);
@@ -436,7 +442,7 @@ final class PlanningGenerationServiceTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $userA = $this->createUser($em);
@@ -477,7 +483,7 @@ final class PlanningGenerationServiceTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $user = $this->createUser($em);
@@ -519,7 +525,7 @@ final class PlanningGenerationServiceTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $user = $this->createUser($em);
@@ -544,6 +550,10 @@ final class PlanningGenerationServiceTest extends KernelTestCase
             $c->get(SeedMaterialBuilder::class),
             $c->get(DutyAssignmentService::class),
             $c->get(UnsatReportPresenter::class),
+            $c->get(CalendarWriteLock::class),
+            $c->get(NeighbourCommitmentCollector::class),
+            $c->get(PersonCommitmentReader::class),
+            $c->get(PersonCommitmentChecker::class),
         );
 
         return [$service, $generation, $em, $dutyAssignmentRepository];

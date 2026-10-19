@@ -11,6 +11,7 @@ use App\Repository\PlanningRepository;
 use App\Service\PlanningPeriodLifecycleService;
 use App\Service\PlanningRuleSetService;
 use App\Tests\PlanningPilotTestHelpers;
+use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DriverManager;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -83,7 +84,7 @@ final class PlanningLaunchControllerTest extends WebTestCase
     {
         $container = static::getContainer();
         $planning = $container->get(PlanningRepository::class)->findOneByStableId($planningStableId);
-        $period = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0]->getPlanningPeriod();
+        $period = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0]->requireSingleCyclePeriod();
         $container->get(PlanningPeriodLifecycleService::class)->transition($period, $target);
     }
 
@@ -274,12 +275,26 @@ final class PlanningLaunchControllerTest extends WebTestCase
     {
         $client = static::createClient();
         $s = $this->pilotScenario($client);
-        // No rule set, no duty: the pipeline could not even snapshot.
 
+        // No duty at all (docs/decisions.md D195): the line is excluded, never blocking by itself — there is simply
+        // nothing to generate, and no job is ever queued for nothing.
         $preflight = $this->preflight($client, $s);
         self::assertFalse($preflight['canGenerate']);
-        self::assertEqualsCanonicalizing(['NO_ACTIVE_RULE_SET', 'NO_DUTIES'], array_column($preflight['blockers'], 'code'));
+        self::assertSame(['NO_LINE_TO_GENERATE'], array_column($preflight['blockers'], 'code'));
+        self::assertSame('EXCLUDE', $preflight['lines'][0]['decision']);
+        $this->launch($client, $s);
+        self::assertResponseStatusCodeSame(409);
+
+        // A real demand without a rule set: the pipeline could not even snapshot — blocked, explicitly, on the line.
+        $container = static::getContainer();
+        $line = $container->get(PlanningLineRepository::class)->findByPlanning($container->get(PlanningRepository::class)->findOneByStableId($s['planningId']))[0];
+        $this->createDuty($container->get(\App\Service\DutyMaterializationService::class), $line->requireSingleCyclePeriod(), $this->createDutyType($container->get(EntityManagerInterface::class), $line->getPlanningTeam()), '2027-01-05', '2027-01-06');
+        $preflight = $this->preflight($client, $s);
+        self::assertFalse($preflight['canGenerate']);
+        self::assertSame(['NO_ACTIVE_RULE_SET'], array_column($preflight['blockers'], 'code'));
         self::assertNotNull($preflight['blockers'][0]['lineStableId']);
+        self::assertSame('GENERATE', $preflight['lines'][0]['decision']);
+        self::assertSame('INCOMPLETE', $preflight['lines'][0]['applicability']['state']);
 
         $result = $this->launch($client, $s);
         self::assertResponseStatusCodeSame(409);
@@ -307,7 +322,7 @@ final class PlanningLaunchControllerTest extends WebTestCase
         $this->activateRuleSet(static::getContainer()->get(PlanningRuleSetService::class), $line->getPlanningTeam());
 
         // No duty exists anywhere yet.
-        self::assertSame([], static::getContainer()->get(DutyRepository::class)->findByPlanningPeriod($line->getPlanningPeriod()));
+        self::assertSame([], static::getContainer()->get(DutyRepository::class)->findByPlanningPeriod($line->requireSingleCyclePeriod()));
 
         $structure = $this->api($client, 'PUT', "/api/planning-lines/{$line->getStableId()}/week-structure", [
             'blocks' => [['name' => 'Week-end', 'days' => ['VEN', 'SAM', 'DIM'], 'family' => 'Week-end']],
@@ -330,9 +345,9 @@ final class PlanningLaunchControllerTest extends WebTestCase
         self::assertGreaterThan(0, $result['lines'][0]['assignmentCount']);
 
         // Calling preflight again never re-materializes or duplicates anything.
-        $dutiesAfterFirstPreflight = static::getContainer()->get(DutyRepository::class)->findByPlanningPeriod($line->getPlanningPeriod());
+        $dutiesAfterFirstPreflight = static::getContainer()->get(DutyRepository::class)->findByPlanningPeriod($line->requireSingleCyclePeriod());
         $this->preflight($client, $s);
-        $dutiesAfterSecondPreflight = static::getContainer()->get(DutyRepository::class)->findByPlanningPeriod($line->getPlanningPeriod());
+        $dutiesAfterSecondPreflight = static::getContainer()->get(DutyRepository::class)->findByPlanningPeriod($line->requireSingleCyclePeriod());
         self::assertCount(\count($dutiesAfterFirstPreflight), $dutiesAfterSecondPreflight);
     }
 
@@ -405,8 +420,11 @@ final class PlanningLaunchControllerTest extends WebTestCase
         self::assertResponseIsSuccessful();
 
         $this->transitionPeriod($s['planningId'], PlanningPeriodStatus::VALIDATED);
-        // While VALIDATED, generating again is allowed but warned about.
-        self::assertContains('VALIDATION_WILL_BE_INVALIDATED', array_column($this->preflight($client, $s)['warnings'], 'code'));
+        // docs/planning-cycles.md I8 (lot L3, D189): a VALIDATED period is locked too — no longer a mere warning.
+        $validated = $this->preflight($client, $s);
+        self::assertFalse($validated['canGenerate']);
+        self::assertSame(['PERIOD_LOCKED'], array_column($validated['blockers'], 'code'));
+        self::assertNotContains('VALIDATION_WILL_BE_INVALIDATED', array_column($validated['warnings'], 'code'));
         $this->transitionPeriod($s['planningId'], PlanningPeriodStatus::PUBLISHED);
 
         $preflight = $this->preflight($client, $s);
@@ -414,6 +432,15 @@ final class PlanningLaunchControllerTest extends WebTestCase
         self::assertSame(['PERIOD_LOCKED'], array_column($preflight['blockers'], 'code'));
         $this->launch($client, $s);
         self::assertResponseStatusCodeSame(409);
+
+        // I8 (lot L3, D189): the technical per-period endpoint cannot create one either.
+        $planning = static::getContainer()->get(PlanningRepository::class)->findOneByStableId($s['planningId']);
+        $period = static::getContainer()->get(PlanningLineRepository::class)->findByPlanning($planning)[0]->requireSingleCyclePeriod();
+        $before = (int) static::getContainer()->get(Connection::class)->fetchOne('SELECT COUNT(*) FROM planning_generations');
+        $this->api($client, 'POST', "/api/planning-periods/{$period->getStableId()}/generations", [], $s['admin']);
+        self::assertResponseStatusCodeSame(409);
+        self::assertSame('period_locked', json_decode((string) $client->getResponse()->getContent(), true)['error'] ?? null);
+        self::assertSame($before, (int) static::getContainer()->get(Connection::class)->fetchOne('SELECT COUNT(*) FROM planning_generations'));
     }
 
     public function testASecondLaunchWhileOneIsRunningIsRefused(): void
