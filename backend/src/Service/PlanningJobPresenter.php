@@ -21,6 +21,8 @@ final class PlanningJobPresenter
         return [
             'stableId' => (string) $job->getStableId(),
             'kind' => $job->getKind()->value,
+            // The period it generates or completes (docs/planning-cycles.md §7.4, lot L3).
+            'period' => null !== $job->getCycle() ? ['stableId' => (string) $job->getCycle()->getStableId(), 'number' => $job->getCycle()->getNumber()] : null,
             'status' => $job->getStatus()->value,
             'requestedBy' => ['firstName' => $job->getRequestedBy()->getFirstName(), 'lastName' => $job->getRequestedBy()->getLastName()],
             'createdAt' => $job->getCreatedAt()->format(\DATE_ATOM),

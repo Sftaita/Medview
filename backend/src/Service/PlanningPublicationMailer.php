@@ -39,18 +39,29 @@ final class PlanningPublicationMailer
     }
 
     /**
-     * @param PublishedDocument $document the name, period and PDF frozen with the publication (D173)
+     * @param PublishedDocument                                                                               $document the name, period and PDF frozen with the publication (D173)
+     * @param list<string>                                                                                    $lines    the lines first published for this person (D196), display order
+     * @param list<array{kind: string, line: string, dutyType: ?string, block: ?string, dates: list<string>}> $changes  their own changes on lines published before (D196)
      */
-    public function sendFirstPublication(User $recipient, Planning $planning, PublishedDocument $document): bool
+    public function sendFirstPublication(User $recipient, Planning $planning, PublishedDocument $document, array $lines = [], array $changes = []): bool
     {
+        $units = array_map(self::unitView(...), $changes);
+
         $email = (new TemplatedEmail())
             ->from(Address::create($this->from))
             ->to($recipient->getEmail())
-            ->subject('Planning de garde disponible — '.$document->planningName)
+            ->subject('Planning de garde disponible — '.$document->planningName.(null !== $document->periodNumber ? ' — Période '.$document->periodNumber : ''))
             ->htmlTemplate('email/planning_published.html.twig')
             ->textTemplate('email/planning_published.txt.twig')
             ->attach($document->content, $document->filename, 'application/pdf')
-            ->context($this->context($recipient, $planning, $document) + ['periodLabel' => $document->periodLabel()]);
+            ->context($this->context($recipient, $planning, $document) + [
+                'periodLabel' => $document->periodLabel(),
+                'periodNumber' => $document->periodNumber,
+                // docs/decisions.md D196: the lines published for this person, and their changes on other lines.
+                'lines' => $lines,
+                'removed' => array_values(array_filter($units, static fn (array $unit): bool => PublicationChangeService::REMOVED === $unit['kind'])),
+                'added' => array_values(array_filter($units, static fn (array $unit): bool => PublicationChangeService::ADDED === $unit['kind'])),
+            ]);
 
         return $this->send($email, 'planning_published');
     }

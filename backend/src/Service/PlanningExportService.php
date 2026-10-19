@@ -6,16 +6,19 @@ namespace App\Service;
 
 use App\Entity\Planning;
 use App\Exception\InvalidPlanningExportRequestException;
+use App\Exception\NothingPublishedInExportRangeException;
 use App\Exception\PlanningNotYetPublishedException;
 use App\Repository\PlanningPublicationRepository;
 
 /**
  * "Exporter le planning" (docs/planning-export.md): request → one
  * intermediate model → PDF or XLSX. Exportable once the planning has been
- * published at least once (a PlanningPublication exists, D143); what is
- * exported is then the *current* calendar, unpublished edits included —
- * exactly what the calendar screen shows. Exporting never writes anything:
- * not a publication, not a generation, not a name.
+ * published at least once (a PlanningPublication exists, D143). Only
+ * published line periods are exported (docs/decisions.md D200): a manager
+ * gets their *current* calendar, unpublished edits included and labelled as
+ * such; anybody else gets exactly what was last diffused. Exporting never
+ * writes anything: not a publication, not a generation, not a name — and
+ * never replaces a publication's stored PDF (D173).
  */
 final class PlanningExportService
 {
@@ -31,18 +34,20 @@ final class PlanningExportService
     }
 
     /**
-     * @param array<mixed> $raw the decoded JSON body
+     * @param array<mixed> $raw         the decoded JSON body
+     * @param bool         $operational the requester manages the calendar (PlanningVoter::MANAGE_CALENDAR)
      *
      * @throws PlanningNotYetPublishedException
      * @throws InvalidPlanningExportRequestException
+     * @throws NothingPublishedInExportRangeException
      */
-    public function export(Planning $planning, array $raw): PlanningExportFile
+    public function export(Planning $planning, array $raw, bool $operational): PlanningExportFile
     {
         if (null === $this->publicationRepository->findLatestForPlanning($planning)) {
             throw new PlanningNotYetPublishedException();
         }
 
-        $data = $this->dataBuilder->build($this->requestParser->parse($planning, $raw));
+        $data = $this->dataBuilder->build($this->requestParser->parse($planning, $raw, $operational));
 
         return new PlanningExportFile(
             match ($data->format) {

@@ -103,8 +103,11 @@ final class DutySwapQueryService
         $line = $unit->line;
         $now = $this->clock->now();
 
+        // docs/decisions.md D198: only the offered unit's period (published, heldUnit() checked it) — a swap never
+        // crosses two periods, so no other period's units are offered.
+        $cycle = $unit->representative->getPlanningPeriod()->getCycle() ?? throw new \LogicException('A line period has its cycle.');
         $unitsByUser = [];
-        foreach ($this->calendarReader->read($line->getPlanning(), static fn (PlanningLine $l): bool => $l === $line) as $cell) {
+        foreach ($this->calendarReader->read($line->getPlanning(), static fn (PlanningLine $l): bool => $l === $line, $cycle) as $cell) {
             $holder = $cell->member?->getUser();
             if (null === $holder || $holder === $viewer || !$cell->isShown()) {
                 continue;
@@ -252,16 +255,18 @@ final class DutySwapQueryService
     }
 
     /**
-     * The viewer's own future units on the request's line, other than the offered one.
+     * The viewer's own future units on the request's line and in the offered
+     * unit's period (docs/decisions.md D198), other than the offered one.
      *
      * @return list<array<string, mixed>>
      */
     private function proposableUnits(DutySwapRequest $request, User $viewer): array
     {
         $line = $request->getLine();
+        $period = (string) $request->getOfferedDuty()->getPlanningPeriod()->getCycle()?->getStableId();
         $units = [];
         foreach ($this->myDuties->dutiesWithSwapStateOf($viewer) as $unit) {
-            if ($unit['lineStableId'] !== (string) $line->getStableId() || !$unit['swappable'] || $unit['dutyStableId'] === (string) $request->getOfferedDuty()->getStableId()) {
+            if ($unit['lineStableId'] !== (string) $line->getStableId() || $unit['period']['stableId'] !== $period || !$unit['swappable'] || $unit['dutyStableId'] === (string) $request->getOfferedDuty()->getStableId()) {
                 continue;
             }
             $units[] = [
@@ -275,6 +280,7 @@ final class DutySwapQueryService
                 'dates' => $unit['dates'],
                 'startsAt' => $unit['startsAt'],
                 'endsAt' => $unit['endsAt'],
+                'period' => $unit['period'],
             ];
         }
 

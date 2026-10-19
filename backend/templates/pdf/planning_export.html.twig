@@ -1,8 +1,10 @@
 {# ------------------------------------------------------------------
    MedVue — export PDF du calendrier courant (docs/planning-export.md)
    Contexte : PlanningExportPdfRenderer::view() — title, periodLabel,
-   generatedAtLabel, lines[label], months[{label, weeks[[7 × {number,
-   inRange, weekend, cells[ligne][{name, dutyType}]}]]}].
+   generatedAtLabel, headingLabel/warning (nature du document, D200),
+   periodsLabel, excludedLabel, lines[label], months[{label, weeks[[7 ×
+   {number, inRange, weekend, periodTag, unpublished[colonnes],
+   cells[ligne][{name, dutyType}]}]]}].
    Rendu par dompdf (A4 paysage) : CSS 2.1 simple, police DejaVu Sans.
    Un mois commence toujours une page ; chaque semaine est un bloc qui
    n'est jamais coupé (dompdf ignore page-break-inside sur un <tbody>, d'où
@@ -44,11 +46,16 @@
   .type { color: #727E8C; font-size: 6.5pt; }
   .none { color: #C3C9D0; }
   .uncovered { color: #B42318; font-weight: bold; }
+  .nature { margin: 2pt 0 0 0; font-size: 8pt; color: #2C7D5F; font-weight: bold; }
+  .nature.warning { color: #8A4B00; background: #FFF4E0; padding: 2pt 4pt; border-left: 2pt solid #D98A00; }
+  .scope { margin: 1pt 0 0 0; font-size: 6.5pt; color: #52606D; }
+  .ptag { font-size: 6pt; color: #2C7D5F; font-weight: bold; }
+  .unpub { color: #8C96A0; font-style: italic; font-size: 6.5pt; }
 </style>
 </head>
 <body>
   <div class="footer">
-    <span class="left">{{ title }} · {{ periodLabel }}</span>
+    <span class="left">{{ title }} · {{ periodLabel }}{% if headingLabel %} · {{ headingLabel }}{% endif %}</span>
     <span class="right">Document généré le {{ generatedAtLabel }} — état du planning à cette date</span>
   </div>
 
@@ -56,6 +63,9 @@
     <div class="month{{ loop.first ? ' first' : '' }}">
       <div class="head">
         <div class="doc"><strong>{{ title }}</strong> · {{ periodLabel }}</div>
+        {% if headingLabel %}<div class="nature{{ warning ? ' warning' : '' }}">{{ headingLabel }}</div>{% endif %}
+        {% if periodsLabel %}<div class="scope">{{ periodsLabel }}</div>{% endif %}
+        {% if excludedLabel %}<div class="scope">{{ excludedLabel }}</div>{% endif %}
         <h2>{{ month.label }}</h2>
       </div>
 
@@ -64,7 +74,7 @@
           <table>
             <tr class="days">
               <td class="label month-of-week">{{ month.label }}</td>
-              {% for day in week %}<td class="{{ day.weekend ? 'we' : '' }}{{ day.inRange ? '' : ' out' }}"><span class="wd">{{ ['lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.', 'dim.'][loop.index0] }}</span> {{ day.number }}</td>{% endfor %}
+              {% for day in week %}<td class="{{ day.weekend ? 'we' : '' }}{{ day.inRange ? '' : ' out' }}">{% if day.periodTag %}<span class="ptag">{{ day.periodTag }}</span> {% endif %}<span class="wd">{{ ['lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.', 'dim.'][loop.index0] }}</span> {{ day.number }}</td>{% endfor %}
             </tr>
             {% for label in lines %}
               {% set column = loop.index0 %}
@@ -72,7 +82,9 @@
                 <td class="label">{{ label }}</td>
                 {% for day in week %}
                   <td class="{{ day.weekend ? 'we' : '' }}{{ day.inRange ? '' : ' out' }}">
-                    {%- if day.inRange -%}
+                    {%- if day.inRange and column in day.unpublished -%}
+                      <span class="unpub">Non publiée</span>
+                    {%- elseif day.inRange -%}
                       {%- for item in day.cells[column] -%}
                         <span class="who">{% if item.name %}{{ item.name }}{% else %}<span class="uncovered">{{ item.gap }}</span>{% endif %}{% if item.dutyType %}<span class="type"> · {{ item.dutyType }}</span>{% endif %}</span>
                       {%- else -%}

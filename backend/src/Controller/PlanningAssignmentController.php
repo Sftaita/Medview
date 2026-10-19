@@ -11,7 +11,10 @@ use App\Repository\PlanningRepository;
 use App\Repository\PlanningTeamMemberRepository;
 use App\Repository\UserRepository;
 use App\Security\Voter\PlanningVoter;
+use App\Service\CalendarReadPolicy;
 use App\Service\PlanningAssignmentViewService;
+use App\Service\PlanningCyclePresenter;
+use App\Service\PlanningCycleResolver;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -38,6 +41,9 @@ final class PlanningAssignmentController
         private readonly PlanningTeamMemberRepository $teamMemberRepository,
         private readonly PlanningAssignmentViewService $viewService,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
+        private readonly PlanningCycleResolver $cycleResolver,
+        private readonly PlanningCyclePresenter $cyclePresenter,
+        private readonly CalendarReadPolicy $readPolicy,
     ) {
     }
 
@@ -73,7 +79,14 @@ final class PlanningAssignmentController
             return new JsonResponse(['error' => 'validation_failed', 'violations' => $errors], 422);
         }
 
-        $current = $this->viewService->currentGenerations($planning);
+        // docs/decisions.md D194: the period shown — ?period=, else the default one; never two periods together.
+        $cycle = $this->cycleResolver->fromRequest($planning, $request);
+        // docs/decisions.md D204: a member reads the lines published in this period only — never a draft's holders.
+        $readsUnpublished = $this->readPolicy->readsUnpublished($planning);
+        $current = array_filter(
+            $this->viewService->currentGenerations($planning, $cycle),
+            fn (array $entry): bool => $this->readPolicy->canRead($entry['line'], $cycle, $readsUnpublished),
+        );
         $generations = array_map(static fn (array $entry): PlanningGeneration => $entry['generation'], array_values($current));
         $lineByGeneration = [];
         foreach ($current as $entry) {
@@ -83,6 +96,11 @@ final class PlanningAssignmentController
         $assignments = $this->viewService->assignments($generations, $user, $from, $to);
 
         $data = [
+            'period' => [
+                ...$this->cyclePresenter->reference($cycle),
+                'startsAt' => $cycle->getStartsAt()->format('Y-m-d'),
+                'endsAt' => $cycle->getEndsAt()->format('Y-m-d'),
+            ],
             'generations' => array_map(
                 static fn (array $entry): array => [
                     'stableId' => (string) $entry['generation']->getStableId(),

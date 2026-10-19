@@ -5,12 +5,15 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Entity\Planning;
+use App\Entity\PlanningCycle;
 use App\Entity\PlanningLine;
 use App\Entity\PlanningPeriodStatus;
 use App\Entity\PlanningPublication;
 use App\Entity\PlanningPublicationDelivery;
 use App\Entity\PlanningPublicationEntry;
 use App\Entity\PlanningPublicationKind;
+use App\Entity\PlanningPublicationLine;
+use App\Entity\PlanningPublicationLineKind;
 use App\Entity\PlanningPublicationNotification;
 use App\Entity\PublicationNotificationStatus;
 use App\Entity\User;
@@ -19,6 +22,7 @@ use App\Exception\PlanningAlreadyPublishedException;
 use App\Exception\PlanningNotPublishableException;
 use App\Exception\PlanningNotYetPublishedException;
 use App\Exception\PlanningPublicationInProgressException;
+use App\Exception\PublicationLineSelectionException;
 use App\Repository\PlanningLineRepository;
 use App\Repository\PlanningPublicationDeliveryRepository;
 use App\Repository\PlanningPublicationNotificationRepository;
@@ -28,27 +32,40 @@ use Symfony\Component\Clock\ClockInterface;
 
 /**
  * "Publier le planning" and "Republier les modifications"
- * (docs/decisions.md D133, D143) — a Planning-level facade over the
- * per-line `PlanningPeriodStatus` lifecycle, the same shape as generation
- * (D129): `PlanningPeriod` lives on the line, so publishing "the planning"
- * means transitioning every active line's period, always through
- * `PlanningPeriodLifecycleService::transition()` — including the
- * GENERATED → VALIDATED step, a purely technical transition never exposed
- * to the user.
+ * (docs/decisions.md D133, D143), one period at a time since D196 (lot L4c)
+ * — a facade over the per-line `PlanningPeriodStatus` lifecycle, the same
+ * shape as generation (D129): publishing lines means transitioning their
+ * period, always through `PlanningPeriodLifecycleService::transition()` —
+ * including the GENERATED → VALIDATED step, a purely technical transition
+ * never exposed to the user.
  *
- * Every real diffusion is recorded (PlanningPublication + one
- * PlanningPublicationEntry per Duty: exactly what was announced), in the
- * same transaction as the status transitions, under the CalendarWriteLock
- * so the recorded calendar is a coherent state. That record is the
- * reference "Modifications non publiées" is computed against; a
- * republication becomes the new reference.
+ * Two operations, never guessed from the state:
+ *
+ * - publish: the first publication of lines in the period. Without a list,
+ *   all or nothing (the historical behaviour): every line that counts must
+ *   be ready, nothing may be published yet. With an explicit list, those
+ *   lines only (FIRST_FOR_LINE), the others left exactly as they are —
+ *   including in a period already published, as long as its published lines
+ *   have no change waiting (republish then, choosing the new lines with it);
+ * - republish: the changes of the period's published lines (UPDATED, only
+ *   those whose published content changed), plus the new lines explicitly
+ *   chosen with it — never a line nobody chose.
+ *
+ * Every diffusion is recorded (PlanningPublication, one
+ * PlanningPublicationEntry per Duty of every published line — exactly what
+ * the period's calendar now announces — and one PlanningPublicationLine per
+ * line it concerned), in one transaction with the status transitions,
+ * after the preflight is run again under the CalendarWriteLock: what is
+ * checked is what is recorded, no reassignment or generation can slip in
+ * between. That record is the reference "Modifications non publiées" is
+ * computed against; each publication becomes the period's new reference.
+ * Other periods are never read as references nor written.
  *
  * The emails a diffusion owes are recorded in that same transaction
- * (PlanningPublicationNotification, docs/decisions.md D172: the recipients
- * and, for a republication, each one's own changes — computed from the
- * very cells being frozen), then sent after the commit by
- * PublicationNotificationSender — a mail failure never undoes a
- * publication, and is retried, never lost.
+ * (PlanningPublicationNotification, docs/decisions.md D172: one per person —
+ * the lines first published for them, and their own changes), then sent
+ * after the commit by PublicationNotificationSender — a mail failure never
+ * undoes a publication, and is retried, never lost.
  *
  * Publication is never a lock: the calendar stays editable afterwards
  * (D133) and a later edit sends nothing by itself — only an explicit
@@ -76,109 +93,98 @@ final class PlanningPublicationService
     }
 
     /**
-     * The first diffusion: every participant receives the PDF of what was published.
+     * The first publication of lines in $cycle (omitted: the planning's only
+     * period). $lineStableIds null: all or nothing; a list: those lines only.
+     *
+     * @param list<string>|null $lineStableIds
      *
      * @throws PlanningPublicationInProgressException
      * @throws PlanningAlreadyPublishedException
      * @throws PlanningNotPublishableException
+     * @throws PublicationLineSelectionException
      */
-    public function publish(Planning $planning, User $publishedBy): PublicationOutcome
+    public function publish(Planning $planning, User $publishedBy, ?PlanningCycle $cycle = null, ?array $lineStableIds = null): PublicationOutcome
     {
-        return $this->locked($planning, function () use ($planning, $publishedBy): PublicationOutcome {
-            $activeLines = $this->activeLines($planning);
-            if (null !== $this->publicationRepository->findLatestForPlanning($planning)
-                || ([] !== $activeLines && $this->allAlreadyPublished($activeLines))) {
-                throw new PlanningAlreadyPublishedException();
+        $cycle ??= $planning->getOnlyCycle();
+
+        return $this->locked($planning, fn (): PublicationOutcome => $this->record($planning, $cycle, $publishedBy, function (PublicationPreflight $preflight) use ($planning, $cycle, $lineStableIds): array {
+            $reference = $this->publicationRepository->findLatestForCycle($cycle);
+            if (null === $lineStableIds) {
+                if (null !== $reference || [] !== $preflight->publishedLines()) {
+                    throw new PlanningAlreadyPublishedException();
+                }
+                // Always the real preflight, under the lock — never one the client loaded earlier.
+                if (!$preflight->publishable) {
+                    throw new PlanningNotPublishableException($preflight);
+                }
+
+                return [$reference, array_map(static fn (PublicationLineReadiness $line): PlanningLine => $line->line, $preflight->lines), false];
             }
 
-            // Always re-run the real preflight here — never trust one the client loaded earlier.
-            $preflight = $this->preflightService->check($planning);
-            if (!$preflight->publishable) {
-                throw new PlanningNotPublishableException($preflight);
+            $firstLines = $this->selectNewLines($preflight, $lineStableIds);
+            if (null !== $reference && [] !== $this->changesOnPublishedLines($planning, $cycle, $reference, $preflight)) {
+                // Publishing new lines alone would freeze the published lines' pending changes without telling anyone.
+                throw PublicationLineSelectionException::republishRequired(array_map(static fn (PublicationLineReadiness $line): PlanningLine => $line->line, $preflight->publishedLines()));
             }
 
-            [$publication, $results] = $this->record(
-                $planning,
-                $activeLines,
-                $publishedBy,
-                PlanningPublicationKind::FIRST,
-                fn (): array => [0, array_map(
-                    static fn (User $user): array => ['user' => $user, 'changes' => null],
-                    $this->changeService->audienceForFirstPublication($planning),
-                )],
-            );
-
-            $delivery = $this->notificationSender->sendForPublication($publication);
-
-            return new PublicationOutcome($publication, $results, $delivery['recipientCount'], $delivery['sentCount']);
-        });
+            return [$reference, $firstLines, false];
+        }));
     }
 
     /**
-     * A later diffusion of the changes made since the last one
-     * (docs/decisions.md D172): only the people whose own duties changed
-     * are emailed — one email each, with their own changes only and the PDF
-     * of the updated planning. Becomes the new reference.
+     * The changes of $cycle's published lines since its last publication
+     * (docs/decisions.md D172: only the people whose own duties changed are
+     * emailed), plus the new lines explicitly chosen with them (D196).
+     *
+     * @param list<string> $newLineStableIds
      *
      * @throws PlanningPublicationInProgressException
      * @throws PlanningNotYetPublishedException
      * @throws NoUnpublishedChangesException
      * @throws PlanningNotPublishableException
+     * @throws PublicationLineSelectionException
      */
-    public function republish(Planning $planning, User $publishedBy): PublicationOutcome
+    public function republish(Planning $planning, User $publishedBy, ?PlanningCycle $cycle = null, array $newLineStableIds = []): PublicationOutcome
     {
-        return $this->locked($planning, function () use ($planning, $publishedBy): PublicationOutcome {
-            $reference = $this->publicationRepository->findLatestForPlanning($planning);
+        $cycle ??= $planning->getOnlyCycle();
+
+        return $this->locked($planning, fn (): PublicationOutcome => $this->record($planning, $cycle, $publishedBy, function (PublicationPreflight $preflight) use ($planning, $cycle, $newLineStableIds): array {
+            $reference = $this->publicationRepository->findLatestForCycle($cycle);
             if (null === $reference) {
                 throw new PlanningNotYetPublishedException();
             }
-
-            if ([] === $this->changeService->changesSince($reference, $this->calendarReader->read($planning))) {
+            $firstLines = [] !== $newLineStableIds ? $this->selectNewLines($preflight, $newLineStableIds) : [];
+            if ([] === $firstLines && [] === $this->changesOnPublishedLines($planning, $cycle, $reference, $preflight)) {
                 throw new NoUnpublishedChangesException();
             }
-
-            $preflight = $this->preflightService->check($planning);
             if (!$preflight->republishable) {
                 throw new PlanningNotPublishableException($preflight);
             }
 
-            [$publication, $results] = $this->record(
-                $planning,
-                $this->activeLines($planning),
-                $publishedBy,
-                PlanningPublicationKind::UPDATE,
-                // Computed again under the calendar lock, from the exact state being recorded: the entries, each
-                // person's changes and the PDF (rendered from those entries) are one and the same version.
-                function (array $lockedCells) use ($reference): array {
-                    $changes = $this->changeService->changesSince($reference, $lockedCells);
-                    if ([] === $changes) {
-                        // Reverted between the check above and the lock: nothing to announce — rolls the transaction back.
-                        throw new NoUnpublishedChangesException();
-                    }
-
-                    return [\count($changes), $this->changeService->personalChanges($changes)];
-                },
-            );
-
-            $delivery = $this->notificationSender->sendForPublication($publication);
-
-            return new PublicationOutcome($publication, $results, $delivery['recipientCount'], $delivery['sentCount']);
-        });
+            return [$reference, $firstLines, true];
+        }));
     }
 
     /**
-     * The state the calendar screen shows (docs/decisions.md D143).
+     * The state the calendar screen shows for $cycle (docs/decisions.md D143, D196).
      */
-    public function state(Planning $planning): PublicationState
+    public function state(Planning $planning, ?PlanningCycle $cycle = null): PublicationState
     {
-        $latest = $this->publicationRepository->findLatestForPlanning($planning);
+        $cycle ??= $planning->getOnlyCycle();
+        $history = $this->publicationRepository->findByCycle($cycle);
+        $awaiting = array_values(array_filter(
+            $this->lineRepository->findByPlanning($planning),
+            static fn (PlanningLine $line): bool => $line->isActive()
+                && \in_array($line->periodIn($cycle)?->getStatus(), [PlanningPeriodStatus::GENERATED, PlanningPeriodStatus::VALIDATED], true),
+        ));
+        $latest = $this->publicationRepository->findLatestForCycle($cycle);
         if (null === $latest) {
-            return new PublicationState(null, null, [], $this->publicationRepository->findByPlanning($planning));
+            return new PublicationState(null, null, [], $history, $cycle, $awaiting);
         }
 
-        $changes = $this->changeService->changesSince($latest, $this->calendarReader->read($planning));
+        $changes = $this->changeService->changesSince($latest, $this->calendarReader->read($planning, $this->publishedIn($cycle), $cycle));
 
-        return new PublicationState($this->publicationRepository->findFirstForPlanning($planning), $latest, $changes, $this->publicationRepository->findByPlanning($planning));
+        return new PublicationState($this->publicationRepository->findFirstForCycle($cycle), $latest, $changes, $history, $cycle, $awaiting);
     }
 
     /**
@@ -209,33 +215,123 @@ final class PlanningPublicationService
     }
 
     /**
-     * Status transitions + the publication record + the notifications it
-     * owes, in one transaction, under the CalendarWriteLock (no reassignment
-     * can slip between reading the calendar, freezing it and deciding who is
-     * told what).
+     * The chosen new lines (D196): each must count in the period, be
+     * unpublished and ready on its own, and a reinforcement line goes out
+     * with or after its source — never guessed, never completed.
      *
-     * @param list<PlanningLine>                                                                                                                                                                     $activeLines
-     * @param callable(list<CalendarCell>): array{0: int, 1: list<array{user: User, changes: list<array{kind: string, line: string, dutyType: ?string, block: ?string, dates: list<string>}>|null}>} $prepare
-     *                                                                                                                                                                                                            the changed-duty count and each recipient (with their own changes for a republication), from the locked cells
+     * @param list<string> $stableIds
      *
-     * @return array{0: PlanningPublication, 1: list<PublicationLineResult>}
+     * @return list<PlanningLine>
      */
-    private function record(Planning $planning, array $activeLines, User $publishedBy, PlanningPublicationKind $kind, callable $prepare): array
+    private function selectNewLines(PublicationPreflight $preflight, array $stableIds): array
+    {
+        $stableIds = array_values(array_unique($stableIds));
+        if ([] === $stableIds) {
+            throw PublicationLineSelectionException::empty();
+        }
+
+        $byId = [];
+        foreach ($preflight->lines as $readiness) {
+            $byId[(string) $readiness->line->getStableId()] = $readiness;
+        }
+        $unknown = array_values(array_filter($stableIds, static fn (string $id): bool => !isset($byId[$id])));
+        if ([] !== $unknown) {
+            throw PublicationLineSelectionException::unknown($unknown);
+        }
+
+        $selected = array_map(static fn (string $id): PublicationLineReadiness => $byId[$id], $stableIds);
+        $published = array_values(array_filter($selected, static fn (PublicationLineReadiness $line): bool => $line->isPublished()));
+        if ([] !== $published) {
+            throw PublicationLineSelectionException::alreadyPublished(array_map(static fn (PublicationLineReadiness $line): PlanningLine => $line->line, $published));
+        }
+        $notReady = array_values(array_filter($selected, static fn (PublicationLineReadiness $line): bool => !$line->isFirstPublishable()));
+        if ([] !== $notReady) {
+            throw PublicationLineSelectionException::notPublishable(array_map(static fn (PublicationLineReadiness $line): array => ['line' => $line->line, 'blockers' => $line->blockers], $notReady));
+        }
+
+        $lines = array_map(static fn (PublicationLineReadiness $line): PlanningLine => $line->line, $selected);
+        $orphans = [];
+        foreach ($selected as $readiness) {
+            $source = $readiness->sourceLine;
+            if (null !== $source && !\in_array($source, $lines, true) && !($preflight->line($source)?->isPublished() ?? false)) {
+                $orphans[] = ['line' => $readiness->line, 'source' => $source];
+            }
+        }
+        if ([] !== $orphans) {
+            throw PublicationLineSelectionException::sourceNotPublished($orphans);
+        }
+
+        usort($lines, static fn (PlanningLine $a, PlanningLine $b): int => $a->getPosition() <=> $b->getPosition());
+
+        return $lines;
+    }
+
+    /**
+     * @return list<PublicationChange>
+     */
+    private function changesOnPublishedLines(Planning $planning, PlanningCycle $cycle, PlanningPublication $reference, PublicationPreflight $preflight): array
+    {
+        $published = array_map(static fn (PublicationLineReadiness $line): PlanningLine => $line->line, $preflight->publishedLines());
+
+        return $this->changeService->changesSince($reference, $this->calendarReader->read($planning, static fn (PlanningLine $line): bool => \in_array($line, $published, true), $cycle));
+    }
+
+    /**
+     * The preflight run again + status transitions + the publication record
+     * + the notifications it owes, in one transaction, under the
+     * CalendarWriteLock (no reassignment, no generation can slip between
+     * checking the calendar, freezing it and deciding who is told what).
+     *
+     * @param callable(PublicationPreflight): array{0: ?PlanningPublication, 1: list<PlanningLine>, 2: bool} $decide
+     *                                                                                                               the period's reference publication, the lines to publish for the first time, and
+     *                                                                                                               whether the published lines' changes are announced — or an exception (nothing written)
+     */
+    private function record(Planning $planning, PlanningCycle $cycle, User $publishedBy, callable $decide): PublicationOutcome
     {
         $connection = $this->entityManager->getConnection();
         $connection->beginTransaction();
         try {
             $this->calendarWriteLock->acquire($planning);
 
+            $preflight = $this->preflightService->check($planning, $cycle);
+            [$reference, $firstLines, $announceChanges] = $decide($preflight);
+            $publishedBefore = array_map(static fn (PublicationLineReadiness $line): PlanningLine => $line->line, $preflight->publishedLines());
+
             $results = [];
-            foreach ($activeLines as $line) {
-                $results[] = $this->publishLine($line);
+            foreach ($preflight->lines as $readiness) {
+                $isFirst = \in_array($readiness->line, $firstLines, true);
+                if ($isFirst) {
+                    $period = $readiness->line->periodIn($cycle) ?? throw new \LogicException('A line of the preflight has a period in the cycle.');
+                    if (PlanningPeriodStatus::GENERATED === $period->getStatus()) {
+                        $this->lifecycleService->transition($period, PlanningPeriodStatus::VALIDATED);
+                    }
+                    $this->lifecycleService->transition($period, PlanningPeriodStatus::PUBLISHED);
+                }
             }
 
-            $cells = $this->calendarReader->read($planning);
-            [$changedDutyCount, $recipients] = $prepare($cells);
-            $publication = new PlanningPublication($planning, $kind, $publishedBy, $changedDutyCount, new \DateTimeImmutable());
+            $published = [...$publishedBefore, ...$firstLines];
+            $cells = $this->calendarReader->read($planning, static fn (PlanningLine $line): bool => \in_array($line, $published, true), $cycle);
+            $changes = null !== $reference && $announceChanges
+                ? array_values(array_filter($this->changeService->changesSince($reference, $cells), static fn (PublicationChange $change): bool => \in_array($change->line, $publishedBefore, true)))
+                : [];
+            if ($announceChanges && [] === $changes && [] === $firstLines) {
+                // Reverted between the client's look and the lock: nothing to announce — rolls the transaction back.
+                throw new NoUnpublishedChangesException();
+            }
+
+            $publication = new PlanningPublication(
+                $planning,
+                null === $reference ? PlanningPublicationKind::FIRST : PlanningPublicationKind::UPDATE,
+                $publishedBy,
+                \count($changes),
+                new \DateTimeImmutable(),
+                $this->isCycleComplete($preflight, $published),
+            );
+            // Before the first write: planning_publications is append-only.
+            $publication->assignToCycle($cycle);
             $this->entityManager->persist($publication);
+
+            $entriesByLine = [];
             foreach ($cells as $cell) {
                 // docs/decisions.md D166: a conditional duty nobody needs and nobody holds is not part of what is
                 // published — never recorded, so the publication PDF can never show it as "Non attribué".
@@ -243,10 +339,30 @@ final class PlanningPublicationService
                     continue;
                 }
                 $this->entityManager->persist(new PlanningPublicationEntry($publication, $cell->duty, $cell->member));
+                $entriesByLine[(int) $cell->line->getId()] = ($entriesByLine[(int) $cell->line->getId()] ?? 0) + 1;
             }
+
+            $changedByLine = [];
+            foreach ($changes as $change) {
+                $changedByLine[(int) $change->line->getId()] = ($changedByLine[(int) $change->line->getId()] ?? 0) + 1;
+            }
+            foreach ($preflight->lines as $readiness) {
+                $line = $readiness->line;
+                $kind = match (true) {
+                    \in_array($line, $firstLines, true) => PlanningPublicationLineKind::FIRST_FOR_LINE,
+                    isset($changedByLine[(int) $line->getId()]) => PlanningPublicationLineKind::UPDATED,
+                    default => null, // never an artificial UPDATED
+                };
+                if (null !== $kind) {
+                    $period = $line->periodIn($cycle) ?? throw new \LogicException('A line of the preflight has a period in the cycle.');
+                    $this->entityManager->persist(new PlanningPublicationLine($publication, $period, $line, $kind, $entriesByLine[(int) $line->getId()] ?? 0, $changedByLine[(int) $line->getId()] ?? 0));
+                }
+                $results[] = new PublicationLineResult($line, $line->periodIn($cycle)?->getStatus() ?? $readiness->periodStatus, $readiness->isPublished(), $kind);
+            }
+
             $now = $this->clock->now();
-            foreach ($recipients as ['user' => $user, 'changes' => $changes]) {
-                $this->entityManager->persist(new PlanningPublicationNotification($publication, $user, $changes, $now));
+            foreach ($this->recipients($cycle, $firstLines, $changes) as ['user' => $user, 'changes' => $personal, 'firstLines' => $lineNames]) {
+                $this->entityManager->persist(new PlanningPublicationNotification($publication, $user, $personal, $now, $lineNames));
             }
             $this->entityManager->flush();
 
@@ -257,49 +373,63 @@ final class PlanningPublicationService
             $this->entityManager->flush();
 
             $connection->commit();
-
-            return [$publication, $results];
         } catch (\Throwable $exception) {
             $connection->rollBack();
             throw $exception;
         }
+
+        $delivery = $this->notificationSender->sendForPublication($publication);
+
+        return new PublicationOutcome($publication, $results, $delivery['recipientCount'], $delivery['sentCount']);
     }
 
     /**
-     * @return list<PlanningLine>
+     * One recipient each (docs/decisions.md D172, D196): the members of the
+     * lines published for the first time (whether or not they hold a duty),
+     * and the people whose own duties changed on the published lines — a
+     * person in both gets one email, with both.
+     *
+     * @param list<PlanningLine>      $firstLines
+     * @param list<PublicationChange> $changes
+     *
+     * @return list<array{user: User, changes: list<array{kind: string, line: string, dutyType: ?string, block: ?string, dates: list<string>}>|null, firstLines: list<string>|null}>
      */
-    private function activeLines(Planning $planning): array
+    private function recipients(PlanningCycle $cycle, array $firstLines, array $changes): array
     {
-        return array_values(array_filter($this->lineRepository->findByPlanning($planning), static fn (PlanningLine $line): bool => $line->isActive()));
+        $byUser = [];
+        foreach ([] !== $firstLines ? $this->changeService->audienceForFirstLines($cycle, $firstLines) : [] as ['user' => $user, 'lines' => $lines]) {
+            $byUser[(int) $user->getId()] = ['user' => $user, 'changes' => null, 'firstLines' => $lines];
+        }
+        foreach ($this->changeService->personalChanges($changes) as ['user' => $user, 'changes' => $personal]) {
+            $byUser[(int) $user->getId()] = ['user' => $user, 'changes' => $personal, 'firstLines' => $byUser[(int) $user->getId()]['firstLines'] ?? null];
+        }
+
+        return array_values($byUser);
     }
 
     /**
-     * @param list<PlanningLine> $lines
+     * docs/decisions.md D196: after this publication, every line that counts in the period is published and none of
+     * them holds a required duty left uncovered or a reinforcement whose demand is unknown.
+     *
+     * @param list<PlanningLine> $published
      */
-    private function allAlreadyPublished(array $lines): bool
+    private function isCycleComplete(PublicationPreflight $preflight, array $published): bool
     {
-        foreach ($lines as $line) {
-            if (PlanningPeriodStatus::PUBLISHED !== $line->getPlanningPeriod()->getStatus()) {
+        foreach ($preflight->lines as $readiness) {
+            if (!\in_array($readiness->line, $published, true)) {
                 return false;
             }
         }
 
-        return true;
+        return [] === $preflight->uncoveredDuties && [] === $preflight->undeterminedDuties;
     }
 
-    private function publishLine(PlanningLine $line): PublicationLineResult
+    /**
+     * @return callable(PlanningLine): bool the lines published in $cycle
+     */
+    private function publishedIn(PlanningCycle $cycle): callable
     {
-        $period = $line->getPlanningPeriod();
-        if (PlanningPeriodStatus::PUBLISHED === $period->getStatus()) {
-            return new PublicationLineResult($line, $period->getStatus(), alreadyPublished: true);
-        }
-
-        if (PlanningPeriodStatus::GENERATED === $period->getStatus()) {
-            $this->lifecycleService->transition($period, PlanningPeriodStatus::VALIDATED);
-        }
-        $this->lifecycleService->transition($period, PlanningPeriodStatus::PUBLISHED);
-
-        return new PublicationLineResult($line, $period->getStatus(), alreadyPublished: false);
+        return static fn (PlanningLine $line): bool => PlanningPeriodStatus::PUBLISHED === $line->periodIn($cycle)?->getStatus();
     }
 
     /**

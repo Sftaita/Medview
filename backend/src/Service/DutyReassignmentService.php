@@ -9,7 +9,6 @@ use App\Entity\DutyAssignment;
 use App\Entity\DutyAssignmentEvent;
 use App\Entity\DutySwapProposal;
 use App\Entity\PlanningGeneration;
-use App\Entity\PlanningPeriodStatus;
 use App\Entity\PlanningSnapshot;
 use App\Entity\PlanningTeamMember;
 use App\Entity\User;
@@ -23,6 +22,7 @@ use App\Exception\PlanningGenerationNotSnapshottedException;
 use App\Exception\StaleReassignmentException;
 use App\Repository\DutyAssignmentRepository;
 use App\Repository\PlanningGenerationRepository;
+use App\Repository\PlanningPeriodRepository;
 use App\Repository\PlanningSnapshotRepository;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
@@ -41,6 +41,15 @@ use Doctrine\ORM\EntityManagerInterface;
  * simultaneous saves are serialized and the second one sees the first
  * one's result (StaleReassignmentException, 409) — the D131 identity check
  * alone could not catch two requests that read before either committed.
+ *
+ * Periods (docs/decisions.md D197): the period is the duty's own, never a
+ * choice — its block (the database keeps a DutyGroupInstance in one period),
+ * its current generation and the events written all belong to it. Every
+ * other period, of every line, is only read, by the live check
+ * (ReassignmentCandidateService). Whether the change touches a published
+ * calendar (DutyAssignmentEvent.wasPublished) is read under the lock, from
+ * the database: a publication committed while the request was on its way is
+ * seen.
  *
  * Statement order matters and is the reason this does NOT follow the
  * project's usual "one flush() for the whole batch" convention
@@ -64,6 +73,7 @@ final class DutyReassignmentService
         private readonly CalendarWriteLock $calendarWriteLock,
         private readonly EntityManagerInterface $entityManager,
         private readonly ConditionalCoverageService $conditionalCoverage,
+        private readonly PlanningPeriodRepository $periodRepository,
     ) {
     }
 
@@ -82,9 +92,8 @@ final class DutyReassignmentService
         PlanningTeamMember $chosenMember,
         ?string $expectedCurrentTeamMemberStableId,
         User $author,
-        bool $wasPublished,
     ): array {
-        return $this->inLockedTransaction($representativeDuty, function () use ($representativeDuty, $chosenMember, $expectedCurrentTeamMemberStableId, $author, $wasPublished): array {
+        return $this->inLockedTransaction($representativeDuty, function () use ($representativeDuty, $chosenMember, $expectedCurrentTeamMemberStableId, $author): array {
             [$generation, $block, $currentByDuty] = $this->resolveCurrentState($representativeDuty, $expectedCurrentTeamMemberStableId);
 
             // docs/decisions.md D165: a conditional block takes a NEW holder only while the live demand requires it —
@@ -109,6 +118,7 @@ final class DutyReassignmentService
 
             // Phase 2 — one new MANUAL DutyAssignment + one DutyAssignmentEvent per constituent Duty.
             $occurredAt = new \DateTimeImmutable();
+            $wasPublished = $this->periodRepository->isPublishedNow($generation->getPlanningPeriod());
             $planning = $representativeDuty->getPlanningPeriod()->getTeam()->getPlanning();
             foreach ($block as $duty) {
                 $previous = $currentByDuty[(int) $duty->getId()] ?? null;
@@ -133,9 +143,9 @@ final class DutyReassignmentService
      * @throws StaleReassignmentException    the block no longer has the holder the editor showed
      * @throws DutyAlreadyUncoveredException there is nobody to remove
      */
-    public function unassign(Duty $representativeDuty, ?string $expectedCurrentTeamMemberStableId, User $author, bool $wasPublished): array
+    public function unassign(Duty $representativeDuty, ?string $expectedCurrentTeamMemberStableId, User $author): array
     {
-        return $this->inLockedTransaction($representativeDuty, function () use ($representativeDuty, $expectedCurrentTeamMemberStableId, $author, $wasPublished): array {
+        return $this->inLockedTransaction($representativeDuty, function () use ($representativeDuty, $expectedCurrentTeamMemberStableId, $author): array {
             [$generation, $block, $currentByDuty] = $this->resolveCurrentState($representativeDuty, $expectedCurrentTeamMemberStableId);
 
             if ([] === $currentByDuty) {
@@ -146,6 +156,7 @@ final class DutyReassignmentService
             $this->supersede($block, $currentByDuty);
 
             $occurredAt = new \DateTimeImmutable();
+            $wasPublished = $this->periodRepository->isPublishedNow($generation->getPlanningPeriod());
             $planning = $representativeDuty->getPlanningPeriod()->getTeam()->getPlanning();
             foreach ($block as $duty) {
                 $previous = $currentByDuty[(int) $duty->getId()] ?? null;
@@ -179,6 +190,12 @@ final class DutyReassignmentService
      * otherwise read as a false CONFLICT / rest violation with the very
      * duty they are handing over), everything else they hold on every line
      * still counts.
+     *
+     * Periods (docs/decisions.md D198, lot L4e): both units must be of the
+     * same period (OTHER_PERIOD for two periods of one line, never resolved
+     * into one); everything they hold in every other period, of every line,
+     * is read by that live check; the PUBLISHED status is the period's own,
+     * read from the database under the lock.
      *
      * The writes follow the D131 statement order (supersede every current
      * row of both units first, flushed, then insert the SWAP rows): the
@@ -265,10 +282,12 @@ final class DutyReassignmentService
 
         $period = $offeredDuty->getPlanningPeriod();
         if ($counterpartDuty->getPlanningPeriod() !== $period) {
-            throw new DutySwapNotApplicableException(DutySwapNotApplicableException::NOT_SWAPPABLE);
+            // docs/decisions.md D198: two periods of one line are never swapped in V1 — said as such, never guessed into one.
+            throw new DutySwapNotApplicableException($counterpartDuty->getPlanningPeriod()->getLine() === $period->getLine() && null !== $period->getLine() ? DutySwapNotApplicableException::OTHER_PERIOD : DutySwapNotApplicableException::NOT_SWAPPABLE);
         }
         // A deactivated line is no longer part of the calendar members see (CurrentCalendarReader): nothing to swap there.
-        if (PlanningPeriodStatus::PUBLISHED !== $period->getStatus() || !$request->getLine()->isActive()) {
+        // The status is read from the database (D198, as D197): under applySwap()'s lock, a period unpublished meanwhile is seen.
+        if (!$this->periodRepository->isPublishedNow($period) || !$request->getLine()->isActive()) {
             throw new DutySwapNotApplicableException(DutySwapNotApplicableException::PERIOD_NOT_PUBLISHED);
         }
 

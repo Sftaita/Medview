@@ -9,11 +9,16 @@ use App\Entity\DutyAssignment;
 use App\Entity\Planning;
 use App\Repository\PlanningRepository;
 use App\Security\Voter\PlanningVoter;
+use App\Service\CalendarReadPolicy;
+use App\Service\LineApplicabilityService;
 use App\Service\LiveDemandPresenter;
+use App\Service\PlanningCyclePresenter;
+use App\Service\PlanningCycleResolver;
 use App\Service\PlanningResultCandidateReason;
 use App\Service\PlanningResultDuty;
 use App\Service\PlanningResultLine;
 use App\Service\PlanningResultService;
+use App\Service\PlanningResultView;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -40,6 +45,10 @@ final class PlanningResultController
         private readonly PlanningResultService $resultService,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
         private readonly LiveDemandPresenter $demandPresenter,
+        private readonly PlanningCycleResolver $cycleResolver,
+        private readonly PlanningCyclePresenter $cyclePresenter,
+        private readonly LineApplicabilityService $applicability,
+        private readonly CalendarReadPolicy $readPolicy,
     ) {
     }
 
@@ -66,11 +75,30 @@ final class PlanningResultController
             return new JsonResponse(['error' => 'validation_failed', 'violations' => $errors], 422);
         }
 
-        $result = $this->resultService->forPlanning($planning, $from, $to);
+        // docs/decisions.md D194: the period shown — ?period=, else the default one (current, else next, else last;
+        // PlanningCyclePresenter::defaultCycle()). Its duties only; from/to narrow inside it.
+        $cycle = $this->cycleResolver->fromRequest($planning, $request);
+        $result = $this->resultService->forPlanning($planning, $from, $to, $cycle);
+        // docs/decisions.md D204: a line not published in this period is no member's to read — left out, as if absent.
+        $readsUnpublished = $this->readPolicy->readsUnpublished($planning);
+        $result = new PlanningResultView($result->planning, array_values(array_filter(
+            $result->lines,
+            fn (PlanningResultLine $line): bool => $this->readPolicy->canRead($line->line, $cycle, $readsUnpublished),
+        )));
+        $applicability = $this->applicability->forLines(array_map(static fn ($line) => $line->line, $result->lines), $cycle);
 
         return new JsonResponse([
             'planningStableId' => (string) $planning->getStableId(),
-            'lines' => array_map($this->lineToArray(...), $result->lines),
+            'period' => [
+                ...$this->cyclePresenter->reference($cycle),
+                'startsAt' => $cycle->getStartsAt()->format('Y-m-d'),
+                'endsAt' => $cycle->getEndsAt()->format('Y-m-d'),
+                'lastDay' => $cycle->getEndsAt()->modify('-1 day')->format('Y-m-d'),
+            ],
+            'lines' => array_map(fn (PlanningResultLine $line): array => [
+                ...$this->lineToArray($line),
+                'applicability' => $applicability[(int) $line->line->getId()]->toArray(),
+            ], $result->lines),
         ]);
     }
 

@@ -97,6 +97,21 @@ final class PlanningExportPdfRenderer
         return (string) $dompdf->output();
     }
 
+    /**
+     * "Période 1 (du 1er janvier au 30 avril 2027) · Période 2 (du 1er mai
+     * au 31 juillet 2027)" — each clipped to the exported range. Shared by
+     * both renderers.
+     *
+     * @param list<array{number: int, first: \DateTimeImmutable, last: \DateTimeImmutable}> $periods
+     */
+    public static function periodsLabel(array $periods): string
+    {
+        return implode(' · ', array_map(
+            static fn (array $period): string => 'Période '.$period['number'].' (du '.FrenchDate::long($period['first']).' au '.FrenchDate::long($period['last']).')',
+            $periods,
+        ));
+    }
+
     /** "128M" → bytes (PHP shorthand K/M/G). */
     private static function bytes(string $value): int
     {
@@ -116,7 +131,14 @@ final class PlanningExportPdfRenderer
      * the weeks holding at least one exported date; a date of the month
      * outside the exported range keeps its number but shows no duty.
      *
-     * @return array{title: string, periodLabel: string, generatedAtLabel: string, lines: list<string>, months: list<array{label: string, weeks: list<list<array{number: ?string, inRange: bool, weekend: bool, cells: list<list<array{name: ?string, dutyType: ?string, gap: ?string}>>}>>}>}
+     * Periods (docs/decisions.md D200): on a planning with several periods,
+     * the periods covered are listed under the title and the first exported
+     * day of each carries its tag ("P2"); a line period left out because it
+     * is not published reads "Non publiée", never "—" (no duty), and is
+     * listed too. The document's nature (headingLabel) is printed only when
+     * it says something: the operational warning or the diffused state.
+     *
+     * @return array{title: string, periodLabel: string, generatedAtLabel: string, headingLabel: ?string, warning: bool, periodsLabel: ?string, excludedLabel: ?string, lines: list<string>, months: list<array{label: string, weeks: list<list<array{number: ?string, inRange: bool, weekend: bool, periodTag: ?string, unpublished: list<int>, cells: list<list<array{name: ?string, dutyType: ?string, gap: ?string}>>}>>}>}
      */
     public function view(PlanningExportData $data): array
     {
@@ -124,6 +146,10 @@ final class PlanningExportPdfRenderer
         $dayByDate = [];
         foreach ($data->days as $day) {
             $dayByDate[$day->date->format('Y-m-d')] = $day;
+        }
+        $periodStarts = [];
+        foreach ($data->periods as $period) {
+            $periodStarts[$period['first']->format('Y-m-d')] = 'P'.$period['number'];
         }
 
         $months = [];
@@ -144,6 +170,8 @@ final class PlanningExportPdfRenderer
                         'number' => $inMonth ? $date->format('j') : null,
                         'inRange' => null !== $day,
                         'weekend' => $offset >= 5,
+                        'periodTag' => null !== $day && $data->multiPeriod ? ($periodStarts[$day->date->format('Y-m-d')] ?? null) : null,
+                        'unpublished' => null === $day ? [] : $day->unpublished,
                         'cells' => null === $day ? [] : array_map(
                             static fn (array $items): array => array_map(
                                 static fn (PlanningExportItem $item): array => ['name' => $item->personName, 'dutyType' => $item->dutyTypeName, 'gap' => $item->gapLabel()],
@@ -166,6 +194,10 @@ final class PlanningExportPdfRenderer
             'title' => $data->title,
             'periodLabel' => 'Du '.FrenchDate::long($data->first).' au '.FrenchDate::long($data->last),
             'generatedAtLabel' => FrenchDate::long($data->generatedAt).' à '.$data->generatedAt->format('H:i'),
+            'headingLabel' => $data->headingLabel(),
+            'warning' => PlanningExportData::OPERATIONAL_CHANGED === $data->nature,
+            'periodsLabel' => $data->multiPeriod ? self::periodsLabel($data->periods) : null,
+            'excludedLabel' => [] === $data->excluded ? null : 'Non inclus car non publiés : '.implode(', ', $data->excluded),
             'lines' => array_map(static fn (PlanningExportLine $line): string => $line->label, $data->lines),
             'months' => $months,
         ];

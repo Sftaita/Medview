@@ -11,6 +11,10 @@ use App\Entity\Planning;
  * to $planning and is active, the dates lie inside the planning, the
  * order of $lines is the order of the document. Built only by
  * PlanningExportRequestParser.
+ *
+ * `$operational` (docs/decisions.md D200): the requester manages the
+ * calendar (PlanningVoter::MANAGE_CALENDAR) and exports the current
+ * calendar; otherwise the export is what was last diffused.
  */
 final readonly class PlanningExportRequest
 {
@@ -24,6 +28,7 @@ final readonly class PlanningExportRequest
         public \DateTimeImmutable $from,
         public \DateTimeImmutable $toExclusive,
         public array $lines,
+        public bool $operational = true,
     ) {
     }
 }

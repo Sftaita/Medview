@@ -7,7 +7,6 @@ namespace App\Controller;
 use App\Dto\ReassignDutyRequest;
 use App\Eligibility\ExclusionReason;
 use App\Entity\Duty;
-use App\Entity\PlanningPeriodStatus;
 use App\Entity\User;
 use App\Exception\CoverageNotRequiredException;
 use App\Exception\CoverageUndeterminedException;
@@ -23,6 +22,7 @@ use App\Service\DependentImpact;
 use App\Service\DutyReassignmentService;
 use App\Service\ExclusionReasonLabeler;
 use App\Service\LiveDemandPresenter;
+use App\Service\PlanningCyclePresenter;
 use App\Service\ReassignmentBlockDuty;
 use App\Service\ReassignmentCandidate;
 use App\Service\ReassignmentCandidateService;
@@ -53,6 +53,7 @@ final class DutyReassignmentController
         private readonly AuthorizationCheckerInterface $authorizationChecker,
         private readonly LiveDemandPresenter $demandPresenter,
         private readonly ExclusionReasonLabeler $reasonLabeler,
+        private readonly PlanningCyclePresenter $cyclePresenter,
     ) {
     }
 
@@ -84,6 +85,7 @@ final class DutyReassignmentController
         $current = $view->currentTeamMember;
 
         return new JsonResponse([
+            'period' => $this->periodOf($duty),
             'groupInstanceStableId' => $view->groupInstanceStableId,
             'groupLabel' => $view->groupLabel,
             'blockDuties' => array_map($this->blockDutyToArray(...), $view->blockDuties),
@@ -124,10 +126,8 @@ final class DutyReassignmentController
             return new JsonResponse(['error' => 'validation_failed', 'violations' => ['expectedCurrentTeamMemberStableId' => 'This value should not be blank.']], 422);
         }
 
-        $wasPublished = PlanningPeriodStatus::PUBLISHED === $duty->getPlanningPeriod()->getStatus();
-
         try {
-            $impacts = $this->reassignmentService->unassign($duty, $expected, $user, $wasPublished);
+            $impacts = $this->reassignmentService->unassign($duty, $expected, $user);
         } catch (DutyNotGeneratedException $exception) {
             return new JsonResponse(['error' => 'duty_not_generated', 'message' => $exception->getMessage()], 409);
         } catch (StaleReassignmentException $exception) {
@@ -136,7 +136,7 @@ final class DutyReassignmentController
             return new JsonResponse(['error' => 'already_uncovered', 'message' => $exception->getMessage()], 409);
         }
 
-        return new JsonResponse(['status' => 'unassigned', 'dependentImpacts' => $this->impactsToArray($impacts)], 200);
+        return new JsonResponse(['status' => 'unassigned', 'period' => $this->periodOf($duty), 'dependentImpacts' => $this->impactsToArray($impacts)], 200);
     }
 
     #[Route('/api/plannings/{planningStableId}/duties/{dutyStableId}/reassign', name: 'api_duty_reassign', methods: ['POST'])]
@@ -154,10 +154,8 @@ final class DutyReassignmentController
             throw new NotFoundHttpException('Team member not found.');
         }
 
-        $wasPublished = PlanningPeriodStatus::PUBLISHED === $duty->getPlanningPeriod()->getStatus();
-
         try {
-            $impacts = $this->reassignmentService->reassign($duty, $teamMember, $dto->expectedCurrentTeamMemberStableId, $user, $wasPublished);
+            $impacts = $this->reassignmentService->reassign($duty, $teamMember, $dto->expectedCurrentTeamMemberStableId, $user);
         } catch (DutyNotGeneratedException $exception) {
             return new JsonResponse(['error' => 'duty_not_generated', 'message' => $exception->getMessage()], 409);
         } catch (StaleReassignmentException $exception) {
@@ -173,7 +171,7 @@ final class DutyReassignmentController
             return new JsonResponse(['error' => 'coverage_undetermined', 'message' => $exception->getMessage()], 409);
         }
 
-        return new JsonResponse(['status' => 'reassigned', 'dependentImpacts' => $this->impactsToArray($impacts)], 200);
+        return new JsonResponse(['status' => 'reassigned', 'period' => $this->periodOf($duty), 'dependentImpacts' => $this->impactsToArray($impacts)], 200);
     }
 
     /**
@@ -195,12 +193,29 @@ final class DutyReassignmentController
         if (null === $duty || (string) $duty->getPlanningPeriod()->getTeam()->getPlanning()->getStableId() !== $planningStableId) {
             throw new NotFoundHttpException('Duty not found.');
         }
+        // docs/decisions.md D197: a duty of an orphan period (its line deleted, docs/planning-cycles.md §6.3) is part
+        // of no calendar — nothing shows it, nothing may change it.
+        if (null === $duty->getPlanningPeriod()->getLine() || null === $duty->getPlanningPeriod()->getCycle()) {
+            throw new NotFoundHttpException('Duty not found.');
+        }
 
         if (!$this->authorizationChecker->isGranted(PlanningVoter::MANAGE_CALENDAR, $duty->getPlanningPeriod()->getTeam()->getPlanning())) {
             throw new AccessDeniedHttpException('Only the creator or an OWNER/ADMIN of this Planning can modify its calendar.');
         }
 
         return $duty;
+    }
+
+    /**
+     * The duty's own period (docs/decisions.md D197) — the client checks it is still the one it shows.
+     *
+     * @return array{stableId: string, number: int}
+     */
+    private function periodOf(Duty $duty): array
+    {
+        $cycle = $duty->getPlanningPeriod()->getCycle() ?? throw new \LogicException('resolveDuty() only returns duties of a period of a cycle.');
+
+        return $this->cyclePresenter->reference($cycle);
     }
 
     /**

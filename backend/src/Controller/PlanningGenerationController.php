@@ -15,6 +15,7 @@ use App\Exception\NoActivePlanningRuleSetException;
 use App\Exception\NoSolverParameterSetException;
 use App\Exception\PlanningGenerationAlreadySnapshottedException;
 use App\Exception\PlanningGenerationConcurrentSolveException;
+use App\Exception\PlanningGenerationContextChangedException;
 use App\Exception\StalePlanningGenerationDataException;
 use App\Fairness\CoverageStatus;
 use App\Fairness\OptimizationResult;
@@ -64,6 +65,9 @@ final class PlanningGenerationController
     {
         $planningPeriod = $this->resolvePlanningPeriod($planningPeriodStableId);
         $this->denyUnlessCanManage($planningPeriod->getTeam());
+        // Technical, synchronous path (lot L3): never on a planning with several periods — they are generated through
+        // the job system only, which reads the neighbouring periods and serializes the computations.
+        $planningPeriod->getTeam()->getPlanning()->assertSingleCycle();
 
         [$restPolicy, $errorResponse] = $this->restPolicyParser->parse($request);
         if (null !== $errorResponse) {
@@ -100,6 +104,7 @@ final class PlanningGenerationController
     {
         $generation = $this->resolveGeneration($stableId);
         $this->denyUnlessCanManage($generation->getPlanningPeriod()->getTeam());
+        $generation->getPlanningPeriod()->getTeam()->getPlanning()->assertSingleCycle();
 
         try {
             $snapshot = $this->snapshotService->createSnapshot($generation);
@@ -142,6 +147,7 @@ final class PlanningGenerationController
     {
         $generation = $this->resolveGeneration($stableId);
         $this->denyUnlessCanManage($generation->getPlanningPeriod()->getTeam());
+        $generation->getPlanningPeriod()->getTeam()->getPlanning()->assertSingleCycle();
 
         // Technical, per-period endpoint (no screen calls it — the UI queues a PlanningJob, D149):
         // never a second engine run next to the planning's queued/running job.
@@ -157,6 +163,8 @@ final class PlanningGenerationController
             return new JsonResponse(['error' => 'no_solver_parameter_set', 'message' => $exception->getMessage()], 409);
         } catch (StalePlanningGenerationDataException $exception) {
             return new JsonResponse(['error' => 'stale_generation_data', 'message' => $exception->getMessage()], 409);
+        } catch (PlanningGenerationContextChangedException $exception) {
+            return new JsonResponse(['error' => $exception->reason, 'message' => $exception->getMessage()], 409);
         }
 
         return new JsonResponse($this->solveResultToArray($generation, $result), 200);

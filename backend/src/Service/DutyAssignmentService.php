@@ -10,80 +10,38 @@ use App\Entity\DutyAssignmentSource;
 use App\Entity\PlanningGeneration;
 use App\Entity\PlanningSnapshot;
 use App\Entity\PlanningTeamMember;
-use App\Exception\CoverageNotRequiredException;
-use App\Exception\CoverageUndeterminedException;
-use App\Exception\DuplicateDutyAssignmentException;
 use App\Exception\InvalidDutyAssignmentException;
-use App\Exception\PlanningGenerationNotSnapshottedException;
 use App\Repository\PlanningSnapshotMemberRepository;
-use App\Repository\PlanningSnapshotRepository;
-use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
- * Creates DutyAssignment rows. Deliberately narrow (docs/planning-generation.md
- * §18): checks the structural invariants a client could otherwise violate
- * trivially (wrong PlanningPeriod, wrong PlanningTeam, duplicate), but performs no
- * eligibility check at all (availability, spacing, fairness, rules) — that
- * is EligibilityService's job, a later lot.
+ * Creates DutyAssignment rows for the application's controlled write paths
+ * only: each of them checks eligibility live and holds the CalendarWriteLock
+ * itself. This service checks only the structural invariants a caller could
+ * otherwise violate (the duty's PlanningPeriod is the generation's, the
+ * member is of its PlanningTeam and in its snapshot), and never flushes: the
+ * caller owns the transaction and the statement order (docs/decisions.md
+ * D106, D131).
  *
- * Two real, distinct write paths, never conflated (docs/decisions.md
- * D106):
- *
- * - `createManual()` (Lot 3) — one HTTP request, one assignment,
- *   `DutyAssignmentSource::MANUAL` always forced, flushes immediately (its
- *   own transaction).
  * - `createAuto()` (Lot 6E) — called many times in a loop by
  *   `PlanningGenerationService::generate()` while persisting a whole solve
- *   result; never flushes itself (the caller flushes exactly once for the
- *   entire batch + the generation's own metadata + status transitions, the
- *   atomicity §18 of the lot requires) and accepts an already-resolved
- *   `PlanningSnapshot` instead of looking it up again for every single
- *   assignment.
+ *   result (the caller flushes exactly once for the entire batch + the
+ *   generation's own metadata + status transitions, the atomicity §18 of the
+ *   lot requires), and by the completion.
+ * - `createManualBatchItem()` / `createSwapBatchItem()` — a reassignment's /
+ *   a swap's replacement rows (DutyReassignmentService).
+ *
+ * The former `createManual()` (lot 3) wrote one MANUAL assignment with no
+ * eligibility check, no lock and no event, for the technical endpoint
+ * `POST /api/planning-generations/{id}/assignments`. Both were removed
+ * (docs/decisions.md D197).
  */
 final class DutyAssignmentService
 {
     public function __construct(
-        private readonly PlanningSnapshotRepository $snapshotRepository,
         private readonly PlanningSnapshotMemberRepository $snapshotMemberRepository,
         private readonly EntityManagerInterface $entityManager,
-        private readonly ConditionalCoverageService $conditionalCoverage,
     ) {
-    }
-
-    /**
-     * @throws PlanningGenerationNotSnapshottedException
-     * @throws InvalidDutyAssignmentException
-     * @throws DuplicateDutyAssignmentException
-     * @throws CoverageNotRequiredException              docs/decisions.md D165 — the same write-time rule as a reassignment
-     * @throws CoverageUndeterminedException
-     */
-    public function createManual(PlanningGeneration $generation, Duty $duty, PlanningTeamMember $teamMember, bool $locked): DutyAssignment
-    {
-        $snapshot = $this->snapshotRepository->findOneByGeneration($generation);
-        if (null === $snapshot) {
-            throw new PlanningGenerationNotSnapshottedException();
-        }
-
-        // docs/decisions.md D165: this low-level path must not be a way around the rule a reassignment enforces —
-        // a conditional duty takes a new holder only while the live demand requires it.
-        $this->conditionalCoverage->assertCanBeNewlyCovered([$duty]);
-
-        $assignment = $this->buildAssignment($generation, $snapshot, $duty, $teamMember, DutyAssignmentSource::MANUAL, $locked);
-        $this->entityManager->persist($assignment);
-
-        try {
-            $this->entityManager->flush();
-        } catch (UniqueConstraintViolationException) {
-            // The absence of a prior findBy() check above is deliberate:
-            // the unique constraint on (planning_generation_id, duty_id) is
-            // the real guarantee, and catching its violation here turns a
-            // concurrent duplicate into the same clean 409 a sequential one
-            // would get (same pattern as D026/UserRegistrationService).
-            throw new DuplicateDutyAssignmentException();
-        }
-
-        return $assignment;
     }
 
     /**

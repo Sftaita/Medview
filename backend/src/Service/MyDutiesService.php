@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace App\Service;
 
-use App\Entity\PlanningLine;
-use App\Entity\PlanningPeriodStatus;
 use App\Entity\User;
 use App\Repository\DutySwapRequestRepository;
 use App\Repository\PlanningRepository;
@@ -21,6 +19,12 @@ use Symfony\Component\Clock\ClockInterface;
  * is PUBLISHED — a draft calendar is never shown to its members, a late
  * edit on a published line is. Only the caller's own duties: nobody else's
  * name ever leaves this service.
+ *
+ * Periods (docs/decisions.md D198, lot L4e): every period of every cycle
+ * whose own status is PUBLISHED (CurrentCalendarReader::readPublished()),
+ * never the planning's status as a whole; each unit names its period. A
+ * unit never spans two periods (a block stays in one, D189 option A), so a
+ * boundary never shows a duty twice.
  */
 final class MyDutiesService
 {
@@ -29,6 +33,7 @@ final class MyDutiesService
         private readonly CurrentCalendarReader $calendarReader,
         private readonly DutySwapRequestRepository $swapRequestRepository,
         private readonly ClockInterface $clock,
+        private readonly PlanningCyclePresenter $cyclePresenter,
     ) {
     }
 
@@ -71,14 +76,16 @@ final class MyDutiesService
      *     endsAt: string,
      *     conditional: bool,
      *     coverageState: string|null,
+     *     period: array{stableId: string, number: int, count: int},
      * }> chronological
      */
     public function dutiesOf(User $user): array
     {
         $units = [];
         foreach ($this->planningRepository->findWithPublishedLineForMember($user) as $planning) {
-            $cells = $this->calendarReader->read($planning, static fn (PlanningLine $line): bool => PlanningPeriodStatus::PUBLISHED === $line->getPlanningPeriod()->getStatus());
-            foreach ($cells as $cell) {
+            // Lot L7: how many periods the planning has — "Période N" is said only when there are several.
+            $periodCount = $this->cyclePresenter->periodCount($planning);
+            foreach ($this->calendarReader->readPublished($planning) as $cell) {
                 if (null === $cell->member || $cell->member->getUser()->getId() !== $user->getId()) {
                     continue;
                 }
@@ -102,6 +109,11 @@ final class MyDutiesService
                         'endsAt' => $duty->getEndsAt(),
                         'conditional' => $duty->isConditional(),
                         'coverageState' => $cell->coverageState?->value,
+                        // Only the periods of a line are read, and those always have their cycle (docs/planning-cycles.md I3).
+                        'period' => [
+                            ...$this->cyclePresenter->reference($duty->getPlanningPeriod()->getCycle() ?? throw new \LogicException('A line period has its cycle.')),
+                            'count' => $periodCount,
+                        ],
                     ];
                 }
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Entity\Planning;
+use App\Entity\PlanningCycle;
 use App\Entity\PlanningLine;
 use App\Repository\PlanningLineDemandPolicyRepository;
 use App\Repository\PlanningLineRepository;
@@ -38,15 +39,65 @@ final class PlanningLineOrder
     }
 
     /**
+     * Only for a Planning with a single cycle — the flows reading it are not
+     * period-aware yet (lots L3/L4, docs/decisions.md D187); a line without
+     * period (added while no period could take it, docs/planning-cycles.md
+     * §5.5) has nothing to solve and is left out.
+     *
      * @return list<PlanningLine> the Planning's active lines, in resolution order
+     *
+     * @throws \App\Exception\MultiplePeriodsNotSupportedException
      */
     public function activeInResolutionOrder(Planning $planning): array
     {
-        $lines = array_values(array_filter(
-            $this->lineRepository->findByPlanning($planning),
-            static fn (PlanningLine $line): bool => $line->isActive(),
-        ));
+        $planning->assertSingleCycle();
 
+        return $this->inResolutionOrder(array_values(array_filter(
+            $this->lineRepository->findByPlanning($planning),
+            static fn (PlanningLine $line): bool => $line->isActive() && null !== $line->getSingleCyclePeriod(),
+        )));
+    }
+
+    /**
+     * The active lines that have a period in $cycle, in resolution order
+     * (docs/planning-cycles.md §5.4, lot L3): what a generation or a
+     * completion of that period solves. A conditional line's source counts
+     * only when it takes part in the same cycle (§5.6).
+     *
+     * @return list<PlanningLine>
+     */
+    public function activeInCycle(PlanningCycle $cycle): array
+    {
+        return $this->inResolutionOrder(array_values(array_filter(
+            $this->lineRepository->findByPlanning($cycle->getPlanning()),
+            static fn (PlanningLine $line): bool => $line->isActive() && null !== $line->periodIn($cycle),
+        )));
+    }
+
+    /**
+     * @return list<PlanningLine> the active lines of $cycle solved before $line (empty for the first one, or for a
+     *                            line that takes no part in $cycle)
+     */
+    public function precedingActiveLinesInCycle(PlanningLine $line, PlanningCycle $cycle): array
+    {
+        $preceding = [];
+        foreach ($this->activeInCycle($cycle) as $candidate) {
+            if ($candidate === $line) {
+                return $preceding;
+            }
+            $preceding[] = $candidate;
+        }
+
+        return [];
+    }
+
+    /**
+     * @param list<PlanningLine> $lines
+     *
+     * @return list<PlanningLine>
+     */
+    private function inResolutionOrder(array $lines): array
+    {
         usort($lines, static fn (PlanningLine $a, PlanningLine $b): int => [$a->getPosition(), $a->getId()] <=> [$b->getPosition(), $b->getId()]);
 
         /** @var array<int, PlanningLine> $sourceOf active source line, keyed by the conditional line's id */

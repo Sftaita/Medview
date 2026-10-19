@@ -79,17 +79,25 @@ final class PlanningJobStore
     }
 
     /**
-     * A generation of this Planning left in SOLVING by an interrupted job
-     * (the only kind of job that ever puts one there — at most one job runs
-     * per Planning) becomes FAILED: never an eternal SOLVING. The optimistic
-     * lock version is bumped like any other write of that row.
+     * A generation left in SOLVING by an interrupted job (the only kind of
+     * job that ever puts one there — at most one job runs per Planning)
+     * becomes FAILED: never an eternal SOLVING. The optimistic lock version
+     * is bumped like any other write of that row.
+     *
+     * Scoped to the job's period when given (docs/planning-cycles.md §5.4,
+     * lot L3): only the job's own generations, never another period's.
+     * Without it, every period of the Planning (a job recorded before L3).
+     * Reached through the period's cycle, so the period of a line deleted
+     * since (orphan, D188) is covered too.
      */
-    public function failSolvingGenerations(int $planningId, string $reason): int
+    public function failSolvingGenerations(int $planningId, string $reason, ?int $cycleId = null): int
     {
         return $this->connection()->executeStatement(
             "UPDATE planning_generations SET status = 'FAILED', failure_reason = :reason, lock_version = lock_version + 1
-             WHERE status = 'SOLVING' AND planning_period_id IN (SELECT planning_period_id FROM planning_lines WHERE planning_id = :planning)",
-            ['reason' => $reason, 'planning' => $planningId],
+             WHERE status = 'SOLVING' AND planning_period_id IN (
+                 SELECT pp.id FROM planning_periods pp JOIN planning_cycles c ON c.id = pp.planning_cycle_id
+                 WHERE c.planning_id = :planning AND (CAST(:cycle AS bigint) IS NULL OR c.id = CAST(:cycle AS bigint)))",
+            ['reason' => $reason, 'planning' => $planningId, 'cycle' => $cycleId],
         );
     }
 

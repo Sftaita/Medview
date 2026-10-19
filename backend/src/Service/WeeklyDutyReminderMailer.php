@@ -32,9 +32,13 @@ final class WeeklyDutyReminderMailer
     }
 
     /**
-     * @param non-empty-list<array{when: string, what: string}> $items
+     * $unpublishedChanges (docs/decisions.md D199): the week differs, for this
+     * person, from what was last diffused — the email then says so in plain
+     * words, and each `changed` item is marked; nothing is added otherwise.
+     *
+     * @param non-empty-list<array{when: string, what: string, changed: bool}> $items
      */
-    public function send(User $recipient, Planning $planning, \DateTimeImmutable $weekStart, array $items): bool
+    public function send(User $recipient, Planning $planning, \DateTimeImmutable $weekStart, array $items, bool $unpublishedChanges = false): bool
     {
         $email = (new TemplatedEmail())
             ->from(Address::create($this->from))
@@ -47,6 +51,7 @@ final class WeeklyDutyReminderMailer
                 'planningName' => $planning->getName(),
                 'weekLabel' => 'Semaine du '.FrenchDate::long($weekStart),
                 'items' => $items,
+                'unpublishedChanges' => $unpublishedChanges,
                 'planningUrl' => rtrim($this->frontendUrl, '/').'/plannings/'.$planning->getStableId(),
                 'supportEmail' => $this->supportEmail,
                 'supportUrl' => 'mailto:'.$this->supportEmail,

@@ -184,6 +184,14 @@ final class SnapshotHasher
             'endsAt' => self::instant($c->getEndsAt()),
             'sourceLegalMinRestHours' => $c->getSourceLegalMinRestHours(),
             'sourceTeamMinRestHours' => $c->getSourceTeamMinRestHours(),
+            // Lot L3 (docs/planning-cycles.md §5.4): only for a duty of another period, so that the hash of every
+            // snapshot taken before — or of a single-period planning — stays exactly what it was.
+            ...(null !== $c->getSourceCycleStableId() ? [
+                'sourceCycleStableId' => (string) $c->getSourceCycleStableId(),
+                'sourceCycleNumber' => $c->getSourceCycleNumber(),
+                'sourceCycleStartsAt' => $c->getSourceCycleStartsAt()?->format('Y-m-d'),
+                'sourceCycleEndsAt' => $c->getSourceCycleEndsAt()?->format('Y-m-d'),
+            ] : []),
         ], $commitments);
     }
 

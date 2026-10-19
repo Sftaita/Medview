@@ -1,9 +1,37 @@
+{% set periodText = periodNumber ? 'période ' ~ periodNumber ~ ', ' ~ periodLabel : periodLabel %}
 Bonjour {{ firstName }},
 
-Le planning de garde {{ planningName }} {{ periodLabel }} est disponible.
+Le planning de garde {{ planningName }} ({{ periodText }}) est disponible.
+{% if lines is not empty %}
+{{ lines|length > 1 ? 'Lignes publiées' : 'Ligne publiée' }} : {{ lines|join(', ') }}.
+{% endif %}
 
 Vous le trouverez en pièce jointe (PDF) : toutes les dates, chaque ligne de garde et la personne affectée. Il reste consultable à tout moment dans MedVue :
 {{ planningUrl }}
+{% if removed is not empty %}
+
+{{ removed|length > 1 ? 'GARDES RETIRÉES SUR UNE AUTRE LIGNE' : 'GARDE RETIRÉE SUR UNE AUTRE LIGNE' }}
+{% for u in removed %}
+
+- {{ u.when }} — {{ u.line }}{% if u.detail %} ({{ u.detail }}){% endif %}
+
+{% for d in u.dates %}
+    {{ d }}
+{% endfor %}
+{% endfor %}
+{% endif %}
+{% if added is not empty %}
+
+{{ added|length > 1 ? 'GARDES AJOUTÉES SUR UNE AUTRE LIGNE' : 'GARDE AJOUTÉE SUR UNE AUTRE LIGNE' }}
+{% for u in added %}
+
+- {{ u.when }} — {{ u.line }}{% if u.detail %} ({{ u.detail }}){% endif %}
+
+{% for d in u.dates %}
+    {{ d }}
+{% endfor %}
+{% endfor %}
+{% endif %}
 
 Si l'une de vos gardes est ensuite ajoutée ou retirée, vous recevrez un email détaillant vos seuls changements, avec le planning actualisé. Chaque samedi, vous recevrez le récapitulatif de vos gardes de la semaine suivante si vous en avez.
 

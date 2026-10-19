@@ -127,14 +127,77 @@ final class DutyMaterializationService
                 throw new InvalidConditionalDutyException('A conditional block needs exactly one coverage source per day of the block.');
             }
         }
+
+        return $this->buildGroup($planningPeriod, $pattern, $anchorDate, $componentLocalTimes, $demandType, $criticality, $coverageSourcesByOffset);
+    }
+
+    /**
+     * The one exception to the atomicity of a block (docs/decisions.md D192):
+     * the days of an occurrence that fall in a period whose start is a
+     * HISTORICAL boundary — the end of a locked previous period, fixed before
+     * lot L3, that cuts the occurrence, whose earlier days were never
+     * materialized (PeriodBoundaryGuard::allowsRemainder(), checked by the
+     * caller). Those days become one DutyGroupInstance of the same pattern
+     * (same family, same duty types, one holder): a block identifiable as a
+     * remainder by having fewer duties than its pattern has components
+     * (DutyGroupInstance::isRemainder()). Never anything in the previous
+     * period.
+     *
+     * @param array<int, array{0: \DateTimeImmutable, 1: \DateTimeImmutable}> $componentLocalTimes     keyed by dayOffset: a
+     *                                                                                                 strict, non-empty subset of the pattern's offsets
+     * @param array<int, Duty>                                                $coverageSourcesByOffset one per day given, or none
+     *
+     * @throws DutyPatternMismatchException
+     */
+    public function materializeBlockRemainder(
+        PlanningPeriod $planningPeriod,
+        DutyPattern $pattern,
+        \DateTimeImmutable $anchorDate,
+        array $componentLocalTimes,
+        DutyDemandType $demandType = DutyDemandType::REQUIRED,
+        array $coverageSourcesByOffset = [],
+    ): DutyGroupInstance {
+        $patternOffsets = array_map(static fn ($component): int => $component->getDayOffset(), $pattern->getComponents()->toArray());
+        $providedOffsets = array_keys($componentLocalTimes);
+        if ([] === $providedOffsets || [] !== array_diff($providedOffsets, $patternOffsets) || \count($providedOffsets) >= \count($patternOffsets)) {
+            throw new DutyPatternMismatchException(sprintf('A block remainder takes a strict, non-empty part of the offsets of its pattern (pattern [%s], got [%s]).', implode(',', $patternOffsets), implode(',', $providedOffsets)));
+        }
+        if ([] !== $coverageSourcesByOffset) {
+            $sourceOffsets = array_keys($coverageSourcesByOffset);
+            sort($sourceOffsets);
+            sort($providedOffsets);
+            if ($sourceOffsets !== $providedOffsets) {
+                throw new InvalidConditionalDutyException('A conditional block needs exactly one coverage source per day of the block.');
+            }
+        }
+
+        return $this->buildGroup($planningPeriod, $pattern, $anchorDate, $componentLocalTimes, $demandType, DutyCriticality::STANDARD, $coverageSourcesByOffset);
+    }
+
+    /**
+     * @param array<int, array{0: \DateTimeImmutable, 1: \DateTimeImmutable}> $componentLocalTimes     keyed by dayOffset
+     * @param array<int, Duty>                                                $coverageSourcesByOffset
+     */
+    private function buildGroup(
+        PlanningPeriod $planningPeriod,
+        DutyPattern $pattern,
+        \DateTimeImmutable $anchorDate,
+        array $componentLocalTimes,
+        DutyDemandType $demandType,
+        DutyCriticality $criticality,
+        array $coverageSourcesByOffset,
+    ): DutyGroupInstance {
         $this->assertMatchesDemandPolicy($planningPeriod, $demandType, array_values($coverageSourcesByOffset));
 
         $timezone = $planningPeriod->getTeam()->getTimezone();
         $groupInstance = new DutyGroupInstance($planningPeriod, $pattern, $anchorDate);
         $this->entityManager->persist($groupInstance);
 
-        foreach ($components as $component) {
+        foreach ($pattern->getComponents() as $component) {
             $offset = $component->getDayOffset();
+            if (!isset($componentLocalTimes[$offset])) {
+                continue; // a remainder: only its own days
+            }
             [$localStartsAt, $localEndsAt] = $componentLocalTimes[$offset];
 
             $duty = new Duty(
@@ -192,8 +255,11 @@ final class DutyMaterializationService
         if (DutyDemandType::CONDITIONAL !== $demandType) {
             throw new InvalidConditionalDutyException('Every duty of a conditional line is CONDITIONAL: its demand depends on the source line.');
         }
+        // docs/planning-cycles.md §5.6: a coverage source is a duty of the source line's period in the SAME cycle.
+        $cycle = $planningPeriod->getCycle();
+        $sourcePeriod = null !== $cycle ? $sourceLine->periodIn($cycle) : null;
         foreach ($coverageSources as $source) {
-            if ($source->getPlanningPeriod() !== $sourceLine->getPlanningPeriod()) {
+            if (null === $sourcePeriod || $source->getPlanningPeriod() !== $sourcePeriod) {
                 throw new InvalidConditionalDutyException('A coverage source must be a duty of the source line of this line.');
             }
         }

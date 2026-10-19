@@ -6,12 +6,14 @@ namespace App\Service;
 
 use App\Entity\PlanningLine;
 use App\Entity\PlanningPeriodStatus;
+use App\Entity\PlanningPublicationLineKind;
 
 /**
- * One active line's outcome of a publish call (docs/decisions.md D133) —
- * `alreadyPublished` distinguishes a line this call actually transitioned
- * from one that was already PUBLISHED before it ran (e.g. a secondary line
- * added after the primary was first published) — never conflated.
+ * One line's outcome of a publication (docs/decisions.md D133, D196):
+ * `kind` says what this publication did to it — FIRST_FOR_LINE, UPDATED, or
+ * null (already published and unchanged, or left as it was: not selected,
+ * not ready). `alreadyPublished` distinguishes a line already PUBLISHED
+ * before the call from one this call transitioned — never conflated.
  */
 final readonly class PublicationLineResult
 {
@@ -19,6 +21,7 @@ final readonly class PublicationLineResult
         public PlanningLine $line,
         public PlanningPeriodStatus $periodStatus,
         public bool $alreadyPublished,
+        public ?PlanningPublicationLineKind $kind = null,
     ) {
     }
 }

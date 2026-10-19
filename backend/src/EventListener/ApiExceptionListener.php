@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\EventListener;
 
+use App\Exception\ApiProblem;
+use App\Exception\ApiProblemWithDetails;
 use App\Service\Admin\TechnicalErrorLog;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
@@ -42,6 +44,17 @@ final class ApiExceptionListener
         }
 
         $exception = $event->getThrowable();
+
+        // A domain refusal that names its own answer (docs/decisions.md D187): its message is written for the API.
+        if ($exception instanceof ApiProblem) {
+            $body = ['error' => $exception->errorCode(), 'message' => $exception->getMessage()];
+            if ($exception instanceof ApiProblemWithDetails) {
+                $body['details'] = $exception->details();
+            }
+            $event->setResponse(new JsonResponse($body, $exception->statusCode()));
+
+            return;
+        }
 
         if ($exception instanceof HttpExceptionInterface) {
             // Symfony's own HTTP exceptions (404, 405, ...) carry messages

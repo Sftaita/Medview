@@ -266,7 +266,7 @@ final class PlanningLineDemandPolicyService
     {
         if ($mode->isConditional()) {
             foreach ($this->lineRepository->findByPlanning($line->getPlanning()) as $other) {
-                if ($other->isActive() && \in_array($other->getPlanningPeriod()->getStatus(), [PlanningPeriodStatus::PUBLISHED, PlanningPeriodStatus::ARCHIVED], true)) {
+                if ($other->isActive() && \in_array($other->getSingleCyclePeriod()?->getStatus(), [PlanningPeriodStatus::PUBLISHED, PlanningPeriodStatus::ARCHIVED], true)) {
                     throw new DemandPolicyConflictException('planning_already_published', 'This planning is already published: its lines can no longer be generated for this period, so a conditional line configured now could never be used. Configure it before the first publication.');
                 }
             }
@@ -274,7 +274,8 @@ final class PlanningLineDemandPolicyService
 
         $modeOrSourceChanges = $current->mode !== $mode
             || $current->sourceLineStableId !== (null !== $sourceLine ? (string) $sourceLine->getStableId() : null);
-        if ($modeOrSourceChanges && $this->dutyRepository->existsForPeriod($line->getPlanningPeriod())) {
+        $period = $line->getSingleCyclePeriod();
+        if ($modeOrSourceChanges && null !== $period && $this->dutyRepository->existsForPeriod($period)) {
             throw new DemandPolicyConflictException('line_already_materialized', 'The duties of this line already exist for this period: its mode or its source can no longer change for this period.');
         }
     }

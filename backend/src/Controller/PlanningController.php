@@ -7,6 +7,7 @@ namespace App\Controller;
 use App\Dto\CreatePlanningRequest;
 use App\Dto\UpdatePlanningRequest;
 use App\Entity\Planning;
+use App\Entity\PlanningCycle;
 use App\Entity\PlanningLine;
 use App\Entity\PlanningPeriodStatus;
 use App\Entity\PlanningTeamMember;
@@ -18,6 +19,8 @@ use App\Repository\PlanningRepository;
 use App\Repository\PlanningTeamMemberRepository;
 use App\Security\Voter\PlanningTeamRoleVoter;
 use App\Security\Voter\PlanningVoter;
+use App\Service\PlanningCyclePresenter;
+use App\Service\PlanningCycleService;
 use App\Service\PlanningService;
 use Symfony\Bundle\SecurityBundle\Security;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -47,6 +50,8 @@ final class PlanningController
         private readonly ValidatorInterface $validator,
         private readonly Security $security,
         private readonly AvailabilityCollectionRepository $collectionRepository,
+        private readonly PlanningCyclePresenter $cyclePresenter,
+        private readonly PlanningCycleService $cycleService,
     ) {
     }
 
@@ -226,6 +231,8 @@ final class PlanningController
         // Several open memberships are possible, one per line (D160).
         $memberships = null !== $currentUser ? $this->teamMemberRepository->findOpenMembershipsForUserInPlanning($planning, $currentUser) : [];
         $lines = $this->planningLineRepository->findByPlanning($planning);
+        // docs/planning-cycles.md §7.1: the single-period fields of a line read its period in the default period.
+        $defaultCycle = $this->cyclePresenter->defaultCycle($planning);
 
         $data = [
             'stableId' => (string) $planning->getStableId(),
@@ -237,8 +244,12 @@ final class PlanningController
             'participating' => [] !== $memberships,
             // Dashboard summary (D151): the caller's own line(s), the planning's head count, its publication.
             'myLineName' => $this->lineNamesOf($lines, $memberships),
-            'memberCount' => $this->distinctMemberCount($lines),
-            'published' => [] !== array_filter($lines, static fn (PlanningLine $line) => $line->isActive() && PlanningPeriodStatus::PUBLISHED === $line->getPlanningPeriod()->getStatus()),
+            'memberCount' => $this->distinctMemberCount($planning, $lines),
+            // Kept for older clients (§7.1): whether any period of an active line is published.
+            'published' => [] !== array_filter($lines, static fn (PlanningLine $line) => $line->isActive() && [] !== array_filter(
+                $line->getPeriods(),
+                static fn ($period) => PlanningPeriodStatus::PUBLISHED === $period->getStatus(),
+            )),
             // Plannings list: its active lines, and whether an availability collection is open (D169).
             'lineCount' => \count(array_filter($lines, static fn (PlanningLine $line) => $line->isActive())),
             'collecting' => [] !== $this->collectionRepository->findOpenByPlanning($planning),
@@ -252,11 +263,19 @@ final class PlanningController
             'timezone' => $planning->getTimezone(),
             'createdAt' => $planning->getCreatedAt()->format(\DATE_ATOM),
             'updatedAt' => $planning->getUpdatedAt()->format(\DATE_ATOM),
+            // Its periods (docs/planning-cycles.md §4.1, §7.1): today in its timezone, current and next period, count.
+            ...$this->cyclePresenter->overview($planning),
         ];
 
         if ($withLines) {
+            $data['periods'] = $this->cyclePresenter->periods($planning);
+            // Lot L6: what the period screens may offer — never an action the backend has switched off
+            // (MEDVUE_PERIOD_CREATION_ENABLED, docs/decisions.md D187).
+            $enabled = $this->cycleService->isCreationEnabled();
+            $data['canCreatePeriod'] = $enabled && $this->authorizationChecker->isGranted(PlanningVoter::MANAGE, $planning);
+            $data['canOpenPeriodCollection'] = $enabled && $this->authorizationChecker->isGranted(PlanningVoter::MANAGE_AVAILABILITY, $planning);
             $data['lines'] = array_map(
-                fn (PlanningLine $line) => $this->lineToArray($line),
+                fn (PlanningLine $line) => $this->lineToArray($line, $defaultCycle),
                 $lines,
             );
         }
@@ -290,15 +309,15 @@ final class PlanningController
      *
      * @param list<PlanningLine> $lines
      */
-    private function distinctMemberCount(array $lines): int
+    private function distinctMemberCount(Planning $planning, array $lines): int
     {
         $users = [];
         foreach ($lines as $line) {
             if (!$line->isActive()) {
                 continue;
             }
-            $period = $line->getPlanningPeriod();
-            foreach ($this->teamMemberRepository->findIntersecting($line->getPlanningTeam(), $period->getStartsAt(), $period->getEndsAt()) as $member) {
+            // Over the whole planning (the envelope of its periods): exactly a line's period while there is one.
+            foreach ($this->teamMemberRepository->findIntersecting($line->getPlanningTeam(), $planning->getStartsAt(), $planning->getEndsAt()) as $member) {
                 $users[(string) $member->getUser()->getStableId()] = true;
             }
         }
@@ -307,15 +326,44 @@ final class PlanningController
     }
 
     /**
+     * Lot L7: each period of the line says how many people take part in it —
+     * a membership stint intersecting the period, each person counted once
+     * even with several stints (the screen of a period shows that period,
+     * never the default one).
+     *
+     * @param array{periods: list<array<string, mixed>>} $view
+     *
+     * @return array{periods: list<array<string, mixed>>}
+     */
+    private function withPeriodMemberCounts(PlanningLine $line, array $view): array
+    {
+        $counts = [];
+        foreach ($line->getPeriods() as $period) {
+            $cycle = $period->getCycle();
+            if (null === $cycle) {
+                continue;
+            }
+            $users = [];
+            foreach ($this->teamMemberRepository->findIntersecting($line->getPlanningTeam(), $cycle->getStartsAt(), $cycle->getEndsAt()) as $member) {
+                $users[(string) $member->getUser()->getStableId()] = true;
+            }
+            $counts[(string) $cycle->getStableId()] = \count($users);
+        }
+        $view['periods'] = array_map(static fn (array $period): array => [...$period, 'memberCount' => $counts[$period['periodStableId']] ?? 0], $view['periods']);
+
+        return $view;
+    }
+
+    /**
      * @return array<string, mixed>
      */
-    private function lineToArray(PlanningLine $line): array
+    private function lineToArray(PlanningLine $line, PlanningCycle $defaultCycle): array
     {
         $team = $line->getPlanningTeam();
         $memberCount = \count($this->teamMemberRepository->findIntersecting(
             $team,
-            $line->getPlanningPeriod()->getStartsAt(),
-            $line->getPlanningPeriod()->getEndsAt(),
+            $defaultCycle->getStartsAt(),
+            $defaultCycle->getEndsAt(),
         ));
 
         return [
@@ -333,9 +381,9 @@ final class PlanningController
                 'canInvite' => $this->authorizationChecker->isGranted(PlanningTeamRoleVoter::INVITE, $team),
             ],
             'memberCount' => $memberCount,
-            'planningPeriodStableId' => (string) $line->getPlanningPeriod()->getStableId(),
-            // The line's lifecycle (DRAFT → GENERATED → VALIDATED → PUBLISHED → ARCHIVED).
-            'periodStatus' => $line->getPlanningPeriod()->getStatus()->value,
+            // The line's lifecycle (DRAFT → GENERATED → VALIDATED → PUBLISHED → ARCHIVED) in the default period
+            // (null when it takes no part in it), and its periods (docs/planning-cycles.md §7.1).
+            ...$this->withPeriodMemberCounts($line, $this->cyclePresenter->lineView($line, $defaultCycle)),
             'createdAt' => $line->getCreatedAt()->format(\DATE_ATOM),
             'updatedAt' => $line->getUpdatedAt()->format(\DATE_ATOM),
         ];

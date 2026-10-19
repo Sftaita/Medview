@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Entity\Planning;
+use App\Entity\PlanningCycle;
 use App\Entity\PlanningJob;
 use App\Entity\PlanningJobKind;
 use App\Entity\RestPolicyOptions;
@@ -55,8 +56,10 @@ final class PlanningJobService
      * @throws PlanningJobInProgressException
      * @throws SurgicalHubDataStaleException  outdated SurgicalHub leave and no allowed override
      */
-    public function requestGeneration(Planning $planning, User $requestedBy, RestPolicyOptions $restPolicy, bool $overrideStaleSurgicalHubData = false): RequestedGeneration
+    public function requestGeneration(Planning $planning, User $requestedBy, RestPolicyOptions $restPolicy, bool $overrideStaleSurgicalHubData = false, ?PlanningCycle $cycle = null, ?string $scope = null): RequestedGeneration
     {
+        // docs/planning-cycles.md §5.4 (lot L3): one period per job, named by the caller on a planning with several.
+        $cycle ??= $planning->getOnlyCycle();
         $this->recovery->recover((int) $planning->getId());
 
         $active = $this->jobRepository->findActiveForPlanning($planning);
@@ -64,7 +67,8 @@ final class PlanningJobService
             throw new PlanningJobInProgressException($active);
         }
 
-        $preflight = $this->launcher->preflight($planning);
+        // docs/decisions.md D195: the same scope the worker replays — a period with nothing to generate never queues a job.
+        $preflight = $this->launcher->preflight($planning, $cycle, $scope);
         if (!$preflight->canGenerate()) {
             throw new PlanningNotLaunchableException($preflight);
         }
@@ -76,7 +80,7 @@ final class PlanningJobService
             'legalMinRestHours' => $restPolicy->legalMinRestHours,
             'teamMinRestEnabled' => $restPolicy->teamMinRestEnabled,
             'teamMinRestHours' => $restPolicy->teamMinRestHours,
-        ]));
+        ], $scope), $cycle);
         $this->surgicalHubGate->recordOverride($surgicalHub, $planning, $requestedBy, (string) $job->getStableId());
 
         return new RequestedGeneration($job, $surgicalHub);
@@ -85,8 +89,9 @@ final class PlanningJobService
     /**
      * @throws PlanningJobInProgressException
      */
-    public function requestCompletion(Planning $planning, User $requestedBy): PlanningJob
+    public function requestCompletion(Planning $planning, User $requestedBy, ?PlanningCycle $cycle = null): PlanningJob
     {
+        $cycle ??= $planning->getOnlyCycle();
         $this->recovery->recover((int) $planning->getId());
 
         $active = $this->jobRepository->findActiveForPlanning($planning);
@@ -94,7 +99,7 @@ final class PlanningJobService
             throw new PlanningJobInProgressException($active);
         }
 
-        return $this->enqueue(new PlanningJob($planning, PlanningJobKind::COMPLETE, $requestedBy));
+        return $this->enqueue(new PlanningJob($planning, PlanningJobKind::COMPLETE, $requestedBy), $cycle);
     }
 
     /** The state the screen shows — a job whose worker died is failed first, never shown as running. */
@@ -110,8 +115,12 @@ final class PlanningJobService
     /**
      * @throws PlanningJobInProgressException
      */
-    private function enqueue(PlanningJob $job): PlanningJob
+    private function enqueue(PlanningJob $job, PlanningCycle $cycle): PlanningJob
     {
+        // The period the worker generates or completes (lot L3) — still one active job per Planning, whatever the
+        // period: two periods are never computed at the same time, so neither reads the other mid-write.
+        $job->assignToCycle($cycle);
+
         try {
             $this->entityManager->persist($job);
             $this->entityManager->flush();

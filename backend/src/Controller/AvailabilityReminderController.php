@@ -11,9 +11,11 @@ use App\Repository\PlanningRepository;
 use App\Repository\PlanningTeamMemberRepository;
 use App\Security\Voter\PlanningVoter;
 use App\Service\AvailabilityReminderService;
+use App\Service\PlanningCycleResolver;
 use App\Service\ReminderOutcome;
 use App\Service\ReminderStatus;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Attribute\Route;
@@ -36,17 +38,20 @@ final class AvailabilityReminderController
         private readonly PlanningTeamMemberRepository $teamMemberRepository,
         private readonly AvailabilityReminderService $reminderService,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
+        private readonly PlanningCycleResolver $cycleResolver,
     ) {
     }
 
     #[Route('/api/plannings/{planningStableId}/members/{memberStableId}/reminders', name: 'api_planning_member_reminder_create', methods: ['POST'])]
-    public function remindMember(string $planningStableId, string $memberStableId, #[CurrentUser] User $user): JsonResponse
+    public function remindMember(string $planningStableId, string $memberStableId, Request $request, #[CurrentUser] User $user): JsonResponse
     {
         $planning = $this->resolvePlanning($planningStableId);
         $this->denyUnlessCanManageAvailability($planning);
         $member = $this->resolveMember($planning, $memberStableId);
+        // docs/planning-cycles.md §5.9: about the collections of one period (?period=, default: current/next/last).
+        $cycle = $this->cycleResolver->fromRequest($planning, $request);
 
-        $outcome = $this->reminderService->remind($planning, $member->getUser(), $user);
+        $outcome = $this->reminderService->remind($planning, $member->getUser(), $user, $cycle);
 
         return match ($outcome->status) {
             ReminderStatus::SENT => new JsonResponse($this->outcomeToArray($outcome), 201),
@@ -72,15 +77,17 @@ final class AvailabilityReminderController
      * is information, not an error.
      */
     #[Route('/api/plannings/{planningStableId}/reminders/pending', name: 'api_planning_reminders_pending', methods: ['POST'])]
-    public function remindPending(string $planningStableId, #[CurrentUser] User $user): JsonResponse
+    public function remindPending(string $planningStableId, Request $request, #[CurrentUser] User $user): JsonResponse
     {
         $planning = $this->resolvePlanning($planningStableId);
         $this->denyUnlessCanManageAvailability($planning);
+        $cycle = $this->cycleResolver->fromRequest($planning, $request);
 
-        $outcomes = $this->reminderService->remindPending($planning, $user);
+        $outcomes = $this->reminderService->remindPending($planning, $user, $cycle);
         $count = static fn (ReminderStatus $status): int => \count(array_filter($outcomes, static fn (ReminderOutcome $o): bool => $o->status === $status));
 
         return new JsonResponse([
+            'period' => ['stableId' => (string) $cycle->getStableId(), 'number' => $cycle->getNumber()],
             'targetedCount' => \count($outcomes),
             'sentCount' => $count(ReminderStatus::SENT),
             'skippedRecentlyCount' => $count(ReminderStatus::TOO_RECENT),

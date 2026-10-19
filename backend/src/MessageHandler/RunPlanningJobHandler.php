@@ -16,6 +16,7 @@ use App\Fairness\CoverageStatus;
 use App\Message\RunPlanningJob;
 use App\Repository\PlanningJobRepository;
 use App\Service\CompletionLineResult;
+use App\Service\LaunchLineReadiness;
 use App\Service\LaunchLineResult;
 use App\Service\LaunchResultPresenter;
 use App\Service\PlanningCompletionService;
@@ -95,7 +96,17 @@ final class RunPlanningJobHandler
             isset($policy['teamMinRestHours']) ? (int) $policy['teamMinRestHours'] : null,
         );
 
-        $results = $this->launcher->launch($job->getPlanning(), $job->getRequestedBy(), $restPolicy);
+        $all = $this->launcher->launch($job->getPlanning(), $job->getRequestedBy(), $restPolicy, $job->getCycle(), $job->getScope());
+        // docs/decisions.md D195: `lines` keeps its meaning — the lines generated; the others are listed apart.
+        $results = array_values(array_filter($all, static fn (LaunchLineResult $r): bool => $r->isGenerated()));
+        $leftAsIs = static fn (string $decision): array => array_values(array_map(
+            static fn (LaunchLineResult $r): array => [
+                'lineStableId' => (string) $r->line->getStableId(),
+                'lineName' => $r->line->getName(),
+                'applicability' => $r->applicability?->toArray(),
+            ],
+            array_filter($all, static fn (LaunchLineResult $r): bool => $decision === $r->decision),
+        ));
 
         $lines = array_map($this->launchResultPresenter->lineToArray(...), $results);
         $usable = array_filter($results, static fn (LaunchLineResult $r): bool => PlanningGenerationStatus::COMPLETED === $r->generation?->getStatus());
@@ -106,6 +117,9 @@ final class RunPlanningJobHandler
         $outcome = [
             'lines' => $lines,
             'coverage' => \count($usable) === \count($results) ? ([] === $incomplete ? 'COMPLETE' : 'INCOMPLETE') : null,
+            'scope' => $job->getScope(),
+            'keptLines' => $leftAsIs(LaunchLineReadiness::KEEP),
+            'excludedLines' => $leftAsIs(LaunchLineReadiness::EXCLUDE),
         ];
 
         // A line that produced no usable result (solver error, timeout, stale data) makes the whole job
@@ -118,7 +132,7 @@ final class RunPlanningJobHandler
      */
     private function complete(PlanningJob $job): array
     {
-        $results = $this->completionService->complete($job->getPlanning(), $job->getRequestedBy());
+        $results = $this->completionService->complete($job->getPlanning(), $job->getRequestedBy(), $job->getCycle());
 
         // An undetermined reinforcement (docs/decisions.md D165) is never completed — and never reported as complete either.
         $remaining = array_sum(array_map(static fn (CompletionLineResult $r): int => $r->remainingUncoveredRequiredUnitCount + $r->undeterminedUnitCount, $results));
@@ -164,6 +178,6 @@ final class RunPlanningJobHandler
 
         $planningId = (int) $job->getPlanning()->getId();
         $this->store->fail((int) $job->getId(), $code, $exception::class.': '.$exception->getMessage());
-        $this->store->failSolvingGenerations($planningId, 'Interrupted: '.$code);
+        $this->store->failSolvingGenerations($planningId, 'Interrupted: '.$code, $job->getCycle()?->getId());
     }
 }

@@ -6,6 +6,7 @@ namespace App\Service;
 
 use App\Eligibility\CommitmentInterval;
 use App\Entity\Duty;
+use App\Entity\PlanningCycle;
 use App\Entity\PlanningGeneration;
 use App\Entity\PlanningLine;
 use App\Entity\PlanningTeamMember;
@@ -35,6 +36,7 @@ final readonly class PersonCommitment
     public function toIntervalFor(PlanningGeneration $edited): CommitmentInterval
     {
         $ownerPolicy = $this->generation->getRestPolicy();
+        $neighbour = $this->neighbourCycleOf($edited);
 
         return new CommitmentInterval(
             $this->duty->getStartsAt(),
@@ -44,6 +46,18 @@ final readonly class PersonCommitment
             $ownerPolicy->teamMinRestEnabled ? $ownerPolicy->teamMinRestHours : null,
             (string) $this->duty->getStableId(),
             (string) $this->line->getStableId(),
+            null !== $neighbour ? (string) $neighbour->getStableId() : null,
+            $neighbour?->getNumber(),
+            $neighbour?->getStartsAt(),
+            $neighbour?->getEndsAt(),
         );
+    }
+
+    /** The period this duty belongs to when it is not the period of $edited (docs/planning-cycles.md §5.4). */
+    public function neighbourCycleOf(PlanningGeneration $edited): ?PlanningCycle
+    {
+        $own = $this->generation->getPlanningPeriod()->getCycle();
+
+        return null !== $own && $own !== $edited->getPlanningPeriod()->getCycle() ? $own : null;
     }
 }

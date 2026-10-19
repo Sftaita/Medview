@@ -5,6 +5,13 @@ framework:
     # Note that the session will be started ONLY if you read or write from it.
     session: true
 
+    # Domain refusals that carry their own answer (409/422, rendered by
+    # ApiExceptionListener — docs/decisions.md D187) are expected outcomes:
+    # logged as information, never as critical errors.
+    exceptions:
+        App\Exception\ApiProblem:
+            log_level: info
+
     #esi: true
     #fragments: true
 

@@ -17,11 +17,12 @@ final class DutySwapUnitDescriber
 {
     public function __construct(
         private readonly ReassignmentCandidateService $candidateService,
+        private readonly PlanningCyclePresenter $cyclePresenter,
     ) {
     }
 
     /**
-     * @return array{dutyStableId: string, planningStableId: string, planningName: string, lineStableId: string, lineName: string, dutyTypeName: string, blockName: string|null, dates: list<string>, startsAt: string, endsAt: string}
+     * @return array{dutyStableId: string, planningStableId: string, planningName: string, lineStableId: string, lineName: string, dutyTypeName: string, blockName: string|null, dates: list<string>, startsAt: string, endsAt: string, period: array{stableId: string, number: int, count: int}|null}
      */
     public function describe(Duty $duty, PlanningLine $line): array
     {
@@ -42,6 +43,11 @@ final class DutySwapUnitDescriber
             'dates' => $dates,
             'startsAt' => $startsAt->format(\DATE_ATOM),
             'endsAt' => $endsAt->format(\DATE_ATOM),
+            // docs/decisions.md D198: the unit's period (null only for an orphan period, never swappable).
+            // Lot L7: with the planning's period count — "Période N" is said only when there are several.
+            'period' => null !== ($cycle = $block[0]->getPlanningPeriod()->getCycle())
+                ? [...$this->cyclePresenter->reference($cycle), 'count' => $this->cyclePresenter->periodCount($line->getPlanning())]
+                : null,
         ];
     }
 

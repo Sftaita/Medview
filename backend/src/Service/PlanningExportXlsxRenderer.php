@@ -45,6 +45,8 @@ final class PlanningExportXlsxRenderer
 {
     public const PLANNING_SHEET = 'Planning';
     public const PEOPLE_SHEET = 'Par personne';
+    public const INFO_SHEET = 'Informations';
+    public const PERIOD_COLUMN = 'Période';
 
     private const WEEKDAYS = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
     private const DATE_FORMAT = 'dd/mm/yyyy';
@@ -67,6 +69,9 @@ final class PlanningExportXlsxRenderer
             $peopleSheet = $writer->addNewSheetAndMakeItCurrent();
             $peopleSheet->setName(self::PEOPLE_SHEET);
             $this->writePeopleSheet($writer, $peopleSheet, $data);
+            $infoSheet = $writer->addNewSheetAndMakeItCurrent();
+            $infoSheet->setName(self::INFO_SHEET);
+            $this->writeInfoSheet($writer, $infoSheet, $data);
 
             $writer->setCurrentSheet($planningSheet);
             $writer->close();
@@ -108,7 +113,7 @@ final class PlanningExportXlsxRenderer
         return new Options(
             pageSetup: new PageSetup(PageOrientation::LANDSCAPE, PaperSize::A4, fitToHeight: 0, fitToWidth: 1),
             headerFooter: new HeaderFooter(
-                oddHeader: self::xml('&L'.$this->headerText($data->title).'&R'.$this->headerText($period)),
+                oddHeader: self::xml('&L'.$this->headerText($data->title).(null !== $data->headingLabel() ? '&C'.$this->headerText($data->headingLabel()) : '').'&R'.$this->headerText($period)),
                 oddFooter: self::xml('&L'.$this->headerText($generated).'&RPage &P / &N'),
             ),
             properties: new Properties(
@@ -124,7 +129,9 @@ final class PlanningExportXlsxRenderer
     private function writePlanningSheet(Writer $writer, Sheet $sheet, PlanningExportData $data): void
     {
         $header = $this->headerStyle();
-        $headers = ['Date', 'Jour', ...array_map(static fn (PlanningExportLine $line): string => $line->label, $data->lines)];
+        // docs/decisions.md D200: a "Période" column on a planning with several periods, after the weekday.
+        $lead = $data->multiPeriod ? 3 : 2;
+        $headers = ['Date', 'Jour', ...($data->multiPeriod ? [self::PERIOD_COLUMN] : []), ...array_map(static fn (PlanningExportLine $line): string => $line->label, $data->lines)];
         $writer->addRow(new Row(array_map(fn (string $text): Cell => $this->text($text, $header), $headers)));
 
         $widths = array_map(static fn (string $text): int => mb_strlen($text), $headers);
@@ -135,18 +142,24 @@ final class PlanningExportXlsxRenderer
                 new DateTimeCell($day->date, $style->withFormat(self::DATE_FORMAT)),
                 $this->text(self::WEEKDAYS[(int) $day->date->format('N') - 1], $style),
             ];
+            if ($data->multiPeriod) {
+                $cells[] = null === $day->periodNumber ? new EmptyCell(null, $style) : $this->text('Période '.$day->periodNumber, $style);
+            }
             foreach ($day->cells as $column => $items) {
-                $text = self::cellText($items);
+                $text = $day->isUnpublished($column) ? PlanningExportDay::UNPUBLISHED : self::cellText($items);
                 $cells[] = '' === $text ? new EmptyCell(null, $style) : $this->text($text, $style);
-                $widths[$column + 2] = max($widths[$column + 2], mb_strlen($text));
+                $widths[$column + $lead] = max($widths[$column + $lead], mb_strlen($text));
             }
             $writer->addRow(new Row($cells));
         }
 
         $sheet->setColumnWidth(12, 1);
         $sheet->setColumnWidth(11, 2);
+        if ($data->multiPeriod) {
+            $sheet->setColumnWidth(11, 3);
+        }
         foreach ($data->lines as $column => $line) {
-            $sheet->setColumnWidth((float) min(45, max(16, $widths[$column + 2] + 3)), $column + 3);
+            $sheet->setColumnWidth((float) min(45, max(16, $widths[$column + $lead] + 3)), $column + $lead + 1);
         }
         $this->finishTable($sheet, \count($headers), 1 + \count($data->days));
         $sheet->setPrintTitleRows('$1:$1');
@@ -159,7 +172,7 @@ final class PlanningExportXlsxRenderer
             foreach ($day->cells as $column => $items) {
                 foreach ($items as $item) {
                     if (null !== $item->personName) {
-                        $rows[] = ['person' => $item->personName, 'date' => $day->date, 'column' => $column];
+                        $rows[] = ['person' => $item->personName, 'date' => $day->date, 'column' => $column, 'period' => $day->periodNumber];
                     }
                 }
             }
@@ -169,7 +182,8 @@ final class PlanningExportXlsxRenderer
         usort($rows, static fn (array $a, array $b): int => [(int) $collator->compare($a['person'], $b['person']), $a['date'], $a['column']] <=> [0, $b['date'], $b['column']]);
 
         $header = $this->headerStyle();
-        $headers = ['Personne', 'Date', 'Jour', 'Ligne'];
+        // docs/decisions.md D200: the period last, so the first four columns never move.
+        $headers = ['Personne', 'Date', 'Jour', 'Ligne', ...($data->multiPeriod ? [self::PERIOD_COLUMN] : [])];
         $writer->addRow(new Row(array_map(fn (string $text): Cell => $this->text($text, $header), $headers)));
 
         $personWidth = mb_strlen('Personne');
@@ -182,6 +196,7 @@ final class PlanningExportXlsxRenderer
                 new DateTimeCell($row['date'], $style->withFormat(self::DATE_FORMAT)),
                 $this->text(self::WEEKDAYS[(int) $row['date']->format('N') - 1], $style),
                 $this->text($label, $style),
+                ...($data->multiPeriod ? [null === $row['period'] ? new EmptyCell(null, $style) : $this->text('Période '.$row['period'], $style)] : []),
             ]));
             $personWidth = max($personWidth, mb_strlen($row['person']));
             $lineWidth = max($lineWidth, mb_strlen($label));
@@ -191,7 +206,41 @@ final class PlanningExportXlsxRenderer
         $sheet->setColumnWidth(12, 2);
         $sheet->setColumnWidth(11, 3);
         $sheet->setColumnWidth((float) min(40, $lineWidth + 3), 4);
+        if ($data->multiPeriod) {
+            $sheet->setColumnWidth(11, 5);
+        }
         $this->finishTable($sheet, \count($headers), 1 + \count($rows));
+    }
+
+    /**
+     * "Informations" (docs/decisions.md D200): what the document is — its
+     * nature (current calendar, labelled when it differs from the last
+     * diffusion, or the diffused state), the dates, the periods covered and
+     * the line periods left out because they are not published. Never a
+     * publication: an export replaces no stored publication PDF.
+     */
+    private function writeInfoSheet(Writer $writer, Sheet $sheet, PlanningExportData $data): void
+    {
+        $rows = [
+            ['Document', $data->title],
+            ['Dates', 'Du '.FrenchDate::long($data->first).' au '.FrenchDate::long($data->last)],
+            ['Nature', $data->natureLabel],
+        ];
+        if ($data->multiPeriod) {
+            $rows[] = ['Périodes', PlanningExportPdfRenderer::periodsLabel($data->periods)];
+        }
+        if ([] !== $data->excluded) {
+            $rows[] = ['Non inclus car non publiés', implode(', ', $data->excluded)];
+        }
+        $rows[] = ['Généré le', FrenchDate::long($data->generatedAt).' à '.$data->generatedAt->format('H:i')];
+
+        $label = new Style(fontBold: true, cellVerticalAlignment: CellVerticalAlignment::TOP);
+        $value = $this->rowStyle(false)->withShouldWrapText(true);
+        foreach ($rows as [$name, $text]) {
+            $writer->addRow(new Row([$this->text($name, $label), $this->text($text, $value)]));
+        }
+        $sheet->setColumnWidth(28, 1);
+        $sheet->setColumnWidth(90, 2);
     }
 
     /** Header row frozen, filters on every column of the table. */

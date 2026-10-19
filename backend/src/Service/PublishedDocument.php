@@ -19,6 +19,8 @@ final readonly class PublishedDocument
         public \DateTimeImmutable $firstDay,
         /** inclusive */
         public \DateTimeImmutable $lastDay,
+        /** docs/decisions.md D196: the number of the period published (never renumbered, docs/planning-cycles.md I1). */
+        public ?int $periodNumber = null,
     ) {
     }
 

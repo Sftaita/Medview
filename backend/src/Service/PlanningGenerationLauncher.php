@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Entity\Planning;
-use App\Entity\PlanningGenerationStatus;
+use App\Entity\PlanningCycle;
 use App\Entity\PlanningLine;
 use App\Entity\PlanningPeriod;
 use App\Entity\PlanningPeriodStatus;
@@ -16,9 +16,10 @@ use App\Exception\NoActivePlanningRuleSetException;
 use App\Exception\NoSolverParameterSetException;
 use App\Exception\PlanningGenerationAlreadySnapshottedException;
 use App\Exception\PlanningGenerationConcurrentSolveException;
+use App\Exception\PlanningGenerationContextChangedException;
 use App\Exception\PlanningGenerationInProgressException;
 use App\Exception\PlanningNotLaunchableException;
-use App\Exception\StalePlanningGenerationDataException;
+use App\Exception\PlanningPeriodNotGeneratableException;
 use App\Repository\DutyRepository;
 use App\Repository\PlanningLineDemandPolicyRepository;
 use App\Repository\PlanningRuleSetRepository;
@@ -68,8 +69,17 @@ use Doctrine\ORM\EntityManagerInterface;
  */
 final class PlanningGenerationLauncher
 {
+    /**
+     * docs/decisions.md D195 (lot L4b): generate the lines of the period that
+     * are not locked, keep the locked ones (validated, published, archived)
+     * as they are. Required, explicitly, as soon as the period holds both.
+     */
+    public const SCOPE_UNLOCKED_LINES = 'unlocked_lines';
+
     /** Namespace of the advisory lock keyed by planning id (any constant unique to this use). */
     private const ADVISORY_LOCK_NAMESPACE = 7351;
+
+    private const LOCKED_STATUSES = [PlanningPeriodStatus::VALIDATED, PlanningPeriodStatus::PUBLISHED, PlanningPeriodStatus::ARCHIVED];
 
     public function __construct(
         private readonly PlanningCollectionStatusService $statusService,
@@ -85,12 +95,41 @@ final class PlanningGenerationLauncher
         private readonly WorkHeartbeat $heartbeat,
         private readonly PlanningLineOrder $lineOrder,
         private readonly PlanningLineDemandPolicyRepository $policyRepository,
+        private readonly PeriodBoundaryGuard $boundaryGuard,
+        private readonly LineApplicabilityService $applicability,
     ) {
     }
 
-    public function preflight(Planning $planning): PlanningGenerationPreflight
+    /**
+     * $cycle: the period generated (docs/planning-cycles.md §5.4, lot L3) —
+     * only the active lines that have a period in it are read. Omitted: the
+     * planning's only period (refused when it has several,
+     * MultiplePeriodsNotSupportedException).
+     *
+     * Each line gets a decision (docs/decisions.md D195, lot L4b), from the
+     * one applicability rule (LineApplicabilityService, D194) read once its
+     * weekly structure is materialized:
+     *
+     * - nothing demanded of it in the period → EXCLUDE: never generated,
+     *   never a blocker, left as it is (a DRAFT line stays DRAFT, it is never
+     *   deactivated and gets no generation);
+     * - its period is locked → KEEP with $scope `unlocked_lines`; without it,
+     *   PERIOD_LOCKED as before — and `requiredScope` says the scope would
+     *   generate the others;
+     * - otherwise → GENERATE, with every blocker of its own (a real demand
+     *   with an incomplete configuration keeps blocking, explicitly), and
+     *   SOURCE_OF_PUBLISHED_LINE when a reinforcement line it decides is
+     *   locked.
+     *
+     * No line to generate at all → NO_LINE_TO_GENERATE: no job is queued.
+     */
+    public function preflight(Planning $planning, ?PlanningCycle $cycle = null, ?string $scope = null): PlanningGenerationPreflight
     {
-        $collection = $this->statusService->status($planning);
+        $cycle ??= $planning->getOnlyCycle();
+        if (null !== $scope && self::SCOPE_UNLOCKED_LINES !== $scope) {
+            throw new \InvalidArgumentException(\sprintf('Unknown generation scope "%s".', $scope));
+        }
+        $collection = $this->statusService->status($planning, $cycle);
 
         $lines = [];
         $blockers = [];
@@ -102,10 +141,30 @@ final class PlanningGenerationLauncher
 
         // The resolution order (docs/decisions.md D161): launch() runs the lines in exactly this order,
         // and each line's snapshot freezes the assignments of the lines before it as fixed commitments.
-        foreach ($this->lineOrder->activeInResolutionOrder($planning) as $line) {
-            $period = $line->getPlanningPeriod();
+        $historicalCuts = $this->boundaryGuard->historicalCutsAt($cycle);
+        $activeLines = $this->lineOrder->activeInCycle($cycle);
+        $locked = [];
+        foreach ($activeLines as $line) {
+            $period = $line->periodIn($cycle) ?? throw new \LogicException('PlanningLineOrder::activeInCycle() only returns lines with a period in the cycle.');
+            $source = $this->conditionalSourceOf($line);
+            $sourceMissing = null !== $source && null === $source->periodIn($cycle);
             // Sources first (PlanningLineOrder): a conditional line's source calendar already exists here (D163).
-            $anomalies = $this->weeklyDutyCalendarService->ensureMaterialized($period, $period->getEndsAt());
+            // A conditional line whose source takes no part in this period has nothing to materialize (§5.6).
+            // A locked period is never materialized (WeeklyDutyCalendarService).
+            $anomalies = $sourceMissing ? [] : $this->weeklyDutyCalendarService->ensureMaterialized($period, $period->getEndsAt());
+
+            // docs/decisions.md D194/D195: read once its duties exist — a weekly structure, a ponctual duty, a
+            // remainder block (D192) or a conditional duty all make it count.
+            $applicability = $this->applicability->forLine($line, $cycle);
+            $isLocked = \in_array($period->getStatus(), self::LOCKED_STATUSES, true);
+            $decision = match (true) {
+                !$applicability->counts() => LaunchLineReadiness::EXCLUDE,
+                $isLocked => LaunchLineReadiness::KEEP,
+                default => LaunchLineReadiness::GENERATE,
+            };
+            if (LaunchLineReadiness::KEEP === $decision) {
+                $locked[(int) $line->getId()] = true;
+            }
 
             $readiness = new LaunchLineReadiness(
                 $line,
@@ -114,24 +173,51 @@ final class PlanningGenerationLauncher
                 $period->getStatus(),
                 null !== $this->ruleSetRepository->findActive($line->getPlanningTeam()),
                 $this->familyUnitCounts($period),
-                $this->conditionalSourceOf($line),
+                $source,
+                $decision,
+                $applicability,
             );
             $lines[] = $readiness;
 
-            if (!$readiness->hasActiveRuleSet) {
+            if (LaunchLineReadiness::EXCLUDE === $decision) {
+                // Neutral (D194): nothing to check — and nothing it could block.
+                continue;
+            }
+            if (LaunchLineReadiness::KEEP === $decision) {
+                // docs/planning-cycles.md I8 (lot L3): a validated, published or archived period is never generated
+                // again — PlanningGenerationService::create() refuses it too. With the scope, it is simply kept.
+                if (null === $scope) {
+                    $blockers[] = new PreflightIssue(PreflightIssueCode::PERIOD_LOCKED, $line);
+                }
+                continue;
+            }
+
+            // docs/decisions.md D195: the prerequisites come from the one applicability rule (D194) — for a line
+            // generated before too, whose own applicability only says GENERATED: they must still hold to generate
+            // it again. A missing one is a blocker, never a warning: no calendar is produced that cannot hold.
+            $missing = $this->applicability->missingPrerequisites($line, $cycle);
+            if (\in_array('NO_ACTIVE_RULE_SET', $missing, true)) {
                 $blockers[] = new PreflightIssue(PreflightIssueCode::NO_ACTIVE_RULE_SET, $line);
             }
             if (0 === $readiness->dutyCount) {
                 $blockers[] = new PreflightIssue(PreflightIssueCode::NO_DUTIES, $line);
             }
-            if (\in_array($readiness->periodStatus, [PlanningPeriodStatus::PUBLISHED, PlanningPeriodStatus::ARCHIVED], true)) {
-                $blockers[] = new PreflightIssue(PreflightIssueCode::PERIOD_LOCKED, $line);
+            if (\in_array('CONDITIONAL_SOURCE_NOT_IN_PERIOD', $missing, true)) {
+                $blockers[] = new PreflightIssue(PreflightIssueCode::CONDITIONAL_SOURCE_NOT_IN_PERIOD, $line);
             }
-            if (PlanningPeriodStatus::VALIDATED === $readiness->periodStatus) {
-                $warnings[] = new PreflightIssue(PreflightIssueCode::VALIDATION_WILL_BE_INVALIDATED, $line);
+            // Duties demanded and nobody to hold them (case B of D195): INCOMPLETE, refused with its own code.
+            if (\in_array('NO_MEMBER_IN_PERIOD', $missing, true)) {
+                $blockers[] = new PreflightIssue(PreflightIssueCode::NO_MEMBER_IN_PERIOD, $line);
             }
-            if (0 === $readiness->memberCount) {
-                $warnings[] = new PreflightIssue(PreflightIssueCode::LINE_WITHOUT_MEMBERS, $line);
+            // A boundary with a neighbouring period that cuts one of its blocks (made before this rule existed):
+            // that occurrence would be materialized in neither period, its days silently left without duty.
+            if ([] !== $this->boundaryGuard->cutsForLineInCycle($line, $cycle)) {
+                $blockers[] = new PreflightIssue(PreflightIssueCode::BLOCK_CUT_BY_PERIOD_BOUNDARY, $line);
+            }
+            // docs/decisions.md D192: a historical boundary at its start — the occurrence's days of this period are a
+            // remainder block (materialized above); its earlier days, in the previous period, stay as they were.
+            if ([] !== array_filter($historicalCuts, static fn (BlockCut $cut): bool => $cut->line === $line)) {
+                $warnings[] = new PreflightIssue(PreflightIssueCode::HISTORICAL_BLOCK_REMAINDER, $line);
             }
             if ([] !== array_filter($anomalies, static fn (CoverageSourceAnomaly $a): bool => CoverageSourceAnomaly::AMBIGUOUS === $a->kind)) {
                 $blockers[] = new PreflightIssue(PreflightIssueCode::AMBIGUOUS_COVERAGE_SOURCE, $line);
@@ -141,6 +227,28 @@ final class PlanningGenerationLauncher
             }
         }
 
+        // docs/decisions.md D195: a line deciding the demand of a locked reinforcement line is never regenerated —
+        // its new result would change a demand already published. Checked once every line's status is known.
+        foreach ($lines as $readiness) {
+            if (!$readiness->isGenerated()) {
+                continue;
+            }
+            foreach ($activeLines as $dependent) {
+                if (isset($locked[(int) $dependent->getId()]) && $this->conditionalSourceOf($dependent) === $readiness->line) {
+                    $blockers[] = new PreflightIssue(PreflightIssueCode::SOURCE_OF_PUBLISHED_LINE, $readiness->line);
+                    break;
+                }
+            }
+        }
+
+        $generated = array_filter($lines, static fn (LaunchLineReadiness $line): bool => $line->isGenerated());
+        $kept = array_filter($lines, static fn (LaunchLineReadiness $line): bool => LaunchLineReadiness::KEEP === $line->decision);
+        // Nothing to generate: never a job for nothing. Without the scope, a locked line already says why (PERIOD_LOCKED).
+        if ([] === $generated && (null !== $scope || [] === $kept)) {
+            $blockers[] = new PreflightIssue(PreflightIssueCode::NO_LINE_TO_GENERATE);
+        }
+        $requiredScope = null === $scope && [] !== $kept && [] !== $generated ? self::SCOPE_UNLOCKED_LINES : null;
+
         if ($collection->pendingCount() > 0) {
             $warnings[] = new PreflightIssue(PreflightIssueCode::PENDING_MEMBERS);
         }
@@ -148,50 +256,100 @@ final class PlanningGenerationLauncher
             $warnings[] = new PreflightIssue(PreflightIssueCode::DEADLINE_PASSED);
         }
 
-        return new PlanningGenerationPreflight($collection, $lines, $blockers, $warnings);
+        return new PlanningGenerationPreflight($collection, $lines, $blockers, $warnings, $scope, $requiredScope);
     }
 
     /**
-     * @return list<LaunchLineResult> one per active line, in display order
+     * Generates $cycle — the active lines that have a period in it, nothing
+     * else (docs/planning-cycles.md §5.4, lot L3). Every other period of the
+     * planning is only read: its current calendar constrains the people
+     * (NeighbourCommitmentCollector), it is never written.
+     *
+     * Only the lines the preflight decides to GENERATE are run (docs/decisions.md
+     * D195): a kept (locked) line and an excluded one (nothing demanded) are
+     * never touched. A kept line's current calendar is a commitment of every
+     * line generated, whatever its place in the resolution order
+     * (NeighbourCommitmentCollector), and a kept source decides the demand of
+     * a generated reinforcement line from its current calendar.
+     *
+     * @return list<LaunchLineResult> one per active line of $cycle, in resolution order: the lines generated with their
+     *                                result, the kept and excluded ones with only their decision (isGenerated() false)
      *
      * @throws PlanningNotLaunchableException        a blocker of the preflight applies
      * @throws PlanningGenerationInProgressException another launch of this planning is running
      */
-    public function launch(Planning $planning, User $launchedBy, ?RestPolicyOptions $restPolicy = null): array
+    public function launch(Planning $planning, User $launchedBy, ?RestPolicyOptions $restPolicy = null, ?PlanningCycle $cycle = null, ?string $scope = null): array
     {
+        $cycle ??= $planning->getOnlyCycle();
         if (!$this->tryLock($planning)) {
             throw new PlanningGenerationInProgressException();
         }
 
         try {
-            $preflight = $this->preflight($planning);
+            $preflight = $this->preflight($planning, $cycle, $scope);
             if (!$preflight->canGenerate()) {
                 throw new PlanningNotLaunchableException($preflight);
             }
+            $generatedLineIds = [];
+            foreach ($preflight->generatedLines() as $readiness) {
+                $generatedLineIds[(int) $readiness->line->getId()] = true;
+            }
 
-            // One line after another, in resolution order (PlanningLineOrder): a line's snapshot is taken
-            // only once the lines before it are solved, so it sees their fresh assignments as commitments.
+            // 1. Solve, one line after another, in resolution order (PlanningLineOrder) — writing nothing
+            // (docs/decisions.md D191). A line's snapshot is taken once the lines before it are solved, and sees
+            // what they are about to hold (PlannedCalendar) as commitments: the D161 priority is unchanged. A line
+            // that fails keeps its calendar, which the lines after it see as it is.
             // A conditional line (docs/decisions.md D164) additionally needs its source line to have produced a
-            // COMPLETED generation in THIS launch — its demand is decided from that result. Otherwise it is not
-            // resolved at all: no generation is created for it (never an older source result, never a fake one).
+            // usable result in THIS launch — its demand is decided from it. Otherwise it is not resolved at all: no
+            // generation is created for it (never an older source result, never a fake one).
             $results = [];
-            $completedLineIds = [];
+            $solvedLineIds = [];
+            $planned = new PlannedCalendar();
+            $solved = [];
             foreach ($preflight->lines as $readiness) {
                 $line = $readiness->line;
+                if (!$readiness->isGenerated()) {
+                    // Kept (locked) or excluded (nothing demanded): never touched — no generation, no status change.
+                    $results[] = new LaunchLineResult($line, null, null, null, decision: $readiness->decision, applicability: $readiness->applicability);
+                    continue;
+                }
                 $source = $this->conditionalSourceOf($line);
-                if (null !== $source && !isset($completedLineIds[(int) $source->getId()])) {
+                // A source generated in this launch must have produced a usable result. A source this launch does not
+                // generate (kept: its period is locked) is read as it is now — its current calendar (D195).
+                if (null !== $source && isset($generatedLineIds[(int) $source->getId()]) && !isset($solvedLineIds[(int) $source->getId()])) {
                     $results[] = new LaunchLineResult($line, null, null, null, 'source_generation_failed');
                     continue;
                 }
 
-                $result = $this->runLine($line, $launchedBy, $restPolicy ?? RestPolicyOptions::none());
-                if (PlanningGenerationStatus::COMPLETED === $result->generation?->getStatus()) {
-                    $completedLineIds[(int) $line->getId()] = true;
+                [$result, $solvedGeneration] = $this->runLine($line, $cycle, $launchedBy, $restPolicy ?? RestPolicyOptions::none(), $planned);
+                if (null !== $solvedGeneration && $solvedGeneration->usable) {
+                    $planned->add($solvedGeneration->generation, $this->generationService->plannedCommitments($solvedGeneration));
+                    $solved[] = $solvedGeneration;
+                    $solvedLineIds[(int) $line->getId()] = true;
                 }
                 $results[] = $result;
             }
 
-            return $results;
+            // 2. Write once, checked under the calendar lock: what stays coherent with the calendars that remain.
+            $this->heartbeat->beat();
+            $notWritten = [] !== $solved ? $this->generationService->writeLaunch($planning, $solved) : [];
+
+            return array_map(static function (LaunchLineResult $result) use ($notWritten): LaunchLineResult {
+                $reason = null !== $result->generation ? ($notWritten[(int) $result->generation->getId()] ?? null) : null;
+                if (null === $reason) {
+                    return $result;
+                }
+
+                return new LaunchLineResult(
+                    $result->line,
+                    $result->generation,
+                    $result->snapshot,
+                    null,
+                    $reason instanceof PlanningGenerationContextChangedException ? $reason->reason : 'stale_generation_data',
+                    $result->demand,
+                    $reason instanceof PlanningGenerationContextChangedException ? $reason->conflicts : [],
+                );
+            }, $results);
         } finally {
             $this->unlock($planning);
         }
@@ -225,7 +383,10 @@ final class PlanningGenerationLauncher
         return $counts;
     }
 
-    private function runLine(PlanningLine $line, User $launchedBy, RestPolicyOptions $restPolicy): LaunchLineResult
+    /**
+     * @return array{0: LaunchLineResult, 1: ?SolvedGeneration} the line's result, and its solved generation (written later)
+     */
+    private function runLine(PlanningLine $line, PlanningCycle $cycle, User $launchedBy, RestPolicyOptions $restPolicy, PlannedCalendar $planned): array
     {
         // The same three steps the per-period endpoints expose, unchanged.
         // Since docs/decisions.md D137, the caller chooses the rest policy
@@ -235,28 +396,33 @@ final class PlanningGenerationLauncher
         // line; a manager who genuinely needs different rest rules per
         // line already has the per-period endpoint for that.
         $this->heartbeat->beat();
-        $generation = $this->generationService->create($line->getPlanningPeriod(), $launchedBy, $restPolicy);
+        $period = $line->periodIn($cycle) ?? throw new \LogicException('A launched line always has a period in the launched cycle.');
+        try {
+            $generation = $this->generationService->create($period, $launchedBy, $restPolicy);
+        } catch (PlanningPeriodNotGeneratableException) {
+            // Locked between the preflight and now (a publication of this period): never generated (I8).
+            return [new LaunchLineResult($line, null, null, null, 'period_locked'), null];
+        }
 
         try {
-            $snapshot = $this->snapshotService->createSnapshot($generation);
+            $snapshot = $this->snapshotService->createSnapshot($generation, $planned);
         } catch (NoActivePlanningRuleSetException|PlanningGenerationAlreadySnapshottedException) {
-            return new LaunchLineResult($line, $generation, null, null, 'snapshot_failed');
+            return [new LaunchLineResult($line, $generation, null, null, 'snapshot_failed'), null];
         } catch (ConditionalSourceNotGeneratedException) {
-            return new LaunchLineResult($line, $generation, null, null, 'source_generation_failed');
+            return [new LaunchLineResult($line, $generation, null, null, 'source_generation_failed'), null];
         }
         $demand = LineDemandSummary::ofSnapshot($snapshot);
 
         try {
-            $result = $this->generationService->generate($generation);
+            $solved = $this->generationService->solve($generation);
         } catch (NoSolverParameterSetException) {
-            return new LaunchLineResult($line, $generation, $snapshot, null, 'no_solver_parameter_set', $demand);
-        } catch (StalePlanningGenerationDataException) {
-            return new LaunchLineResult($line, $generation, $snapshot, null, 'stale_generation_data', $demand);
+            return [new LaunchLineResult($line, $generation, $snapshot, null, 'no_solver_parameter_set', $demand), null];
         } catch (PlanningGenerationConcurrentSolveException) {
-            return new LaunchLineResult($line, $generation, $snapshot, null, 'generation_not_solvable', $demand);
+            return [new LaunchLineResult($line, $generation, $snapshot, null, 'generation_not_solvable', $demand), null];
         }
 
-        return new LaunchLineResult($line, $generation, $snapshot, $result, null, $demand);
+        // An unusable outcome is already recorded FAILED (solve()); a usable one is written at the end of the launch.
+        return [new LaunchLineResult($line, $generation, $snapshot, $solved->result, null, $demand), $solved];
     }
 
     /** The source line of $line when its demand policy in force is conditional (D162), null otherwise. */

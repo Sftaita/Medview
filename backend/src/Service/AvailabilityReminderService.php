@@ -8,6 +8,7 @@ use App\Entity\AvailabilityCollection;
 use App\Entity\AvailabilityResponseStatus;
 use App\Entity\Planning;
 use App\Entity\PlanningAvailabilityReminder;
+use App\Entity\PlanningCycle;
 use App\Entity\ReminderChannel;
 use App\Entity\User;
 use App\Repository\AvailabilityCollectionRepository;
@@ -50,12 +51,18 @@ final class AvailabilityReminderService
     ) {
     }
 
-    public function remind(Planning $planning, User $recipient, User $sentBy): ReminderOutcome
+    /**
+     * $cycle: remind about the collections of this period only
+     * (docs/planning-cycles.md §5.9); null: every open collection of the
+     * planning. The 5-minute interval between two reminders to the same
+     * person stays per planning.
+     */
+    public function remind(Planning $planning, User $recipient, User $sentBy, ?PlanningCycle $cycle = null): ReminderOutcome
     {
-        return $this->entityManager->wrapInTransaction(function () use ($planning, $recipient, $sentBy): ReminderOutcome {
+        return $this->entityManager->wrapInTransaction(function () use ($planning, $recipient, $sentBy, $cycle): ReminderOutcome {
             $this->entityManager->refresh($planning, LockMode::PESSIMISTIC_WRITE);
 
-            return $this->deliver($planning, $recipient, $sentBy, false);
+            return $this->deliver($planning, $cycle, $recipient, $sentBy, false);
         });
     }
 
@@ -65,23 +72,23 @@ final class AvailabilityReminderService
      *
      * @return list<ReminderOutcome>
      */
-    public function remindPending(Planning $planning, User $sentBy): array
+    public function remindPending(Planning $planning, User $sentBy, ?PlanningCycle $cycle = null): array
     {
-        return $this->entityManager->wrapInTransaction(function () use ($planning, $sentBy): array {
+        return $this->entityManager->wrapInTransaction(function () use ($planning, $sentBy, $cycle): array {
             $this->entityManager->refresh($planning, LockMode::PESSIMISTIC_WRITE);
 
             $outcomes = [];
-            foreach ($this->pendingRecipients($planning) as $recipient) {
-                $outcomes[] = $this->deliver($planning, $recipient, $sentBy, true);
+            foreach ($this->pendingRecipients($planning, $cycle) as $recipient) {
+                $outcomes[] = $this->deliver($planning, $cycle, $recipient, $sentBy, true);
             }
 
             return $outcomes;
         });
     }
 
-    private function deliver(Planning $planning, User $recipient, User $sentBy, bool $bulk): ReminderOutcome
+    private function deliver(Planning $planning, ?PlanningCycle $cycle, User $recipient, User $sentBy, bool $bulk): ReminderOutcome
     {
-        $pending = $this->pendingCollections($planning, $recipient);
+        $pending = $this->pendingCollections($planning, $cycle, $recipient);
         if ([] === $pending || !$recipient->isActive()) {
             return new ReminderOutcome($recipient, ReminderStatus::NOTHING_PENDING);
         }
@@ -97,6 +104,11 @@ final class AvailabilityReminderService
         }
 
         $reminder = new PlanningAvailabilityReminder($planning, $recipient, $sentBy, ReminderChannel::EMAIL, $bulk, \count($pending), $now);
+        // The period reminded about; without one, the period of its collections when they are all of the same one.
+        $remindedCycle = $cycle ?? $pending[0]->getCycle();
+        if (null !== $remindedCycle && [] === array_filter($pending, static fn (AvailabilityCollection $collection): bool => $collection->getCycle() !== $remindedCycle)) {
+            $reminder->assignToCycle($remindedCycle);
+        }
         $this->entityManager->persist($reminder);
         $this->entityManager->flush();
 
@@ -108,10 +120,10 @@ final class AvailabilityReminderService
      *
      * @return list<AvailabilityCollection>
      */
-    private function pendingCollections(Planning $planning, User $recipient): array
+    private function pendingCollections(Planning $planning, ?PlanningCycle $cycle, User $recipient): array
     {
         $pending = [];
-        foreach ($this->collectionRepository->findOpenByPlanning($planning) as $collection) {
+        foreach ($this->openCollections($planning, $cycle) as $collection) {
             $response = $this->responseRepository->findOneForUser($collection, $recipient);
             if (null !== $response && AvailabilityResponseStatus::PENDING === $response->getStatus()) {
                 $pending[] = $collection;
@@ -124,10 +136,10 @@ final class AvailabilityReminderService
     /**
      * @return list<User>
      */
-    private function pendingRecipients(Planning $planning): array
+    private function pendingRecipients(Planning $planning, ?PlanningCycle $cycle): array
     {
         $recipients = [];
-        foreach ($this->collectionRepository->findOpenByPlanning($planning) as $collection) {
+        foreach ($this->openCollections($planning, $cycle) as $collection) {
             // findByCollection() is ordered by name, so the first collection fixes a stable order.
             foreach ($this->responseRepository->findByCollection($collection) as $response) {
                 if (AvailabilityResponseStatus::PENDING === $response->getStatus()) {
@@ -137,6 +149,17 @@ final class AvailabilityReminderService
         }
 
         return array_values($recipients);
+    }
+
+    /**
+     * @return list<AvailabilityCollection>
+     */
+    private function openCollections(Planning $planning, ?PlanningCycle $cycle): array
+    {
+        return array_values(array_filter(
+            $this->collectionRepository->findOpenByPlanning($planning),
+            static fn (AvailabilityCollection $collection): bool => null === $cycle || $collection->getCycle() === $cycle,
+        ));
     }
 
     /**

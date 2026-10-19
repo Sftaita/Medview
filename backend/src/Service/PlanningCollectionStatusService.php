@@ -8,6 +8,7 @@ use App\Entity\AvailabilityCollection;
 use App\Entity\AvailabilityCollectionResponse;
 use App\Entity\AvailabilityResponseStatus;
 use App\Entity\Planning;
+use App\Entity\PlanningCycle;
 use App\Entity\PlanningTeamMember;
 use App\Entity\User;
 use App\Entity\UserAvailabilityType;
@@ -50,16 +51,22 @@ final class PlanningCollectionStatusService
     ) {
     }
 
-    public function status(Planning $planning): PlanningCollectionStatus
+    /**
+     * $cycle: the period to read (docs/planning-cycles.md §5.9) — its
+     * collections, and its dates for participants and unavailabilities. Null:
+     * the whole planning (a planning with a single period reads the same).
+     */
+    public function status(Planning $planning, ?PlanningCycle $cycle = null): PlanningCollectionStatus
     {
-        [$relevant, $open] = $this->relevantCollections($planning);
+        [$relevant, $open] = $this->relevantCollections($planning, $cycle);
+        $range = $this->range($planning, $cycle);
 
         $responsesByUser = $this->responsesByUser($relevant);
         $lastReminders = $this->reminderRepository->lastSentAtByRecipient($planning);
 
         $rows = [];
-        foreach ($this->participants($planning) as $member) {
-            $rows[] = $this->buildRow($planning, $member, $responsesByUser[$member->getUser()->getId()] ?? [], $lastReminders);
+        foreach ($this->participants($planning, $range) as $member) {
+            $rows[] = $this->buildRow($planning, $range, $member, $responsesByUser[$member->getUser()->getId()] ?? [], $lastReminders);
         }
 
         $deadline = $this->latestDeadline($open);
@@ -67,16 +74,17 @@ final class PlanningCollectionStatusService
         return new PlanningCollectionStatus($planning, $deadline, $this->overdueDays($planning, $deadline), \count($open), $rows);
     }
 
-    public function detail(Planning $planning, PlanningTeamMember $member): MemberAvailabilityDetail
+    public function detail(Planning $planning, PlanningTeamMember $member, ?PlanningCycle $cycle = null): MemberAvailabilityDetail
     {
-        [$relevant] = $this->relevantCollections($planning);
+        [$relevant] = $this->relevantCollections($planning, $cycle);
+        $range = $this->range($planning, $cycle);
 
         $user = $member->getUser();
         $responses = $this->responsesByUser($relevant)[$user->getId()] ?? [];
         $lastReminders = $this->reminderRepository->lastSentAtByRecipient($planning);
-        $row = $this->buildRow($planning, $member, $responses, $lastReminders);
+        $row = $this->buildRow($planning, $range, $member, $responses, $lastReminders);
 
-        [$from, $to] = $this->periodInstants($planning);
+        [$from, $to] = $this->periodInstants($planning, $range);
         $unavailabilities = [];
         $preferences = [];
         foreach ($this->availabilityPeriodRepository->findIntersecting($user, $from, $to) as $period) {
@@ -92,7 +100,7 @@ final class PlanningCollectionStatusService
             $responses,
             $unavailabilities,
             $preferences,
-            $this->participationPeriodRepository->findIntersecting($member, $planning->getStartsAt(), $planning->getEndsAt()),
+            $this->participationPeriodRepository->findIntersecting($member, $range[0], $range[1]),
             $this->nonParticipationPeriodRepository->findIntersecting($member, $from, $to),
             $this->reminderRepository->findByRecipient($planning, $user),
         );
@@ -137,12 +145,14 @@ final class PlanningCollectionStatusService
      * One participant per person: a user who left and came back appears once,
      * with their open stint if they have one, otherwise the latest.
      *
+     * @param array{0: \DateTimeImmutable, 1: \DateTimeImmutable} $range
+     *
      * @return list<PlanningTeamMember>
      */
-    private function participants(Planning $planning): array
+    private function participants(Planning $planning, array $range): array
     {
         $byUser = [];
-        foreach ($this->teamMemberRepository->findIntersectingForPlanning($planning, $planning->getStartsAt(), $planning->getEndsAt()) as $member) {
+        foreach ($this->teamMemberRepository->findIntersectingForPlanning($planning, $range[0], $range[1]) as $member) {
             $key = $member->getUser()->getId();
             if (!isset($byUser[$key]) || $this->isPreferredStint($member, $byUser[$key])) {
                 $byUser[$key] = $member;
@@ -158,9 +168,12 @@ final class PlanningCollectionStatusService
     /**
      * @return array{0: list<AvailabilityCollection>, 1: list<AvailabilityCollection>} [relevant, open]
      */
-    private function relevantCollections(Planning $planning): array
+    private function relevantCollections(Planning $planning, ?PlanningCycle $cycle): array
     {
-        $collections = $this->collectionRepository->findByPlanning($planning);
+        $collections = array_values(array_filter(
+            $this->collectionRepository->findByPlanning($planning),
+            static fn (AvailabilityCollection $c): bool => null === $cycle || $c->getCycle() === $cycle,
+        ));
         $open = array_values(array_filter($collections, static fn (AvailabilityCollection $c): bool => $c->isOpen()));
 
         return [[] !== $open ? $open : $collections, $open];
@@ -196,10 +209,11 @@ final class PlanningCollectionStatusService
     }
 
     /**
-     * @param list<AvailabilityCollectionResponse> $responses
-     * @param array<int, \DateTimeImmutable>       $lastReminders
+     * @param list<AvailabilityCollectionResponse>                $responses
+     * @param array<int, \DateTimeImmutable>                      $lastReminders
+     * @param array{0: \DateTimeImmutable, 1: \DateTimeImmutable} $range
      */
-    private function buildRow(Planning $planning, PlanningTeamMember $member, array $responses, array $lastReminders): MemberCollectionRow
+    private function buildRow(Planning $planning, array $range, PlanningTeamMember $member, array $responses, array $lastReminders): MemberCollectionRow
     {
         $user = $member->getUser();
         $expected = array_values(array_filter($responses, static fn (AvailabilityCollectionResponse $r): bool => AvailabilityResponseStatus::WITHDRAWN !== $r->getStatus()));
@@ -230,15 +244,18 @@ final class PlanningCollectionStatusService
             $latest?->getAcknowledgedAt(),
             $latest?->getAcknowledgementKind(),
             $lastChange,
-            $this->countUnavailabilities($planning, $user),
+            $this->countUnavailabilities($planning, $range, $user),
             $lastReminders[$user->getId()] ?? null,
             \count($pending),
         );
     }
 
-    private function countUnavailabilities(Planning $planning, User $user): int
+    /**
+     * @param array{0: \DateTimeImmutable, 1: \DateTimeImmutable} $range
+     */
+    private function countUnavailabilities(Planning $planning, array $range, User $user): int
     {
-        [$from, $to] = $this->periodInstants($planning);
+        [$from, $to] = $this->periodInstants($planning, $range);
 
         return \count(array_filter(
             $this->availabilityPeriodRepository->findIntersecting($user, $from, $to),
@@ -247,19 +264,31 @@ final class PlanningCollectionStatusService
     }
 
     /**
-     * The planning's [startsAt, endsAt) dates as instants in its own timezone —
-     * the same conversion PlanningSnapshotService uses to pick a member's
-     * availability, so this view and a snapshot always agree.
+     * The dates read: the period's, or the whole planning's.
      *
      * @return array{0: \DateTimeImmutable, 1: \DateTimeImmutable}
      */
-    private function periodInstants(Planning $planning): array
+    private function range(Planning $planning, ?PlanningCycle $cycle): array
+    {
+        return null !== $cycle ? [$cycle->getStartsAt(), $cycle->getEndsAt()] : [$planning->getStartsAt(), $planning->getEndsAt()];
+    }
+
+    /**
+     * The [startsAt, endsAt) dates read as instants in the planning's own
+     * timezone — the same conversion PlanningSnapshotService uses to pick a
+     * member's availability, so this view and a snapshot always agree.
+     *
+     * @param array{0: \DateTimeImmutable, 1: \DateTimeImmutable} $range
+     *
+     * @return array{0: \DateTimeImmutable, 1: \DateTimeImmutable}
+     */
+    private function periodInstants(Planning $planning, array $range): array
     {
         $timezone = new \DateTimeZone($planning->getTimezone());
 
         return [
-            new \DateTimeImmutable($planning->getStartsAt()->format('Y-m-d').' 00:00:00', $timezone),
-            new \DateTimeImmutable($planning->getEndsAt()->format('Y-m-d').' 00:00:00', $timezone),
+            new \DateTimeImmutable($range[0]->format('Y-m-d').' 00:00:00', $timezone),
+            new \DateTimeImmutable($range[1]->format('Y-m-d').' 00:00:00', $timezone),
         ];
     }
 }

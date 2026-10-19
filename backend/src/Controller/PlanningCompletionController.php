@@ -8,9 +8,11 @@ use App\Entity\User;
 use App\Exception\PlanningJobInProgressException;
 use App\Repository\PlanningRepository;
 use App\Security\Voter\PlanningVoter;
+use App\Service\PlanningCycleResolver;
 use App\Service\PlanningJobPresenter;
 use App\Service\PlanningJobService;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Attribute\Route;
@@ -31,11 +33,12 @@ final class PlanningCompletionController
         private readonly PlanningJobService $jobService,
         private readonly PlanningJobPresenter $jobPresenter,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
+        private readonly PlanningCycleResolver $cycleResolver,
     ) {
     }
 
     #[Route('/api/plannings/{planningStableId}/complete', name: 'api_planning_complete', methods: ['POST'])]
-    public function complete(string $planningStableId, #[CurrentUser] User $user): JsonResponse
+    public function complete(string $planningStableId, Request $request, #[CurrentUser] User $user): JsonResponse
     {
         $planning = $this->planningRepository->findOneByStableId($planningStableId);
         if (null === $planning) {
@@ -45,8 +48,11 @@ final class PlanningCompletionController
             throw new AccessDeniedHttpException('Only a manager of this Planning can complete its calendar.');
         }
 
+        // docs/planning-cycles.md §7.4 (lot L3): `period` (body) or ?period=, required on a planning with several.
+        $cycle = $this->cycleResolver->requiredFromRequest($planning, $request);
+
         try {
-            $job = $this->jobService->requestCompletion($planning, $user);
+            $job = $this->jobService->requestCompletion($planning, $user, $cycle);
         } catch (PlanningJobInProgressException $exception) {
             return new JsonResponse([
                 'error' => 'job_in_progress',

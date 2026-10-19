@@ -365,6 +365,8 @@ final class AvailabilityCollectionController
             'status' => $collection->getStatus()->value,
             'closedAt' => $collection->getClosedAt()?->format(\DATE_ATOM),
             'timezone' => $planning->getTimezone(),
+            // The period it belongs to (docs/planning-cycles.md I12, §7).
+            'period' => null !== $collection->getCycle() ? ['stableId' => (string) $collection->getCycle()->getStableId(), 'number' => $collection->getCycle()->getNumber()] : null,
             'canManage' => $canManage,
             'myResponse' => null !== $mine ? $this->responseToArray($mine, withUser: false) : null,
         ];

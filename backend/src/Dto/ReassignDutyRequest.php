@@ -13,7 +13,7 @@ use Symfony\Component\Validator\Constraints as Assert;
  * holds this block, `null` when it believes the block is uncovered; never
  * optional/omittable, so a stale client can never accidentally skip the
  * check by leaving it out. Notably absent: any "source" field — always
- * forced to MANUAL server-side, like CreateDutyAssignmentRequest.
+ * forced to MANUAL server-side.
  */
 final class ReassignDutyRequest
 {

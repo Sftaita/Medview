@@ -1,7 +1,8 @@
 {# ------------------------------------------------------------------
    MedVue — Rappel hebdomadaire des gardes (docs/decisions.md D146)
    Objet : Vos gardes de la semaine prochaine — <planning>
-   Contexte : firstName, planningName, weekLabel, items[{when, what}] (jamais vide), planningUrl
+   Contexte : firstName, planningName, weekLabel, items[{when, what, changed}] (jamais vide), planningUrl,
+   unpublishedChanges (D199 : la semaine diffère de la dernière diffusion pour cette personne)
    Jamais envoyé à quelqu'un qui n'a aucune garde cette semaine-là.
    ------------------------------------------------------------------ #}
 {% extends 'email/_base.html.twig' %}
@@ -24,6 +25,9 @@
 {% block content %}
 {{ ui.p('Bonjour ' ~ firstName|e ~ ',', 24) }}
 {{ ui.p('Voici vos gardes de la semaine prochaine :', 18) }}
-{{ ui.rows(items|map(item => [item.when, item.what])) }}
+{{ ui.rows(items|map(item => [item.when, item.changed ? item.what ~ ' (changement pas encore republié)' : item.what])) }}
+{% if unpublishedChanges %}
+{{ ui.p('<strong>Ce rappel tient compte de changements faits depuis la dernière diffusion du planning</strong> (une garde attribuée, retirée ou échangée). Ils n’ont pas encore été republiés : ils ne figurent pas dans le dernier planning PDF que vous avez reçu.', 22) }}
+{% endif %}
 {{ ui.p('Ce récapitulatif reflète le planning tel qu’il est au moment de l’envoi.', 22) }}
 {% endblock %}

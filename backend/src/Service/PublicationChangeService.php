@@ -4,11 +4,10 @@ declare(strict_types=1);
 
 namespace App\Service;
 
-use App\Entity\Planning;
+use App\Entity\PlanningCycle;
+use App\Entity\PlanningLine;
 use App\Entity\PlanningPublication;
-use App\Entity\PlanningTeamMember;
 use App\Entity\User;
-use App\Repository\PlanningLineRepository;
 use App\Repository\PlanningPublicationEntryRepository;
 use App\Repository\PlanningTeamMemberRepository;
 
@@ -37,7 +36,6 @@ final class PublicationChangeService
 
     public function __construct(
         private readonly PlanningPublicationEntryRepository $entryRepository,
-        private readonly PlanningLineRepository $lineRepository,
         private readonly PlanningTeamMemberRepository $teamMemberRepository,
     ) {
     }
@@ -144,35 +142,40 @@ final class PublicationChangeService
     }
 
     /**
-     * First publication: every participant of the planning — anyone whose
-     * membership in an active line's team intersects the planning's range —
-     * whether or not they hold a duty (the planning concerns them all).
+     * The first publication of lines in a period (docs/decisions.md D196):
+     * every member of those lines whose membership intersects the period —
+     * whether or not they hold a duty (the line concerns them all) — once
+     * each, with the lines concerned. Nobody is told of a line that was not
+     * published (a line with nothing demanded never is), unless another line
+     * published now concerns them.
      *
-     * @return list<User>
+     * @param list<PlanningLine> $lines
+     *
+     * @return list<array{user: User, lines: list<string>}> sorted by name; lines in display order
      */
-    public function audienceForFirstPublication(Planning $planning): array
+    public function audienceForFirstLines(PlanningCycle $cycle, array $lines): array
     {
-        $activeTeamIds = [];
-        foreach ($this->lineRepository->findByPlanning($planning) as $line) {
-            if ($line->isActive()) {
-                $activeTeamIds[(int) $line->getPlanningTeam()->getId()] = true;
-            }
-        }
+        usort($lines, static fn (PlanningLine $a, PlanningLine $b): int => $a->getPosition() <=> $b->getPosition());
 
-        $members = array_filter(
-            $this->teamMemberRepository->findIntersectingForPlanning($planning, $planning->getStartsAt(), $planning->getEndsAt()),
-            static fn (PlanningTeamMember $member): bool => isset($activeTeamIds[(int) $member->getPlanningTeam()->getId()]),
-        );
-
+        /** @var array<int, User> $users */
         $users = [];
-        foreach ($members as $member) {
-            $user = $member->getUser();
-            if ($user->isActive()) {
+        /** @var array<int, array<string, true>> $linesByUser */
+        $linesByUser = [];
+        foreach ($lines as $line) {
+            foreach ($this->teamMemberRepository->findIntersecting($line->getPlanningTeam(), $cycle->getStartsAt(), $cycle->getEndsAt()) as $member) {
+                $user = $member->getUser();
+                if (!$user->isActive()) {
+                    continue;
+                }
                 $users[(int) $user->getId()] = $user;
+                $linesByUser[(int) $user->getId()][$line->getName()] = true;
             }
         }
 
-        return $this->sortedByName($users);
+        return array_map(
+            static fn (User $user): array => ['user' => $user, 'lines' => array_keys($linesByUser[(int) $user->getId()])],
+            $this->sortedByName($users),
+        );
     }
 
     /**

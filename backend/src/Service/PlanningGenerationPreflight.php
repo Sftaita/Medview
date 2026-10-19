@@ -21,7 +21,22 @@ final readonly class PlanningGenerationPreflight
         public array $lines,
         public array $blockers,
         public array $warnings,
+        /** docs/decisions.md D195: the scope asked for (`unlocked_lines`), or null for the historical behaviour. */
+        public ?string $scope = null,
+        /**
+         * docs/decisions.md D195: `unlocked_lines` when the period holds lines kept (locked) next to lines to
+         * generate and no scope was asked — the launch is refused until it is, explicitly.
+         */
+        public ?string $requiredScope = null,
     ) {
+    }
+
+    /**
+     * @return list<LaunchLineReadiness> the lines this launch generates, in resolution order
+     */
+    public function generatedLines(): array
+    {
+        return array_values(array_filter($this->lines, static fn (LaunchLineReadiness $line): bool => $line->isGenerated()));
     }
 
     public function canGenerate(): bool
