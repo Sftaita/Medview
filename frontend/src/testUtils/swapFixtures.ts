@@ -24,6 +24,7 @@ export function makeUnit(dates: string[], overrides: Partial<SwapUnit> = {}): Sw
     dates,
     startsAt: `${dates[0]}T00:00:00+01:00`,
     endsAt: `${dates[dates.length - 1]}T23:59:00+01:00`,
+    period: { stableId: 'c1', number: 1, count: 1 },
     ...overrides,
   }
 }

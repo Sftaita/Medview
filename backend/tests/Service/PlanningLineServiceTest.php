@@ -150,8 +150,8 @@ final class PlanningLineServiceTest extends KernelTestCase
         $this->addMember($membershipService, $teamA, $userA, TeamMemberRole::MEMBER);
         $this->addMember($membershipService, $teamB, $userB, TeamMemberRole::MEMBER);
 
-        $generationA = new PlanningGeneration($primaryLine->getPlanningPeriod());
-        $generationB = new PlanningGeneration($lineB->getPlanningPeriod());
+        $generationA = new PlanningGeneration($primaryLine->requireSingleCyclePeriod());
+        $generationB = new PlanningGeneration($lineB->requireSingleCyclePeriod());
         $em->persist($generationA);
         $em->persist($generationB);
         $em->flush();
@@ -195,9 +195,9 @@ final class PlanningLineServiceTest extends KernelTestCase
         $this->addMember($membershipService, $teamA, $userA, TeamMemberRole::MEMBER);
 
         $dutyType = $this->createDutyType($em, $teamA);
-        $this->createDuty($dutyMaterialization, $primaryLine->getPlanningPeriod(), $dutyType, '2027-02-01 08:00', '2027-02-01 20:00');
+        $this->createDuty($dutyMaterialization, $primaryLine->requireSingleCyclePeriod(), $dutyType, '2027-02-01 08:00', '2027-02-01 20:00');
 
-        $generation = new PlanningGeneration($primaryLine->getPlanningPeriod());
+        $generation = new PlanningGeneration($primaryLine->requireSingleCyclePeriod());
         $em->persist($generation);
         $em->flush();
         $generationStableId = (string) $generation->getStableId();

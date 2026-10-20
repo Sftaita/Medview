@@ -186,7 +186,7 @@ final class ConditionalGenerationTest extends WebTestCase
     {
         $client = static::createClient();
         $s = $this->scenario($client);
-        $primaryPeriodId = $this->line($s['planningId'], 0)->getPlanningPeriod()->getId();
+        $primaryPeriodId = $this->line($s['planningId'], 0)->requireSingleCyclePeriod()->getId();
         FaultInjectingPlanningSolver::$errorWhen = static function (OptimizationProblem $problem) use ($primaryPeriodId): bool {
             $units = $problem->getRequiredDutyUnits();
 
@@ -347,7 +347,7 @@ final class ConditionalGenerationTest extends WebTestCase
         $source = $this->dutyEntityOn($s['planningId'], '2027-01-09');
         $type = new \App\Entity\DutyType($renfort->getPlanningTeam(), 'RENFORT', 'Renfort');
         $container->get(EntityManagerInterface::class)->persist($type);
-        $container->get(DutyMaterializationService::class)->createStandaloneDuty($renfort->getPlanningPeriod(), $type, new \DateTimeImmutable('2027-01-09 14:00'), new \DateTimeImmutable('2027-01-09 20:00'), DutyDemandType::CONDITIONAL, coverageSource: $source);
+        $container->get(DutyMaterializationService::class)->createStandaloneDuty($renfort->requireSingleCyclePeriod(), $type, new \DateTimeImmutable('2027-01-09 14:00'), new \DateTimeImmutable('2027-01-09 20:00'), DutyDemandType::CONDITIONAL, coverageSource: $source);
         // alice holds the main line's Saturday (Dr B: triggers it); carol, the only other reinforcement, is away.
         $this->forceHolders($client, $s, ['2027-01-09' => 'alice@example.com']);
         $this->declareRange($client, $s['carol'], '2027-01-09', '2027-01-10');

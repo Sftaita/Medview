@@ -19,6 +19,8 @@ use App\Service\AvailabilityCollectionService;
 use App\Service\MemberCollectionRow;
 use App\Service\PlanningCollectionStatus;
 use App\Service\PlanningCollectionStatusService;
+use App\Service\PlanningCyclePresenter;
+use App\Service\PlanningCycleResolver;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
@@ -52,18 +54,23 @@ final class PlanningCollectionStatusController
         private readonly AuthorizationCheckerInterface $authorizationChecker,
         private readonly SerializerInterface $serializer,
         private readonly ValidatorInterface $validator,
+        private readonly PlanningCycleResolver $cycleResolver,
+        private readonly PlanningCyclePresenter $cyclePresenter,
     ) {
     }
 
     #[Route('/api/plannings/{planningStableId}/collection-status', name: 'api_planning_collection_status', methods: ['GET'])]
-    public function status(string $planningStableId): JsonResponse
+    public function status(string $planningStableId, Request $request): JsonResponse
     {
         $planning = $this->resolvePlanning($planningStableId);
         $this->denyUnlessCanManageAvailability($planning);
+        // docs/planning-cycles.md §5.9: the collections of one period (?period=, default: current/next/last).
+        $cycle = $this->cycleResolver->fromRequest($planning, $request);
 
-        $status = $this->statusService->status($planning);
+        $status = $this->statusService->status($planning, $cycle);
 
         return new JsonResponse([
+            'period' => $this->cyclePresenter->reference($cycle),
             'planning' => $this->planningToArray($planning),
             'availabilityDeadline' => $status->availabilityDeadline?->format('Y-m-d'),
             'deadlineOverdueDays' => $status->deadlineOverdueDays,
@@ -74,15 +81,17 @@ final class PlanningCollectionStatusController
     }
 
     #[Route('/api/plannings/{planningStableId}/members/{memberStableId}/availability-status', name: 'api_planning_member_availability_status', methods: ['GET'])]
-    public function memberStatus(string $planningStableId, string $memberStableId): JsonResponse
+    public function memberStatus(string $planningStableId, string $memberStableId, Request $request): JsonResponse
     {
         $planning = $this->resolvePlanning($planningStableId);
         $this->denyUnlessCanManageAvailability($planning);
         $member = $this->resolveMember($planning, $memberStableId);
+        $cycle = $this->cycleResolver->fromRequest($planning, $request);
 
-        $detail = $this->statusService->detail($planning, $member);
+        $detail = $this->statusService->detail($planning, $member, $cycle);
 
         return new JsonResponse([
+            'period' => $this->cyclePresenter->reference($cycle),
             'member' => $this->rowToArray($detail->row),
             'participation' => [
                 'membershipStart' => $member->getMembershipStart()->format('Y-m-d'),
@@ -129,6 +138,11 @@ final class PlanningCollectionStatusController
     {
         $planning = $this->resolvePlanning($planningStableId);
         $this->denyUnlessCanManageAvailability($planning);
+        // The deadline of one period's open collections (?period=, default: current/next/last).
+        $cycle = $this->cyclePresenter->defaultCycle($planning);
+        if ('' !== $request->query->getString('period')) {
+            $cycle = $this->cycleResolver->fromRequest($planning, $request);
+        }
 
         try {
             $raw = json_decode($request->getContent(), true, flags: \JSON_THROW_ON_ERROR);
@@ -176,16 +190,17 @@ final class PlanningCollectionStatusController
         }
 
         try {
-            $this->collectionService->changePlanningDeadline($planning, $deadline);
+            $this->collectionService->changePlanningDeadline($planning, $deadline, $cycle);
         } catch (NoOpenAvailabilityCollectionException $exception) {
             return new JsonResponse(['error' => 'no_open_collection', 'message' => $exception->getMessage()], 409);
         } catch (InvalidAvailabilityDeadlineException $exception) {
             return new JsonResponse(['error' => 'validation_failed', 'violations' => ['availabilityDeadline' => $exception->getMessage()]], 422);
         }
 
-        $status = $this->statusService->status($planning);
+        $status = $this->statusService->status($planning, $cycle);
 
         return new JsonResponse([
+            'period' => $this->cyclePresenter->reference($cycle),
             'availabilityDeadline' => $status->availabilityDeadline?->format('Y-m-d'),
             'deadlineOverdueDays' => $status->deadlineOverdueDays,
             'openCollectionCount' => $status->openCollectionCount,

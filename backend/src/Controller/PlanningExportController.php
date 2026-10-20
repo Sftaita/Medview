@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use App\Exception\InvalidPlanningExportRequestException;
+use App\Exception\NothingPublishedInExportRangeException;
 use App\Exception\PlanningNotYetPublishedException;
 use App\Repository\PlanningRepository;
 use App\Security\Voter\PlanningVoter;
@@ -19,10 +20,12 @@ use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 
 /**
- * "Exporter" (docs/planning-export.md, docs/decisions.md D150): the current
- * calendar of a published planning as a PDF or an .xlsx. Same audience as
- * the calendar screen and "Télécharger le PDF": anyone who can VIEW the
- * planning — the export shows nothing that person cannot already read.
+ * "Exporter" (docs/planning-export.md, docs/decisions.md D150, D200): a
+ * published planning as a PDF or an .xlsx, for anyone who can VIEW it —
+ * but only its published line periods, and what each requester may read:
+ * a manager (MANAGE_CALENDAR) gets the current calendar, labelled when it
+ * differs from the last diffusion; a plain member gets exactly what was
+ * diffused, never a draft nor a change made since.
  * A POST because the export carries a body (lines, order, names, dates);
  * it never modifies anything.
  */
@@ -56,9 +59,11 @@ final class PlanningExportController
         }
 
         try {
-            $file = $this->exportService->export($planning, $raw);
+            $file = $this->exportService->export($planning, $raw, $this->authorizationChecker->isGranted(PlanningVoter::MANAGE_CALENDAR, $planning));
         } catch (PlanningNotYetPublishedException) {
             return new JsonResponse(['error' => 'not_yet_published', 'message' => 'Only a published planning can be exported.'], 409);
+        } catch (NothingPublishedInExportRangeException $exception) {
+            return new JsonResponse(['error' => 'not_published_in_range', 'message' => $exception->getMessage()], 409);
         } catch (InvalidPlanningExportRequestException $exception) {
             return new JsonResponse(['error' => 'validation_failed', 'violations' => $exception->violations], 422);
         }

@@ -10,9 +10,10 @@ use App\Eligibility\DutyUnit;
 use App\Entity\DutyAssignment;
 use App\Entity\DutyAssignmentEvent;
 use App\Entity\Planning;
+use App\Entity\PlanningCycle;
 use App\Entity\PlanningGeneration;
 use App\Entity\PlanningLine;
-use App\Entity\PlanningPeriodStatus;
+use App\Entity\PlanningPeriod;
 use App\Entity\PlanningSnapshot;
 use App\Entity\PlanningTeamMember;
 use App\Entity\SolverParameterSet;
@@ -30,6 +31,7 @@ use App\Repository\DutyAssignmentRepository;
 use App\Repository\DutyRepository;
 use App\Repository\PlanningGenerationRepository;
 use App\Repository\PlanningLineRepository;
+use App\Repository\PlanningPeriodRepository;
 use App\Repository\PlanningSnapshotRepository;
 use App\Repository\PlanningTeamMemberRepository;
 use App\Repository\SolverParameterSetRepository;
@@ -109,18 +111,27 @@ final class PlanningCompletionService
         private readonly DutyUnitFactory $dutyUnitFactory,
         private readonly DutyRepository $dutyRepository,
         private readonly DimensionMembershipCalculator $dimensionMembershipCalculator,
+        private readonly PlanningPeriodRepository $periodRepository,
     ) {
     }
 
     /**
-     * @return list<CompletionLineResult> one per active line
+     * Completes $cycle (docs/planning-cycles.md §5.4, lot L3): the active
+     * lines that have a period in it, nothing else. Every hole is checked
+     * live against what its candidate holds everywhere — other lines, other
+     * periods (ReassignmentCandidateService::assignabilityError()) — and
+     * again under the calendar lock at write time. Omitted: the planning's
+     * only period (refused when it has several).
+     *
+     * @return list<CompletionLineResult> one per active line of $cycle
      *
      * @throws PlanningGenerationInProgressException a generation or another completion is running on this Planning
      * @throws NoSolverParameterSetException
      * @throws PlanningCompletionStaleException      nothing was written
      */
-    public function complete(Planning $planning, User $author): array
+    public function complete(Planning $planning, User $author, ?PlanningCycle $cycle = null): array
     {
+        $cycle ??= $planning->getOnlyCycle();
         if (!$this->tryLock($planning)) {
             throw new PlanningGenerationInProgressException();
         }
@@ -142,8 +153,8 @@ final class PlanningCompletionService
             // docs/decisions.md D165: the live demand, seeing the holders the lines solved earlier are about to get.
             $liveDemand = $this->demandViewFactory->forPlanning($planning);
             $virtualHoldings = [];
-            foreach ($this->lineOrder->activeInResolutionOrder($planning) as $line) {
-                $plan = $this->solveLine($line, $parameterSet, $virtualCommitments, $liveDemand->withSourceHoldings($virtualHoldings));
+            foreach ($this->lineOrder->activeInCycle($cycle) as $line) {
+                $plan = $this->solveLine($line, $cycle, $parameterSet, $virtualCommitments, $liveDemand->withSourceHoldings($virtualHoldings));
                 if ($plan instanceof CompletionLineResult) {
                     $results[] = $plan;
                     continue;
@@ -173,10 +184,11 @@ final class PlanningCompletionService
      * @param list<PersonCommitment> $virtualCommitments fills planned on the lines solved before this one
      * @param LiveDemandView         $demand             the live demand, holders planned on earlier lines included
      */
-    private function solveLine(PlanningLine $line, SolverParameterSet $parameterSet, array $virtualCommitments, LiveDemandView $demand): CompletionLineResult|array
+    private function solveLine(PlanningLine $line, PlanningCycle $cycle, SolverParameterSet $parameterSet, array $virtualCommitments, LiveDemandView $demand): CompletionLineResult|array
     {
         $this->heartbeat->beat();
-        $generation = $this->generationRepository->findMostRecentCompletedByPlanningPeriod($line->getPlanningPeriod());
+        $period = $line->periodIn($cycle) ?? throw new \LogicException('PlanningLineOrder::activeInCycle() only returns lines with a period in the cycle.');
+        $generation = $this->generationRepository->findMostRecentCompletedByPlanningPeriod($period);
         $snapshot = null !== $generation ? $this->snapshotRepository->findOneByGeneration($generation) : null;
         if (null === $generation || null === $snapshot) {
             return new CompletionLineResult($line, 'not_generated');
@@ -189,7 +201,7 @@ final class PlanningCompletionService
         // and targets are computed on them alone. Population, participation and eligibility stay the snapshot's.
         $matrix = $this->matrixBuilder->build($snapshot, withFrozenExternalCommitments: false, demand: $demand);
         $currentByDutyId = $this->currentByDutyId($generation);
-        [$loadOnly, $undeterminedUnitCount] = $this->conditionalLeftovers($line, $demand, $matrix->getDutyUnits(), $currentByDutyId);
+        [$loadOnly, $undeterminedUnitCount] = $this->conditionalLeftovers($period, $demand, $matrix->getDutyUnits(), $currentByDutyId);
         $problem = $this->problemBuilder->build($this->contextBuilder->build($snapshot, $matrix), $parameterSet)
             ->withLoadOnlyUnits($loadOnly, $this->membershipOf($loadOnly));
 
@@ -234,7 +246,7 @@ final class PlanningCompletionService
      *
      * @return array{0: list<DutyUnit>, 1: int}
      */
-    private function conditionalLeftovers(PlanningLine $line, LiveDemandView $demand, array $demandUnits, array $currentByDutyId): array
+    private function conditionalLeftovers(PlanningPeriod $period, LiveDemandView $demand, array $demandUnits, array $currentByDutyId): array
     {
         $inMatrix = [];
         foreach ($demandUnits as $unit) {
@@ -243,7 +255,7 @@ final class PlanningCompletionService
 
         $loadOnly = [];
         $undetermined = 0;
-        foreach ($this->dutyUnitFactory->fromDuties($this->dutyRepository->findByPlanningPeriod($line->getPlanningPeriod())) as $unit) {
+        foreach ($this->dutyUnitFactory->fromDuties($this->dutyRepository->findByPlanningPeriod($period)) as $unit) {
             if (!$unit->getDuties()[0]->isConditional() || isset($inMatrix[$unit->getStableKey()])) {
                 continue;
             }
@@ -369,7 +381,8 @@ final class PlanningCompletionService
                     throw new PlanningCompletionStaleException();
                 }
 
-                $wasPublished = PlanningPeriodStatus::PUBLISHED === $generation->getPlanningPeriod()->getStatus();
+                // docs/decisions.md D197: the committed status, read under the lock — never the entity loaded before the solve.
+                $wasPublished = $this->periodRepository->isPublishedNow($generation->getPlanningPeriod());
                 // D165: the live demand again, under the lock — what the lines written just before in this
                 // transaction now hold included. A reinforcement the calendar no longer requires is never written.
                 $demandNow = $this->demandViewFactory->forPlanning($planning);

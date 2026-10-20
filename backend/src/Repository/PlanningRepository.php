@@ -6,6 +6,7 @@ namespace App\Repository;
 
 use App\Entity\Planning;
 use App\Entity\PlanningLine;
+use App\Entity\PlanningPeriod;
 use App\Entity\PlanningPeriodStatus;
 use App\Entity\User;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
@@ -33,7 +34,7 @@ class PlanningRepository extends ServiceEntityRepository
         return $this->createQueryBuilder('p')
             ->distinct()
             ->join(PlanningLine::class, 'l', 'WITH', 'l.planning = p AND l.active = true')
-            ->join('l.planningPeriod', 'pp')
+            ->join(PlanningPeriod::class, 'pp', 'WITH', 'pp.line = l')
             ->andWhere('pp.status = :published')
             ->setParameter('published', PlanningPeriodStatus::PUBLISHED)
             ->orderBy('p.id', 'ASC')
@@ -53,7 +54,7 @@ class PlanningRepository extends ServiceEntityRepository
         return $this->createQueryBuilder('p')
             ->distinct()
             ->join(PlanningLine::class, 'l', 'WITH', 'l.planning = p AND l.active = true')
-            ->join('l.planningPeriod', 'pp')
+            ->join(PlanningPeriod::class, 'pp', 'WITH', 'pp.line = l')
             ->join('App\Entity\PlanningTeamMember', 'tm', 'WITH', 'tm.planning = p AND tm.user = :user')
             ->andWhere('pp.status = :published')
             ->setParameter('published', PlanningPeriodStatus::PUBLISHED)

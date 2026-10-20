@@ -7,6 +7,8 @@ type Props = {
   planningStableId: string
   /** Used only when the server's file name cannot be read. */
   planningName: string
+  /** The period the follow-up shows (docs/decisions.md D200): the export covers it; the whole planning without it. */
+  periodStableId?: string
 }
 
 /**
@@ -15,7 +17,7 @@ type Props = {
  * planning period. Shown in the availability follow-up, which only managers
  * see — the server checks the right anyway.
  */
-export function AbsenceExportButton({ planningStableId, planningName }: Props) {
+export function AbsenceExportButton({ planningStableId, planningName, periodStableId }: Props) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // A ref, not state: two clicks in the same tick both read the state as "idle".
@@ -27,7 +29,7 @@ export function AbsenceExportButton({ planningStableId, planningName }: Props) {
     setBusy(true)
     setError(null)
     try {
-      const file = await downloadAbsencesPdf(planningStableId)
+      const file = await downloadAbsencesPdf(planningStableId, periodStableId)
       const url = URL.createObjectURL(file.blob)
       const link = document.createElement('a')
       link.href = url

@@ -54,7 +54,7 @@ final class PlanningJobRecovery
     {
         // The database's clock, like every job timestamp (PlanningJobStore).
         $rows = $this->entityManager->getConnection()->fetchAllAssociative(
-            "SELECT id, planning_id, status FROM planning_jobs
+            "SELECT id, planning_id, planning_cycle_id, status FROM planning_jobs
              WHERE ((status = 'RUNNING' AND heartbeat_at < LOCALTIMESTAMP - make_interval(secs => :stale))
                  OR (status = 'QUEUED' AND created_at < LOCALTIMESTAMP - make_interval(secs => :queued)))"
             .(null !== $planningId ? ' AND planning_id = :planning' : ''),
@@ -71,7 +71,7 @@ final class PlanningJobRecovery
 
             if ($this->store->fail((int) $row['id'], $code, $detail)) {
                 ++$failed;
-                $this->store->failSolvingGenerations((int) $row['planning_id'], 'Interrupted: '.$code);
+                $this->store->failSolvingGenerations((int) $row['planning_id'], 'Interrupted: '.$code, (int) $row['planning_cycle_id']);
                 $this->logger->warning('PlanningJob {id} recovered as FAILED ({code}).', ['id' => $row['id'], 'code' => $code]);
             }
         }
@@ -95,10 +95,11 @@ final class PlanningJobRecovery
              WHERE g.status = 'SOLVING'
                AND g.updated_at < LOCALTIMESTAMP - make_interval(secs => :orphan)
                AND NOT EXISTS (
-                   SELECT 1 FROM planning_jobs j JOIN planning_lines l ON l.planning_id = j.planning_id
-                   WHERE l.planning_period_id = g.planning_period_id AND j.status = 'RUNNING'
+                   SELECT 1 FROM planning_jobs j JOIN planning_cycles c ON c.planning_id = j.planning_id
+                   JOIN planning_periods lp ON lp.planning_cycle_id = c.id
+                   WHERE lp.id = g.planning_period_id AND j.status = 'RUNNING'
                )"
-            .(null !== $planningId ? ' AND g.planning_period_id IN (SELECT planning_period_id FROM planning_lines WHERE planning_id = :planning)' : ''),
+            .(null !== $planningId ? ' AND g.planning_period_id IN (SELECT pp.id FROM planning_periods pp JOIN planning_cycles c ON c.id = pp.planning_cycle_id WHERE c.planning_id = :planning)' : ''),
             ['orphan' => self::ORPHAN_SOLVING_AFTER_SECONDS] + (null !== $planningId ? ['planning' => $planningId] : []),
         );
 

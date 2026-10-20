@@ -35,6 +35,7 @@ use Symfony\Component\Uid\Uuid;
  */
 #[ORM\Entity(repositoryClass: PlanningJobRepository::class)]
 #[ORM\Table(name: 'planning_jobs')]
+#[ORM\Index(columns: ['planning_cycle_id'], name: 'idx_planning_jobs_planning_cycle_id')]
 #[ORM\UniqueConstraint(name: 'uniq_planning_jobs_stable_id', columns: ['stable_id'])]
 #[ORM\Index(columns: ['planning_id', 'created_at'], name: 'idx_planning_jobs_planning')]
 #[ORM\Index(columns: ['status'], name: 'idx_planning_jobs_status')]
@@ -52,6 +53,15 @@ class PlanningJob
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
     private Planning $planning;
 
+    /**
+     * The "période" of the Planning this row belongs to (docs/planning-cycles.md).
+     * NOT NULL in the database since lot L2 (docs/decisions.md D187): always
+     * set before the first flush.
+     */
+    #[ORM\ManyToOne(targetEntity: PlanningCycle::class)]
+    #[ORM\JoinColumn(name: 'planning_cycle_id', nullable: false, onDelete: 'RESTRICT')]
+    private ?PlanningCycle $cycle = null;
+
     #[ORM\Column(length: 10, enumType: PlanningJobKind::class)]
     private PlanningJobKind $kind;
 
@@ -65,6 +75,10 @@ class PlanningJob
     /** GENERATE only: the rest policy chosen at launch (RestPolicyOptions::toArray()), replayed by the worker. */
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $restPolicy;
+
+    /** GENERATE only: the scope asked for (docs/decisions.md D195) — `unlocked_lines`, or null for the historical one. */
+    #[ORM\Column(name: 'generation_scope', length: 20, nullable: true)]
+    private ?string $scope = null;
 
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
@@ -91,8 +105,9 @@ class PlanningJob
     /**
      * @param array<string, mixed>|null $restPolicy
      */
-    public function __construct(Planning $planning, PlanningJobKind $kind, User $requestedBy, ?array $restPolicy = null)
+    public function __construct(Planning $planning, PlanningJobKind $kind, User $requestedBy, ?array $restPolicy = null, ?string $scope = null)
     {
+        $this->scope = $scope;
         $this->stableId = Uuid::v7();
         $this->planning = $planning;
         $this->kind = $kind;
@@ -110,6 +125,27 @@ class PlanningJob
     public function getStableId(): Uuid
     {
         return $this->stableId;
+    }
+
+    public function getCycle(): ?PlanningCycle
+    {
+        return $this->cycle;
+    }
+
+    /** Set once, before the row is first written: a row never changes cycle. */
+    public function assignToCycle(PlanningCycle $cycle): void
+    {
+        if (null !== $this->cycle) {
+            if ($this->cycle === $cycle) {
+                return;
+            }
+            throw new \LogicException('A row never changes cycle.');
+        }
+        if ($cycle->getPlanning() !== $this->planning) {
+            throw new \InvalidArgumentException('The cycle must belong to the same Planning.');
+        }
+
+        $this->cycle = $cycle;
     }
 
     public function getPlanning(): Planning
@@ -138,6 +174,11 @@ class PlanningJob
     public function getRestPolicy(): ?array
     {
         return $this->restPolicy;
+    }
+
+    public function getScope(): ?string
+    {
+        return $this->scope;
     }
 
     public function getCreatedAt(): \DateTimeImmutable

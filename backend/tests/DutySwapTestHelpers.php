@@ -239,7 +239,7 @@ trait DutySwapTestHelpers
         $container->get(EntityManagerInterface::class)->clear();
         $planning = $container->get(PlanningRepository::class)->findOneByStableId($planningStableId);
         $line = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0];
-        $generation = $container->get(PlanningGenerationRepository::class)->findMostRecentCompletedByPlanningPeriod($line->getPlanningPeriod());
+        $generation = $container->get(PlanningGenerationRepository::class)->findMostRecentCompletedByPlanningPeriod($line->requireSingleCyclePeriod());
         $rows = [];
         foreach ($container->get(DutyAssignmentRepository::class)->findForGenerations([$generation]) as $row) {
             $rows[$row->getDuty()->getLocalDate()->format('Y-m-d')] = $row;

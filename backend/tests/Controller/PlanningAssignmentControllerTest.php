@@ -9,6 +9,7 @@ use App\Entity\PlanningGeneration;
 use App\Entity\PlanningGenerationStatus;
 use App\Repository\PlanningLineRepository;
 use App\Repository\PlanningRepository;
+use App\Repository\PlanningSnapshotRepository;
 use App\Repository\PlanningTeamMemberRepository;
 use App\Repository\UserRepository;
 use App\Service\DutyAssignmentService;
@@ -18,6 +19,7 @@ use App\Service\PlanningSnapshotService;
 use App\Tests\InvitationTestHelpers;
 use App\Tests\PlanningDomainTestHelpers;
 use App\Tests\PlanningGenerationTestHelpers;
+use Doctrine\DBAL\Connection;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -39,7 +41,7 @@ final class PlanningAssignmentControllerTest extends WebTestCase
     /**
      * @return array<string, mixed>
      */
-    private function scenario(KernelBrowser $client, bool $completed = true): array
+    private function scenario(KernelBrowser $client, bool $completed = true, bool $published = true): array
     {
         $creator = $this->userToken($client, 'creator@example.com');
         $alice = $this->userToken($client, 'alice@example.com');
@@ -53,7 +55,7 @@ final class PlanningAssignmentControllerTest extends WebTestCase
         $container = static::getContainer();
         $em = $container->get(EntityManagerInterface::class);
         $planning = $container->get(PlanningRepository::class)->findOneByStableId($planningId);
-        $period = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0]->getPlanningPeriod();
+        $period = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0]->requireSingleCyclePeriod();
         $team = $period->getTeam();
         $this->activateRuleSet($container->get(PlanningRuleSetService::class), $team);
 
@@ -75,6 +77,7 @@ final class PlanningAssignmentControllerTest extends WebTestCase
         $container->get(PlanningSnapshotService::class)->createSnapshot($generation);
 
         $assignments = $container->get(DutyAssignmentService::class);
+        $snapshot = $container->get(PlanningSnapshotRepository::class)->findOneByGeneration($generation) ?? self::fail('no snapshot');
         $plan = [
             [$aliceMember, $night, '2027-02-05 20:00', '2027-02-06 08:00'], // Friday night
             [$aliceMember, $day, '2027-02-06 08:00', '2027-02-06 20:00'],   // Saturday
@@ -83,13 +86,18 @@ final class PlanningAssignmentControllerTest extends WebTestCase
         ];
         foreach ($plan as [$member, $type, $from, $to]) {
             $duty = $this->createDuty($materialization, $period, $type, $from, $to);
-            $assignments->createManual($generation, $duty, $member, false);
+            $assignments->createManualBatchItem($generation, $snapshot, $duty, $member);
         }
+        $em->flush();
 
         if ($completed) {
             $generation->transitionTo(PlanningGenerationStatus::SOLVING);
             $generation->transitionTo(PlanningGenerationStatus::COMPLETED);
             $em->flush();
+        }
+        // docs/decisions.md D204: a plain member reads a published line only — the member views below read one.
+        if ($completed && $published) {
+            $container->get(Connection::class)->executeStatement("UPDATE planning_periods SET status = 'PUBLISHED' WHERE id = ?", [$period->getId()]);
         }
 
         return [
@@ -102,6 +110,24 @@ final class PlanningAssignmentControllerTest extends WebTestCase
             'bobUserId' => (string) $users->findOneByEmail('bob@example.com')->getStableId(),
             'outsiderUserId' => (string) $users->findOneByEmail('outsider@example.com')->getStableId(),
         ];
+    }
+
+    public function testAPlainMemberReadsNothingOfAGenerationNotPublishedWhileTheCreatorReadsItAll(): void
+    {
+        $client = static::createClient();
+        $s = $this->scenario($client, published: false);
+
+        $member = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/assignments", token: $s['bob']);
+        self::assertResponseIsSuccessful();
+        self::assertSame([], $member['generations'], 'docs/decisions.md D204: the draft line is left out, as if absent');
+        self::assertSame([], $member['assignments']);
+        $alice = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/assignments?userStableId={$s['aliceUserId']}", token: $s['bob']);
+        self::assertSame([], $alice['assignments']);
+        self::assertSame(0, $alice['summary']['totalDuties']);
+
+        $creator = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/assignments", token: $s['creator']);
+        self::assertCount(1, $creator['generations']);
+        self::assertCount(4, $creator['assignments']);
     }
 
     public function testTheWholeTeamViewListsEveryAssignmentWithoutSummary(): void

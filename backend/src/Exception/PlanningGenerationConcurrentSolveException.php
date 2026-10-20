@@ -9,8 +9,8 @@ namespace App\Exception;
  * loses a real race: `PlanningGenerationService::generate()` catches
  * Doctrine's `OptimisticLockException` on `PlanningGeneration::$lockVersion`
  * and translates it here — the same "DB constraint is the real guarantee"
- * pattern already used for `PlanningGenerationAlreadySnapshottedException`/
- * `DuplicateDutyAssignmentException`, just backed by an optimistic lock
+ * pattern already used for `PlanningGenerationAlreadySnapshottedException`,
+ * just backed by an optimistic lock
  * instead of a unique constraint (there is no unique column to lean on for
  * "only one solve in flight", so this is the correct mechanism instead).
  * Also thrown by the up-front status check (DRAFT/SOLVING/COMPLETED/FAILED

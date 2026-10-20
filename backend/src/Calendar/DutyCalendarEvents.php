@@ -13,7 +13,11 @@ namespace App\Calendar;
  * unit, a timed event would claim hours nobody configured. One event per
  * unit (a block once), split only if its days are not contiguous. The UID
  * derives from the unit's stable id: a reassigned duty leaves one person's
- * feed and enters another's, never duplicated in either.
+ * feed and enters another's, never duplicated in either. Periods
+ * (docs/decisions.md D198): the unit's stable id is that of its block or
+ * duty, never of a period or a generation — the same UID across
+ * regenerations of other periods, republications and reassignments, and
+ * unique across periods (a unit belongs to exactly one).
  *
  * A reinforcement that is not currently required or still undetermined
  * (D165) is TENTATIVE, with the same wording as the "Mes gardes" badge.

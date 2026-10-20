@@ -9,9 +9,11 @@ use App\Entity\AvailabilityCollection;
 use App\Entity\AvailabilityCollectionResponse;
 use App\Entity\AvailabilityResponseStatus;
 use App\Entity\Planning;
+use App\Entity\PlanningCycle;
 use App\Entity\User;
 use App\Entity\UserAvailabilityType;
 use App\Exception\AvailabilityCollectionClosedException;
+use App\Exception\AvailabilityCollectionOutsidePeriodException;
 use App\Exception\AvailabilityCollectionOutsidePlanningException;
 use App\Exception\AvailabilityCollectionOverlapException;
 use App\Exception\ConflictingUnavailabilityException;
@@ -20,6 +22,7 @@ use App\Exception\NoOpenAvailabilityCollectionException;
 use App\Exception\NotAnAvailabilityRespondentException;
 use App\Repository\AvailabilityCollectionRepository;
 use App\Repository\AvailabilityCollectionResponseRepository;
+use App\Repository\PlanningCycleRepository;
 use App\Repository\PlanningTeamMemberRepository;
 use App\Repository\UserAvailabilityPeriodRepository;
 use Doctrine\DBAL\LockMode;
@@ -45,6 +48,7 @@ final class AvailabilityCollectionService
         private readonly UserAvailabilityPeriodRepository $availabilityPeriodRepository,
         private readonly EntityManagerInterface $entityManager,
         private readonly ClockInterface $clock,
+        private readonly PlanningCycleRepository $cycleRepository,
     ) {
     }
 
@@ -53,14 +57,24 @@ final class AvailabilityCollectionService
      * expected to answer (memberships intersecting the window). Never
      * called for an empty window: DateWindow itself rejects that.
      *
+     * A collection belongs to exactly one period (docs/planning-cycles.md I12,
+     * §5.9): its window must lie inside one cycle — $cycle when given, else
+     * whichever contains it. Its answers are its own: nothing is copied from
+     * another collection.
+     *
      * @throws AvailabilityCollectionOutsidePlanningException
+     * @throws AvailabilityCollectionOutsidePeriodException
      * @throws AvailabilityCollectionOverlapException
      * @throws InvalidAvailabilityDeadlineException
      */
-    public function open(Planning $planning, DateWindow $window, User $createdBy, ?\DateTimeImmutable $deadline = null): AvailabilityCollection
+    public function open(Planning $planning, DateWindow $window, User $createdBy, ?\DateTimeImmutable $deadline = null, ?PlanningCycle $cycle = null): AvailabilityCollection
     {
         if ($window->startsAt < $planning->getStartsAt() || $window->endsAt > $planning->getEndsAt()) {
             throw new AvailabilityCollectionOutsidePlanningException();
+        }
+        $cycle ??= $this->cycleContaining($planning, $window);
+        if (null === $cycle || $cycle->getPlanning() !== $planning || !$cycle->contains($window->startsAt, $window->endsAt)) {
+            throw new AvailabilityCollectionOutsidePeriodException();
         }
         if ([] !== $this->collectionRepository->findOverlapping($planning, $window->startsAt, $window->endsAt)) {
             throw new AvailabilityCollectionOverlapException();
@@ -69,6 +83,7 @@ final class AvailabilityCollectionService
 
         $now = $this->now();
         $collection = new AvailabilityCollection($planning, $window->startsAt, $window->endsAt, $createdBy, $now, $deadline);
+        $collection->assignToCycle($cycle);
         $this->entityManager->persist($collection);
 
         $expected = [];
@@ -113,9 +128,13 @@ final class AvailabilityCollectionService
      * @throws NoOpenAvailabilityCollectionException
      * @throws InvalidAvailabilityDeadlineException
      */
-    public function changePlanningDeadline(Planning $planning, ?\DateTimeImmutable $deadline): int
+    public function changePlanningDeadline(Planning $planning, ?\DateTimeImmutable $deadline, ?PlanningCycle $cycle = null): int
     {
-        $open = $this->collectionRepository->findOpenByPlanning($planning);
+        // docs/planning-cycles.md §5.9: the deadline of the selected period's open collections only.
+        $open = array_values(array_filter(
+            $this->collectionRepository->findOpenByPlanning($planning),
+            static fn (AvailabilityCollection $collection): bool => null === $cycle || $collection->getCycle() === $cycle,
+        ));
         if ([] === $open) {
             throw new NoOpenAvailabilityCollectionException();
         }
@@ -309,6 +328,17 @@ final class AvailabilityCollectionService
             $periods,
             static fn ($period): bool => UserAvailabilityType::UNAVAILABLE === $period->getType(),
         ));
+    }
+
+    private function cycleContaining(Planning $planning, DateWindow $window): ?PlanningCycle
+    {
+        foreach ($this->cycleRepository->findByPlanning($planning) as $cycle) {
+            if ($cycle->contains($window->startsAt, $window->endsAt)) {
+                return $cycle;
+            }
+        }
+
+        return null;
     }
 
     public function assertDeadlineNotPast(Planning $planning, ?\DateTimeImmutable $deadline): void

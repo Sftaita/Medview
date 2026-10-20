@@ -22,6 +22,22 @@ final readonly class LaunchLineResult
         public ?string $error = null,
         /** A conditional line's demand, per unit (D164) — null for an independent line. */
         public ?LineDemandSummary $demand = null,
+        /**
+         * Why a result solved in this launch was not written (`launch_inconsistent`, docs/decisions.md D191): each
+         * rule the final calendar would have broken.
+         *
+         * @var list<array<string, mixed>>
+         */
+        public array $conflicts = [],
+        /** docs/decisions.md D195: GENERATE, or KEEP / EXCLUDE for a line this launch left as it is (no generation). */
+        public string $decision = LaunchLineReadiness::GENERATE,
+        /** docs/decisions.md D194/D195: why a line was kept or excluded — null for a line generated. */
+        public ?LineApplicability $applicability = null,
     ) {
+    }
+
+    public function isGenerated(): bool
+    {
+        return LaunchLineReadiness::GENERATE === $this->decision;
     }
 }

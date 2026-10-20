@@ -12,6 +12,7 @@ use App\Entity\PlanningTeamMember;
 use App\Repository\PlanningLineRepository;
 use App\Repository\PlanningPublicationDocumentRepository;
 use App\Repository\PlanningPublicationEntryRepository;
+use App\Repository\PlanningPublicationLineRepository;
 use Dompdf\Dompdf;
 use Dompdf\Options;
 use Twig\Environment;
@@ -28,6 +29,12 @@ use Twig\Environment;
  * when the publication is recorded, and stored (PlanningPublicationDocument,
  * D173): the same bytes are attached to every email of that publication and
  * served by "Télécharger le PDF" — see pdfOf().
+ *
+ * Since docs/decisions.md D196 (lot L4c): the period published — its own
+ * dates, "Période N" — and exactly the lines published in it by then, read
+ * from the publication history (planning_publication_lines), with the names
+ * they were published under. A publication without stored PDF (before D173)
+ * keeps the rendering it always had.
  */
 final class PlanningPdfRenderer
 {
@@ -35,6 +42,7 @@ final class PlanningPdfRenderer
         private readonly PlanningPublicationEntryRepository $entryRepository,
         private readonly PlanningLineRepository $lineRepository,
         private readonly PlanningPublicationDocumentRepository $documentRepository,
+        private readonly PlanningPublicationLineRepository $publicationLineRepository,
         private readonly Environment $twig,
     ) {
     }
@@ -48,15 +56,16 @@ final class PlanningPdfRenderer
      */
     public function pdfOf(PlanningPublication $publication): PublishedDocument
     {
+        $number = $publication->getCycle()?->getNumber();
         $document = $this->documentRepository->findOneByPublication($publication);
         if (null !== $document) {
-            return new PublishedDocument($document->getContent(), $document->getFilename(), $document->getPlanningName(), $document->getPeriodFirstDay(), $document->getPeriodLastDay());
+            return new PublishedDocument($document->getContent(), $document->getFilename(), $document->getPlanningName(), $document->getPeriodFirstDay(), $document->getPeriodLastDay(), $number);
         }
 
         $planning = $publication->getPlanning();
-        [$first, $last] = self::periodDays($publication);
+        [$first, $last] = self::planningDays($publication);
 
-        return new PublishedDocument($this->render($publication), $this->filename($publication), $planning->getName(), $first, $last);
+        return new PublishedDocument($this->renderView($this->legacyView($publication)), $this->legacyFilename($publication), $planning->getName(), $first, $last, $number);
     }
 
     /**
@@ -65,46 +74,22 @@ final class PlanningPdfRenderer
      */
     public function document(PlanningPublication $publication, \DateTimeImmutable $createdAt): PlanningPublicationDocument
     {
-        [$first, $last] = self::periodDays($publication);
+        [$first, $last] = self::cycleDays($publication);
 
         return new PlanningPublicationDocument($publication, $this->render($publication), $this->filename($publication), $publication->getPlanning()->getName(), $first, $last, $createdAt);
     }
 
-    /**
-     * The planning's first and last day (inclusive), as pure calendar dates.
-     *
-     * @return array{0: \DateTimeImmutable, 1: \DateTimeImmutable}
-     */
-    private static function periodDays(PlanningPublication $publication): array
-    {
-        $planning = $publication->getPlanning();
-
-        return [
-            new \DateTimeImmutable($planning->getStartsAt()->format('Y-m-d')),
-            new \DateTimeImmutable($planning->getEndsAt()->modify('-1 day')->format('Y-m-d')),
-        ];
-    }
-
     public function render(PlanningPublication $publication): string
     {
-        $options = new Options();
-        $options->setDefaultFont('DejaVu Sans');
-        $options->setIsRemoteEnabled(false);
-        $options->setIsPhpEnabled(false);
-
-        $dompdf = new Dompdf($options);
-        $dompdf->loadHtml($this->twig->render('pdf/planning.html.twig', $this->view($publication)));
-        $dompdf->setPaper('A4', 'portrait');
-        $dompdf->render();
-
-        return (string) $dompdf->output();
+        return $this->renderView($this->view($publication));
     }
 
+    /** docs/decisions.md D196: "planning-<slug>-periode-<N>.pdf". */
     public function filename(PlanningPublication $publication): string
     {
-        $slug = trim((string) preg_replace('/[^a-z0-9]+/', '-', strtolower((string) iconv('UTF-8', 'ASCII//TRANSLIT', $publication->getPlanning()->getName()))), '-');
+        $number = $publication->getCycle()?->getNumber();
 
-        return 'planning-'.('' !== $slug ? $slug : 'medvue').'.pdf';
+        return 'planning-'.$this->slug($publication).(null !== $number ? '-periode-'.$number : '').'.pdf';
     }
 
     /**
@@ -115,7 +100,47 @@ final class PlanningPdfRenderer
      */
     public function view(PlanningPublication $publication): array
     {
-        $planning = $publication->getPlanning();
+        $cycle = $publication->getCycle() ?? throw new \LogicException('A publication always belongs to a period (lot L2).');
+        [$first, $last] = self::cycleDays($publication);
+
+        // The lines published in the period by then, each under the name it was first published with.
+        /** @var array<int, array{name: string, position: int, order: int}> $columns by period id */
+        $columns = [];
+        foreach ($this->publicationLineRepository->findFirstPublishedThrough($cycle, $publication) as $order => $published) {
+            $columns[(int) $published->getPeriod()->getId()] = [
+                'name' => $published->getLineName() ?? $published->getPeriod()->getLine()?->getName() ?? 'Ligne supprimée',
+                'position' => $published->getPeriod()->getLine()?->getPosition() ?? \PHP_INT_MAX,
+                'order' => $order,
+            ];
+        }
+        uasort($columns, static fn (array $a, array $b): int => [$a['position'], $a['order']] <=> [$b['position'], $b['order']]);
+
+        /** @var array<string, array<int, list<array{duty: Duty, member: ?PlanningTeamMember}>>> $byDateAndColumn */
+        $byDateAndColumn = [];
+        foreach ($this->entryRepository->findByPublication($publication) as $entry) {
+            $duty = $entry->getDuty();
+            $byDateAndColumn[$duty->getLocalDate()->format('Y-m-d')][(int) $duty->getPlanningPeriod()->getId()][] = ['duty' => $duty, 'member' => $entry->getTeamMember()];
+        }
+
+        return $this->grid(
+            $publication,
+            $first,
+            $last,
+            'Période '.$cycle->getNumber().' · du '.FrenchDate::long($first).' au '.FrenchDate::long($last),
+            array_map(static fn (array $column): array => ['name' => $column['name']], array_values($columns)),
+            array_keys($columns),
+            $byDateAndColumn,
+        );
+    }
+
+    /**
+     * Before D173 (no stored PDF), exactly as it was rendered then: the
+     * planning's dates, the lines found in the entries, their current names.
+     *
+     * @return array<string, mixed>
+     */
+    private function legacyView(PlanningPublication $publication): array
+    {
         $entries = $this->entryRepository->findByPublication($publication);
 
         /** @var array<int, PlanningLine> $lineByPeriodId */
@@ -135,10 +160,32 @@ final class PlanningPdfRenderer
 
         $lines = array_values(array_filter($lineByPeriodId));
         usort($lines, static fn (PlanningLine $a, PlanningLine $b): int => $a->getPosition() <=> $b->getPosition());
+        [$first, $last] = self::planningDays($publication);
 
+        return $this->grid(
+            $publication,
+            $first,
+            $last,
+            'Du '.FrenchDate::long($first).' au '.FrenchDate::long($last),
+            array_map(static fn (PlanningLine $line): array => ['name' => $line->getName()], $lines),
+            array_map(static fn (PlanningLine $line): int => (int) $line->getId(), $lines),
+            $byDateAndLine,
+        );
+    }
+
+    /**
+     * @param list<array{name: string}>                                                       $lines
+     * @param list<int>                                                                       $columnKeys
+     * @param array<string, array<int, list<array{duty: Duty, member: ?PlanningTeamMember}>>> $byDateAndColumn
+     *
+     * @return array<string, mixed>
+     */
+    private function grid(PlanningPublication $publication, \DateTimeImmutable $first, \DateTimeImmutable $last, string $periodLabel, array $lines, array $columnKeys, array $byDateAndColumn): array
+    {
+        $planning = $publication->getPlanning();
         $tz = new \DateTimeZone($planning->getTimezone());
-        $first = new \DateTimeImmutable($planning->getStartsAt()->format('Y-m-d'), $tz);
-        $last = (new \DateTimeImmutable($planning->getEndsAt()->format('Y-m-d'), $tz))->modify('-1 day');
+        $first = new \DateTimeImmutable($first->format('Y-m-d'), $tz);
+        $last = new \DateTimeImmutable($last->format('Y-m-d'), $tz);
 
         $weeks = [];
         $currentWeek = null;
@@ -153,8 +200,8 @@ final class PlanningPdfRenderer
             }
 
             $cells = [];
-            foreach ($lines as $line) {
-                $items = $byDateAndLine[$date->format('Y-m-d')][(int) $line->getId()] ?? [];
+            foreach ($columnKeys as $key) {
+                $items = $byDateAndColumn[$date->format('Y-m-d')][$key] ?? [];
                 $showType = \count($items) > 1;
                 $cells[] = array_map(fn (array $item): array => $this->cellItem($item['duty'], $item['member'], $showType), $items);
             }
@@ -171,11 +218,71 @@ final class PlanningPdfRenderer
 
         return [
             'planningName' => $planning->getName(),
-            'periodLabel' => 'Du '.FrenchDate::long($first).' au '.FrenchDate::long($last),
+            'periodLabel' => $periodLabel,
             'publishedAtLabel' => FrenchDate::long($publication->getPublishedAt()->setTimezone($tz)).' à '.$publication->getPublishedAt()->setTimezone($tz)->format('H:i'),
-            'lines' => array_map(static fn (PlanningLine $line): array => ['name' => $line->getName()], $lines),
+            'lines' => $lines,
             'weeks' => array_map(static fn (array $week): array => ['label' => $week['label'], 'days' => $week['days']], $weeks),
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $view
+     */
+    private function renderView(array $view): string
+    {
+        $options = new Options();
+        $options->setDefaultFont('DejaVu Sans');
+        $options->setIsRemoteEnabled(false);
+        $options->setIsPhpEnabled(false);
+
+        $dompdf = new Dompdf($options);
+        $dompdf->loadHtml($this->twig->render('pdf/planning.html.twig', $view));
+        $dompdf->setPaper('A4', 'portrait');
+        $dompdf->render();
+
+        return (string) $dompdf->output();
+    }
+
+    /**
+     * The published period's first and last day (inclusive), as pure calendar dates.
+     *
+     * @return array{0: \DateTimeImmutable, 1: \DateTimeImmutable}
+     */
+    private static function cycleDays(PlanningPublication $publication): array
+    {
+        $cycle = $publication->getCycle() ?? throw new \LogicException('A publication always belongs to a period (lot L2).');
+
+        return [
+            new \DateTimeImmutable($cycle->getStartsAt()->format('Y-m-d')),
+            new \DateTimeImmutable($cycle->getEndsAt()->modify('-1 day')->format('Y-m-d')),
+        ];
+    }
+
+    /**
+     * Before D173: the planning's first and last day (inclusive), as they are now.
+     *
+     * @return array{0: \DateTimeImmutable, 1: \DateTimeImmutable}
+     */
+    private static function planningDays(PlanningPublication $publication): array
+    {
+        $planning = $publication->getPlanning();
+
+        return [
+            new \DateTimeImmutable($planning->getStartsAt()->format('Y-m-d')),
+            new \DateTimeImmutable($planning->getEndsAt()->modify('-1 day')->format('Y-m-d')),
+        ];
+    }
+
+    private function legacyFilename(PlanningPublication $publication): string
+    {
+        return 'planning-'.$this->slug($publication).'.pdf';
+    }
+
+    private function slug(PlanningPublication $publication): string
+    {
+        $slug = trim((string) preg_replace('/[^a-z0-9]+/', '-', strtolower((string) iconv('UTF-8', 'ASCII//TRANSLIT', $publication->getPlanning()->getName()))), '-');
+
+        return '' !== $slug ? $slug : 'medvue';
     }
 
     /**

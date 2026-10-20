@@ -1,6 +1,8 @@
 # Export d'un planning publié (PDF / Excel)
 
-Décision : [`docs/decisions.md`](decisions.md) D150.
+Décision : [`docs/decisions.md`](decisions.md) D150 ; plusieurs périodes,
+droits et nature du document : D200 (§13, prime sur §2-§4 là où ils
+diffèrent).
 
 ## 1. Objectif
 
@@ -35,7 +37,7 @@ Conséquences :
 | Bouton | Contenu | Source |
 |---|---|---|
 | « PDF de la dernière diffusion » (`GET /publication.pdf`, D143) | le planning **tel qu'il a été diffusé** lors de la dernière publication/republication, figé | entrées de la dernière `PlanningPublication` |
-| « Exporter » (`POST /export`, D150) | le calendrier **tel qu'il est maintenant**, modifications non encore diffusées comprises, en PDF ou Excel | `CurrentCalendarReader` |
+| « Exporter » (`POST /export`, D150, D200) | gestionnaire : le calendrier **tel qu'il est maintenant**, modifications non encore diffusées comprises (marqué comme tel, §13) ; membre : ce qui a été diffusé ; périodes publiées seulement ; PDF ou Excel | gestionnaire : `CurrentCalendarReader` ; membre : entrées de la dernière publication de chaque période |
 
 Après une réaffectation ou un retrait non republié, les deux diffèrent :
 c'est voulu. Une republication fait avancer le PDF de diffusion ; l'export,
@@ -50,6 +52,7 @@ rappelle la différence.
 | Bouton « Exporter » | onglet Planning, dès que `publication-state.published` |
 | Planning exportable | au moins une `PlanningPublication` — sinon 409 `not_yet_published` |
 | Qui | `PlanningVoter::VIEW` (créateur, tout membre courant d'une équipe du planning) — le même public que le calendrier et « PDF de la dernière diffusion » (MEMBER, ADMIN, OWNER/créateur : oui ; sans adhésion : 403 ; non authentifié : 401) ; aucun nouvel attribut |
+| Quoi, selon le rôle (D200) | `MANAGE_CALENDAR` (créateur, ADMIN/OWNER) : calendrier courant de toute ligne active ; simple membre : ce qui a été diffusé, lignes ayant au moins une période publiée seulement ; dans les deux cas, seules les périodes de ligne `PUBLISHED` sont exportées (§13) |
 
 ## 4. API
 
@@ -73,14 +76,16 @@ rappelle la différence.
 | `format` | `pdf` ou `xlsx` |
 | `title` | obligatoire, 120 caractères au plus ; caractères de contrôle retirés, espaces normalisés ; ne modifie jamais `Planning.name` |
 | `from` / `to` | facultatifs, `YYYY-MM-DD`, **`from` inclusif, `to` exclusif** (l'interface montre une date de fin **incluse** et envoie le lendemain) (même convention que `Planning::$endsAt` et `/result`) ; défaut = bornes du planning ; `from ≥ startsAt`, `to ≤ endsAt`, `from < to` — toujours revalidé côté serveur |
-| `lines` | liste non vide ; **l'ordre du tableau est l'ordre du document** ; chaque `stableId` doit être une ligne **active de ce planning**, une seule fois |
+| `period` | facultatif (D200) : stableId d'une période du planning, raccourci pour ses bornes ; jamais avec `from`/`to` (422 `period`) ; inconnue : 422 `period` |
+| `lines` | liste non vide ; **l'ordre du tableau est l'ordre du document** ; chaque `stableId` doit être une ligne **active de ce planning**, une seule fois — et, pour un simple membre, ayant au moins une période publiée (sinon même refus qu'une ligne inconnue, D200) |
 | `lines[].label` | « Nom dans l'export », obligatoire, 80 caractères au plus ; ne renomme jamais la `PlanningLine` |
 
 Tout autre champ (y compris `position`) est refusé.
 
 Réponses : `200` + fichier (`Content-Disposition: attachment`,
 `Cache-Control: private, no-store`) ; `400` JSON invalide ; `401` ; `403`
-sans VIEW ; `404` planning inconnu ; `409` `not_yet_published` ; `422`
+sans VIEW ; `404` planning inconnu ; `409` `not_yet_published` ou
+`not_published_in_range` (aucune ligne choisie publiée sur la plage, D200) ; `422`
 `validation_failed` + `violations` (clés `format`, `title`, `from`, `to`,
 `lines`, `lines[i].stableId`, `lines[i].label`, `size` — PDF trop
 volumineux, voir §6 —, champ inconnu).
@@ -271,3 +276,57 @@ conditionnelle, `CalendarCell`), jamais du renderer :
 `PlanningExportItem::gapLabel()` est l'unique source du libellé d'un trou,
 lue par les deux renderers. Aucun avertissement textuel n'est ajouté aux
 fichiers. Tests : `ConditionalPublicationTest`.
+
+## 13. Plusieurs périodes, droits et nature du document (docs/decisions.md D200, lot L4f)
+
+**Plage.** `from`/`to` peuvent couvrir plusieurs périodes ; `period` est le
+raccourci d'une période. `PlanningExportDataBuilder` parcourt chaque période
+touchée et lit chaque ligne choisie **dans sa propre période** :
+
+| Période de la ligne | Dans le document |
+|---|---|
+| `PUBLISHED` | exportée |
+| autre statut | jamais exportée : « Non publiée » chaque jour (jamais « — »), listée « Non inclus car non publiés : Période 2 — Seniors » |
+| aucune | rien à montrer (cellule vide) |
+
+Aucune ligne choisie publiée sur la plage : 409 `not_published_in_range`.
+
+**Qui voit quoi.**
+
+| Demandeur | Contenu d'une période publiée | Nature affichée |
+|---|---|---|
+| Gestionnaire (`MANAGE_CALENDAR`) | calendrier courant (`CurrentCalendarReader`) | « Calendrier opérationnel — modifications non publiées possibles » s'il diffère de la dernière publication de la période (par personne : A → B → A n'est pas une modification) ; sinon « Calendrier courant — identique à la dernière diffusion » (feuille Informations seulement) |
+| Simple membre | entrées de la dernière `PlanningPublication` de la période (garde non diffusée omise, modification faite depuis jamais montrée) | « Planning diffusé — dernière diffusion le … » (par période sur plusieurs périodes) |
+
+Un simple membre ne peut choisir qu'une ligne ayant au moins une période
+publiée ; une autre est refusée exactement comme une ligne inconnue ou d'un
+autre planning (422 `lines[i].stableId`, « Not an active line of this
+planning. »).
+
+**Identification des périodes** (planning à plusieurs périodes ; une seule
+période : document inchangé, sauf la feuille Informations) :
+
+- PDF : liste « Période 1 (du … au …) · Période 2 (…) » sous le titre,
+  étiquette « P2 » sur le premier jour exporté de chaque période ; nature du
+  document sous le titre (encadré orangé pour l'avertissement) et dans le
+  pied de page ;
+- XLSX : colonne « Période » après « Jour » (feuille Planning), en dernière
+  colonne (feuille Par personne) ; feuille **Informations** (toujours, en
+  dernier) : Document, Dates, Nature, Périodes, Non inclus car non publiés,
+  Généré le ; avertissement aussi dans l'en-tête imprimé.
+
+**Historique.** Un export n'écrit rien et ne remplace jamais le PDF stocké
+d'une publication (D173).
+
+**Frontend.** La note du dialogue dit ce que sera le document selon le
+rôle ; un membre ne se voit proposer que les lignes publiées
+(`isExportableLine`) ; message dédié pour `not_published_in_range`.
+
+**Tests.** `PlanningCycleExportTest` (plage sur deux périodes, raccourci
+`period`, période non publiée, gestionnaire / membre avec modifications non
+republiées, A → B → A, rien d'écrit, 403), `PlanningExportControllerTest`
+(ligne jamais publiée : membre refusé, gestionnaire « Non publiée » ; ligne
+d'un autre planning ; réaffectation : gestionnaire vs membre),
+`PlanningExportRenderersTest` (étiquettes, « Non publiée », colonnes,
+feuille Informations), `SinglePeriodCompatibilityTest` (flag désactivé),
+`frontend/src/features/planning/export/*.test.ts(x)`.

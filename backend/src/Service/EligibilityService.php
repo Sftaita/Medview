@@ -154,6 +154,13 @@ final class EligibilityService
                 $exclusions[] = new EligibilityExclusion($violation->reason, [
                     'otherLineStableId' => $violation->commitment->lineStableId,
                     'otherDutyStableId' => $violation->commitment->dutyStableId,
+                    // docs/planning-cycles.md §5.4: a duty of another period — which one, and when.
+                    ...(null !== $violation->commitment->periodStableId ? [
+                        'otherPeriodStableId' => $violation->commitment->periodStableId,
+                        'otherPeriodNumber' => $violation->commitment->periodNumber,
+                        'otherPeriodStartsAt' => $violation->commitment->periodStartsAt?->format('Y-m-d'),
+                        'otherPeriodEndsAt' => $violation->commitment->periodEndsAt?->format('Y-m-d'),
+                    ] : []),
                 ]);
             }
         }

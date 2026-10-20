@@ -47,14 +47,14 @@ trait CalendarWorkflowTestHelpers
         $this->activateRuleSet($container->get(PlanningRuleSetService::class), $line->getPlanningTeam());
         $dutyType = $this->createDutyType($em, $line->getPlanningTeam());
         foreach ($standalone as [$from, $to]) {
-            $this->createDuty($materializer, $line->getPlanningPeriod(), $dutyType, $from, $to);
+            $this->createDuty($materializer, $line->requireSingleCyclePeriod(), $dutyType, $from, $to);
         }
 
         if (null === $block) {
             return null;
         }
 
-        [$group] = $this->createTwoDutyGroup($em, $materializer, $line->getPlanningTeam(), $line->getPlanningPeriod(), $block[0], $block[0], $block[1], $block[1], $block[2]);
+        [$group] = $this->createTwoDutyGroup($em, $materializer, $line->getPlanningTeam(), $line->requireSingleCyclePeriod(), $block[0], $block[0], $block[1], $block[1], $block[2]);
 
         return $group;
     }
@@ -80,14 +80,14 @@ trait CalendarWorkflowTestHelpers
         $planning = $container->get(PlanningRepository::class)->findOneByStableId($planningStableId);
         $calendar = [];
         foreach ($container->get(PlanningLineRepository::class)->findByPlanning($planning) as $index => $line) {
-            $generation = $container->get(PlanningGenerationRepository::class)->findMostRecentCompletedByPlanningPeriod($line->getPlanningPeriod());
+            $generation = $container->get(PlanningGenerationRepository::class)->findMostRecentCompletedByPlanningPeriod($line->requireSingleCyclePeriod());
             $byDuty = [];
             if (null !== $generation) {
                 foreach ($container->get(DutyAssignmentRepository::class)->findForGenerations([$generation]) as $assignment) {
                     $byDuty[(int) $assignment->getDuty()->getId()] = $assignment->getTeamMember()->getUser()->getEmail();
                 }
             }
-            foreach ($container->get(DutyRepository::class)->findByPlanningPeriod($line->getPlanningPeriod()) as $duty) {
+            foreach ($container->get(DutyRepository::class)->findByPlanningPeriod($line->requireSingleCyclePeriod()) as $duty) {
                 $calendar[$index.'|'.$duty->getLocalDate()->format('Y-m-d').'|'.$duty->getDutyType()->getCode()] = $byDuty[(int) $duty->getId()] ?? null;
             }
         }
@@ -107,7 +107,7 @@ trait CalendarWorkflowTestHelpers
         $container = static::getContainer();
         $planning = $container->get(PlanningRepository::class)->findOneByStableId($planningStableId);
         $line = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[$lineIndex];
-        foreach ($container->get(DutyRepository::class)->findByPlanningPeriod($line->getPlanningPeriod()) as $duty) {
+        foreach ($container->get(DutyRepository::class)->findByPlanningPeriod($line->requireSingleCyclePeriod()) as $duty) {
             if ($duty->getLocalDate()->format('Y-m-d') === $date) {
                 return $duty;
             }

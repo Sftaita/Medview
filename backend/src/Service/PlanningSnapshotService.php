@@ -58,8 +58,7 @@ final class PlanningSnapshotService
         private readonly PlanningRuleSetRepository $ruleSetRepository,
         private readonly EntityManagerInterface $entityManager,
         private readonly PlanningLineRepository $lineRepository,
-        private readonly PlanningLineOrder $lineOrder,
-        private readonly PersonCommitmentReader $commitmentReader,
+        private readonly NeighbourCommitmentCollector $neighbourCommitments,
         private readonly PlanningLineDemandPolicyRepository $demandPolicyRepository,
         private readonly PlanningGenerationRepository $generationRepository,
         private readonly DutyAssignmentRepository $assignmentRepository,
@@ -86,7 +85,7 @@ final class PlanningSnapshotService
      * @throws NoActivePlanningRuleSetException              if the PlanningTeam has never activated a PlanningRuleSet
      * @throws ConditionalSourceNotGeneratedException        a conditional line whose source line was never generated (D164)
      */
-    public function createSnapshot(PlanningGeneration $generation): PlanningSnapshot
+    public function createSnapshot(PlanningGeneration $generation, ?PlannedCalendar $planned = null): PlanningSnapshot
     {
         if (PlanningGenerationStatus::DRAFT !== $generation->getStatus()) {
             throw new PlanningGenerationAlreadySnapshottedException();
@@ -101,7 +100,7 @@ final class PlanningSnapshotService
         }
 
         // Checked before anything is persisted, like the rule set above: a refusal never leaves half a snapshot behind.
-        $demandSource = $this->demandSourceOf($planningPeriod);
+        $demandSource = $this->demandSourceOf($planningPeriod, $planned);
 
         // TeamMemberParticipationPeriod is DATE-typed, mirroring
         // PlanningPeriod's own bounds directly. UserAvailabilityPeriod and
@@ -169,7 +168,7 @@ final class PlanningSnapshotService
             }
         }
 
-        $this->freezeExternalCommitments($snapshot, $relevantMembers);
+        $this->freezeExternalCommitments($snapshot, $relevantMembers, $planned);
         if (null !== $demandSource) {
             $this->freezeDemand($snapshot, ...$demandSource);
         }
@@ -208,12 +207,17 @@ final class PlanningSnapshotService
      * null, reason SOURCE_UNASSIGNED) unless another day of the block is
      * triggered — never recorded as "not required".
      *
-     * @return array{0: PlanningLineDemandPolicy, 1: PlanningLine, 2: PlanningGeneration}|null
-     *                                                                                         the policy in force, its source line and the source generation to read — null for an independent line
+     * During a launch (docs/decisions.md D191), a source solved earlier in
+     * the same launch is read from what it is about to hold ($planned):
+     * that generation, and its planned holders — never its calendar that is
+     * about to be replaced.
+     *
+     * @return array{0: PlanningLineDemandPolicy, 1: PlanningLine, 2: PlanningGeneration, 3: array<int, string>|null}|null
+     *                                                                                                                     the policy in force, its source line, the source generation to read and, when it is only planned, its holders by duty id — null for an independent line
      *
      * @throws ConditionalSourceNotGeneratedException
      */
-    private function demandSourceOf(PlanningPeriod $period): ?array
+    private function demandSourceOf(PlanningPeriod $period, ?PlannedCalendar $planned = null): ?array
     {
         $line = $this->lineRepository->findOneByPlanningPeriod($period);
         $policy = null !== $line ? $this->demandPolicyRepository->findActiveForLine($line) : null;
@@ -222,13 +226,21 @@ final class PlanningSnapshotService
             return null;
         }
 
-        $sourceGeneration = $this->generationRepository->findMostRecentCompletedByPlanningPeriod($sourceLine->getPlanningPeriod())
+        // docs/planning-cycles.md §5.6: the source is the source line's period in the SAME cycle — never another one.
+        $sourcePeriod = null !== $period->getCycle() ? $sourceLine->periodIn($period->getCycle()) : null;
+        if (null !== $sourcePeriod && null !== $planned?->generationOf($sourcePeriod)) {
+            return [$policy, $sourceLine, $planned->generationOf($sourcePeriod), $planned->holdersOf($sourcePeriod)];
+        }
+        $sourceGeneration = (null !== $sourcePeriod ? $this->generationRepository->findMostRecentCompletedByPlanningPeriod($sourcePeriod) : null)
             ?? throw new ConditionalSourceNotGeneratedException();
 
-        return [$policy, $sourceLine, $sourceGeneration];
+        return [$policy, $sourceLine, $sourceGeneration, null];
     }
 
-    private function freezeDemand(PlanningSnapshot $snapshot, PlanningLineDemandPolicy $policy, PlanningLine $sourceLine, PlanningGeneration $sourceGeneration): void
+    /**
+     * @param array<int, string>|null $plannedHolders the source's planned holders by duty id, when it is only planned (D191)
+     */
+    private function freezeDemand(PlanningSnapshot $snapshot, PlanningLineDemandPolicy $policy, PlanningLine $sourceLine, PlanningGeneration $sourceGeneration, ?array $plannedHolders = null): void
     {
         $period = $snapshot->getGeneration()->getPlanningPeriod();
         $frozenPolicy = new PlanningSnapshotDemandPolicy($snapshot, $policy->getStableId(), $policy->getVersion(), $sourceLine->getStableId(), $sourceGeneration->getStableId());
@@ -237,9 +249,11 @@ final class PlanningSnapshotService
             $this->entityManager->persist(new PlanningSnapshotDemandTrigger($frozenPolicy, $trigger));
         }
 
-        $holders = [];
-        foreach ($this->assignmentRepository->findForGenerations([$sourceGeneration]) as $assignment) {
-            $holders[(int) $assignment->getDuty()->getId()] = (string) $assignment->getTeamMember()->getUser()->getStableId();
+        $holders = $plannedHolders ?? [];
+        if (null === $plannedHolders) {
+            foreach ($this->assignmentRepository->findForGenerations([$sourceGeneration]) as $assignment) {
+                $holders[(int) $assignment->getDuty()->getId()] = (string) $assignment->getTeamMember()->getUser()->getStableId();
+            }
         }
         $holdingOf = static fn (Duty $source): SourceHolding => new SourceHolding(true, $holders[(int) $source->getId()] ?? null);
         $rules = $frozenPolicy->toRules();
@@ -267,46 +281,41 @@ final class PlanningSnapshotService
     }
 
     /**
-     * docs/decisions.md D161: the duties this snapshot's people already
-     * hold on the lines solved BEFORE this one (PlanningLineOrder) — their
-     * current assignments right now, frozen as values. A line solved later
-     * is never looked at: at a planning-level launch it is about to be
-     * regenerated itself, and it is that later line's own snapshot that
-     * will see this one's result.
+     * docs/decisions.md D161, docs/planning-cycles.md §5.4: the duties this
+     * snapshot's people already hold elsewhere — on the lines solved BEFORE
+     * this one in the same period, and in every other period of the planning
+     * when they can constrain this one (NeighbourCommitmentCollector) —
+     * their current assignments right now, frozen as values. A line solved
+     * later in the same period is never looked at: at a launch it is about
+     * to be regenerated itself, and it is that later line's own snapshot
+     * that will see this one's result. The same collection is read again
+     * under the calendar lock before the result is written
+     * (PlanningGenerationService).
      *
      * @param list<PlanningTeamMember> $members
      */
-    private function freezeExternalCommitments(PlanningSnapshot $snapshot, array $members): void
+    private function freezeExternalCommitments(PlanningSnapshot $snapshot, array $members, ?PlannedCalendar $planned = null): void
     {
-        $line = $this->lineRepository->findOneByPlanningPeriod($snapshot->getGeneration()->getPlanningPeriod());
-        if (null === $line) {
-            return;
-        }
-
+        $generation = $snapshot->getGeneration();
         $userStableIds = [];
         foreach ($members as $member) {
             $userStableIds[(string) $member->getUser()->getStableId()] = true;
         }
 
-        foreach ($this->commitmentReader->byUserStableId($this->lineOrder->precedingActiveLines($line)) as $userStableId => $commitments) {
-            if (!isset($userStableIds[$userStableId])) {
-                continue;
-            }
-
-            foreach ($commitments as $commitment) {
-                $ownerPolicy = $commitment->generation->getRestPolicy();
-                $this->entityManager->persist(new PlanningSnapshotExternalCommitment(
-                    $snapshot,
-                    $commitment->teamMember->getUser()->getStableId(),
-                    $commitment->line->getStableId(),
-                    $commitment->generation->getStableId(),
-                    $commitment->duty->getStableId(),
-                    $commitment->duty->getStartsAt(),
-                    $commitment->duty->getEndsAt(),
-                    $ownerPolicy->legalMinRestEnabled ? $ownerPolicy->legalMinRestHours : null,
-                    $ownerPolicy->teamMinRestEnabled ? $ownerPolicy->teamMinRestHours : null,
-                ));
-            }
+        foreach ($this->neighbourCommitments->collect($generation->getPlanningPeriod(), $generation->getRestPolicy(), $userStableIds, $planned) as $commitment) {
+            $ownerPolicy = $commitment->generation->getRestPolicy();
+            $this->entityManager->persist(new PlanningSnapshotExternalCommitment(
+                $snapshot,
+                $commitment->teamMember->getUser()->getStableId(),
+                $commitment->line->getStableId(),
+                $commitment->generation->getStableId(),
+                $commitment->duty->getStableId(),
+                $commitment->duty->getStartsAt(),
+                $commitment->duty->getEndsAt(),
+                $ownerPolicy->legalMinRestEnabled ? $ownerPolicy->legalMinRestHours : null,
+                $ownerPolicy->teamMinRestEnabled ? $ownerPolicy->teamMinRestHours : null,
+                $commitment->neighbourCycleOf($generation),
+            ));
         }
     }
 }

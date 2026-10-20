@@ -204,6 +204,46 @@ describe('DashboardPage', () => {
     expect(screen.queryByText('Page planning')).not.toBeInTheDocument()
   })
 
+  it('gives the status of the current period once a planning has several, never one global "Planning publié" (lot L6)', async () => {
+    frozenMockupDay()
+    const summary = (number: number, status: string) => ({
+      stableId: `c${number}`,
+      number,
+      startsAt: '2026-10-01',
+      endsAt: '2027-02-01',
+      lastDay: '2027-01-31',
+      status,
+      timeState: 'current',
+      lineCounts: { counting: 2, published: 1, incomplete: 0, withoutDemand: 0 },
+      publishedAt: null,
+      lastPublishedAt: null,
+      generatedAt: null,
+      collections: { open: 0, closed: 0, acknowledged: 0, expected: 0, deadline: null, uncoveredDays: 0 },
+    })
+    createFakeBackend({
+      plannings: [
+        { ...TRAUMA, published: true, periodCount: 3, currentPeriod: summary(2, 'partially_published') },
+        {
+          ...TRAUMA,
+          stableId: 'next',
+          name: 'Urgences',
+          published: true,
+          periodCount: 2,
+          currentPeriod: null,
+          nextPeriod: summary(2, 'preparation'),
+        },
+      ],
+    }).install()
+    renderDashboard()
+
+    const trauma = await screen.findByRole('link', { name: /Trauma Delta/ })
+    expect(within(trauma).getByText(/Période 2 partiellement publiée\./)).toBeInTheDocument()
+    expect(within(trauma).getByText('Voir mes gardes')).toBeInTheDocument()
+    const urgences = screen.getByRole('link', { name: /Urgences/ })
+    expect(within(urgences).getByText(/Période 2 en préparation\./)).toBeInTheDocument()
+    expect(screen.queryByText(/Planning publié/)).not.toBeInTheDocument()
+  })
+
   it('shows the next duty with its countdown, and how many follow', async () => {
     frozenMockupDay()
     createFakeBackend({

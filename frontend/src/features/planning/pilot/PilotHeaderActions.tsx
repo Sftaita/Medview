@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Icon } from '../../../components/Icon'
 import { WeekStructureModal } from '../../week-structure'
 import { ActionMenu, type ActionMenuItem } from '../detail/ActionMenu'
-import { GenerationModal } from './GenerationModal'
+import { GenerationModal, type GenerationPeriod } from './GenerationModal'
 import { PlanningSettingsModal } from './PlanningSettingsModal'
 import { RuleSetModal } from './RuleSetModal'
 import type { CollectionStatus, PlanningJob } from './types'
@@ -21,6 +21,12 @@ type Props = {
   primaryLineName?: string
   /** "Modifier le nom" in the menu, for someone allowed to rename the planning. */
   onRename?: () => void
+  /** "Prolonger la période" in the menu (a planning with a single period, docs/decisions.md D122). */
+  onExtend?: () => void
+  /** The selected period (docs/planning-cycles.md §7.4): what the generation and the deadline apply to. */
+  period?: GenerationPeriod
+  /** The main button's label — "Générer la période 2" once there are several. */
+  generateLabel?: string
   /** Settings saved or generation created: the page refreshes the pilot data. */
   onChanged: () => void
   /** A generation was accepted (a QUEUED job, docs/decisions.md D149): the page follows it. */
@@ -49,6 +55,9 @@ export function PilotHeaderActions({
   primaryLineStableId,
   primaryLineName,
   onRename,
+  onExtend,
+  period,
+  generateLabel = 'Générer le planning',
   onChanged,
   onLaunched,
   canLaunchGeneration = true,
@@ -65,6 +74,7 @@ export function PilotHeaderActions({
 
   const menu: ActionMenuItem[] = [
     ...(onRename ? [{ label: 'Modifier le nom', icon: 'pencil' as const, onSelect: onRename }] : []),
+    ...(onExtend ? [{ label: 'Prolonger la période', icon: 'calendar' as const, onSelect: onExtend }] : []),
     { label: 'Paramètres', icon: 'settings', onSelect: () => setDialog('settings') },
     ...(primaryLineStableId
       ? [
@@ -84,7 +94,7 @@ export function PilotHeaderActions({
           disabled={busy}
           title={busy ? 'Un calcul est déjà en cours sur ce planning' : undefined}
         >
-          Générer le planning
+          {generateLabel}
           <Icon name="arrow" size={18} strokeWidth={2.2} />
         </button>
       )}
@@ -93,6 +103,7 @@ export function PilotHeaderActions({
       {dialog === 'settings' && (
         <PlanningSettingsModal
           planningStableId={planningStableId}
+          periodStableId={period?.stableId}
           availabilityDeadline={status?.availabilityDeadline ?? null}
           onClose={() => setDialog(null)}
           onSaved={onChanged}
@@ -118,6 +129,7 @@ export function PilotHeaderActions({
       {dialog === 'generate' && (
         <GenerationModal
           planningStableId={planningStableId}
+          period={period}
           onClose={() => setDialog(null)}
           onLaunched={(job) => {
             onChanged()

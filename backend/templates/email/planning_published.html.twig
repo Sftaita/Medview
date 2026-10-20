@@ -1,18 +1,22 @@
 {# ------------------------------------------------------------------
    MedVue — Première publication d'un planning (docs/decisions.md D143)
-   Objet : Planning de garde disponible — <planning>
-   Contexte : firstName, planningName, periodLabel, planningUrl ; PDF joint.
+   ou de nouvelles lignes d'une période (D196)
+   Objet : Planning de garde disponible — <planning> — Période <N>
+   Contexte : firstName, planningName, periodLabel, periodNumber, planningUrl,
+   lines (lignes publiées pour cette personne), removed/added (ses changements
+   sur des lignes déjà publiées) ; PDF joint.
    ------------------------------------------------------------------ #}
 {% extends 'email/_base.html.twig' %}
 {% import  'email/_components.html.twig' as ui %}
 
-{% set preheader  = 'Le planning de garde ' ~ periodLabel ~ ' est disponible.' %}
+{% set periodText = periodNumber ? 'période ' ~ periodNumber ~ ', ' ~ periodLabel : periodLabel %}
+{% set preheader  = 'Le planning de garde ' ~ periodText ~ ' est disponible.' %}
 {% set accent     = '#42A882' %}
 {% set eyebrow    = 'Planning publié' %}
 {% set h1         = 'Votre planning de garde<br>est disponible' %}
 {% set panelLabel = 'Planning' %}
 {% set panelTitle = planningName %}
-{% set panelSub   = 'Période ' ~ periodLabel %}
+{% set panelSub   = periodNumber ? 'Période ' ~ periodNumber ~ ' · ' ~ periodLabel : 'Période ' ~ periodLabel %}
 {% set ctaLabel   = 'Voir le planning' %}
 {% set ctaUrl     = planningUrl %}
 {% set footerNote = 'Vous recevez cet email car vous participez à ce planning de garde sur MedVue.' %}
@@ -22,8 +26,23 @@
 
 {% block content %}
 {{ ui.p('Bonjour ' ~ firstName|e ~ ',', 24) }}
-{{ ui.p('Le planning de garde ' ~ ui.b(planningName) ~ ' ' ~ periodLabel|e ~ ' est disponible.', 18) }}
+{{ ui.p('Le planning de garde ' ~ ui.b(planningName) ~ ' (' ~ periodText|e ~ ') est disponible.', 18) }}
+{% if lines is not empty %}
+{{ ui.p((lines|length > 1 ? 'Lignes publiées : ' : 'Ligne publiée : ') ~ lines|map(l => l|e)|join(', ') ~ '.', 18) }}
+{% endif %}
 {{ ui.p('Vous le trouverez en pièce jointe (PDF) : toutes les dates, chaque ligne de garde et la personne affectée. Il reste consultable à tout moment dans MedVue.') }}
+{% for section in [
+    {units: removed, title: removed|length > 1 ? 'Gardes retirées sur une autre ligne' : 'Garde retirée sur une autre ligne'},
+    {units: added, title: added|length > 1 ? 'Gardes ajoutées sur une autre ligne' : 'Garde ajoutée sur une autre ligne'},
+] %}
+{% if section.units is not empty %}
+{{ ui.divider() }}
+{{ ui.p(ui.b(section.title), 18) }}
+{% for u in section.units %}
+{{ ui.p(ui.b(u.when) ~ '<br>' ~ u.line|e ~ (u.detail ? ' — ' ~ u.detail|e : '') ~ (u.dates is not empty ? '<br>' ~ u.dates|map(d => d|e)|join('<br>') : ''), 14) }}
+{% endfor %}
+{% endif %}
+{% endfor %}
 {% endblock %}
 
 {% block after_cta %}

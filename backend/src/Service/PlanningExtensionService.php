@@ -10,11 +10,13 @@ use App\Entity\PlanningPeriod;
 use App\Entity\PlanningPeriodStatus;
 use App\Entity\User;
 use App\Exception\InvalidAvailabilityDeadlineException;
+use App\Exception\MultiplePeriodsNotSupportedException;
 use App\Exception\NoNewPlanningRangeException;
 use App\Exception\OverlappingFairnessPeriodException;
 use App\Exception\PlanningPeriodLockedException;
 use App\Exception\PlanningRangeShrinkException;
 use App\Repository\FairnessPeriodRepository;
+use App\Repository\PlanningCycleRepository;
 use App\Repository\PlanningLineRepository;
 use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
@@ -43,6 +45,7 @@ final class PlanningExtensionService
         private readonly FairnessPeriodRepository $fairnessPeriodRepository,
         private readonly AvailabilityWindowCalculator $windowCalculator,
         private readonly AvailabilityCollectionService $collectionService,
+        private readonly PlanningCycleRepository $cycleRepository,
     ) {
     }
 
@@ -54,6 +57,7 @@ final class PlanningExtensionService
      * @throws PlanningPeriodLockedException
      * @throws InvalidAvailabilityDeadlineException
      * @throws OverlappingFairnessPeriodException
+     * @throws MultiplePeriodsNotSupportedException
      */
     public function extend(
         Planning $planning,
@@ -62,6 +66,9 @@ final class PlanningExtensionService
         User $requestedBy,
         ?\DateTimeImmutable $deadline = null,
     ): array {
+        // docs/planning-cycles.md §5.2: this endpoint stays the one of a single-period planning (start moved earlier
+        // included); a planning with several periods changes the end of its last period (PATCH …/periods/{period}).
+        $planning->assertSingleCycle();
         // Before touching anything: a refused deadline must leave the planning as it was.
         $this->collectionService->assertDeadlineNotPast($planning, $deadline);
 
@@ -71,23 +78,36 @@ final class PlanningExtensionService
         try {
             // Re-read under the lock: the range may have just been extended by a concurrent request.
             $this->entityManager->refresh($planning, LockMode::PESSIMISTIC_WRITE);
+            // A period created meanwhile (PlanningCycleService::createNext() takes the same lock) is seen here.
+            $cycles = $this->cycleRepository->findByPlanning($planning);
+            if (1 !== \count($cycles)) {
+                throw new MultiplePeriodsNotSupportedException();
+            }
+            $cycle = $cycles[0];
 
             $startsAt = $newStartsAt ?? $planning->getStartsAt();
             $endsAt = $newEndsAt ?? $planning->getEndsAt();
             $windows = $this->windowCalculator->newWindows($planning->getStartsAt(), $planning->getEndsAt(), $startsAt, $endsAt);
 
-            $lines = $this->planningLineRepository->findByPlanning($planning);
-            foreach ($lines as $line) {
-                $status = $line->getPlanningPeriod()->getStatus();
+            // A line without period (added while the period could not take it, §5.5) has nothing to extend.
+            $periods = [];
+            foreach ($this->planningLineRepository->findByPlanning($planning) as $line) {
+                $period = $line->periodIn($cycle);
+                if (null === $period) {
+                    continue;
+                }
+                $status = $period->getStatus();
                 if (PlanningPeriodStatus::DRAFT !== $status && PlanningPeriodStatus::GENERATED !== $status) {
                     throw new PlanningPeriodLockedException();
                 }
-                $this->assertNoOtherFairnessPeriodInTheWay($line->getPlanningPeriod(), $startsAt, $endsAt);
+                $this->assertNoOtherFairnessPeriodInTheWay($period, $startsAt, $endsAt);
+                $periods[] = $period;
             }
 
+            // The cycle keeps the Planning's dates; its periods check it (PlanningPeriod::extendTo()).
+            $cycle->extendTo($startsAt, $endsAt);
             $planning->extendTo($startsAt, $endsAt);
-            foreach ($lines as $line) {
-                $period = $line->getPlanningPeriod();
+            foreach ($periods as $period) {
                 $period->getFairnessPeriod()->extendTo($startsAt, $endsAt);
                 $period->extendTo($startsAt, $endsAt);
             }

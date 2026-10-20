@@ -376,7 +376,7 @@ final class DutyReassignmentControllerTest extends WebTestCase
         $container = static::getContainer();
         $planning = $container->get(PlanningRepository::class)->findOneByStableId($planningStableId);
         $line = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0];
-        $duties = $container->get(DutyRepository::class)->findByPlanningPeriod($line->getPlanningPeriod());
+        $duties = $container->get(DutyRepository::class)->findByPlanningPeriod($line->requireSingleCyclePeriod());
 
         return array_map(static fn ($d) => (string) $d->getStableId(), $duties);
     }

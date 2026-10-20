@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import type { PlanningDetail } from '../types'
-import { initialExportState, moveLine, toExportRequest, validateExport } from './exportModel'
+import type { PlanningDetail, PlanningLineSummary } from '../types'
+import {
+  initialExportState,
+  isExportableLine,
+  moveLine,
+  toExportRequest,
+  validateExport,
+} from './exportModel'
 
 const PLANNING = {
   stableId: 'plan-1',
@@ -13,6 +19,37 @@ const PLANNING = {
     { stableId: 'z', name: 'Z', position: 2, active: false },
   ],
 } as unknown as PlanningDetail
+
+describe('isExportableLine (docs/decisions.md D200)', () => {
+  const line = (status?: 'DRAFT' | 'PUBLISHED', active = true) =>
+    ({
+      active,
+      periods:
+        status === undefined
+          ? undefined
+          : [
+              { periodStableId: 'c1', number: 1, planningPeriodStableId: 'p1', status: 'PUBLISHED' },
+              { periodStableId: 'c2', number: 2, planningPeriodStableId: 'p2', status },
+            ].filter((period) => status === 'PUBLISHED' || period.number === 2),
+    }) as unknown as PlanningLineSummary
+
+  it('lets a manager choose any active line', () => {
+    expect(isExportableLine(line('DRAFT'), true)).toBe(true)
+    expect(isExportableLine(line('PUBLISHED', false), true)).toBe(false)
+  })
+
+  it('lets anybody else choose only a line published in some period', () => {
+    expect(isExportableLine(line('PUBLISHED'), false)).toBe(true)
+    expect(isExportableLine(line('DRAFT'), false)).toBe(false)
+    expect(isExportableLine({ active: true, periodStatus: 'GENERATED' } as PlanningLineSummary, false)).toBe(
+      false,
+    )
+    expect(
+      isExportableLine({ active: true } as PlanningLineSummary, false),
+      'unknown: the server decides',
+    ).toBe(true)
+  })
+})
 
 describe('exportModel', () => {
   it('starts from the planning: active lines by position, whole period, last day inclusive', () => {

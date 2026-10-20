@@ -6701,3 +6701,2401 @@ l'ancienne (voir légende).
 - **Écarté** : bloquer sans dérogation (une panne SurgicalHub bloquerait les
   plannings) ; un simple avertissement (proche d'une génération silencieuse
   sur des données périmées) ; synchroniser dans le worker.
+
+## D185 — Périodes successives : composants de la maquette portés seuls, sur données fictives, derrière une route de développement
+
+- **Contexte** : la maquette `docs/Design/medvue-periodes` décrit un planning
+  découpé en périodes successives (Période 1, 2, 3…), chacune avec sa
+  collecte, sa génération et sa publication, et « Créer la période
+  suivante » même après publication. Le modèle réel n'a qu'une plage par
+  planning, agrandie sur place par « Prolonger » et refusée après
+  publication (D122) ; seule la collecte est déjà découpée en fenêtres.
+- **Décision** (décision utilisateur du 2026-10-10) : porter les composants
+  et le CSS de la maquette tels quels dans `frontend/src/features/periods/`
+  (règles de dates et de périodes, sélecteur frise/mobile, carte de
+  période, étapes, onglets, fenêtre de création, vues « Mes plannings » et
+  détail), sur les données fictives de la maquette, **sans** les brancher
+  sur l'API ni sur les pages réelles.
+- **Prévisualisation** : `/dev/periodes`, hors du cadre applicatif, chargée
+  par import dynamique sous `import.meta.env.DEV` : absente du build de
+  production (vérifié dans le bundle).
+- **Fidélité** : comparée au pixel près à la maquette (Playwright +
+  pixelmatch, 1 440 px et 390 px, 17 états : listes, détail avec 1/2/4/8
+  périodes, historique, période future, disponibilités, fenêtre vide /
+  préréglage / erreur, création, collecte ouverte) — 0 pixel d'écart avec
+  la même police. Les seuls écarts restants viennent de la source d'Inter
+  (Google Fonts dans la maquette, `@fontsource/inter` dans l'application) :
+  anticrénelage de quelques glyphes.
+- **Écarts assumés avec la maquette** : les règles globales de la maquette
+  (`body`, `button`, focus) sont déjà dans `index.css` et n'ont pas été
+  reprises ; deux défauts que `index.css` change sont restaurés dans la
+  portée `.mv-page` (`font-feature-settings: 'cv05'`, marge du paragraphe
+  d'en-tête) ; les `setState` dans des effets (resynchronisation de la
+  période choisie, de l'onglet, de la date de fin) sont remplacés par un
+  ajustement pendant le rendu, comportement identique.
+- **Reste à faire pour un branchement réel** : un modèle « plusieurs
+  périodes par ligne » (collecte, génération, publication par période),
+  les statuts de maquette (`preparation`, `collecte`, `generee`, `publiee`,
+  `archivee`) alignés sur le backend, et `today` calculé dans le fuseau du
+  planning.
+
+## D186 — Périodes successives, lot L1 : `PlanningCycle` et socle de persistance additif, sans changement de comportement
+
+- **Contexte** : spécification `docs/planning-cycles.md` validée le
+  2026-10-10 (arbitrages A–M, points complémentaires 1–7) ; seul le lot L1
+  est autorisé.
+- **Décision** : nouvelle entité `PlanningCycle` (« période » d'un
+  planning : `stableId` UUIDv7, `number`, `[startsAt, endsAt)`,
+  `createdBy` nullable), et rattachement au cycle de
+  `planning_periods` (+ la ligne, `planning_line_id`),
+  `availability_collections`, `planning_jobs`, `planning_publications`,
+  `planning_availability_reminders`. Migration `Version20261010180000` :
+  chaque planning existant reçoit son cycle 1 aux dates du planning ; les
+  données existantes y sont rattachées ; contraintes en base :
+  non-chevauchement des cycles d'un planning (`EXCLUDE`), numéro unique,
+  une période par (ligne, cycle), non-chevauchement des périodes d'une
+  équipe (`EXCLUDE`), ligne de la même équipe que la période (FK
+  composite), cycle du même planning pour collectes / jobs / publications /
+  rappels (FK composites), une publication `FIRST` par cycle.
+- **Écarts assumés avec la spécification (§3), imposés par « l'ancien code
+  doit continuer de fonctionner sur le nouveau schéma »** :
+  - les nouvelles colonnes de rattachement sont **nullables** en L1
+    (l'ancien code insère sans elles) ; elles deviendront NOT NULL en L2,
+    après un rattrapage des lignes qu'une version antérieure aurait écrites
+    entre-temps (détectées par l'audit, invariants `*_without_cycle`) ;
+  - `planning_periods.planning_line_id` est en `ON DELETE SET NULL
+    (planning_line_id)` et non `RESTRICT` : supprimer une ligne laisse sa
+    période derrière elle, exactement comme aujourd'hui. Le changement de
+    règle de suppression d'une ligne (F, `line_has_history`) reste prévu
+    en L2 ;
+  - une période orpheline (ligne supprimée) ne reçoit son cycle que si ses
+    dates sont encore celles du cycle (sinon `NULL`, signalé par l'audit) ;
+  - `planning_availability_reminders` : colonne ajoutée sans rattrapage
+    (table append-only, historique laissé intact ; NULL = rappel antérieur
+    aux périodes).
+- **Seule écriture sur une table append-only** : rattrapage de la nouvelle
+  colonne `planning_publications.planning_cycle_id` ; trigger désactivé
+  puis réactivé dans la transaction de la migration (verrou exclusif
+  pendant toute la durée) ; l'audit vérifie que tous les triggers sont
+  actifs.
+- **Code** : la version L1 rattache chaque nouvelle ligne écrite au cycle
+  unique du planning (création de planning → cycle 1, ajout de ligne,
+  prolongation D122 → le cycle grandit avec le planning, ouverture de
+  collecte, job, publication, rappel). Aucune lecture, aucune réponse
+  d'API, aucune règle de génération, publication, réaffectation ou
+  SurgicalHub ne change. Les deux trous relevés à l'audit (génération et
+  matérialisation possibles sur une période publiée par l'endpoint
+  technique) restent ouverts : leur correction change une règle de
+  génération, elle est reportée en L3 (spécification §11 corrigée).
+- **Retour arrière** : tant que L2 n'est pas engagé, revenir au code
+  précédent ne demande aucune migration descendante (schéma additif,
+  colonnes nullables) ; `down()` reste possible et refuse dès qu'un
+  planning a plus d'un cycle.
+- **Preuve de conservation** : `app:planning-cycles:audit` (lecture seule :
+  empreinte de chaque ligne de chaque table, hors colonnes ajoutées par L1,
+  contraintes, index, triggers, invariants) avant / après / après retour
+  arrière.
+
+## D187 — Périodes successives, lot L2 : créer, prolonger ou raccourcir, supprimer une période ; lignes et collectes par période ; parcours historiques protégés
+
+- **Contexte** : L1 validé (D186) ; lot L2 autorisé, L3 à L7 exclus. Les
+  périodes 2 et suivantes doivent pouvoir exister en base sans qu'aucun
+  parcours historique (génération, publication, lecture) ne les prenne
+  pour la période 1.
+- **Schéma** (`Version20261012090000`) :
+  - `planning_lines.planning_period_id` est supprimée : le lien ligne →
+    période est porté par `planning_periods.planning_line_id` seul. Une
+    ligne a une période par cycle auquel elle participe. Avant la
+    suppression, la migration vérifie que les deux liens sont identiques ;
+  - `planning_cycle_id` passe en NOT NULL sur `availability_collections`,
+    `planning_jobs` et `planning_publications`. Il reste nullable sur les
+    rappels, comme prévu ;
+  - la FK `(planning_line_id, team_id)` d'une période passe de
+    `SET NULL` à `RESTRICT` : supprimer une ligne ne laisse plus de période
+    orpheline ;
+  - nouvelle contrainte `chk_planning_periods_cycle_of_line`
+    (`planning_line_id IS NULL OR planning_cycle_id IS NOT NULL`) ;
+  - la migration rattrape d'abord, avec les règles de L1, ce qu'une version
+    pré-L1 aurait écrit après un retour arrière, puis vérifie que le nombre
+    de lignes de 14 tables est inchangé ;
+  - `down()` reconstruit `planning_period_id` à partir des périodes. Il
+    refuse sans rien perdre dès qu'un planning a plus d'un cycle, ou qu'une
+    ligne n'a pas exactement une période.
+- **Écart 1 — NOT NULL de `planning_periods.planning_cycle_id` remplacé par
+  la contrainte « période d'une ligne ⇒ cycle »** :
+  - un NOT NULL aurait obligé à modifier ou supprimer les périodes
+    orphelines historiques dont les dates ne correspondent à aucun cycle.
+    Elles restent telles quelles ;
+  - la contrainte est **validée** sur toutes les lignes existantes, sans
+    `NOT VALID` ;
+  - les tests de domaine qui créent des périodes sans planning restent
+    possibles.
+- **Écart 2 — protection plutôt que résolution par période** :
+  - La spécification (§3.4) faisait passer toutes les lectures par
+    `forLineAndCycle`. Mais choisir la période dans la génération, la
+    publication et les lectures, c'est l'objet de L3 et L4.
+  - En L2, `PlanningLine::getPlanningPeriod()` disparaît, remplacée par
+    `getSingleCyclePeriod()` / `requireSingleCyclePeriod()`, plus
+    `Planning::assertSingleCycle()` et `getOnlyCycle()`. Avec plusieurs
+    cycles, elles lèvent `MultiplePeriodsNotSupportedException` (409
+    `multiple_periods_not_supported`) au lieu de choisir une période.
+  - Garde-fous explicites aux entrées d'écriture :
+    - génération planning et technique (`PlanningGenerationService::create`),
+      matérialisation, jobs, complétion ;
+    - publication et republication ;
+    - réaffectation et candidats ;
+    - échanges (`heldUnit`, `accept`, `applySwap`, `checkSwap`) ;
+    - politique de demande ;
+    - prolongation D122.
+  - Lectures concernées : préflights, résultat, affectations,
+    statistiques, export.
+  - « Mes gardes », le flux agenda et le rappel du samedi **ignorent** un
+    planning à plusieurs périodes jusqu'en L4, pour ne jamais casser la
+    page des autres plannings.
+  - Rien de tout cela n'est atteignable tant que le flag est désactivé.
+- **Écart 3 — le flag couvre toutes les écritures de période** :
+  - `MEDVUE_PERIOD_CREATION_ENABLED`, désactivé (`0`) dans le `.env`
+    livré, `1` dans `.env.test` ;
+  - il bloque la création (409 `period_creation_disabled`), mais aussi la
+    modification de la fin, la suppression et l'ouverture d'une collecte
+    par l'endpoint de période (409 `period_management_disabled`) ;
+  - la lecture `GET …/periods` reste ouverte.
+- **Écart 4 — ligne sans période** (§5.5, appliqué tel quel) :
+  - une ligne ajoutée alors qu'aucune période ne peut la recevoir (toutes
+    publiées ou passées) est créée **sans période**. C'est vrai aussi pour
+    un planning à une seule période publiée : jusqu'ici, la ligne recevait
+    une période DRAFT dans la période publiée ;
+  - elle est ignorée par tous les parcours (génération, préflights,
+    publication, calendrier, statistiques) et reçoit sa première période,
+    et sa `FairnessPeriod`, à la création de la période suivante ;
+  - par défaut, la période de départ est la plus ancienne à partir de
+    laquelle toutes les suivantes sont ouvertes. On évite ainsi un 409
+    `later_period_published` quand aucune période n'est choisie ;
+  - la ligne principale d'un **nouveau** planning reçoit toujours sa
+    période 1, même pour une plage passée (comportement inchangé).
+- **Autres précisions** :
+  - **Échéance de collecte** : `PATCH …/settings` prend la période en
+    `?period=` uniquement, car le corps refuse les champs inconnus (D116).
+  - **Fenêtre d'une collecte ouverte sans dates** : le premier intervalle
+    non couvert de la période.
+  - **`generationOutdated`** : vrai à l'allongement si une génération
+    COMPLETED existe sur la période.
+  - **Suppression d'une ligne sans historique** :
+    - critères : ni génération, ni demande d'échange, ni garde servant de
+      source à une autre ligne ;
+    - elle supprime ses périodes et leurs gardes matérialisées ;
+    - son équipe et sa `FairnessPeriod` restent, comme avant.
+  - **Erreurs du domaine** : interface `ApiProblem`, rendue par
+    `ApiExceptionListener` (`{error, message}` avec le statut) et
+    journalisée au niveau `info`.
+- **Concurrence** :
+  - toute opération sur les périodes prend le verrou `PESSIMISTIC_WRITE`
+    sur la ligne du planning (le même que la prolongation D122), relit
+    l'état sous ce verrou, et exige ce que le client a vu
+    (`previousPeriodStableId`, `expectedEndsAt`, `?expected=`) ;
+  - les contraintes en base sont le dernier filet (exclusions, numéro
+    unique, une période par ligne et par cycle) : toute violation annule
+    tout et renvoie 409 `period_sequence_changed`.
+- **Audit** (`app:planning-cycles:audit`) :
+  - empreinte des liens ligne ↔ période (`lineLinks`), lue là où ils sont
+    stockés avant et après L2 ;
+  - changements de schéma voulus par L2 listés comme « planifiés »,
+    jamais comme différences ;
+  - nouveaux invariants : `periods_outside_fairness` (bloquant),
+    `lines_without_period` et `cycles_shorter_than_7_days` (information).
+- **Retour arrière** : tant qu'aucune deuxième période n'existe, le
+  `down()` de L2 puis celui de L1 sont valides, puis on redéploie le tag
+  précédent. Après la première deuxième période en production, plus aucun
+  `down()` n'est possible (§6.1) : seule la création désactivée par défaut
+  rend cet état atteignable.
+
+## D188 — Périodes successives, correctif de L2 : compatibilité mono-période quand la création de périodes est désactivée
+
+- **Date** : 2026-10-11. Lot L2, à la validation (non déployé, non commité).
+- **Constat** : avec `MEDVUE_PERIOD_CREATION_ENABLED=0`, deux comportements
+  de L2 différaient de `master` (avant L1) sur un planning qui n'a qu'une
+  période. D187 (écart 4 et « suppression d'une ligne sans historique ») les
+  documentait, mais ils s'appliquaient aussi flag désactivé, donc en
+  production dès le déploiement de L2 :
+  - **ajout d'une ligne** à un planning publié, validé ou terminé : la ligne
+    était créée sans période. Avant L1, `PlanningLineService::addLine()`
+    créait toujours sa période DRAFT et sa `FairnessPeriod` aux dates du
+    planning, quel que soit son état ;
+  - **suppression d'une ligne déjà générée** : refusée par L2 (409
+    `line_has_history`). Avant L1, la ligne était supprimée et sa période,
+    ses générations, affectations et entrées de publication restaient en
+    base, rattachées à aucune ligne. Une ligne sans historique : L2
+    supprimait ses périodes et gardes matérialisées, avant L1 elles
+    restaient.
+- **Ce qui suivait avant L1, et que l'on retrouve** : la ligne ajoutée à un
+  planning publié apparaît dans le détail avec sa période. La génération au
+  niveau du planning reste bloquée par `PERIOD_LOCKED` sur la ligne publiée.
+  La republication est refusée tant que la nouvelle ligne n'a pas de
+  génération (`republishable = false`). Avec L2 tel quel, la ligne sans
+  période était ignorée : la republication restait possible et la ligne
+  invisible dans le calendrier, un changement silencieux.
+- **Décision — compatibilité mono-période** : flag désactivé **et** planning
+  à une seule période :
+  - `addLine()` crée la période de la ligne dans cette période, sans les
+    règles d'éligibilité du §5.5 ;
+  - `deleteLine()` supprime la ligne seule. Ses périodes restent, avec tout
+    leur historique et leur cycle, rattachées à aucune ligne
+    (`PlanningPeriod::detachFromLine()`). C'est l'état que laissait
+    `ON DELETE SET NULL (planning_line_id)` en L1 : la contrainte
+    « ligne ⇒ cycle » le permet et la FK reste `RESTRICT` ;
+  - seule exception : une ligne visée par une demande d'échange reste
+    refusée, en 409 `line_has_history`. Avant L1, la base la refusait déjà
+    (`duty_swap_requests.line_id` en `RESTRICT`), avec une erreur 500.
+- **Inchangé** : flag activé, ou planning à plusieurs périodes, ce sont les
+  règles de D187 (§5.5). La compatibilité ne crée aucune période
+  historique : seule la période unique, qui existe déjà, reçoit la ligne,
+  comme avant.
+- **Durcissement lié aux périodes orphelines** (une seule en production,
+  rattachée au cycle 1 de son planning par L1) :
+  - `PlanningCycleRepository::periodsOf()` ne renvoie plus que les périodes
+    d'une ligne. Une orpheline, même publiée, ne verrouille plus sa période
+    (`changeEnd`, éligibilité d'une nouvelle ligne) et n'est plus déplacée
+    avec elle ;
+  - l'invariant d'audit `periods_cycle_mismatch` ne compare plus les dates
+    d'une orpheline à celles de son cycle. Elle garde ses dates. Avant ce
+    correctif, une prolongation D122 du planning concerné aurait rendu
+    l'audit bloquant ;
+  - les orphelines comptent toujours dans les compteurs d'historique d'un
+    cycle (générations, gardes) : un raccourcissement ou une suppression
+    reste refusé en leur présence (prudence).
+- **Retour arrière** : la compatibilité restaure la condition du `down()` de
+  L2 (chaque ligne a exactement une période). Avec L2 tel quel, une ligne
+  ajoutée après publication rendait le `down()` impossible. Les
+  allers-retours L2 puis L1 sont rejoués sur un planning publié avec ligne
+  tardive et orpheline publiée : aucune perte ni différence, seuls les
+  identifiants des cycles régénérés changent (même résultat que D186).
+- **Tests** :
+  - `SinglePeriodCompatibilityTest`, 7 tests, flag désactivé pour la
+    classe : ligne avant publication, ligne après publication (période,
+    `FairnessPeriod`, ligne publiée intacte, `PERIOD_LOCKED`, republication
+    refusée), planning terminé (horloge simulée), suppression d'une ligne
+    générée puis prolongation, suppression d'une ligne sans historique,
+    demande d'échange ;
+  - `SinglePeriodCompatibilityMigrationTest`, 3 tests ;
+  - `PlanningCycleControllerTest::testAnOrphanPeriodNeitherLocksNorMovesWithItsPeriod` ;
+  - contrôle par mutations : chaque correctif retiré fait échouer au moins
+    un test.
+
+## D189 — Périodes successives, lot L3 : génération et complétion par période, contraintes entre périodes
+
+- **Date** : 2026-10-11. Non déployé, non commité ; le flag
+  `MEDVUE_PERIOD_CREATION_ENABLED` reste désactivé par défaut.
+- **Contexte** : L2 et D188 validés. Arbitrages de lancement de L3 :
+  - blocs coupés : option A (refus) ;
+  - `PERIOD_LOCKED` maintenu, pas de génération partielle d'une période ;
+  - motifs `CROSS_LINE_*` réutilisés, avec la période voisine dans
+    l'explication ;
+  - endpoint synchrone technique refusé en multipériode ;
+  - SurgicalHub inchangé.
+
+### Contrat d'API
+
+- **Période explicite** :
+  - `GET …/generation-preflight?period=`, `POST …/generations` et
+    `POST …/complete` (`period` dans le corps ou `?period=`) ;
+  - sur un planning à plusieurs périodes, sans période : 422
+    `period_required`, jamais de période devinée
+    (`PlanningCycleResolver::requiredFromRequest`) ;
+  - période d'un autre planning : 404 `period_not_found` ;
+  - planning à une seule période : inchangé, le paramètre reste facultatif.
+- **Réponses** : le préflight et le job (`GET …/jobs/latest`) portent
+  `period {stableId, number}`.
+- **Nouveaux bloquants du préflight** : `CONDITIONAL_SOURCE_NOT_IN_PERIOD`
+  et `BLOCK_CUT_BY_PERIOD_BOUNDARY`. `PERIOD_LOCKED` couvre désormais aussi
+  `VALIDATED`.
+- **Nouvelles erreurs** :
+  - 422 `period_boundary_splits_block`, avec `details` (ligne, bloc,
+    frontière, premier et dernier jour), sur la création de période, le
+    `PATCH` de fin et le `PUT …/week-structure` ;
+  - 409 `period_locked` sur l'endpoint technique de création de
+    génération.
+  - `ApiExceptionListener` rend `details` (`ApiProblemWithDetails`).
+- **Nouveaux motifs d'échec d'une ligne de job** :
+  `neighbour_calendar_changed`, `period_locked`.
+- **Endpoints techniques refusés sur un planning à plusieurs périodes** (409
+  `multiple_periods_not_supported`) : création, snapshot et résolution
+  synchrones d'une génération, affectation manuelle technique
+  (`DutyAssignmentService::createManual`). Ils ne lisent pas les périodes
+  voisines.
+
+### Génération par période
+
+- **Lignes générées** : seules les lignes actives qui ont une période dans
+  le cycle choisi (`PlanningLineOrder::activeInCycle`).
+- **Jobs** :
+  - le job porte la période (`planning_jobs.planning_cycle_id`), et le
+    worker la transmet ;
+  - toujours **un seul job actif par planning**, toutes périodes
+    confondues : deux périodes ne sont jamais calculées en même temps.
+- **Récupération des jobs abandonnés** : limitée aux générations de la
+  période du job. Les requêtes passent par
+  `planning_periods.planning_cycle_id`, ce qui couvre aussi une période
+  orpheline.
+
+### Contraintes entre périodes
+
+- **`NeighbourCommitmentCollector`** collecte les engagements à respecter :
+  - **même période** : les lignes résolues avant celle-ci (D161,
+    inchangé) ;
+  - **autres périodes** : toutes les lignes actives, la même ligne
+    comprise, publiées ou non. On garde chaque garde qui chevauche
+    l'étendue des gardes de la période, ou dont l'écart est inférieur au
+    seuil le plus strict des deux générations (`LEGAL`/`TEAM_MIN_REST`,
+    les siennes et celles du propriétaire) ;
+  - pas de marge fixe : une garde plus éloignée ne peut rien violer, une
+    plus proche est toujours gardée.
+- **Gel dans le snapshot** :
+  - `PlanningSnapshotExternalCommitment` porte la période d'origine
+    (identifiant, numéro, dates) quand ce n'est pas la période générée ;
+  - migration `Version20261013090000` : quatre colonnes nullables, aucune
+    ligne écrite ;
+  - le `snapshotHash` n'inclut ces champs que s'ils sont renseignés : les
+    empreintes existantes sont inchangées.
+- **Explications** : motifs `CROSS_LINE_*` inchangés (exclusions locales,
+  aucun changement du contrat CP-SAT). Le contexte de l'exclusion ajoute
+  `otherPeriodStableId`, `otherPeriodNumber`, `otherPeriodStartsAt` et
+  `otherPeriodEndsAt`.
+- **Symétrie** :
+  - N+1 généré après N fige N, et N régénéré après N+1 fige N+1 ;
+  - le seuil appliqué est le plus strict des deux, quel que soit l'ordre.
+- **Garde de nuit sur la frontière** : c'est une garde de son jour de
+  début, matérialisée normalement. Seules les règles de chevauchement et de
+  repos s'y appliquent.
+
+### Écriture : verrou et revalidation
+
+- **Écriture d'une génération** (`PlanningGenerationService`) : une
+  transaction sous le `CalendarWriteLock` du planning, tenu jusqu'au
+  commit. Sous ce verrou, on vérifie que :
+  1. la période n'a pas été validée, publiée ou archivée (I8) ;
+  2. la liste des gardes est inchangée (`snapshotHash`, D106) ;
+  3. l'ensemble des engagements voisins, relu de la même façon, est
+     identique à celui que le snapshot a figé.
+  - Sinon : génération FAILED, et rien d'autre n'est écrit.
+  - S'applique aussi aux plannings à une seule période : la course laissée
+    ouverte par D161 (réaffectation d'une ligne précédente pendant la
+    résolution de la suivante) est fermée.
+- **Complétion** (`PlanningCompletionService`) :
+  - elle travaille par période ;
+  - chaque trou est vérifié en direct contre toutes les périodes
+    (`ReassignmentCandidateService::assignabilityError` lit les périodes
+    de toutes les lignes actives), puis de nouveau sous le verrou au
+    moment d'écrire ;
+  - elle reste permise sur une période publiée, pour les trous seulement.
+- **Chemins d'écriture du calendrier courant d'un planning multipériode, à
+  la fin de L3** :
+
+  | Chemin | Verrou | Contrôle entre périodes | Multipériode |
+  |---|---|---|---|
+  | Écriture d'une génération | `CalendarWriteLock` | ensemble figé = ensemble relu | ouvert |
+  | Complétion | `CalendarWriteLock` | en direct, chaque trou | ouvert |
+  | Réaffectation, retrait | `CalendarWriteLock` | en direct (lit déjà toutes les périodes) | refusé (L4) |
+  | Échange | `CalendarWriteLock` | idem | refusé (L4) |
+  | Affectation technique, résolution synchrone | — | — | refusé |
+  | Publication (statuts, sans affectation) | `CalendarWriteLock` | — | refusé (L4) |
+  | Création, fin, suppression de période | verrou `PESSIMISTIC_WRITE` sur le planning | refusé pendant un job | ouvert |
+
+- **Garantie démontrée** :
+  - sur un planning multipériode, seules la génération et la complétion
+    peuvent ajouter un titulaire ;
+  - toutes deux vérifient, sous le verrou que prend toute écriture du
+    calendrier, qu'aucune garde ajoutée ne chevauche le calendrier courant
+    des autres périodes, ni n'en viole le repos (seuil le plus strict) ;
+  - aucune garantie n'est annoncée pour la réaffectation et les échanges
+    multipériodes, refusés jusqu'en L4.
+
+### I8 et blocs coupés
+
+- **I8** :
+  - `PlanningGenerationService::create()` refuse une période `VALIDATED`,
+    `PUBLISHED` ou `ARCHIVED` ;
+  - `WeeklyDutyCalendarService` ne matérialise rien dans une telle
+    période ;
+  - le résultat d'une période publiée pendant une résolution n'est pas
+    écrit.
+  - Un calendrier publié existant n'est jamais modifié. Seules
+    disparaissent les nouvelles gardes que le préflight y aurait ajoutées
+    après un changement de structure : c'était le trou I8.
+- **Blocs coupés** (option A, `PeriodBoundaryGuard`) :
+  - **règle** : exactement celle de la matérialisation. Un bloc est un
+    motif récurrent actif d'au moins deux composantes ; ses jours sont le
+    lundi de chaque semaine plus chaque décalage, quelle que soit sa
+    longueur, contiguë ou non, même sur la semaine suivante. Une
+    occurrence est coupée si son premier jour est avant la frontière et
+    son dernier jour après ou dessus ;
+  - une garde d'un seul jour n'est jamais un bloc ;
+  - **contrôlé** à la création de période (début et fin), à la
+    modification de la fin de la dernière période et à la modification de
+    la structure d'une ligne (frontières existantes) ;
+  - **signalé** par le préflight pour une frontière antérieure à la règle ;
+  - les extrémités d'un planning à une seule période ne sont pas des
+    frontières : comportement inchangé.
+
+### Écarts à la spécification
+
+1. **`VALIDATED` bloque la génération**. Jusqu'ici, ce n'était qu'un
+   avertissement, `VALIDATION_WILL_BE_INVALIDATED`, qui n'est plus
+   produit. Ce statut n'existe en pratique qu'à l'intérieur de la
+   transaction d'une publication.
+2. **Contrôle anticipé des fins** : la fin d'une nouvelle période, et la
+   nouvelle fin de la dernière, sont contrôlées dès leur saisie. Sinon,
+   une période publiée dont la fin coupe un bloc ne pourrait plus jamais
+   être suivie.
+3. **`LiveDemandViewFactory` lit toutes les périodes**, avec la source prise
+   dans le même cycle. C'est une correction transversale nécessaire à la
+   complétion. Les lectures (calendrier, publication, statistiques)
+   restent protégées par leurs gardes L4/L5.
+4. **`PlanningLineDemandPolicyService` reste refusé en multipériode** (409
+   `multiple_periods_not_supported`), alors que le §10 de la spécification
+   le plaçait en L3 : ce n'était pas demandé pour ce lot.
+5. **Revalidation à l'écriture étendue aux plannings à une seule période**
+   (lignes précédentes) : un refus nouveau devient possible, mais
+   seulement en cas d'écriture concurrente réelle.
+
+### Tests
+
+- **`PlanningCycleGenerationTest`** (14 tests, OR-Tools réel) :
+  - périodes 1, 2 et 3, avec empreintes ;
+  - période obligatoire ;
+  - repos dans les deux ordres, avec et sans politique ;
+  - nuit à cheval sur la frontière, et chevauchement ;
+  - personne sur deux lignes et deux périodes ;
+  - période voisine modifiée pendant le calcul, par écriture directe et
+    par un retrait réel (`DutyReassignmentService`) sur une ligne
+    précédente ;
+  - période publiée pendant le calcul ;
+  - job abandonné sur une période future ;
+  - période publiée jamais régénérée, et sans nouvelles gardes ;
+  - complétion d'une période publiée qui respecte la période suivante ;
+  - trou laissé plutôt qu'un repos violé.
+- **`PlanningCycleBoundaryTest`** (4 tests) et **`PeriodBoundaryGuardTest`**
+  (4 tests).
+- **`PlanningCycleConditionalLineTest`** : source dans le même cycle,
+  source absente.
+- **Tests existants mis à jour** :
+  - `PlanningLaunchControllerTest` : `VALIDATED`, endpoint technique ;
+  - `PlanningCycleControllerTest` : `period_required` au lieu de 409 ;
+  - test conditionnel de L2 : la fin de la période 1 est déplacée au
+    lundi, à cause du bloc du week-end.
+
+## D190 — Périodes successives, clôture de L3 : risque D161, périodes orphelines, répétition sur le dump de production
+
+- **Date** : 2026-10-11. Analyse et vérifications ; un seul correctif limité
+  (audit). Le correctif de D161 attend une validation. Rien n'est déployé ni
+  commité.
+
+### Risque D161 : une ligne tardive en échec garde son ancien calendrier
+
+- **Transactions** : un lancement n'a pas de transaction d'ensemble. Pour
+  chaque ligne, dans l'ordre de résolution, quatre étapes, chacune validée :
+  1. création de la génération ;
+  2. snapshot ;
+  3. réservation SOLVING ;
+  4. écriture des affectations, sous le `CalendarWriteLock` (L3).
+- **Échecs possibles d'une ligne** :
+  - erreur ou délai du solveur sans solution ;
+  - gardes changées, voisinage changé, période verrouillée ;
+  - snapshot impossible ;
+  - source conditionnelle en échec ;
+  - exception inattendue : job FAILED, et ses SOLVING passent en FAILED.
+- **Conséquence** :
+  - les lignes résolues **avant** l'échec sont écrites, et leur nouveau
+    calendrier devient le calendrier courant ;
+  - la ligne en échec garde sa dernière génération COMPLETED ;
+  - or les lignes précédentes, résolues sans voir les lignes suivantes
+    (règle D161), ne l'ont pas prise en compte ;
+  - les lignes **après** l'échec ont figé l'ancien calendrier de la ligne
+    en échec : elles lui sont compatibles.
+- **Reproduit** avec OR-Tools réel (test temporaire, retiré) :
+  - lancement 1 : alice tient la nuit Juniors ;
+  - lancement 2 : la journée Seniors qui précède est donnée à alice, puis
+    la résolution des Juniors échoue ;
+  - résultat : repos légal violé entre les deux lignes, job FAILED ;
+  - seul le préflight de publication le signale (`conflicts`), et il bloque
+    la publication.
+- **Hors risque** :
+  - **génération initiale** : la ligne en échec n'a pas de calendrier, il
+    n'y a rien d'incompatible ;
+  - **complétion** : les trous de toutes les lignes sont revalidés en
+    direct, dans une seule transaction ;
+  - **périodes voisines** : un lancement ne modifie qu'une période, et
+    respecte le calendrier courant des autres.
+- **Solutions examinées** :
+  1. **Retour arrière global après échec** : rendre de nouveau courante
+     l'ancienne génération. Écarté : il faut défaire des générations
+     COMPLETED déjà visibles, et les historiques ne sont jamais réécrits.
+  2. **Figer aussi les calendriers des lignes suivantes** : petit
+     changement. Écarté : il renverse la priorité D161 à chaque
+     régénération, même sans échec, et dégrade les résultats.
+  3. **Atomicité stricte du lancement** : tout ou rien. Écarté seul : une
+     génération initiale perdrait ses lignes réussies, alors qu'elle n'a
+     aucun risque.
+  4. **Recommandé — résolution en deux temps, écriture unique
+     revalidée** :
+     - toutes les lignes sont d'abord résolues, sans rien écrire. Le
+       snapshot d'une ligne fige les résultats prévus des lignes
+       précédentes du lancement (engagements virtuels, comme la complétion
+       D161), et la demande d'une ligne conditionnelle lit les titulaires
+       prévus de sa source ;
+     - puis une seule transaction, sous le `CalendarWriteLock`, construit
+       le calendrier final : nouveaux résultats pour les lignes réussies,
+       calendrier courant pour les autres, autres périodes ;
+     - elle le revalide par personne (chevauchement, repos au seuil le plus
+       strict) et ligne par ligne (verrou de période, gardes, voisinage) ;
+     - calendrier final cohérent : toutes les lignes réussies sont écrites.
+       Un échec partiel sans incohérence garde donc ses lignes réussies, et
+       une génération initiale reste partielle comme aujourd'hui ;
+     - sinon : rien n'est écrit. Les générations réussies passent en FAILED
+       (`launch_inconsistent`) avec la liste des conflits, leurs
+       diagnostics et métadonnées sont conservés, et le job est FAILED avec
+       ce motif. Aucune affectation existante n'est touchée.
+     - **Impact** : `PlanningGenerationService` est séparé en « résoudre »
+       et « écrire » ; le snapshot accepte des engagements et des
+       titulaires virtuels ; le lanceur écrit à la fin. Changement de
+       stratégie transactionnelle : **attend une validation**.
+
+### Périodes orphelines
+
+- **Origine** :
+  - lignes supprimées avant L1 ;
+  - D188 (flag désactivé, planning à une seule période).
+  - En multipériode, une ligne avec historique ne peut plus être
+    supprimée : aucune nouvelle orpheline possible.
+- **Lecture** : aucun parcours ne les lit — calendrier, « Mes gardes »,
+  agenda, export, publication, engagements de génération, candidats. Comme
+  avant L1, et comme une ligne inactive.
+- **Données de production** (dump du 2026-10-11) :
+  - une orpheline, DRAFT, du 2026-10-01 au 2027-01-31 ;
+  - aucune garde, aucune génération, aucune affectation, aucune entrée de
+    publication ;
+  - aucun conflit possible avec les lignes actives (chevauchement, 11 h,
+    24 h : 0).
+- **Décision** : leurs gardes sont de l'**historique**, jamais un
+  engagement actif. Une garde qui ne figure plus nulle part n'est connue de
+  personne ; la prendre en compte créerait des exclusions impossibles à
+  expliquer. Aucune orpheline n'est supprimée, aucune affectation
+  modifiée.
+- **Correctif limité** : invariant d'audit `orphan_current_assignments_not_over`
+  (information), qui compte les affectations courantes d'une orpheline non
+  terminées, à vérifier avant toute activation. Test
+  `SinglePeriodCompatibilityTest::testTheDutiesOfADeletedLineAreHistoryNotACommitment`.
+- **Alternative possible si refusée** : lire comme engagements les
+  affectations courantes non terminées d'une orpheline déjà publiée.
+
+### Répétition L1 → L2 → L3 sur le dump de production
+
+- **Cadre** : PostgreSQL jetable en mémoire, réseau interne, image de
+  production, code L3 monté en lecture seule. La production est restée en
+  `Version20261010120000`, et le serveur a été nettoyé.
+- **Montée L1, puis L2, puis L3** :
+  - données identiques à l'origine sur les 59 tables : chaque ligne,
+    chaque colonne de départ ;
+  - audits sans différence, hors changements prévus ;
+  - colonnes L3 toutes NULL ; seul ajout au schéma : ces quatre colonnes.
+- **Descente L3 → L2 → L1 → origine** : schéma identique à chaque étape,
+  données identiques. Remontée : schéma identique, seules les lignes
+  `planning_cycles` régénérées diffèrent (nouveaux identifiants).
+- **Retour arrière refusé dans deux cas** :
+  - L3 : dès qu'un snapshot a figé une garde d'une autre période (testé) ;
+  - L2 : dès qu'une période 2 existe (D187), ou qu'une ligne n'a pas
+    exactement une période.
+  - L'ordre est toujours L3 avant L2.
+- **Constat bloquant pour l'activation** :
+  - sur le planning réel, la période 1 finit le dimanche 2027-01-31
+    (exclusif) et la ligne principale a un bloc vendredi → dimanche : la
+    création d'une période 2 est refusée (`period_boundary_splits_block`) ;
+  - sa fin ne peut pas bouger : la ligne principale est publiée ;
+  - **le planning réel ne pourrait jamais recevoir de période 2** sous
+    l'option A. Le week-end du 29 au 31 janvier n'a d'ailleurs jamais été
+    matérialisé (fin de planning, comportement historique) : un trou
+    existe déjà.
+  - **Arbitrage nécessaire avant L4/L7.**
+- **Génération réelle d'une période 2** sur la restauration :
+  - après avoir, dans la copie seulement, décalé la fin au lundi
+    2027-02-01 et désactivé la ligne secondaire vide (sans membre ni
+    règle, elle bloque déjà tout lancement, période 1 comprise) ;
+  - résultat : 91 gardes, génération COMPLETED et couverture complète ;
+  - période 1 strictement inchangée, 0 violation de repos de 11 h entre
+    les périodes ;
+  - 0 garde de la période 1 figée : la dernière est à plus de 11 h de la
+    première de la période 2.
+
+## D191 — Périodes successives, clôture de L3 : lancement résolu en deux temps, écriture unique revalidée ; orphelines signalées
+
+- **Date** : 2026-10-12. Ferme le risque D161 (diagnostic D190) selon la
+  stratégie validée. Non déployé, non commité ; création de périodes
+  toujours désactivée par défaut.
+
+### Lancement résolu en deux temps
+
+1. **Résolution** :
+   - lignes résolues dans l'ordre D161 (`PlanningLineOrder`), sans rien
+     écrire (`PlanningGenerationService::solve()`) ;
+   - le snapshot d'une ligne fige ce que les lignes déjà résolues du
+     lancement vont tenir (`PlannedCalendar`), à la place de leur
+     calendrier sur le point d'être remplacé ;
+   - une ligne conditionnelle lit les titulaires prévus de sa source
+     (`freezeDemand`) ;
+   - une ligne en échec garde son calendrier, que les lignes suivantes
+     voient tel quel ;
+   - un résultat inutilisable est enregistré FAILED tout de suite, comme
+     avant ;
+   - la priorité D161 est inchangée : une ligne ne voit jamais les lignes
+     résolues après elle.
+2. **Écriture** (`writeLaunch()`) : une seule transaction sous le
+   `CalendarWriteLock`, tenu jusqu'au commit.
+   - **Contrôles par génération**, dans l'ordre :
+     - période non verrouillée ;
+     - gardes inchangées (`snapshotHash`) ;
+     - engagements voisins identiques à ceux figés, relus avec les
+       générations déjà acceptées « prévues » ;
+     - pour une ligne conditionnelle, résultat de sa source écrit lui aussi
+       (`source_not_written`).
+     - Un snapshot obsolète n'est jamais écrit, même si le calendrier
+       final paraît cohérent.
+   - **Contrôle du calendrier final**, personne par personne :
+     - le calendrier final comprend les résultats acceptés, les calendriers
+       qui restent (lignes en échec) et toutes les autres périodes ;
+     - règles vérifiées dans les deux sens (`PersonCommitmentChecker`) :
+       chevauchement, repos au seuil le plus strict, auto-couverture ;
+     - une génération impliquée dans une violation est écartée
+       (`launch_inconsistent`, liste des conflits) ;
+     - tout ce qui suit est revérifié sans elle, jusqu'à stabilité : une
+       ligne qui avait figé son résultat prévu tombe à son tour ;
+     - seul ce qui reste cohérent est écrit.
+   - **Échec partiel** : il reste partiel quand c'est sûr — génération
+     initiale, ou ancien calendrier compatible.
+   - **Génération non écrite** : elle passe en FAILED avec ses métadonnées
+     et son motif (`failure_reason`) ; aucune affectation existante n'est
+     modifiée ni supprimée.
+   - **Sortie du job** : chaque ligne indique `error` et `conflicts`
+     (personne, lignes, jours, motif) ; le job est FAILED dès qu'une ligne
+     n'est pas écrite.
+3. **Endpoint technique** : la résolution synchrone d'une génération passe
+   par la même écriture contrôlée.
+
+### Autres chemins d'écriture
+
+- **Complétion** : contrôle en direct de chaque trou contre toutes les
+  lignes et périodes, dans une seule transaction sous le même verrou.
+- **Réaffectation, retrait et échange** : contrôle en direct sous le
+  verrou ; refusés en multipériode jusqu'en L4.
+- **Affectation technique** (`POST /planning-generations/{id}/assignments`,
+  aucun écran) :
+  - toujours sans contrôle d'éligibilité, comme depuis le lot 3 ;
+  - refusée en multipériode (D189) ;
+  - en période unique, c'est le seul chemin restant sans contrôle (risque
+    résiduel signalé).
+
+### Garantie
+
+- **Cas couverts** : une génération, même en échec partiel, n'écrit jamais
+  une affectation qui chevauche une garde courante de la même personne, ni
+  qui en viole le repos ou l'auto-couverture. Cela vaut dans toutes les
+  lignes actives et toutes les périodes, contrôlé sous le verrou que prend
+  toute écriture du calendrier.
+- **Limites** :
+  - les lignes inactives et les périodes orphelines ne sont pas lues ;
+  - les contraintes douces (équité) ne sont pas revérifiées ;
+  - la demande d'un renfort qui garde son ancien calendrier, alors que sa
+    source a changé, est réévaluée en direct, et la publication bloque
+    l'indéterminé, comme D165.
+
+### Périodes orphelines
+
+- L'invariant `orphan_current_assignments_not_over` devient **bloquant** :
+  une affectation courante non terminée d'une période orpheline fait
+  échouer l'audit jusqu'à une décision explicite. Elle n'est plus
+  seulement signalée en information.
+- **Production** : 0 (D190).
+- **Tests** : une suppression D188 d'une ligne générée, avec des gardes à
+  venir, déclenche le signalement.
+- Rien n'est supprimé ni modifié.
+
+### Frontière historique qui coupe un bloc — exception non implémentée
+
+- Sur le planning réel, la période 2 commencerait le dimanche 2027-01-31,
+  dernier jour du bloc du vendredi 29 au dimanche 31.
+- Sous l'atomicité des blocs, ce dimanche n'est matérialisé dans aucune
+  période : l'exception créerait donc un jour de garde obligatoire oublié
+  dans la nouvelle période.
+- Conformément à la consigne, rien n'est implémenté. Les options sont
+  présentées dans le rapport et attendent un arbitrage.
+
+### Tests
+
+- **`PlanningLaunchConsistencyTest`** (4 tests, OR-Tools réel) :
+  - scénario Alice / Juniors / Seniors reproduit : rien n'est écrit ;
+  - génération initiale partielle : écrite ;
+  - régénération compatible : écrite ;
+  - cascade sur trois lignes.
+- **`PlanningLaunchConditionalConsistencyTest`** (2 tests) :
+  - source incompatible avec le renfort conservé ;
+  - renfort jamais écrit sans le résultat de sa source.
+- **`PlanningCycleGenerationTest`** : le test de course D161 est remplacé
+  par une écriture réelle sur une ligne précédente pendant un lancement. Le
+  calendrier final reste cohérent.
+- **Mutations** : 7 nouvelles et les 12 de L3, toutes tuées.
+
+## D192 — Périodes successives, fin de L3 : frontière historique qui coupe un bloc (option A, fraction restante)
+
+- **Date** : 2026-10-12. Arbitrage utilisateur : option A. Non déployé, non
+  commité. Aucune migration.
+
+### Vérification préalable
+
+Faite sur une restauration jetable du dump du 2026-10-12, en lecture seule.
+
+- **Planning réel** : 2026-10-01 → 2027-01-31, fuseau Europe/Brussels.
+  - La fin est **exclusive** : le formulaire de création indique « Date
+    exclue : pour finir le 31 décembre, saisissez le 1er janvier ».
+  - Le dernier jour de la période 1 est donc le **samedi 30 janvier**.
+  - Une période 2 commencerait le **dimanche 31 janvier**.
+  - Le diagnostic de D190/D191 est confirmé : le dimanche 31 appartient à
+    la période 2.
+- **Ligne principale** (publiée) :
+  - structure active : un bloc `Ven · Sam · Dim` (famille « Week End ») et
+    des jours isolés du lundi au jeudi ;
+  - matérialisée jusqu'au jeudi 28 janvier ;
+  - les blocs complets précédents (22-24, 15-17 janvier…) existent ;
+  - **aucune garde du 29 au 31 janvier**.
+- **Ligne secondaire** (brouillon, vide) : aucune structure hebdomadaire.
+- **Bilan** :
+  - une seule occurrence est coupée ;
+  - les vendredi 29 et samedi 30 restent un trou historique de la période
+    publiée, que I8 interdit de toucher ;
+  - le dimanche 31 est la fraction restante d'un jour.
+
+### Règle
+
+- **Frontière historique** : le début d'une période qui est la fin d'une
+  période précédente verrouillée (une de ses périodes de ligne VALIDATED,
+  PUBLISHED ou ARCHIVED). Cette fin ne peut plus bouger.
+- **Une occurrence est « historique »** si :
+  - un bloc actif d'une ligne est coupé à cette frontière ;
+  - aucun de ses jours antérieurs n'a de garde de la ligne dans la période
+    précédente.
+- **Tout autre cas reste une coupure ordinaire** :
+  - période précédente déplaçable ;
+  - fin de la nouvelle période ;
+  - nouvelle fin de la dernière période ;
+  - jour antérieur déjà doté d'une garde.
+  - Une coupure ordinaire est refusée (422), avec ou sans confirmation.
+- **Création** :
+  - sans confirmation : 409 `historical_block_cut_confirmation_required`,
+    avec le détail (ligne, bloc, frontière, `earlierDays`,
+    `remainderDays`), et rien n'est créé ;
+  - avec `acceptHistoricalBlockCuts: true` : la période est créée, la
+    réponse liste `historicalBlockCuts`, et le journal enregistre la ligne,
+    le bloc, les dates et l'auteur.
+- **Matérialisation** :
+  - les jours de l'occurrence dans la nouvelle période forment un **bloc de
+    reste** : une `DutyGroupInstance` du même motif, donc même famille,
+    mêmes types de garde, un seul titulaire ;
+  - ce bloc est identifiable : moins de gardes que de composantes de son
+    motif (`DutyGroupInstance::isRemainder()`) ;
+  - rien n'est jamais créé dans la période précédente ;
+  - pour une ligne conditionnelle, chaque jour est relié à la garde source
+    du même jour dans la même période. Une source manquante laisse
+    l'occurrence non matérialisée et le préflight le signale
+    (`COVERAGE_SOURCE_MISSING`), comme pour un bloc entier.
+- **Préflight** : avertissement non bloquant `HISTORICAL_BLOCK_REMAINDER`.
+  Une coupure ordinaire reste bloquante.
+- **Structure hebdomadaire** :
+  - une coupure historique est tolérée ;
+  - une coupure ordinaire est refusée ;
+  - pour un planning à plusieurs périodes, la fin de la dernière période
+    est aussi contrôlée, car c'est la prochaine frontière.
+
+### Sécurité métier
+
+- **Demande** : REQUIRED ou CONDITIONAL selon la politique de la ligne,
+  inchangé.
+- **Famille et éligibilité** : celles du motif, inchangées.
+- **Repos et chevauchement** : ce sont des gardes ordinaires.
+- **Atomicité** : la fraction est un bloc, avec un seul titulaire.
+- **Couverture** : la fraction est une garde de la période 2 ; « couverture
+  complète » n'est donc vrai que si elle est tenue.
+- **Écart d'équité assumé** : une fraction compte pour **une** occurrence
+  de sa famille (« Week End »), même si elle ne fait qu'un jour.
+
+### Tests
+
+- **`PlanningCycleHistoricalBoundaryTest`** (5 tests, OR-Tools réel) :
+  - cas réel : fraction d'un jour, refus sans confirmation, génération
+    complète, empreintes de la période 1 inchangées ;
+  - fraction de deux jours en un seul bloc, avec un seul titulaire ;
+  - frontière ordinaire refusée même avec confirmation : période
+    précédente déplaçable, ou nouvelle fin ;
+  - jour antérieur déjà doté d'une garde : refusé ;
+  - structure modifiable, sans jamais couper la prochaine frontière.
+- **`PlanningCycleConditionalLineTest`** : fraction conditionnelle reliée à
+  sa source de la période 2.
+- **`PeriodBoundaryGuardTest`** : jours antérieurs et jours restants.
+
+### Test intermittent `PlanningPublicationWorkflowTest`
+
+- **Constat** : un seul échec, en suite complète (machine chargée par
+  d'autres projets Docker).
+- **Reproduction** : impossible ; vert 6 fois seul, 2 fois dans son
+  fichier, et dans la suite complète suivante.
+- **Analyse** :
+  - la réponse lue pour la vue « membre » ne contenait pas `published`, et
+    aucun journal serveur n'a été émis pour cette requête : ni 500, ni
+    403, ni 404 ;
+  - l'endpoint ne passe par aucun code de génération modifié ;
+  - le helper de test transforme toute réponse non JSON en `[]`.
+- **Conclusion** : pas une régression de L3. La cause probable se situe
+  dans l'authentification ou l'environnement, sans preuve.
+- **Diagnostic ajouté** : une assertion de statut, qui affichera la
+  réponse complète si l'échec se reproduit.
+
+## D193 — Équité d'un bloc de reste (D192) : écart documenté, algorithme inchangé
+
+- **Date** : 2026-10-12. Arbitrage utilisateur à la validation de L3.
+- **Règle conservée** : un bloc de reste (`DutyGroupInstance::isRemainder()`)
+  compte pour **une occurrence** de sa famille d'équité, même s'il ne compte
+  qu'un seul jour.
+  - C'est la règle de toute `DutyUnit` : `ALLOCATION_FAMILY` est comptée une
+    fois par unité (D136, `DimensionMembershipCalculator`,
+    `RequiredDemandBuilder`).
+  - Le cas réel : le dimanche 31 janvier 2027 de Trauma Delta, compté comme
+    un « Week End ».
+- **Vérifié dans le code, et à garder ainsi** :
+  - la charge pondérée (`WEIGHTED_WORKLOAD`, `DutyType::workloadValue`) et le
+    nombre de gardes (`TOTAL_DUTIES`) sont comptés **garde par garde**, sur
+    les gardes réellement matérialisées ;
+  - les statistiques (`PlanningStatisticsService`) comptent les jours, les
+    familles par jour et la charge pondérée garde par garde : un bloc de
+    reste d'un jour compte un jour.
+- **Évolution possible, non faite** : pondérer l'occurrence d'un bloc de
+  reste au prorata de ses jours, par exemple 1/3 de « Week End ». Cela
+  suppose un changement de l'algorithme d'équité et un versionnement de
+  `ALGORITHM_VERSION`. À décider le jour où des restes deviendraient
+  fréquents.
+
+## D194 — Applicabilité d'une ligne, statut de période et lecture par période (lot L4a)
+
+- **Date** : 2026-10-12. Contrat L4 validé par l'utilisateur (arbitrages
+  D1-D7) ; seul L4a est implémenté.
+- **Problème réel** : Trauma Delta. La ligne principale est publiée ; la
+  ligne secondaire est active, DRAFT, sans structure ni garde. Le préflight
+  de publication exigeait de **toute** ligne active une génération : la
+  republication de la ligne principale était bloquée par une ligne qui n'a
+  rien à couvrir.
+
+### Décision
+
+- **Un seul service décide** : `LineApplicabilityService::forLine(ligne,
+  période)` → `LineApplicability` (`INACTIVE`, `NOT_IN_PERIOD`, `NO_DEMAND`,
+  `INCOMPLETE`, `APPLICABLE`, avec `reasons`). Statut de période, préflight,
+  publication et vues du calendrier le lisent : ils ne peuvent pas diverger.
+- **Demande** : au moins une garde dans la période (récurrente
+  matérialisée, ponctuelle, reste D192) **ou** une structure hebdomadaire
+  récurrente active (elle sera matérialisée au préflight de génération).
+  Une politique conditionnelle seule n'en crée pas.
+- **« Sans demande » ≠ « configuration incomplète »** : une demande réelle
+  dont un prérequis manque (jeu de règles actif, membre dans la période,
+  source conditionnelle dans le cycle) est `INCOMPLETE` et **compte**.
+  Une ligne déjà générée est `APPLICABLE` (ses prérequis ont tenu).
+- **Jamais de désactivation automatique** : le service ne modifie rien.
+- **Statut de période** (`PlanningCyclePresenter`) calculé sur les lignes qui
+  comptent : `published` (toutes publiées), `partially_published` (certaines),
+  `generated`, `collecting`, `preparation`. **Aucune** ligne qui compte →
+  jamais `published`. `lineCounts` et l'applicabilité de chaque ligne sont
+  exposés.
+- **Préflight et publication** : une ligne `NO_DEMAND` est listée à part
+  (`neutralLines`), n'est ni contrôlée ni publiée, et garde son statut
+  (DRAFT reste DRAFT). Une ligne `INCOMPLETE` reste dans `lines` et bloque la
+  publication complète (D4). Le champ `lines` du préflight garde son sens :
+  le frontend actuel n'a pas eu à changer.
+- **Lecture par période** : `CurrentCalendarReader::read`,
+  `PlanningResultService::forPlanning`,
+  `PlanningAssignmentViewService::currentGenerations` acceptent une période ;
+  `GET .../result` et `GET .../assignments` résolvent `?period=` (sinon la
+  période par défaut : en cours, sinon suivante, sinon dernière — lecture
+  seulement, D6) et renvoient `period`. Jamais deux périodes fusionnées.
+  Sans période passée, les autres appelants gardent le comportement
+  mono-période (409 `multiple_periods_not_supported` sur plusieurs).
+
+### Hors L4a (volontairement)
+
+- Génération : comportement inchangé face à une ligne sans demande ; son
+  exclusion explicite relève de L4b.
+- Audience de la première publication (inclut encore les membres d'une
+  ligne neutre), `planning_publication_lines`, `cycle_complete`,
+  publication partielle et par période : L4c.
+- Contournement de l'endpoint technique d'affectation : L4d (D5).
+- Une ligne non générée dans une période n'affiche toujours aucune garde
+  dans `result` (comportement antérieur conservé ; son `dutyCount` est
+  exposé par l'applicabilité).
+
+### Tests
+
+- **`LineApplicabilityTest`** (7 tests, OR-Tools réel) : ligne active sans
+  demande (neutre, jamais désactivée, période jamais « publiée »), garde
+  ponctuelle seule (`INCOMPLETE` puis `APPLICABLE`), ligne conditionnelle
+  sans demande puis avec structure, ligne incomplète qui bloque la
+  publication, demande apparue après publication → `partially_published`
+  et republication bloquée, et **Trauma Delta** : fin de période un samedi,
+  week-end coupé, secondaire DRAFT vide, première publication puis
+  republication sans toucher la secondaire, période 2 avec le reste D192,
+  `result`/`assignments` par période.
+- **`PlanningCycleControllerTest`** : `result` et `assignments` ne sont plus
+  refusés sur plusieurs périodes ; lecture par défaut et `?period=`.
+
+## D195 — Génération ciblée sur les lignes non verrouillées et applicables (lot L4b)
+
+- **Date** : 2026-10-13. L4b autorisé par l'utilisateur après validation de
+  L4a (D194).
+- **But** : générer les lignes non publiées d'une période qui contient déjà
+  des lignes publiées, sans jamais modifier ces dernières, et sans qu'une
+  ligne sans demande bloque ou soit générée.
+
+### Décision
+
+- **Une décision par ligne**, au préflight (`LaunchLineReadiness::decision`),
+  depuis `LineApplicabilityService` (D194), lue **après** la matérialisation
+  de la semaine type :
+  - `EXCLUDE` (aucune demande) : ni bloquante ni générée, statut inchangé,
+    jamais désactivée ;
+  - `KEEP` (période VALIDATED/PUBLISHED/ARCHIVED et une demande) : jamais
+    régénérée ;
+  - `GENERATE` : tous ses bloquants propres s'appliquent. Une demande réelle
+    à la configuration incomplète reste bloquante pour le lancement, avec son
+    code.
+- **`scope: "unlocked_lines"` explicite** : jamais déduit de l'état de la
+  période.
+  - Sans lui, une ligne `KEEP` reste un `PERIOD_LOCKED` (comportement
+    historique), et `requiredScope` indique que le scope générerait les
+    autres.
+  - Avec lui, les lignes `KEEP` sont conservées.
+  - Il est stocké sur le job (`planning_jobs.generation_scope`, migration
+    additive `Version20261014090000`) et rejoué par le worker.
+- **`NO_LINE_TO_GENERATE`** : aucune ligne à générer → refus avant la
+  création du job.
+- **Engagements quelle que soit la position** :
+  - `NeighbourCommitmentCollector` ajoute aux lignes précédentes (D161)
+    toute ligne de la même période dont la période est verrouillée ;
+  - sans cela, une ligne publiée placée après aurait été ignorée par le
+    solve, et le résultat écarté seulement à l'écriture
+    (`launch_inconsistent`).
+- **Conditionnel** (profondeur 1, D162 : les chaînes sont des éventails
+  autour d'une source) :
+  - **renfort à générer, source conservée** : il est résolu, et sa demande
+    est lue depuis le calendrier courant de la source (génération source la
+    plus récente, affectations `current`) ;
+  - **revalidation** : sous `CalendarWriteLock`, `staleInput` relit en base
+    les titulaires des gardes source et les compare aux décisions figées. Une
+    différence donne `source_calendar_changed`, même si les personnes
+    concernées ne sont pas membres du renfort (ce que le contrôle des
+    engagements ne voyait pas) ;
+  - **source à générer dont un renfort est conservé** :
+    `SOURCE_OF_PUBLISHED_LINE`, la source n'est jamais régénérée.
+- **Résultat du job** : `lines` ne contient que les lignes générées
+  (inchangé pour l'écran) ; `scope`, `keptLines`, `excludedLines` sont
+  ajoutés. `launch()` renvoie une entrée par ligne, avec sa décision.
+- **Inchangé** (D191) : résolution sans écriture, snapshots, revalidation
+  et écriture atomique sous `CalendarWriteLock`, diagnostics des lignes
+  échouées.
+
+### Écarts et limites
+
+- **Ligne sans membre** : tranché le 2026-10-15, voir « Arbitrage des
+  trois cas » ci-dessous.
+- **Ligne incomplète** : elle bloque **tout** le lancement, pas seulement sa
+  propre génération (comportement D129 conservé : un refus ne laisse jamais
+  une partie des lignes générées).
+- **Source non publiée, renfort publié** : aucun flux ne produit encore cet
+  état (publication tout ou rien jusqu'à L4c). Le test le fabrique
+  directement en base.
+- **Frontend** : il n'envoie jamais `scope`, donc son comportement est
+  inchangé. Il traduit les trois nouveaux bloquants (`NO_MEMBER_IN_PERIOD`,
+  `NO_LINE_TO_GENERATE`, `SOURCE_OF_PUBLISHED_LINE`) au lieu d'afficher
+  « génération impossible ».
+
+### Arbitrage des trois cas (2026-10-15)
+
+Validé par l'utilisateur à la reprise de L4b. Une seule source de vérité :
+`LineApplicabilityService` (D194).
+
+- **A — aucune garde demandée** : `NO_DEMAND`, décision `EXCLUDE`. Ni
+  générée ni bloquante, elle reste DRAFT (inchangé depuis la première
+  version de L4b).
+- **B — des gardes, aucun membre dans la période** : `INCOMPLETE`
+  (`NO_MEMBER_IN_PERIOD`). Le lancement est refusé avec le bloquant
+  `NO_MEMBER_IN_PERIOD` (nouveau code, 409 `not_launchable`, aucun job).
+  - Il remplace l'avertissement `LINE_WITHOUT_MEMBERS` de D129, qui n'est
+    plus produit. Le code reste dans l'énumération pour les clients qui le
+    connaissent, comme `VALIDATION_WILL_BE_INVALIDATED`.
+  - Les prérequis d'une ligne à générer (jeu de règles, membre, source
+    conditionnelle dans la période) sont lus par
+    `LineApplicabilityService::missingPrerequisites()`, la même méthode qui
+    rend une ligne `INCOMPLETE`. Le lanceur ne refait plus ses propres
+    contrôles.
+  - Ils sont aussi lus pour une ligne **déjà générée** qu'on régénère :
+    son applicabilité dit `APPLICABLE` (`GENERATED`, D194 inchangé pour la
+    publication), mais si ses membres sont tous partis, la régénérer est
+    refusé. Son ancienne génération reste telle quelle.
+  - **Génération des autres lignes** : le mécanisme actuel ne permet pas
+    de les générer à côté d'une ligne bloquée. Tout bloquant refuse tout
+    le lancement (D129 : jamais une partie des lignes générée sur un
+    refus). Ce comportement est conservé, conformément à l'arbitrage
+    (« uniquement si le mécanisme le permet »). Pour générer les autres,
+    il faut compléter la ligne ou la désactiver.
+- **C — des membres, aucun candidat pour certaines gardes** : pas une
+  configuration incomplète. La ligne est `APPLICABLE` et générée, les
+  gardes restent non couvertes, la ligne et le job sont `INCOMPLETE`,
+  jamais `COMPLETE`. Règles du solveur et de couverture inchangées.
+- **Hors périmètre** : l'endpoint technique de génération par période
+  (`PlanningGenerationController`) ne passe pas par le lanceur et ne
+  contrôle pas les membres, comme avant. Son contournement relève de L4d.
+
+### Tests
+
+- **`PlanningGenerationScopeTest`** (10, OR-Tools réel) :
+  - monopériode sans régression, scope inconnu (422) ;
+  - ligne sans demande exclue ;
+  - Trauma Delta : rien à générer, aucun job ;
+  - scope exigé : 409 avec `requiredScope` ;
+  - génération `unlocked_lines` avec empreintes de la ligne publiée et des
+    publications inchangées ;
+  - ligne publiée placée **après** dans l'ordre, engagement figé et
+    respecté ;
+  - ligne incomplète (`NO_ACTIVE_RULE_SET`, aucun job) ;
+  - échec partiel injecté (calendrier et ligne publiée intacts) ;
+  - Trauma Delta période 2 avec le reste D192, secondaire exclue, période 1
+    strictement inchangée.
+- **`PlanningGenerationScopeConditionalTest`** (4, OR-Tools réel) :
+  - renfort généré depuis le calendrier courant de la source publiée (après
+    réaffectation) ;
+  - `SOURCE_OF_PUBLISHED_LINE` ;
+  - second renfort de la même source à côté du premier publié ;
+  - changement concurrent de la source pendant le solve
+    (`source_calendar_changed`).
+- **Adapté** : `PlanningLaunchControllerTest` (une ligne sans garde est
+  exclue, `NO_LINE_TO_GENERATE` ; la demande sans jeu de règles reste
+  `NO_ACTIVE_RULE_SET`).
+- **Ajoutés à la clôture (2026-10-15)** :
+  - `PlanningGenerationScopeTest`, 4 tests (14 au total) : cas B sans scope
+    (aucun job, aucune ligne générée), cas B avec le scope à côté d'une
+    ligne publiée (empreinte inchangée), cas B sur une ligne déjà générée
+    dont les membres sont partis (ancienne génération intacte), cas C
+    (`APPLICABLE`, garde non couverte, ligne et job `INCOMPLETE`) ;
+  - `PlanningCyclesL4bMigrationTest`, 2 tests : `down` puis `up` sur une
+    planning générée ne change ni les jobs, ni les affectations, ni l'audit
+    `app:planning-cycles:audit`, et tous les jobs existants restent sans
+    scope ; `down` refuse dès qu'un job porte un scope ;
+  - `PilotHeaderActions.test.tsx` : libellés des trois bloquants.
+- **Adaptés au cas B** : `PlanningResultControllerTest::testSeveralLinesAreReportedIndependently`
+  et `PlanningStatisticsControllerTest` (2 tests) généraient exprès une
+  ligne **sans aucun membre**, désormais refusée. Ils utilisent un seul
+  membre absent le jour de la garde (cas C). Leurs assertions sont
+  inchangées (génération propre à la ligne, `INCOMPLETE`, 1 garde requise,
+  0 couverte, groupes séparés). Les statistiques vérifient en plus que le
+  job a réussi. L'ancien scénario reste couvert explicitement par les trois
+  tests du cas B.
+
+### Vérification de clôture (2026-10-15)
+
+- **Suite backend complète**, au premier plan, un fichier à la fois
+  (165 fichiers, aucun parallélisme, aucune interruption) : 1 550 tests,
+  19 755 assertions. 1 532 réussis, 18 ignorés, 0 échec, 0 erreur.
+  - Les 18 tests ignorés sont dans `tests/Deployment` (scripts, compose de
+    production et workflow CI absents du conteneur de dev). Ils tournent
+    en CI.
+  - `DutySwapControllerTest::testAnSmtpFailureNeverUndoesTheSwapAndTheEmailIsRetried`
+    a échoué une fois, pendant une exécution anormalement longue du fichier
+    (77 min au lieu de 3). Il n'a pas été reproduit : seul, OK en 17 s, et
+    le fichier entier relancé, 35/35 en 3 min 15. L4b ne touche pas aux
+    échanges. Test jugé sensible au temps écoulé, à surveiller.
+- **Frontend** : oxlint 0/0, `tsc` OK, Vitest 602/602 (57 fichiers).
+- **Mutations ciblées**, une par une, source restaurée et vérifiée à
+  l'octet après chacune : 16/16 tuées.
+  - exclusion d'une ligne sans demande ;
+  - bloquant `NO_MEMBER_IN_PERIOD`, dans le lanceur et dans le service ;
+  - prérequis relus pour une ligne déjà générée ;
+  - conservation des lignes publiées ;
+  - scope exigé, scope rejoué par le worker, aucun job pour rien ;
+  - `SOURCE_OF_PUBLISHED_LINE`, source conservée lue en direct ;
+  - engagement d'une ligne publiée placée après, repos avec les périodes
+    voisines ;
+  - écriture refusée si le calendrier source ou voisin a changé ;
+  - couverture jamais `COMPLETE` avec une garde non couverte.
+  - Sous la mutation « conservation des lignes publiées », la ligne
+    publiée n'est quand même pas réécrite : la garde I8 de
+    `PlanningGenerationService::create()` la refuse (défense en
+    profondeur).
+- **Migration** : en dev, appliquée le 2026-10-13, schéma identique à son
+  `up()` (`generation_scope VARCHAR(20) NULL`). Les 10 jobs existants sont
+  sans scope. `doctrine:schema:validate` ne signale que les contraintes SQL
+  écrites à la main des lots précédents (FK composites, index partiels),
+  rien sur cette colonne. Elle n'a **pas** été répétée sur une restauration
+  du dump de production (colonne additive nullable, aucune ligne écrite).
+
+## D196 — Publication par période et par ligne (lot L4c)
+
+- **Date** : 2026-10-16. L4c autorisé par l'utilisateur après validation de
+  L4b (D195). Non déployé, non commité ; le flag
+  `MEDVUE_PERIOD_CREATION_ENABLED` reste désactivé par défaut.
+- **Arbitrages de lancement** (2026-10-16) :
+  - **première publication d'une ligne dans une période déjà publiée** :
+    toujours explicite. « Republier » ne publie jamais une ligne jamais
+    publiée ; la fenêtre existante propose une section « Nouvelles lignes
+    à publier », cases décochées par défaut ;
+  - **« Publier » sans liste** : tout ou rien, comme avant. Une publication
+    partielle exige la liste explicite `lines`, jamais déduite ;
+  - **jamais d'`UPDATED` artificiel** : une ligne dont rien de publié ne
+    change n'est pas enregistrée.
+
+### Modèle
+
+- **`planning_publications.kind`** reste `FIRST` (première publication de
+  la période, une seule par période : index existant) ou `UPDATE` (toute
+  opération suivante sur la période).
+- **`planning_publications.cycle_complete`** (NOT NULL), figé : après la
+  publication, toutes les lignes qui comptent dans la période (D194) sont
+  publiées, aucune garde obligatoire n'a été publiée non couverte et aucun
+  renfort n'est indéterminé. Jamais recalculé ensuite.
+- **`planning_publication_lines`** (append-only, trigger) : une ligne par
+  ligne concernée par une publication.
+  - `kind` : `FIRST_FOR_LINE` (première publication de la ligne dans la
+    période, même si la période a déjà son `FIRST`) ou `UPDATED`
+    (contenu publié modifié) ;
+  - `duty_count` (gardes de la ligne figées par la publication),
+    `changed_duty_count` (0 pour `FIRST_FOR_LINE`, > 0 pour `UPDATED`,
+    contrainte en base) ;
+  - la ligne est conservée en **valeurs** (`line_stable_id`, `line_name`
+    au moment de la publication). En compatibilité mono-période (D188),
+    une ligne publiée peut encore être supprimée et sa période reste :
+    une clé `RESTRICT` vers la ligne casserait ce parcours ;
+  - la période de la ligne et la période du planning sont de vraies clés,
+    liées entre elles et au cycle de la publication par des clés
+    composites : une ligne de publication ne mélange jamais deux périodes ;
+  - un seul `FIRST_FOR_LINE` par période de ligne (index partiel unique).
+- **`planning_publication_notifications.first_lines`** : les lignes
+  publiées pour la première fois pour ce destinataire (email de première
+  publication), à côté de ses propres changements sur d'autres lignes.
+  Une personne reçoit un seul email. Une notification d'avant L4c garde
+  son sens (`changes` NULL = première publication).
+- **Entrées** (`planning_publication_entries`, inchangé) : chaque
+  publication fige les gardes de **toutes** les lignes publiées de la
+  période (référence des « Modifications non publiées »), jamais celles
+  d'une ligne non publiée ni d'une autre période.
+
+### Règles
+
+- **`publish`** (`period` exigé sur un planning à plusieurs périodes, 422
+  `period_required`) :
+  - sans `lines` : tout ou rien. Rien ne doit être publié dans la
+    période et toutes les lignes qui comptent doivent être prêtes, sinon
+    409 `not_publishable` avec le diagnostic de chaque ligne ;
+  - avec `lines` : ces lignes seulement. Chacune doit compter dans la
+    période, ne pas être publiée et être prête seule ; une ligne
+    conditionnelle part avec ou après sa ligne source. Les lignes non
+    choisies restent exactement comme elles sont ;
+  - dans une période déjà publiée, publier de nouvelles lignes seules est
+    refusé tant que les lignes publiées ont des modifications en attente
+    (409 `republish_required`) : leurs gardes seraient figées sans que
+    personne soit prévenu. Il faut republier en cochant les nouvelles
+    lignes.
+- **`republish`** : les modifications des lignes déjà publiées (`UPDATED`
+  pour les seules lignes qui changent), plus les `newLines` cochées
+  (`FIRST_FOR_LINE`), en une seule opération atomique. Une ligne non
+  publiée ne bloque plus la republication (Trauma Delta : une demande
+  apparue sur la ligne secondaire bloquait tout).
+- **Verdict par ligne** (préflight `lines[]`) : `published`,
+  `firstPublishable`, `blockers` (`NOT_GENERATED`, `INCOMPLETE`,
+  `UNCOVERED_DUTIES`, `INCONSISTENT_GROUPS`, `INVALID_ASSIGNMENTS`,
+  `CONFLICTS`, `UNDETERMINED_REINFORCEMENTS`), `sourceLineStableId`.
+  `republishable` ne dépend plus que des lignes publiées (une garde non
+  couverte y reste un retrait annoncé, D143).
+- **Erreurs de choix de lignes** (`details` nomme chaque ligne) : 422
+  `lines_required`, `invalid_lines`, `unknown_line` (y compris une ligne
+  sans demande) ; 409 `line_already_published`, `line_not_publishable`
+  (avec ses `blockers`), `source_line_not_published`,
+  `republish_required`.
+- **Publier N+1 avant N** : autorisé, avertissement
+  `EARLIER_PERIOD_UNPUBLISHED` (numéros des périodes antérieures dont une
+  ligne qui compte n'est pas publiée) dans `warnings` du préflight. Jamais
+  bloquant, jamais une écriture sur l'autre période.
+- **Sécurité** :
+  - le préflight est rejoué **sous le `CalendarWriteLock`**, dans la
+    transaction qui écrit : ce qui est contrôlé est ce qui est enregistré,
+    aucune réaffectation ni génération ne peut s'intercaler (avant L4c, il
+    tournait juste avant la transaction) ;
+  - verrou consultatif par planning (`publication_in_progress`) ;
+  - filets en base : `FIRST` et `FIRST_FOR_LINE` uniques, contraintes de
+    comptage, clés composites, triggers append-only.
+- **Conflits et repos entre périodes** : contrôlés par les règles
+  existantes (`ReassignmentCandidateService` lit toutes les périodes, lot
+  L3). Un engagement d'une autre période est signalé comme un engagement
+  d'une autre ligne (`CROSS_LINE_*`).
+- **Réaffectation après publication** : inchangée (D133, D143).
+
+### PDF et notifications
+
+- **Nouveaux PDF** :
+  - dates de la période ;
+  - libellé « Période N · du … au … » ;
+  - nom `planning-<slug>-periode-<N>.pdf` ;
+  - colonnes = les lignes publiées dans la période à la date de la
+    publication, lues dans `planning_publication_lines` (jamais le statut
+    courant), sous le nom de leur première publication.
+- **PDF historiques** : les octets stockés (D173) sont servis tels quels.
+  Une publication d'avant D173 (sans PDF stocké) garde son ancien rendu
+  (dates du planning, ancien nom de fichier).
+  `GET /api/plannings/{p}/publications/{publication}/pdf` sert n'importe
+  quelle publication passée.
+- **Audience** :
+  - première publication d'une ligne : ses membres dont l'adhésion
+    chevauche la période ;
+  - republication : les personnes dont les propres gardes changent
+    (D172, inchangé) ;
+  - une personne sur plusieurs lignes : un seul email ;
+  - jamais les membres d'une ligne sans demande, sauf via une autre ligne
+    publiée ;
+  - l'objet de l'email de première publication porte « — Période N ».
+- **Boîte d'envoi, reprise, idempotence** : inchangées (D172).
+
+### Migration `Version20261016090000`
+
+- **Additive** : table `planning_publication_lines`, colonnes
+  `cycle_complete` et `first_lines`, deux index uniques de support des clés
+  composites.
+- **Remplissage des publications existantes** (toutes de la période 1,
+  tout ou rien), depuis leurs entrées figées uniquement :
+  - première apparition d'une période → `FIRST_FOR_LINE` ;
+  - réapparition avec au moins une garde tenue autrement → `UPDATED` avec
+    ce nombre ; sinon aucune ligne ;
+  - `cycle_complete` = aucune entrée publiée non couverte ;
+  - lignes marquées `reconstructed`.
+- **Écriture sur une table append-only** : `cycle_complete`, trigger
+  désactivé puis réactivé dans la transaction (comme L1).
+- **Assertions qui annulent la migration** : chaque publication a son
+  `cycle_complete` ; aucune entrée ne vient d'une autre période ; toute
+  période publiée a sa première publication.
+- **Retour arrière** : `down()` refuse dès qu'une ligne non reconstruite
+  existe, c'est-à-dire dès la première publication faite avec L4c. Au-delà,
+  restauration de la sauvegarde prise avant la migration.
+- **Ordre** : L4c dépend de colonnes de L1 (`planning_cycle_id`) ; un
+  retour arrière jusqu'à L1 défait donc L4c en premier.
+
+### Écarts et limites
+
+- **Audience (spécification §5.7)** : la première publication d'une
+  période n'écrit plus aux « membres des lignes actives » mais aux membres
+  des lignes publiées par l'opération (arbitrage du lancement : jamais un
+  email pour une ligne sans demande).
+- **Plannings à une seule période** : leurs nouveaux PDF portent aussi
+  « Période 1 » et `-periode-1` (§5.7 appliqué à toutes les nouvelles
+  publications). Une notification d'avant L4c renvoyée après le
+  déploiement dit aussi « période 1 » dans son texte (son PDF reste celui
+  stocké).
+- **Conflit entre périodes** : présenté comme un conflit avec une autre
+  ligne (`CROSS_LINE_*`), inchangé depuis L3.
+- **Endpoint technique d'affectation** : non modifié (L4d).
+- **Lectures transverses** (« Mes gardes », agenda, rappel du samedi,
+  export, statistiques) : non modifiées dans ce lot.
+
+### Vérification de clôture (2026-10-17)
+
+- **Suite backend complète**, fichier par fichier, au premier plan :
+  169 fichiers, 1 575 tests, 20 585 assertions, **0 échec**, 18 ignorés
+  (les tests `tests/Deployment` qui exigent l'hôte, comme pour L4b).
+  - Ajouté ensuite : 1 test.
+  - `PlanningPublicationByLineTest` rejoué entier : 17/17.
+- **Frontend** :
+  - 57 fichiers, 610 tests ;
+  - `tsc`, lint, Prettier et build OK.
+  - `PlanningCalendar` « job déjà en cours » a échoué une fois sous la
+    charge d'une campagne de mutations, puis a passé seul (2/2) et dans son
+    fichier (21/21) : délai de 5 s, déjà observé.
+- **Mutations ciblées**, une à la fois, source restaurée et vérifiée :
+  24, dont **23 tuées**.
+  - **Backend, 20** : `UPDATED` artificiel ; republication qui publie
+    seule les lignes prêtes ; ligne déjà publiée, ligne non prête
+    acceptées ; source choisie avec son renfort refusée ; source publiée
+    ignorée ; « Publier » sans tout-ou-rien ; `republish_required`
+    sauté ; `cycle_complete` qui ignore la couverture ou les lignes non
+    publiées ; email unique qui perd les nouvelles lignes ; aucun email
+    aux membres d'une nouvelle ligne ; garde « non couverte » qui bloque
+    une ligne déjà publiée ; pas d'avertissement N+1 ; verrou du
+    calendrier absent ou pris après le préflight ; republication sans
+    `period` ; remplissage de `cycle_complete` ou des `UPDATED` faussé.
+  - **Frontend, 4** : lignes pré-cochées ; envoi de toutes les lignes
+    prêtes (« Republier » et publication partielle) ; ligne non prête
+    cochable.
+  - **Survivant, équivalent** : la borne « jusqu'à cette publication » des
+    colonnes du PDF. Le PDF est rendu à l'enregistrement, quand aucune
+    publication plus récente n'existe, et un PDF historique est servi
+    depuis ses octets stockés.
+- **Tests ajoutés pendant la clôture** :
+  - `testThePublicationReadsTheCalendarOnlyUnderTheCalendarWriteLock` :
+    ordre du SQL via `tests/SqlRecorder.php`, middleware DBAL de
+    l'environnement de test seulement. La transaction du test détient
+    déjà le verrou, donc aucune session concurrente ne peut l'observer.
+  - Publication partielle : une ligne prête mais non cochée n'est jamais
+    envoyée.
+
+### Répétition sur le dump de production (2026-10-17)
+
+- **Cadre** :
+  - dump `medvue_20261017_034501.dump` (le plus récent sur le serveur,
+    sha256 vérifié), procédure de D190 ;
+  - PostgreSQL jetable en mémoire, réseau Docker interne, image de
+    production, code L4c (`src/`, `migrations/`, `templates/`) monté en
+    lecture seule ;
+  - aucune donnée téléchargée hors du serveur ; conteneurs, réseau et
+    répertoire supprimés ensuite ;
+  - la production est restée en `Version20261010120000`.
+- **Données** : 1 planning, 2 lignes, 2 publications (`FIRST`,
+  `UPDATE`), 240 entrées, 0 document stocké, 0 notification,
+  32 livraisons.
+- **Montée L1 → L2 → L3 → L4b → L4c**, une à la fois :
+  - les 59 tables sont identiques à l'origine à chaque étape, sur chaque
+    colonne de départ ;
+  - audit : seule différence `planning_publication_lines` à L4c ;
+  - aucun invariant bloquant ; seule information, l'orpheline connue
+    (D190) ;
+  - L4b : seule la colonne `generation_scope`, aucun job avec scope.
+- **Remplissage L4c, vérifié par un calcul indépendant en SQL** :
+  - 1 `FIRST_FOR_LINE` (la première apparition de la période), 1
+    `UPDATED`, tous `reconstructed` ;
+  - 0 ligne manquante, 0 en trop ; 0 `UPDATED` sur une première
+    apparition ;
+  - `duty_count` égal aux entrées ;
+  - `UPDATED` : 92 gardes changées, égal au `changed_duty_count` annoncé
+    par la publication ;
+  - `cycle_complete` vrai pour les 2 (aucune entrée publiée non
+    couverte) ; `first_lines` toujours NULL ;
+  - période de chaque ligne cohérente avec sa publication.
+- **Lecture par l'application** (flag désactivé) :
+  - les 2 PDF historiques (antérieurs à D173) sont rendus ;
+  - état du planning : publié, `FIRST/complete` puis `UPDATE/complete`,
+    0 modification non publiée ;
+  - préflight : ligne principale publiée sans bloquant, ligne secondaire
+    neutre (sans demande), aucune ligne en attente.
+- **Retour arrière** :
+  - L4c → L4b : schéma identique à celui d'après L4b, données
+    identiques ;
+  - remontée : schéma identique ; reconstruction identique (empreinte
+    de toutes les colonnes sauf l'identifiant) ;
+  - descente complète L4c → L4b → L3 → L2 → L1 → origine : schéma et
+    données identiques à chaque étape.
+- **Point de non-retour** :
+  - démontré : une ligne de publication enregistrée par L4c elle-même
+    (`reconstructed = false`, insérée dans la copie) fait refuser
+    `down()` (« Restore a backup instead ») ;
+  - en production, ce point est atteint à la **première publication
+    après le déploiement de L4c** ;
+  - avant ce point, le retour arrière par migration est sûr ; après,
+    seule la restauration de la sauvegarde prise avant la migration
+    reste possible.
+
+## D197 — Réaffectation, candidats et complétion par période ; endpoint technique d'affectation fermé (lot L4d)
+
+- **Date** : 2026-10-17. L4d autorisé par l'utilisateur après validation de
+  L4c (D196). Non déployé, non commité ; le flag
+  `MEDVUE_PERIOD_CREATION_ENABLED` reste désactivé par défaut.
+- **Constat de départ** : depuis L3, le contrôle en direct d'une
+  réaffectation (`ReassignmentCandidateService`) et de la complétion lit
+  déjà les gardes de toutes les périodes de toutes les lignes actives
+  (§5.4). Restaient : le refus `multiple_periods_not_supported` des
+  candidats, de la réaffectation et du retrait (D187), `wasPublished` lu
+  hors du verrou, une garde de période orpheline contrôlée contre rien, et
+  l'endpoint technique d'affectation sans aucun contrôle.
+
+### Décision
+
+- **La période est celle de la garde** (arbitrage D6 de L4 : une opération
+  liée à une garde utilise la période de la garde). Candidats,
+  réaffectation et retrait ne prennent aucun paramètre `period` et ne
+  sont plus refusés sur un planning à plusieurs périodes. Le bloc (un
+  `DutyGroupInstance` reste dans une période : clé composite
+  `duties(group_instance_id, planning_period_id)`), la génération courante
+  et les événements écrits appartiennent à la période de la garde. Les
+  réponses portent `period {stableId, number}`.
+- **Contrôle en direct sur toutes les périodes** (règles inchangées) :
+  - chevauchement, `LEGAL_MIN_REST`, `TEAM_MIN_REST` (seuil le plus strict
+    des deux générations), auto-couverture, indisponibilités,
+    non-participation, adhésion à la date locale ;
+  - une garde de la même ligne dans la période voisine donne les motifs
+    `CROSS_LINE_*` (écart connu depuis L3, D189) ;
+  - les périodes lues viennent du planning de l'équipe de la période
+    modifiée, plus de sa ligne : la liste n'est jamais vide.
+- **Période orpheline** (sans ligne, §6.3) : une de ses gardes n'appartient
+  à aucun calendrier. Candidats, réaffectation et retrait répondent 404.
+- **`wasPublished` lu sous le verrou** : réaffectation, retrait et
+  complétion lisent en base, sous le `CalendarWriteLock` que prend aussi
+  toute publication, si la période est publiée
+  (`PlanningPeriodRepository::isPublishedNow`).
+  - Avant : le contrôleur lisait le statut de l'entité avant le verrou, et
+    la complétion celui de l'entité chargée avant la résolution. Une
+    publication validée entre-temps était enregistrée comme la
+    modification d'un brouillon.
+  - Le paramètre `wasPublished` de `DutyReassignmentService::reassign()` /
+    `unassign()` disparaît : le service le détermine lui-même.
+- **Droits inchangés** : `PlanningVoter::MANAGE_CALENDAR` (créateur,
+  OWNER/ADMIN d'une ligne), sur toutes les périodes, publiées ou non.
+- **Lignes conditionnelles** : la source d'un renfort est dans la même
+  période (L3). Les impacts signalés sont ceux du bloc modifié, donc de sa
+  période. Rien n'est écrit sur la ligne conditionnelle (D165).
+- **Complétion** : déjà par période depuis L3 ; seul `wasPublished`
+  change.
+- **Publications** (L4c) : une réaffectation n'écrit dans aucune table de
+  publication. Elle apparaît dans les « Modifications non publiées » de sa
+  période seulement.
+- **Endpoint technique d'affectation fermé** :
+  `POST /api/planning-generations/{id}/assignments` répond 410
+  `endpoint_removed` à tout appelant authentifié, sans rien lire ni
+  écrire.
+  - Raisons : aucun contrôle d'éligibilité, ni verrou, ni événement
+    d'audit ; écriture possible dans un calendrier publié ; droits
+    d'équipe au lieu de `PlanningVoter` ; aucun écran ne l'utilisait.
+  - Le besoin (affecter une garde non couverte) est couvert par
+    `POST /api/plannings/{p}/duties/{d}/reassign` avec
+    `expectedCurrentTeamMemberStableId: null`.
+  - Retirés : `DutyAssignmentService::createManual()`,
+    `CreateDutyAssignmentRequest`, `DuplicateDutyAssignmentException`.
+    Les invariants structurels (période, équipe, snapshot, une seule
+    affectation courante) restent contrôlés pour les chemins contrôlés.
+  - Option « sécuriser » écartée : elle aurait dupliqué la réaffectation.
+
+### Hors L4d (volontairement)
+
+- **Échanges** : toujours refusés sur un planning à plusieurs périodes
+  (`applySwap()`, `checkSwap()`).
+- « Mes gardes », agenda, rappel du samedi, exports, statistiques :
+  inchangés.
+- **Endpoints techniques de génération** (création, snapshot, résolution
+  synchrones) : toujours refusés en multipériode. En mono-période, ils ne
+  contrôlent toujours ni l'applicabilité ni les membres (D195) ; leurs
+  écritures passent par le verrou et le contrôle de période verrouillée
+  de `PlanningGenerationService`.
+
+### Tests
+
+- **`PlanningCycleReassignmentTest`** (14, OR-Tools et worker réels) :
+  - période 2 réaffectée, période 1 inchangée (empreinte, événements
+    compris) ; période déduite et renvoyée ; génération de la période 2 ;
+  - planning à une seule période : réponses identiques, `period` 1 ;
+  - repos entre la nuit du 30 avril (période 1) et le matin du 1er mai
+    (période 2) : candidat absent et enregistrement refusé
+    (`CROSS_LINE_LEGAL_MIN_REST`) dans les deux sens ; un refus n'écrit
+    rien ; une personne libre des deux côtés reste candidate ;
+  - nuit qui chevauche le matin suivant sans politique de repos :
+    `CROSS_LINE_CONFLICT` dans les deux sens ; enchaînement sans repos ni
+    chevauchement accepté (contrôle positif) ;
+  - indisponibilité déclarée après les générations, à cheval sur la
+    frontière : lue pour la garde de chaque période ;
+  - période publiée : réaffectation et retrait toujours possibles,
+    `wasPublished` et auteur ; brouillon de la période 2 :
+    `wasPublished` faux ; modifications non publiées par période ; tables
+    de publication (publications, entrées, lignes, documents,
+    notifications, envois) inchangées ;
+  - droits : membres simples et personne extérieure refusés (403) sur
+    les trois routes, ADMIN de ligne accepté ;
+  - période orpheline : 404 sur les trois routes, rien d'écrit ;
+  - verrou : les titulaires ne sont lus qu'après la prise du
+    `CalendarWriteLock` (ordre du SQL, `SqlRecorder`), réaffectation et
+    retrait ;
+  - deux enregistrements de part et d'autre de la frontière, valides
+    séparément, incompatibles ensemble : le second, sérialisé par le
+    verrou, est refusé et n'écrit rien ;
+  - publication validée après le chargement de la période (statut écrit
+    hors de l'EntityManager) : l'événement dit `wasPublished` ; même cas
+    pendant la résolution d'une complétion ; la période 2 n'est jamais
+    touchée ;
+  - endpoint technique : 410 sur un planning à plusieurs périodes, rien
+    d'écrit.
+- **`PlanningCycleConditionalReassignmentTest`** (2) : un changement sur la
+  ligne source ne signale que le renfort de sa période (4 mai, jamais le
+  5 janvier), sans écrire sur la ligne de renfort ; un renfort de la
+  période 2 ne prend un titulaire que si sa propre source l'exige.
+- **`DutyAssignmentControllerTest`** (3, réécrit) : 410 pour OWNER, ADMIN
+  et MEMBER, aucune affectation ni événement ; même réponse pour une
+  génération inconnue ; 401 sans jeton.
+- **`DutyAssignmentServiceTest`** (5, nouveau) : les invariants
+  structurels autrefois couverts par l'endpoint (MANUAL forcé, pas de
+  flush, garde d'une autre période, membre d'une autre équipe, membre
+  arrivé après le snapshot, deux affectations courantes refusées par la
+  base).
+- **Adaptés** : `ConditionalCalendarTest` (l'ancien chemin bas niveau
+  répond 410), `PlanningAssignmentControllerTest` et
+  `PlanningGenerationServiceTest` (fixtures sans `createManual()`),
+  `PlanningCycleGenerationTest` et `PlanningJobControllerTest` (signature
+  de `unassign()`).
+
+### Vérification de clôture (2026-10-17)
+
+- **Suite backend complète**, fichier par fichier au premier plan : 172
+  fichiers, 1 592 tests, 21 148 assertions, 0 échec, 0 erreur, 18 ignorés
+  (BackupScripts 6, CiWorkflow 3, DeployScripts 3, ProdCompose 6, comme
+  en L4b/L4c), 4 428 s. Elle couvre aussi le test d'ordre du verrou et le
+  `SqlRecorder` ajoutés à la clôture de L4c.
+- **Frontend** (aucun fichier modifié par L4d) : 57 fichiers, 610 tests ;
+  `tsc` et lint (0 avertissement) OK ; build OK.
+  - Prettier sur tout le dépôt : 138 fichiers signalés, dont 119 par les
+    seules fins de ligne CRLF de la copie Windows, et 19 avec de vrais
+    écarts, déjà présents sur `master` et non modifiés par ce chantier.
+- **php-cs-fixer** (chemins explicites, fichiers modifiés par L4d) :
+  conforme. Les seuls écarts signalés portent sur les fins de ligne des
+  fichiers en CRLF.
+- **Mutations** (une à la fois, toujours restaurées) : 14 lancées, 14
+  tuées :
+  - `wasPublished` lu sur l'entité (réaffectation, complétion), forcé à
+    faux (retrait) ou à vrai ;
+  - garde orpheline acceptée ;
+  - autres périodes ignorées, ou engagements limités à la génération
+    modifiée ;
+  - verrou absent, ou pris après les lectures ;
+  - endpoint technique qui ne répond plus 410 ;
+  - candidats de nouveau refusés en multipériode ; réponse qui nomme la
+    période 1 ;
+  - source d'un renfort lue dans la période 1 ; dépendants non signalés.
+- **Migration** : aucune.
+
+## D198 — Échanges, « Mes gardes », agenda et rappel du samedi sur plusieurs périodes (lot L4e)
+
+- **Date** : 2026-10-17. L4e autorisé par l'utilisateur après validation de
+  L4d (D197). Non déployé, non commité ; le flag
+  `MEDVUE_PERIOD_CREATION_ENABLED` reste désactivé par défaut.
+- **Constat de départ** :
+  - « Mes gardes » (donc l'agenda) et le rappel du samedi laissaient de
+    côté tout planning à plusieurs périodes (`hasSeveralCycles()`).
+  - Les échanges le refusaient (`multiple_periods_not_supported`) :
+    `heldUnit()`, `accept()`, `applySwap()`, `checkSwap()`.
+  - La revalidation d'un échange lisait le statut publié sur l'entité,
+    chargée avant le verrou.
+
+### Décision
+
+- **Une seule lecture de ce que voient les membres** :
+  `CurrentCalendarReader::readPublished()` lit, cycle par cycle, le
+  calendrier courant de chaque période dont **le statut propre** est
+  `PUBLISHED`.
+  - Jamais « la » période d'une ligne, jamais un statut global du
+    planning. Une période en brouillon reste invisible, même si les autres
+    périodes de la ligne sont publiées.
+  - Chaque garde est lue dans sa période. Un bloc ne traverse jamais deux
+    périodes (D189, option A), donc une frontière ne montre rien deux fois.
+  - Utilisée par « Mes gardes », l'agenda et le rappel du samedi.
+- **« Mes gardes »** (`GET /api/me/duties`) :
+  - toutes les périodes publiées de tous les plannings du membre ;
+  - chaque unité porte `period {stableId, number}` ;
+  - adhésions terminées incluses, comme avant (D168) ;
+  - lignes désactivées exclues, comme avant ;
+  - heures inchangées : instants en UTC, dates locales du planning. La
+    nuit du 30 avril qui finit le 1er mai est une garde du 30 avril, de sa
+    propre période.
+- **Agenda** :
+  - le flux reprend exactement « Mes gardes » ; règles de génération et
+    de mise à jour inchangées (D170) ;
+  - **UID** = identifiant stable du bloc, ou de la garde isolée, suivi de
+    `@medvue` (plus la date de début pour une fraction non contiguë,
+    inchangé). Il ne dépend ni de la période, ni de la génération, ni de
+    l'écran : il reste le même après une réaffectation (l'événement passe
+    d'un flux à l'autre), une republication ou la publication d'une autre
+    période ;
+  - unique dans un flux : une unité appartient à une seule période.
+- **Rappel du samedi** :
+  - la semaine suivante (lundi → lundi, fuseau du planning) est lue sur
+    toutes les périodes qu'elle touche, chacune selon son propre statut ;
+  - un seul email par personne et par planning pour toute la semaine ;
+    une période en brouillon en est exclue ;
+  - idempotence inchangée : `(user, planning, semaine)`. Conséquence
+    (inchangée) : une période publiée après l'envoi du samedi n'ajoute
+    pas de second email cette semaine-là ;
+  - destinataires inchangés : les titulaires actifs de gardes de la
+    semaine, adhésion terminée comprise si la garde est la leur.
+- **Échanges** :
+  - **La période est celle des gardes.** Une garde est échangeable quand
+    sa propre période est `PUBLISHED`, quel que soit le statut des autres
+    périodes. Une garde de période orpheline (sans ligne) ne l'est jamais.
+  - **Deux périodes différentes : refus en V1**, à chaque étape :
+    - demande convenue et proposition : 422 `other_period`, avant toute
+      écriture ou notification ;
+    - revalidation à l'acceptation : `DutySwapNotApplicableException::OTHER_PERIOD`
+      (409 `swap_not_applicable`, raison `other_period`) ;
+    - deux lignes différentes restent `NOT_SWAPPABLE`, comme avant.
+  - **Options de création** : les unités des collègues sont lues dans la
+    seule période de la garde offerte, publiée par construction.
+    `proposableUnits` ne garde que les unités du membre dans cette même
+    période. Chaque unité décrite porte `period`.
+  - **Contrôle en direct sur toutes les périodes** (règles inchangées, via
+    `ReassignmentCandidateService`, D197) : chevauchement, repos,
+    engagements, indisponibilités. La garde cédée reste exclue des
+    engagements de celui qui la cède (D178).
+  - **Statut lu en base sous le verrou** : la revalidation lit
+    `PlanningPeriodRepository::isPublishedNow()` (comme D197). Une période
+    archivée entre-temps est vue.
+  - **Verrou** : l'acceptation prend le `CalendarWriteLock` avant de lire
+    les titulaires (inchangé, vérifié par l'ordre du SQL).
+  - **Lignes conditionnelles** : la source d'un renfort est dans la même
+    période (L3). Un échange qui changerait les renforts requis est refusé
+    (`changes_reinforcements`, D165) ; un échange entre deux renforts
+    requis est accepté.
+  - **Audit** : événements inchangés (`DutyAssignmentEvent` avec
+    `wasPublished` vrai et la proposition, `DutySwapEvent`), dans la
+    génération de la période de la garde.
+  - **Droits inchangés** (D178) : seul le décideur accepte ou refuse ; un
+    destinataire doit être un membre actif de la ligne.
+  - **Échanges en cours sur un planning à une période** : rien ne change.
+    Les mêmes contrôles, et `period` vaut 1.
+- **Frontend** : types `MyDuty.period` et `SwapUnit.period` ajoutés. Aucun
+  composant visuel modifié.
+
+### Hors L4e (volontairement)
+
+- Statistiques, exports PDF/XLSX, export des absences (L5 et suivants).
+- Libellés `CROSS_LINE_*` pour un conflit avec la même ligne dans la
+  période voisine (écart connu depuis L3, D189).
+- Second rappel quand une période est publiée après l'envoi du samedi
+  (règle d'idempotence existante conservée).
+
+### Tests
+
+- **`PlanningCycleSwapTest`** (10, OR-Tools et worker réels) :
+  - échange accepté dans la période 2 : titulaires échangés, lignes
+    `SWAP`, événements `wasPublished` liés à la proposition dans la
+    génération de la période 2 ; période 1 inchangée (empreinte) ; tables
+    de publication inchangées ; modifications non publiées de la période
+    2 seulement ;
+  - échange entre deux périodes : 422 `other_period` (demande convenue et
+    proposition), aucune écriture ; `proposableUnits` limités à la période
+    de la garde offerte ; revalidation forcée : `OTHER_PERIOD` ;
+  - frontière respectant les repos : accepté, la nuit de la période 1
+    inchangée ;
+  - chevauchement avec la période voisine : `CROSS_LINE_CONFLICT` dans
+    les deux sens, rien d'écrit ;
+  - réaffectation dans la période voisine entre la demande et
+    l'acceptation : acceptation refusée, `SWAP_VALIDATION_FAILED`, rien
+    d'écrit ;
+  - période archivée hors de l'EntityManager avant l'acceptation :
+    `period_not_published` ;
+  - ordre du SQL : titulaires lus après le verrou ;
+  - période 2 en brouillon, période 1 publiée : garde de la période 2 non
+    échangeable (409 `duty_not_swappable`) ni affichée, période 1
+    échangeable ;
+  - droits : requérant 403, tiers et gestionnaire 404, destinataire hors
+    ligne 422 ; échange dans la période 1 après publication de la période
+    2 ; historique des gestionnaires avec la période ;
+  - options de création : seules les unités de la période de la garde
+    offerte.
+- **`PlanningCycleConditionalSwapTest`** (2) : échange sur la ligne source
+  qui change les renforts de sa période refusé (`changes_reinforcements`,
+  rien d'écrit) ; échange de deux renforts requis de la période 2 accepté,
+  ligne source et période 1 inchangées.
+- **`PlanningCycleMemberReadsTest`** (6) :
+  - « Mes gardes » sur trois périodes, la 3 publiée avant la 2 : jamais la
+    période en brouillon ; elle apparaît à sa publication ; chaque garde
+    une fois ; `period` exact ;
+  - nuit à la frontière : période 1, une seule date, heures réelles ; un
+    seul événement d'agenda le 30 avril ;
+  - adhésion terminée : la garde reste dans « Mes gardes » et l'agenda ;
+  - agenda : deux périodes publiées, UID stables après réaffectation (de
+    flux en flux), republication et publication d'une autre période ;
+  - rappel d'une semaine qui traverse deux périodes : les deux listées,
+    une fois, un seul email ; second passage sans envoi ; période en
+    brouillon exclue.
+- **`SinglePeriodCompatibilityTest`** : flag désactivé, planning à une
+  période : échange, « Mes gardes » (`period` 1), agenda et rappel comme
+  avant.
+- **Adapté** : `PlanningCycleControllerTest` (« Mes gardes » lit
+  désormais la période 1 publiée d'un planning à deux périodes).
+
+### Vérification de clôture (2026-10-18)
+
+- **Suite backend complète**, fichier par fichier au premier plan : 175
+  fichiers, 1 611 tests, 22 281 assertions, 0 échec, 0 erreur, 18 ignorés
+  (BackupScripts 6, CiWorkflow 3, DeployScripts 3, ProdCompose 6, comme
+  en L4d), 4 710 s.
+  - `InvitationRegistrationTest`, sans rapport avec L4e : un premier
+    passage a été interrompu par la mise en veille de la machine (32 608 s,
+    1 échec). Un relancement isolé a eu 1 échec, venu de l'état du
+    limiteur de débit laissé par le passage interrompu. Le relancement
+    complet est vert (17 tests) ; c'est lui qui est compté.
+- **Frontend** : 57 fichiers, 610 tests, verts sur trois des quatre passages
+  complets. Le deuxième a eu un échec intermittent, non reproduit et non
+  identifié (la minuterie de 5 s de `PlanningCalendar` est déjà connue
+  comme instable). `tsc` et oxlint (0 avertissement) OK ; build OK.
+- **Prettier** (fichiers modifiés) : conforme. **php-cs-fixer** (chemins
+  explicites) : conforme ; seules les fins de ligne des fichiers en CRLF
+  sont signalées.
+- **Mutations** (une à la fois, toujours restaurées) : 18 lancées, 18
+  tuées :
+  - lecture : périodes en brouillon lues ; première période seulement ;
+    statut global du planning ; semaine qui saute la période suivante ;
+    rappel qui ignore les plannings à plusieurs périodes ; chaque période
+    lue deux fois ; « Mes gardes » qui nomme la période 1 ;
+  - agenda : UID dépendant de la période ;
+  - échanges : demande entre deux périodes acceptée ; revalidation qui dit
+    `not_swappable` ; revalidation qui ignore la période ; statut lu sur
+    l'entité ; options lues sur toutes les périodes ; `proposableUnits`
+    de toutes les périodes ; garde échangeable selon le statut global ;
+    échanges de nouveau refusés en multipériode ; unité sans période ;
+    aucun verrou à l'acceptation (les deux acquisitions retirées).
+- **Migration** : aucune.
+
+## D199 — Rappel du samedi : calendrier opérationnel, modifications non republiées signalées
+
+- **Date** : 2026-10-18. Arbitrage de l'utilisateur après l'audit des
+  rappels (clôture de L4e, D198). Non déployé, non commité.
+- **Constat de l'audit** :
+  - le rappel lit le calendrier courant (`DutyAssignment.current`, D146),
+    filtré seulement par le statut `PUBLISHED` de chaque période ; il ne
+    lit jamais les entrées figées des publications ;
+  - une réaffectation manuelle ou une complétion après publication
+    n'envoie aucun email ; un échange accepté envoie sa confirmation aux
+    deux médecins (D178-D180) ;
+  - un médecin pouvait donc recevoir comme sienne une garde réattribuée
+    sans republication, sans rien qui le distingue du dernier PDF diffusé ;
+  - idempotence : `weekly_duty_reminders (user, planning, week_start)`,
+    écrite après un envoi accepté ; seul le nombre de gardes est gardé.
+
+### Décision
+
+- **La source reste le calendrier courant** : le rappel annonce les gardes
+  que le médecin doit effectivement assurer au moment de l'envoi
+  (réaffectation, complétion, échange accepté compris). Pas de retour à la
+  dernière publication : un ancien titulaire n'est jamais convoqué pour
+  une garde réattribuée dans MedVue. Cohérent avec « Mes gardes » et
+  l'agenda (D168, D170, D198).
+- **Comparaison** avec la dernière publication **de chaque période**
+  (`PlanningPublicationRepository::findLatestForCycle()`), garde par garde,
+  par personne (`PublicationChangeService::changesSince()`, entrées
+  append-only) : A → B → A n'est pas une modification.
+- **Présentation** :
+  - semaine identique à ce qui a été diffusé : aucun ajout ;
+  - garde tenue par le médecin sans lui avoir été diffusée : marquée
+    « (changement pas encore republié) » ;
+  - dans ce cas, ou s'il a perdu une garde diffusée de la semaine tout en
+    en gardant une autre, un paragraphe : « Ce rappel tient compte de
+    changements faits depuis la dernière diffusion du planning (une garde
+    attribuée, retirée ou échangée). Ils n'ont pas encore été republiés :
+    ils ne figurent pas dans le dernier planning PDF que vous avez reçu. » ;
+  - dates, horaires et affectations : ceux en vigueur ; texte et HTML.
+- **Inchangés** : idempotence, jamais d'email vide, emails des échanges,
+  publication et republication (D172), droits, historique.
+
+### Limites documentées
+
+- **Une réaffectation manuelle ne prévient personne immédiatement.** Un
+  ancien titulaire sans autre garde cette semaine-là ne reçoit aucun
+  rappel, donc aucune mention. Évolution distincte, à traiter avec un
+  mécanisme fiable et ciblé ; aucun mécanisme créé ici.
+- Une période publiée après l'envoi du samedi : sa première publication
+  prévient ses participants ; pas de second rappel (idempotence).
+- Fenêtre de quelques secondes : calendrier lu une fois par planning, puis
+  emails un par un (faiblesse connue, reportée le 2026-10-12).
+- **Traçabilité future** (pas de migration ici) : conserver pour chaque
+  rappel envoyé l'identifiant d'envoi (ligne `weekly_duty_reminders`), la
+  ou les publications de référence (une par période), les gardes
+  annoncées (identifiant stable de la garde ou du bloc, dates, ligne), le
+  titulaire annoncé, le marquage « pas encore republié » et le texte de
+  l'avertissement — pour pouvoir répondre « qu'a-t-on dit à ce médecin ? ».
+
+### Tests
+
+`WeeklyDutyReminderUnpublishedChangesTest` (7, une période) : semaine
+identique sans avertissement ; réaffectation non republiée ; complétion non
+republiée ; A → B → A ; republication avant le rappel ; republication après
+(emails D172, aucun second rappel) ; le rappel n'écrit rien d'autre.
+`PlanningCycleReminderChangesTest` (4) : semaine sur deux périodes comparée
+à la publication de chacune ; republication d'une seule période ; échange
+accepté ; période publiée après un premier rappel. Flag désactivé :
+`SinglePeriodCompatibilityTest`.
+
+## D200 — Exports sur plusieurs périodes, limités aux périodes publiées et aux droits de chacun (lot L4f)
+
+- **Date** : 2026-10-18. L4f autorisé par l'utilisateur après D199. Non
+  déployé, non commité ; flag `MEDVUE_PERIOD_CREATION_ENABLED` désactivé
+  par défaut.
+- **Constat de départ** :
+  - l'export des gardes lisait `getSingleCyclePeriod()` : il échouait sur
+    un planning à plusieurs périodes ;
+  - **faille, y compris en monopériode** : l'export n'exigeait que
+    `PlanningVoter::VIEW` (tout membre) et acceptait toute ligne active,
+    même jamais publiée, avec les modifications non publiées ; un membre
+    pouvait donc exporter par l'API une ligne en brouillon ;
+  - l'export des absences couvrait toujours tout le planning.
+
+### Décision
+
+- **Plage** : `from`/`to` (fin exclusive) dans les bornes du planning,
+  sur autant de périodes que voulu ; `period` (stableId) = raccourci pour
+  les bornes d'une période, jamais combiné avec `from`/`to` (422
+  `period`). Limite PDF de 800 rangées inchangée.
+- **Seules les périodes de ligne `PUBLISHED` sont exportées.** Pour chaque
+  période touchée et chaque ligne choisie :
+  - publiée : exportée ;
+  - autre statut : jamais exportée, jours « Non publiée » (jamais « — »),
+    listée « Non inclus car non publiés : Période 2 — Seniors » ;
+  - pas de période de ligne : rien à montrer (cellule vide) ;
+  - aucune ligne publiée sur la plage : 409 `not_published_in_range`.
+- **Ce que montre une période publiée dépend du demandeur** :
+  - **gestionnaire** (`MANAGE_CALENDAR` : créateur ou ADMIN/OWNER d'une
+    équipe du planning, D147) : le calendrier courant de toutes les lignes
+    actives ; comparé, par période, à sa dernière publication (A → B → A
+    n'est pas une modification) ; s'il diffère sur le périmètre exporté, le
+    document est marqué **« Calendrier opérationnel — modifications non
+    publiées possibles »** (en-tête et pied du PDF, en-tête imprimé et
+    feuille « Informations » du XLSX) ; sinon « Calendrier courant —
+    identique à la dernière diffusion » (feuille « Informations » seule) ;
+  - **membre** : exactement ce que la dernière publication de chaque
+    période a diffusé (entrées append-only, titulaire par titulaire), jamais
+    une modification faite depuis ; une garde non diffusée est omise ;
+    marqué « Planning diffusé — dernière diffusion le … » ; une ligne
+    jamais publiée est refusée comme une ligne inconnue (422
+    `lines[i].stableId`, même message).
+- **Identification des périodes** (planning à plusieurs périodes
+  seulement ; monopériode inchangé) : PDF — liste des périodes couvertes
+  sous le titre, étiquette « P2 » sur le premier jour exporté de chaque
+  période ; XLSX — colonne « Période » après « Jour » (feuille Planning),
+  en dernière colonne (feuille Par personne). Nouvelle feuille
+  « Informations » (toujours, en dernier) : document, dates, nature,
+  périodes, lignes non incluses, date de génération.
+- **Historique** : un export n'écrit rien, n'est jamais une publication et
+  ne remplace jamais un PDF de publication stocké (D173), servi à l'octet
+  près.
+- **Absences** : `GET …/availability-export.pdf?period={stableId}` ou
+  `?from=&to=` (fin exclusive), tout le planning sans paramètre (inchangé) ;
+  422 `validation_failed` pour une plage invalide ; droits
+  `MANAGE_AVAILABILITY` vérifiés avant toute lecture de la plage ;
+  participants, jours et adhésions limités à la plage ; « Période 2 » ou
+  « Périodes 1 à 2 » dans l'en-tête sur un planning à plusieurs périodes.
+  Le suivi des disponibilités exporte la période qu'il affiche.
+- **Frontend** : la note du dialogue dit ce que sera le document selon le
+  rôle ; un membre ne se voit proposer que les lignes publiées ; message
+  pour `not_published_in_range` ; types seulement, aucun composant visuel
+  refondu.
+
+### Hors L4f
+
+Statistiques (L5), SurgicalHub, PDF de publication (inchangés), conservation
+des exports (aucune).
+
+### Limites
+
+- Une ligne ajoutée après publication n'a pas de période de ligne : pour un
+  gestionnaire, colonne vide (elle ne participe pas encore), non listée.
+- Export membre : un renfort « non évalué » au moment de la diffusion se
+  lit « Non attribué » (l'entrée ne garde que le titulaire).
+- Le XLSX ne porte l'avertissement que dans l'en-tête imprimé et la
+  feuille « Informations » (pas de ligne de titre dans la feuille
+  Planning, pour ne pas décaler le tableau, ses filtres et son volet figé).
+
+### Tests
+
+- Exports : `PlanningCycleExportTest` (7), `PlanningCycleAbsenceExportTest`
+  (5), `PlanningExportControllerTest` (+1 : ligne jamais publiée, ligne d'un
+  autre planning ; réaffectation : gestionnaire vs membre),
+  `PlanningExportRenderersTest` (+1 : périodes, « Non publiée »,
+  avertissement, feuille Informations), `SinglePeriodCompatibilityTest`
+  (+1, flag désactivé : exports et absences).
+- Frontend : `exportModel.test.ts` (`isExportableLine`), `ExportModal.test.tsx`
+  (note selon le rôle, lignes proposées, `not_published_in_range`),
+  `AbsenceExportButton.test.tsx` (période du suivi envoyée).
+
+### Vérification de clôture (2026-10-18, D199 et D200)
+
+- **Suite backend complète**, fichier par fichier au premier plan : 179
+  fichiers, 1 637 tests, 23 383 assertions, 0 échec, 0 erreur, 18 ignorés
+  (les mêmes que L4e).
+  - Incident de l'outil de mutation, sans rapport avec le code : les
+    gabarits mutés étaient restaurés avec `cp -p` (date d'origine
+    conservée), Twig gardait donc en cache la version mutée (R6 : marque
+    retirée). `PlanningCycleReminderChangesTest` a échoué (3) dans la
+    suite pour cette raison. Gabarits identiques à leur sauvegarde, cache
+    Twig de test vidé, restauration corrigée (`cp` sans `-p`) ; les six
+    fichiers déjà passés qui rendent ces gabarits ont été relancés : verts.
+    Les mutations de gabarits ont été rejouées après correction.
+- **Frontend** : 57 fichiers, 616 tests verts ; `tsc` et oxlint
+  (0 avertissement) OK ; build OK ; Prettier conforme sur les fichiers
+  modifiés.
+- **php-cs-fixer** (chemins explicites) : conforme, hors fins de ligne.
+- **Mutations** (une à la fois, toujours restaurées et vérifiées) : 24
+  lancées, 24 tuées.
+  - rappel : marque jamais posée ; perte d'une garde ignorée ; publication
+    de tout le planning au lieu de celle de la période ; tout marqué ;
+    avertissement texte toujours affiché ; marque texte absente ;
+    avertissement HTML absent ;
+  - exports : membre lisant le calendrier courant ; tout demandeur traité
+    en gestionnaire ; ligne en brouillon acceptée pour un membre ; période
+    non publiée exportée ; changement jamais détecté ; pas de 409 sans
+    publication ; colonne « Période » absente ; « Non publiée » absent du
+    XLSX ; raccourci `period` ignoré ; `period` combiné à `from` ; nature
+    absente du PDF ; « Non publiée » absent du PDF ; titulaire diffusé
+    remplacé par l'actuel ;
+  - absences : plage ignorée ; `to` hors planning accepté ; `period`
+    combiné à `from` ;
+  - frontend : lignes en brouillon proposées à un membre.
+  - Une mutation a d'abord survécu (membre lisant le calendrier courant) :
+    les comptes de test portaient tous le même nom. Noms distincts donnés
+    dans `PlanningCycleExportTest` ; la mutation est ensuite tuée.
+- **Migration** : aucune.
+
+## D201 — Statistiques par période, cumul publié et données provisoires (lot L5)
+
+- **Date** : 2026-10-18. L5 autorisé par l'utilisateur après validation de
+  D199 et L4f (D200). Non déployé, non commité ; flag
+  `MEDVUE_PERIOD_CREATION_ENABLED` désactivé par défaut. Aucune migration.
+- **Audit** :
+  - `PlanningStatisticsService` lisait `getSingleCyclePeriod()` : sur un
+    planning à plusieurs périodes, la statistique répondait 409
+    `multiple_periods_not_supported`.
+  - `currentPeriod` et `cumulative` étaient **le même objet** (D132 : une
+    seule période par ligne à l'époque).
+  - Source : les affectations courantes (`DutyAssignment.current`) de la
+    génération COMPLETED la plus récente de chaque période de ligne, garde
+    par garde ; jours par jour de semaine réel, familles par jour, charge
+    pondérée = Σ `DutyType::workloadValue` par garde (D147), une ligne de
+    résultat par adhésion (stint), un groupe par ligne. D193 vérifié : un
+    bloc de reste (D192) compte ses jours réels et sa charge réelle ; son
+    « occurrence » de famille n'existe que pour le solveur.
+  - Droits : `VIEW` — un simple membre pouvait lire par l'API les
+    statistiques d'une génération non publiée (l'interface ne lui montrait
+    pas le bouton).
+
+### Décision
+
+- **Source inchangée** : le calendrier opérationnel courant (affectations
+  courantes, réaffectations et échanges compris), comme les statistiques
+  déjà affichées et la spécification §7.5. Aucune formule changée.
+- **Trois ensembles de périodes de ligne, comptés par les mêmes règles** :
+  - **période sélectionnée** (`currentPeriod`) : la période de chaque ligne
+    dans le cycle choisi, si elle a une génération ; chaque groupe porte
+    `publication` (PUBLISHED / UNPUBLISHED) et `provisional` ;
+  - **cumul publié** (`cumulative`) : les périodes de ligne **publiées**
+    (`PUBLISHED`, ou `ARCHIVED` — jamais produit aujourd'hui) des périodes 1
+    à la sélectionnée incluse ; une période est publiée **ligne par ligne** :
+    une ligne publiée ne publie pas sa voisine ;
+  - **provisoire** (`provisional`) : les autres périodes de ligne ayant une
+    génération, sur les mêmes périodes ; **jamais additionné** au cumul.
+  - Chaque période de ligne est d'un seul côté : aucun double comptage, même
+    dans une période partiellement publiée.
+  - Une ligne sans génération (rien demandé, pas encore générée) : aucun
+    groupe, aucune charge ; `NOT_GENERATED` dans `period.lines`.
+  - Un groupe = une ligne, jamais deux lignes fusionnées (une personne sur
+    deux lignes a une ligne de résultat dans chaque groupe) ; une adhésion
+    terminée ou commencée entre deux périodes garde sa propre ligne de
+    résultat, avec ses seules gardes.
+- **Point d'extension** : `CycleHistoryReader` (spécification §9) — périodes
+  de ligne des cycles `≤` sélectionné, génération courante, publiée ou non.
+  Le solveur ne le lit pas.
+- **API** : `GET /api/plannings/{p}/statistics?period={stableId}` :
+  - `period` : `stableId`, `number`, `startsAt`, `endsAt`, `lines` (`lineStableId`,
+    `lineName`, `publication` PUBLISHED / UNPUBLISHED / NOT_GENERATED) ;
+  - `currentPeriod`, `cumulative`, `provisional` : `startsAt`, `endsAt`,
+    `throughPeriodNumber`, `periodNumbers` (périodes réellement sommées),
+    `groups` (`publication`, `provisional`, `periodNumbers`, `members`
+    inchangés) ;
+  - `period` obligatoire sur un planning à plusieurs périodes (422
+    `period_required`), facultatif sur une seule (comportement d'avant) ;
+    période inconnue : 404 `period_not_found`.
+- **Droits** : lecture `VIEW` ; seul un gestionnaire (`MANAGE_CALENDAR`)
+  voit ce qui n'est pas publié. Pour un simple membre : groupes non publiés
+  retirés de `currentPeriod`, `provisional` = null, cumul publié identique
+  à celui d'un gestionnaire.
+- **Frontend (minimal, en attendant L6)** : onglet « Cumul publié » (au lieu
+  de « Cumul du planning »), message « Aucune garde publiée pour le moment »,
+  groupe provisoire titré « — provisoire (non publiée) » ; types et
+  `fetchPlanningStatistics(…, periodStableId?)` prêts pour L6.
+
+### Écarts à la spécification §7.5
+
+- Forme de réponse : `cumulative` (publié) et `provisional` à plat au lieu
+  de `cumulative.published` / `cumulative.unpublished`, et `currentPeriod`
+  conservé : l'écran actuel lit `currentPeriod` et `cumulative` ; aucun
+  nouveau composant avant L6.
+- Les groupes restent au niveau de la réponse (`currentPeriod.groups`), pas
+  dans `period.lines[].groups`.
+
+### Hors L5
+
+Compensation d'équité entre périodes, solveur, règles de publication,
+composants `features/periods` (L6), SurgicalHub.
+
+### Limites
+
+- Changement visible sur un planning à une période : avant publication, le
+  « Cumul publié » est vide (avant L5, il répétait la période) ;
+  l'information est dans `provisional`.
+- Les familles restent comptées **par jour** (D193) ; aucun compteur
+  d'occurrences de famille par bloc n'est exposé (évolution possible, à
+  arbitrer).
+- Une période de ligne orpheline (ligne supprimée, D191) n'entre dans
+  aucune statistique, comme avant.
+- Le cumul publié lit le calendrier courant : il peut contenir des
+  modifications non republiées (comme les statistiques d'avant L5) ; il
+  n'est pas un « état diffusé » (contrairement à l'export d'un membre, D200).
+
+### Tests
+
+- `PlanningCycleStatisticsTest` (6) : trois périodes (1 et 2 publiées, 3 en
+  préparation) lues depuis chacune ; réaffectation après publication ;
+  charge pondérée réelle ; adhésion terminée / commencée entre deux
+  périodes ; membre et droits (422, 404, 403) ; période partiellement
+  publiée, personne sur deux lignes, ligne sans demande (`NOT_GENERATED`).
+- `PlanningCycleStatisticsBlocksTest` (2, OR-Tools réel) : chaque périmètre
+  comparé à un recomptage SQL indépendant ; bloc de week-end entier (trois
+  jours, un titulaire) ; bloc de reste D192 (un jour, une journée de
+  famille, sa charge) ; publication de la période 2 : cumul = période 1 +
+  période 2, rien compté deux fois.
+- Adaptés : `PlanningStatisticsControllerTest` (une période : provisoire
+  puis cumul ; membre), `ConditionalPublicationTest` (renfort superflu dans
+  le provisoire), `PlanningCycleControllerTest` (422 `period_required`),
+  `PlanningCycleConditionalLineTest` (renforts de la période 2 : provisoire,
+  comptés sur leurs vraies affectations), `SinglePeriodCompatibilityTest`
+  (flag désactivé).
+- Frontend : `StatisticsPanel.test.tsx` (onglet « Cumul publié », groupe
+  provisoire, cumul vide).
+
+### Vérification de clôture (2026-10-18)
+
+- **Suite backend complète**, fichier par fichier au premier plan : 181
+  fichiers, 1 646 tests, 23 957 assertions, 0 échec, 0 erreur, 18 ignorés
+  (les mêmes).
+- **Frontend** : 57 fichiers, 617 tests ; `tsc`, oxlint (0 avertissement)
+  et build OK ; Prettier conforme sur les fichiers modifiés.
+- **php-cs-fixer** (chemins explicites) : conforme, hors fins de ligne.
+- **Mutations** (une à la fois, restaurées et vérifiées) : 14 lancées, 14
+  tuées — statut publié forcé ; périodes après la sélectionnée lues ;
+  provisoire versé au cumul ; membre traité en gestionnaire ; groupes non
+  publiés montrés au membre ; toutes les périodes dans « la période » ;
+  période devinée au lieu d'être exigée ; une seule génération sommée par
+  ligne ; ligne générée signalée `NOT_GENERATED` ; provisoire nul pour un
+  gestionnaire ; charge pondérée remplacée par un compte ; familles
+  comptées une fois au lieu de par jour ; groupe vide pour une ligne sans
+  génération ; frontend : étiquette provisoire retirée.
+- **Migration** : aucune.
+
+## D202 — Interface multipériode : composants `features/periods` branchés sur les vraies données (lot L6)
+
+- **Date** : 2026-10-19. L6 autorisé par l'utilisateur après validation de
+  L5 (D201). Non déployé, non commité ; flag
+  `MEDVUE_PERIOD_CREATION_ENABLED` désactivé par défaut. Aucune migration.
+- **But** : qu'un médecin comprenne qu'un planning (Trauma Delta) est
+  permanent et contient des périodes successives, chacune avec sa
+  préparation, ses gardes et sa publication.
+
+### Décision
+
+- **Composants D185 réutilisés, adaptés, jamais reconstruits** :
+  - `PlanningCard` : « Mes plannings », une carte par planning : la période
+    en cours et la suivante (avant la première : la suivante seule ; une
+    fois tout terminé : la dernière), chacune avec son statut ; nombre de
+    périodes ; rôle déduit des droits (Propriétaire = `canManage`,
+    Gestionnaire = `canPublish`, sinon Membre). Plus de « Publié » global.
+    Une seule période : pas de numéro ni de compteur.
+  - `PeriodSelector`, `PeriodDetailCard`, `PreparationSteps`,
+    `CreatePeriodDialog` : détail du planning. `PeriodTabs` devient la barre
+    d'onglets de la maquette autour des vrais contenus (Lignes,
+    Indisponibilités, Gardes), comme prévu par la spécification §8.
+  - Statut `partielle` (« Partiellement publiée ») ajouté aux statuts de la
+    maquette ; `archivee` n'est toujours pas produit.
+  - La page `/dev/periodes` et ses vues sur données fictives sont
+    supprimées ; `mock.ts` ne sert plus qu'au test unitaire des dates.
+- **Période sélectionnée** : dans l'URL (`?periode=N`), chaque changement
+  ajoute une entrée d'historique (précédent/suivant du navigateur) ; une
+  valeur inconnue revient à la période par défaut (en cours, sinon suivante,
+  sinon dernière, §4.1).
+- **Tout ce qui dépend de la période** est remonté à chaque changement
+  (`key` = période) et chaque appel nomme la période : suivi de collecte,
+  rappels, échéance, préflight et lancement de génération, complétion,
+  résultat, affectations, préflight de publication, publication,
+  republication, état de publication, PDF, statistiques. Une réponse dont
+  `period.stableId` n'est pas la période affichée est ignorée (suivi de
+  collecte, calendrier, statistiques).
+- **Création d'une période** : la fenêtre montre le premier et le dernier
+  jour **inclus** et le premier jour de la période qui suivrait ; elle
+  envoie la fin exclusive (`dernier jour + 1`). Erreurs traduites :
+  bloc coupé (422, blocs listés), coupe historique D192 (409, blocs et jours
+  de reste listés, case de confirmation explicite avant
+  `acceptHistoricalBlockCuts: true`), séquence changée (409, « Recharger »),
+  calcul en cours, période trop courte, désactivée, droits. La nouvelle
+  période est sélectionnée après création.
+- **Génération** : la fenêtre nomme la période et liste la décision de
+  chaque ligne (générée, conservée, ignorée sans demande) ; quand le
+  préflight indique `requiredScope: unlocked_lines`, le gestionnaire choisit
+  explicitement « Générer uniquement les lignes non publiées » (préflight
+  relu avec le scope, lancement avec `scope`). Une période entièrement
+  publiée n'offre plus « Générer ».
+- **Publication** : modales L4c inchangées, période transmise ; statut
+  « Période N publiée / non publiée » ; liste des diffusions de la période
+  avec le PDF stocké de chacune (`publications/{id}/pdf`).
+- **Statistiques** : trois vues « Période N », « Cumul publié »,
+  « En préparation » (seulement si `provisional` non nul et non vide), les
+  périodes réellement sommées, l'état de publication de chaque ligne et la
+  note « affectations opérationnelles actuelles… peut différer des PDF
+  diffusés ». Le bouton est ouvert aux membres (le serveur ne leur donne
+  que le publié, D201). La date de fin affichée est le dernier jour inclus
+  (elle affichait la fin exclusive).
+- **Transverses** : « Mes gardes » et les échanges nomment une période
+  postérieure à la première (« · Période 2 ») ; l'export propose
+  « Toutes les périodes », « Période N » ou des dates ; le tableau de bord
+  donne le statut de la période qui compte au lieu de « Planning publié ».
+- **Contrat backend, ajout minimal** (aucune règle changée) :
+  - `currentPeriod` / `nextPeriod` / nouveau `latestPeriod` de
+    `GET /api/plannings` et du détail portent `status`, `timeState`,
+    `lineCounts`, `collections`, `publishedAt`, `lastPublishedAt`,
+    `generatedAt` (même calcul que §7.2) ;
+  - le détail expose `canCreatePeriod` (flag et `MANAGE`) et
+    `canOpenPeriodCollection` (flag et `MANAGE_AVAILABILITY`) : l'interface
+    ne propose jamais une action que le backend a désactivée.
+- **Mobile** : la barre « Créer la période suivante » est placée au-dessus
+  de la navigation du bas ; la fenêtre de création passe au-dessus de toute
+  navigation (`--z-sheet`) ; aucun défilement horizontal à 390 px.
+
+### Écarts aux maquettes
+
+- En-tête : celui de MedVue (actions de pilotage existantes) avec la ligne
+  « Commun à toutes les périodes » de la maquette ; badge « Actif » retiré
+  (aucune donnée).
+- Les étapes de la maquette (collecte, génération, publication) remplacent
+  « Équipe → Indisponibilités → Génération » ; elles ne changent plus
+  d'onglet au clic ; la liste de l'état de chaque ligne est ajoutée sous les
+  étapes.
+- « Prolonger la période » (D122) passe dans le menu « ⋯ » et n'est offert
+  que sur un planning à une seule période.
+
+### Limites
+
+- Une période 1 n'est pas nommée dans « Mes gardes » et les échanges (seules
+  les périodes suivantes le sont).
+- Le nombre de membres d'une ligne reste celui de la période par défaut.
+- Le « Cumul publié » d'un planning à une période reste vide avant
+  publication (D201).
+
+## D203 — Recette finale et préparation de la mise en production des périodes (lot L7)
+
+- **Date** : 2026-10-19. L7 autorisé par l'utilisateur après validation de
+  L6 (D202), recette et préparation uniquement : ni commit, ni push, ni
+  déploiement, ni activation. Aucune migration ajoutée.
+
+### Corrections
+
+- **Nombre de membres d'une ligne par période** : `lines[].periods[]` porte
+  `memberCount`, les personnes dont une adhésion recoupe la période, comptées
+  une fois même avec plusieurs adhésions. L'onglet Lignes affiche celui de la
+  période sélectionnée, plus celui de la période par défaut.
+- **« Période N » dans « Mes gardes » et les échanges** : la référence de
+  période porte `count`, le nombre de périodes du planning ; le numéro est dit
+  dès qu'il y en a plusieurs, période 1 comprise, jamais pour un planning à
+  une seule période (`periodLabel`).
+- **Défauts trouvés en recette** :
+  - bandeau « Consultation de l'historique » limité aux périodes publiées
+    **terminées** (il apparaissait sur la période en cours et une période
+    future publiées) ;
+  - calendrier d'une période partiellement publiée : « Période N
+    partiellement publiée » (`cycleComplete: false`) au lieu de « publiée » ;
+  - génération d'une période sans collecte : « Aucune collecte des
+    disponibilités n'a été ouverte pour ces dates » au lieu de « Tous ont
+    confirmé leurs disponibilités » ;
+  - à 390 px, le choix « Générer uniquement les lignes non publiées »
+    élargissait la fenêtre (défilement horizontal) : il passe à la ligne.
+- **`.env.prod.example`** : `MEDVUE_PERIOD_CREATION_ENABLED=0` ajouté —
+  `ProdComposeTest` exige que chaque clé de `backend/.env` y soit redéfinie
+  (échec que la CI aurait levé ; les tests `tests/Deployment` sont ignorés
+  dans le conteneur de développement, qui ne monte que `backend/`).
+
+### Recette
+
+- Pile de développement, worker et OR-Tools réels, comptes jetables
+  « Trauma Delta L7 » : les 19 parcours demandés, 4 périodes (dont une
+  partiellement publiée et une en préparation), voir le rapport L7.
+- Navigateur : bundle de production servi localement contre l'API de dev
+  (le serveur Vite du conteneur ne voit pas toujours les fichiers modifiés,
+  voir Limites) ; ordinateur et 390 px ; gestionnaire, membre, sans accès.
+
+### Point ouvert (arbitrage)
+
+- Un simple membre lit par `/result` et `/assignments` les affectations
+  d'une ligne générée non publiée (règle D148, antérieure au chantier : « un
+  membre a la lecture »). Avec la publication ligne par ligne (D196), un
+  brouillon côtoie des lignes publiées dans la même période. « Mes gardes »,
+  iCal, rappels, exports et statistiques ne montrent jamais de brouillon.
+  Aucun changement fait sans décision.
+
+### Environnement (développement uniquement)
+
+- **API lente (≈ 5 s)** : en mode debug, chaque requête vérifie la fraîcheur
+  du conteneur Symfony sur 649 ressources lues à travers le volume Windows
+  (≈ 3 s, dont 1,2 s pour le glob de `src/`) ; le traitement lui-même prend
+  ≈ 300 ms. Absent en production (`APP_DEBUG=0`, cache préchauffé dans
+  l'image).
+- **Fichiers périmés du serveur Vite** : les événements de fichiers de
+  Windows n'atteignent pas le conteneur ; un module déjà servi reste en
+  cache. Absent en production (bundle construit).
+- **Sessions** : la rotation des jetons de rafraîchissement refuse toute
+  réutilisation sans délai de grâce ; deux onglets qui rafraîchissent au même
+  instant révoquent la famille et déconnectent l'utilisateur. Antérieur au
+  chantier, **peut se produire en production**, non corrigé (hors périmètre).
+- **Tests intermittents** : 3 tests frontend au-delà de 5 s sous charge
+  (navigateur et suites d'autres projets en parallèle), verts relancés seuls.
+
+### Mise en production
+
+Plan en deux étapes (code avec création désactivée, puis activation
+séparée), commits proposés, retour arrière et conditions d'arrêt :
+[`deployment-periods.md`](deployment-periods.md).
+
+## D204 — Lecture du calendrier : un simple membre ne lit que les lignes publiées (lot L7)
+
+- **Date** : 2026-10-19. Décision de l'utilisateur après le constat de D203 :
+  fermer l'accès des simples membres aux affectations des lignes non
+  publiées. D148 (« un membre a la lecture ») n'est pas réécrit : D204 en
+  restreint la portée.
+- **Constat** : `/result` et `/assignments` (droit `VIEW`) renvoyaient les
+  affectations de la génération la plus récente de chaque ligne, publiée ou
+  non. Avec la publication ligne par ligne (D196), un brouillon côtoyait
+  des lignes publiées. Les autres lectures des membres (« Mes gardes » D168,
+  iCal, rappels D146/D199, exports D200, statistiques D201) ne montraient
+  déjà que le publié.
+
+### Décision
+
+- **Politique unique, côté serveur** : `CalendarReadPolicy`.
+  - Qui gère le calendrier (`PlanningVoter::MANAGE_CALENDAR` : créateur,
+    OWNER/ADMIN d'une équipe — même règle que les statistiques provisoires,
+    D201) lit toutes les lignes, publiées ou non.
+  - Toute autre personne qui peut voir le planning (`VIEW`) lit les lignes
+    **publiées** (PUBLISHED ou ARCHIVED) dans la période affichée, avec
+    leurs affectations courantes : réaffectations et échanges faits après
+    publication compris (calendrier opérationnel, D168).
+  - Une ligne non publiée dans la période est **retirée** de la réponse :
+    ni la ligne, ni sa génération, ni ses gardes, ni ses titulaires — la
+    réponse est celle d'une ligne qui n'existerait pas.
+  - Personne sans accès : 403 inchangé, sans donnée.
+- **Chemins couverts** :
+  - `GET /api/plannings/{p}/result` (vue d'ensemble, calendrier) ;
+  - `GET /api/plannings/{p}/assignments` (équipe et `?userStableId=`, dont
+    le résumé personnel) ;
+  - échanges (`/api/duty-swaps/options`, `POST /api/duty-swap-requests`) :
+    une garde d'une ligne non publiée, ou présentée par quelqu'un qui n'est
+    pas membre de sa ligne, reçoit **la même réponse qu'une garde
+    inconnue** (404 `not_found`, « Garde introuvable. ») au lieu de 409
+    `duty_not_swappable` / `duty_not_held` qui en trahissaient l'existence.
+  - Inchangés, déjà réservés aux gestionnaires : candidats, réaffectation,
+    retrait, préflights, collecte, historique des échanges ; `jobs/latest`
+    ne donne à un membre que l'état du calcul (D149).
+- **Audit des consommateurs** : seuls les deux contrôleurs utilisent
+  `PlanningResultService::forPlanning` et
+  `PlanningAssignmentViewService::currentGenerations` ; publication,
+  export, statistiques, « Mes gardes » et rappels ont leurs propres
+  lectures, inchangées. Frontend : calendrier et « Par personne »
+  (`PersonalPlanningView`) ; l'onglet des gardes d'un membre n'affiche le
+  calendrier que si une ligne est publiée dans la période
+  (`hasReadableCalendar`), sinon le message d'attente existant.
+- **Cas vérifiés** : planning à une période (rien avant publication, tout
+  après), période partiellement publiée, période antérieure publiée et
+  période suivante en brouillon, flag désactivé (même règle), réaffectation
+  après publication visible.
+
+### Tests
+
+- `PlanningReadConfidentialityTest` (5) ; `SinglePeriodCompatibilityTest`
+  (+1, flag désactivé) ; `PlanningAssignmentControllerTest` (+1, et ses vues
+  de membre lisent désormais un planning publié) ; `DutySwapControllerTest`
+  et `PlanningCycleSwapTest` (404 au lieu de 409) ; frontend : modèle et page.
+- Mutations : 6 backend (filtre de `/result`, de `/assignments`, droit de
+  gestion, statut publié, réponse d'une garde non publiée, réponse à un
+  non-membre) et 1 frontend : toutes détectées.
+
+### Limites
+
+- Les métadonnées de ligne (nom, statut de sa période, applicabilité) restent
+  lisibles par un membre dans le détail du planning : elles disent qu'une
+  ligne est « générée, non publiée », jamais qui en tient les gardes.
+
+## D205 — Répétition des cinq migrations sur le dump de production du 2026-10-19, avec le code final (lot L7)
+
+- **Date** : 2026-10-19. Autorisée par l'utilisateur (préalable P2 de
+  `docs/deployment-periods.md`), dans les conditions qu'il a fixées :
+  restauration isolée, lecture seule des sources de production, aucune
+  écriture ni migration en production, aucun téléchargement du dump, aucun
+  service de production ni SurgicalHub arrêté, modifié ou redémarré.
+- **Cadre** (procédure de D190/D196, script repris de D196) :
+  - dump `medvue_20261019_034501.dump` (328 868 octets, le plus récent,
+    sauvegarde quotidienne de 03:45 UTC, `backup.json` : `success`),
+    sur le serveur dans `/home/deploy/backups/medvue/postgres/` ; sha256
+    vérifié contre son `.sha256` ;
+  - ressources vérifiées avant : 6,4 Go de mémoire disponibles sur 7,9,
+    77 Go de disque libres ; services MedVue et SurgicalHub en marche ;
+  - PostgreSQL jetable en mémoire (`tmpfs` 1 Go), réseau Docker
+    `--internal` (aucune route vers la base de production ni vers
+    l'extérieur), image de production `medvue-backend:local`
+    (2026-10-10, `v2026.10.10-prod`) ; code final (`src/`, `migrations/`,
+    `templates/`, `config/` sans les clés JWT de développement) monté en
+    lecture seule ;
+  - de la production, seuls ont été lus : `printenv` de l'utilisateur et
+    du nom de la base, et la version de migration ; seul le code a été
+    envoyé sur le serveur, dans un répertoire temporaire ; seul le journal
+    (comptes, empreintes, définitions de schéma) a été rapatrié ;
+    conteneur, réseau et répertoire supprimés ensuite, vérifié ;
+  - production restée en `Version20261010120000`, conteneurs inchangés
+    (les workers MedVue et SurgicalHub redémarrent environ une fois par
+    heure d'eux-mêmes — 42 et 45 redémarrages en 43 h, politique
+    `unless-stopped` —, sans lien avec la répétition, antérieur à la
+    première connexion).
+- **Données** : identiques à celles de D196 (1 planning, 2 lignes,
+  2 publications `FIRST`/`UPDATE`, 240 entrées, 0 document stocké,
+  0 notification, 32 livraisons, 6 jobs).
+- **Résultats** :
+  - montée L1 → L2 → L3 → L4b → L4c une à une : les 59 tables identiques
+    à l'origine à chaque étape, sur chaque colonne de départ ; aucun
+    invariant bloquant ;
+  - remplissage L4c contrôlé par un calcul SQL indépendant : 1
+    `FIRST_FOR_LINE`, 1 `UPDATED`, tous `reconstructed` ; 0 manquante, 0
+    en trop ; `duty_count` égal aux entrées ; 92 gardes changées comme
+    annoncé ; `cycle_complete` vrai pour les 2 ;
+  - publications (`planning_publications`) et entrées (240) : empreintes
+    inchangées ;
+  - **calendrier lu par l'application** (nouveau) : le code de production
+    sur la copie avant migration et le code final après L4c lisent les
+    mêmes 120 gardes, les mêmes titulaires, le même état
+    couvert/requis/live — vue de résultat et calendrier courant —, flag
+    désactivé comme activé ; après la descente complète, le code de
+    production relit la copie à l'identique ;
+  - PDF historiques : les 2 publications (antérieures à D173, sans
+    document stocké) sont rendues en PDF valides par le code final ;
+  - état de publication et préflight : publié, `FIRST/complete` puis
+    `UPDATE/complete`, 0 modification non publiée, ligne principale
+    publiée sans bloquant, ligne secondaire neutre ;
+  - retour arrière L4c → L4b puis remontée : schéma et données
+    identiques, reconstruction identique ; descente complète jusqu'à
+    `Version20261010120000` : schéma et données identiques à chaque
+    étape ;
+  - point de non-retour : une ligne de publication enregistrée par L4c
+    (`reconstructed = false`) fait refuser `down()` de L4c (« Restore a
+    backup instead »).
+
+### Conditions réelles de retour arrière (étape A, flag désactivé)
+
+- **Code** : l'image `medvue-backend:local` est remplacée au build ;
+  revenir au code précédent, c'est reconstruire l'archive du tag
+  `v2026.10.10-prod` (`docs/deployment.md` §4), jamais un simple
+  redémarrage.
+- **Schéma, tant que rien n'a été enregistré dans les nouvelles
+  structures** : la descente L4c → L1 est sûre et sans perte (démontrée
+  ici sur les données du jour).
+- **Ce qui ferme le retour par migration**, en production :
+  - la **première publication ou republication** après le déploiement
+    (toute publication écrit ses `planning_publication_lines`, non
+    reconstruites) → `down()` de L4c refuse ;
+  - une génération demandée avec le périmètre `unlocked_lines` (« lignes
+    non verrouillées », possible dès qu'une ligne d'une période est
+    publiée et une autre non) → `down()` de L4b refuse ;
+  - un engagement figé d'une autre période → `down()` de L3 refuse —
+    impossible tant que le flag est désactivé (une seule période).
+- **Au-delà** : correctif en avant (cas normal), ou restauration du dump
+  pris juste avant la migration, qui perd tout ce qui a été écrit depuis
+  (publications, réaffectations, échanges, disponibilités, congés
+  SurgicalHub importés — ces derniers reviennent à la synchronisation
+  suivante) : décision explicite uniquement.

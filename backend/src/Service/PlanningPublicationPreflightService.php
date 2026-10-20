@@ -10,13 +10,16 @@ use App\Eligibility\ExclusionReason;
 use App\Entity\Duty;
 use App\Entity\DutyAssignment;
 use App\Entity\Planning;
+use App\Entity\PlanningCycle;
 use App\Entity\PlanningGeneration;
 use App\Entity\PlanningLine;
+use App\Entity\PlanningPeriod;
 use App\Entity\PlanningPeriodStatus;
 use App\Entity\PlanningTeamMember;
 use App\Repository\DutyAssignmentRepository;
 use App\Repository\DutyRepository;
 use App\Repository\PlanningGenerationRepository;
+use App\Repository\PlanningLineDemandPolicyRepository;
 use App\Repository\PlanningLineRepository;
 
 /**
@@ -26,7 +29,14 @@ use App\Repository\PlanningLineRepository;
  * same block-resolution `ReassignmentCandidateService` already uses for a
  * single reassignment, and member validity/conflicts reuse its
  * `firstBlockingReason()` verbatim — never a second, parallel constraint
- * implementation (§6 of the spec).
+ * implementation (§6 of the spec). Conflicts and rest are read against every
+ * period of the planning (PersonCommitmentReader, lot L3): a boundary between
+ * two periods is checked like any other day.
+ *
+ * Since docs/decisions.md D196 (lot L4c), one period at a time, with a
+ * verdict per line: published or not, publishable for the first time on its
+ * own, and why not. A line not yet published never plays a part in
+ * whether the published ones can be republished.
  */
 final class PlanningPublicationPreflightService
 {
@@ -38,11 +48,18 @@ final class PlanningPublicationPreflightService
         private readonly ReassignmentCandidateService $candidateService,
         private readonly ExclusionReasonLabeler $reasonLabeler,
         private readonly LiveDemandViewFactory $demandViewFactory,
+        private readonly LineApplicabilityService $applicability,
+        private readonly PlanningLineDemandPolicyRepository $policyRepository,
     ) {
     }
 
-    public function check(Planning $planning): PublicationPreflight
+    /**
+     * $cycle: the period checked. Omitted: the planning's only period
+     * (refused when it has several, MultiplePeriodsNotSupportedException).
+     */
+    public function check(Planning $planning, ?PlanningCycle $cycle = null): PublicationPreflight
     {
+        $cycle ??= $planning->getOnlyCycle();
         $lineReadiness = [];
         $uncoveredDuties = [];
         $inconsistentGroups = [];
@@ -50,48 +67,117 @@ final class PlanningPublicationPreflightService
         $conflicts = [];
         $undeterminedDuties = [];
         $superfluousCoverages = [];
-        $allReady = true;
+        $neutralLines = [];
         $demand = $this->demandViewFactory->forPlanning($planning);
 
         foreach ($this->lineRepository->findByPlanning($planning) as $line) {
-            if (!$line->isActive()) {
+            // A line without period in this cycle (docs/planning-cycles.md §5.5) has nothing to publish in it.
+            $period = $line->isActive() ? $line->periodIn($cycle) : null;
+            if (null === $period) {
                 continue;
             }
 
-            $period = $line->getPlanningPeriod();
+            // docs/decisions.md D194: a line with nothing demanded in the period is neutral — listed apart, never a
+            // reason to block the others (Trauma Delta: an empty DRAFT secondary line blocked every republication).
+            // A single duty of the period, ponctual or conditional, makes it count again.
+            $applicability = $this->applicability->forLine($line, $cycle);
+            if (!$applicability->counts()) {
+                $neutralLines[] = new PublicationNeutralLine($line, $period->getStatus(), $applicability);
+                continue;
+            }
+
             $generation = $this->generationRepository->findMostRecentCompletedByPlanningPeriod($period);
-            $readiness = new PublicationLineReadiness($line, $period->getStatus(), null !== $generation);
-            $lineReadiness[] = $readiness;
+            $basic = new PublicationLineReadiness($line, $period->getStatus(), null !== $generation);
+            $blockers = [];
+            if (LineApplicability::INCOMPLETE === $applicability->state) {
+                $blockers[] = PublicationLineReadiness::INCOMPLETE;
+            }
+            if (!$basic->hasReadyStatus() || null === $generation) {
+                $blockers[] = PublicationLineReadiness::NOT_GENERATED;
+            } else {
+                $issues = ['uncovered' => [], 'inconsistent' => [], 'invalid' => [], 'conflicts' => [], 'undetermined' => [], 'superfluous' => []];
+                $this->checkLine($line, $period, $generation, $demand, $issues['uncovered'], $issues['inconsistent'], $issues['invalid'], $issues['conflicts'], $issues['undetermined'], $issues['superfluous']);
+                array_push($uncoveredDuties, ...$issues['uncovered']);
+                array_push($inconsistentGroups, ...$issues['inconsistent']);
+                array_push($invalidAssignments, ...$issues['invalid']);
+                array_push($conflicts, ...$issues['conflicts']);
+                array_push($undeterminedDuties, ...$issues['undetermined']);
+                array_push($superfluousCoverages, ...$issues['superfluous']);
 
-            if (!$readiness->hasReadyStatus() || null === $generation) {
-                $allReady = false;
-                continue;
+                // Republication (docs/decisions.md D143): a duty deliberately left uncovered after the line went out
+                // ("Retirer l'affectation") is itself news worth announcing — so an uncovered duty only blocks a line
+                // never published yet (its first PUBLISHED transition requires full coverage,
+                // PlanningPeriodLifecycleService).
+                if ([] !== $issues['uncovered'] && !$basic->isPublished()) {
+                    $blockers[] = PublicationLineReadiness::UNCOVERED_DUTIES;
+                }
+                foreach (['inconsistent' => PublicationLineReadiness::INCONSISTENT_GROUPS, 'invalid' => PublicationLineReadiness::INVALID_ASSIGNMENTS, 'conflicts' => PublicationLineReadiness::CONFLICTS, 'undetermined' => PublicationLineReadiness::UNDETERMINED_REINFORCEMENTS] as $key => $code) {
+                    if ([] !== $issues[$key]) {
+                        $blockers[] = $code;
+                    }
+                }
             }
 
-            $this->checkLine($line, $generation, $demand, $uncoveredDuties, $inconsistentGroups, $invalidAssignments, $conflicts, $undeterminedDuties, $superfluousCoverages);
+            $lineReadiness[] = new PublicationLineReadiness($line, $period->getStatus(), null !== $generation, $blockers, $this->conditionalSourceOf($line, $cycle), $applicability);
         }
 
-        $coherent = $allReady
-            && [] === $inconsistentGroups
-            && [] === $invalidAssignments
-            && [] === $conflicts
-            // docs/decisions.md D165: a reinforcement whose demand cannot be evaluated is never "fine" — it blocks a
-            // publication and a republication alike, until its source duty has a holder again.
-            && [] === $undeterminedDuties
-            && [] !== $lineReadiness;
+        $published = array_filter($lineReadiness, static fn (PublicationLineReadiness $line): bool => $line->isPublished());
+        // All or nothing (historical meaning of "Publier"): nothing published in the period yet, every line ready.
+        $publishable = [] !== $lineReadiness
+            && [] === $published
+            && [] === array_filter($lineReadiness, static fn (PublicationLineReadiness $line): bool => !$line->isFirstPublishable());
+        $republishable = [] !== $published
+            && [] === array_filter($published, static fn (PublicationLineReadiness $line): bool => [] !== $line->blockers);
 
-        $publishable = $coherent && [] === $uncoveredDuties;
-
-        // Republication (docs/decisions.md D143): a duty deliberately left uncovered after the
-        // planning went out ("Retirer l'affectation") is itself news worth announcing — so an
-        // uncovered duty only blocks on a line that has never been published yet (its first
-        // PUBLISHED transition still requires full coverage, PlanningPeriodLifecycleService).
-        $republishable = $coherent && [] === array_filter(
+        return new PublicationPreflight(
+            $publishable,
+            $lineReadiness,
             $uncoveredDuties,
-            static fn (UncoveredPublicationDuty $item): bool => PlanningPeriodStatus::PUBLISHED !== $item->duty->getPlanningPeriod()->getStatus(),
+            $inconsistentGroups,
+            $invalidAssignments,
+            $conflicts,
+            $republishable,
+            $undeterminedDuties,
+            $superfluousCoverages,
+            $neutralLines,
+            $cycle,
+            $this->earlierUnpublished($planning, $cycle),
         );
+    }
 
-        return new PublicationPreflight($publishable, $lineReadiness, $uncoveredDuties, $inconsistentGroups, $invalidAssignments, $conflicts, $republishable, $undeterminedDuties, $superfluousCoverages);
+    /**
+     * docs/decisions.md D196: the earlier periods holding a line that counts and is not published — publishing this
+     * one first is allowed (EARLIER_PERIOD_UNPUBLISHED, a warning).
+     *
+     * @return list<int>
+     */
+    private function earlierUnpublished(Planning $planning, PlanningCycle $cycle): array
+    {
+        $numbers = [];
+        foreach ($planning->getCycles() as $earlier) {
+            if ($earlier->getNumber() >= $cycle->getNumber()) {
+                continue;
+            }
+            foreach ($this->lineRepository->findByPlanning($planning) as $line) {
+                $period = $line->isActive() ? $line->periodIn($earlier) : null;
+                if (null !== $period && PlanningPeriodStatus::PUBLISHED !== $period->getStatus() && PlanningPeriodStatus::ARCHIVED !== $period->getStatus()
+                    && $this->applicability->forLine($line, $earlier)->counts()) {
+                    $numbers[] = $earlier->getNumber();
+                    break;
+                }
+            }
+        }
+
+        return $numbers;
+    }
+
+    /** The line $line reinforces in $cycle (its demand policy in force is conditional, D162), null otherwise. */
+    private function conditionalSourceOf(PlanningLine $line, PlanningCycle $cycle): ?PlanningLine
+    {
+        $policy = $this->policyRepository->findActiveForLine($line);
+        $source = null !== $policy && $policy->getMode()->isConditional() ? $policy->getSourceLine() : null;
+
+        return null !== $source && null !== $source->periodIn($cycle) ? $source : null;
     }
 
     /**
@@ -104,6 +190,7 @@ final class PlanningPublicationPreflightService
      */
     private function checkLine(
         PlanningLine $line,
+        PlanningPeriod $period,
         PlanningGeneration $generation,
         LiveDemandView $demand,
         array &$uncoveredDuties,
@@ -113,7 +200,7 @@ final class PlanningPublicationPreflightService
         array &$undeterminedDuties,
         array &$superfluousCoverages,
     ): void {
-        $duties = $this->dutyRepository->findByPlanningPeriod($line->getPlanningPeriod());
+        $duties = $this->dutyRepository->findByPlanningPeriod($period);
 
         /** @var array<int, DutyAssignment> $currentByDutyId */
         $currentByDutyId = [];

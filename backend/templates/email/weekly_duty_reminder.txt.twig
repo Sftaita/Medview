@@ -4,8 +4,13 @@ Bonjour {{ firstName }},
 
 Voici vos gardes de la semaine prochaine ({{ planningName }}, {{ weekLabel|lower }}) :
 {% for item in items %}
-- {{ item.when }} — {{ item.what }}
+- {{ item.when }} — {{ item.what }}{% if item.changed %} (changement pas encore republié){% endif %}
+
 {% endfor %}
+{% if unpublishedChanges %}
+
+Ce rappel tient compte de changements faits depuis la dernière diffusion du planning (une garde attribuée, retirée ou échangée). Ils n'ont pas encore été republiés : ils ne figurent pas dans le dernier planning PDF que vous avez reçu.
+{% endif %}
 
 Ce récapitulatif reflète le planning tel qu'il est au moment de l'envoi :
 {{ planningUrl }}

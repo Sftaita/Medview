@@ -26,6 +26,7 @@ use Symfony\Component\Uid\Uuid;
  */
 #[ORM\Entity(repositoryClass: AvailabilityCollectionRepository::class)]
 #[ORM\Table(name: 'availability_collections')]
+#[ORM\Index(columns: ['planning_cycle_id'], name: 'idx_availability_collections_planning_cycle_id')]
 #[ORM\UniqueConstraint(name: 'uniq_availability_collections_stable_id', columns: ['stable_id'])]
 #[ORM\Index(columns: ['planning_id'], name: 'idx_availability_collections_planning_id')]
 class AvailabilityCollection
@@ -41,6 +42,15 @@ class AvailabilityCollection
     #[ORM\ManyToOne(targetEntity: Planning::class)]
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
     private Planning $planning;
+
+    /**
+     * The "période" of the Planning this row belongs to (docs/planning-cycles.md).
+     * NOT NULL in the database since lot L2 (docs/decisions.md D187): always
+     * set before the first flush.
+     */
+    #[ORM\ManyToOne(targetEntity: PlanningCycle::class)]
+    #[ORM\JoinColumn(name: 'planning_cycle_id', nullable: false, onDelete: 'RESTRICT')]
+    private ?PlanningCycle $cycle = null;
 
     #[ORM\Column(type: 'date_immutable')]
     private \DateTimeImmutable $startsAt;
@@ -103,6 +113,30 @@ class AvailabilityCollection
     public function getStableId(): Uuid
     {
         return $this->stableId;
+    }
+
+    public function getCycle(): ?PlanningCycle
+    {
+        return $this->cycle;
+    }
+
+    /** Set once, before the row is first written: a row never changes cycle. */
+    public function assignToCycle(PlanningCycle $cycle): void
+    {
+        if (null !== $this->cycle) {
+            if ($this->cycle === $cycle) {
+                return;
+            }
+            throw new \LogicException('A row never changes cycle.');
+        }
+        if ($cycle->getPlanning() !== $this->planning) {
+            throw new \InvalidArgumentException('The cycle must belong to the same Planning.');
+        }
+        if (!$cycle->contains($this->startsAt, $this->endsAt)) {
+            throw new \InvalidArgumentException('A collection window must lie inside its cycle (docs/planning-cycles.md I12).');
+        }
+
+        $this->cycle = $cycle;
     }
 
     public function getPlanning(): Planning

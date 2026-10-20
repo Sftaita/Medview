@@ -6,6 +6,8 @@ import { updatePlanningSettings } from './api'
 
 type Props = {
   planningStableId: string
+  /** The period whose open collections get the deadline (docs/planning-cycles.md §7.4). */
+  periodStableId?: string
   /** The current deadline ("YYYY-MM-DD"), if any. */
   availabilityDeadline: string | null
   onClose: () => void
@@ -18,7 +20,13 @@ type Props = {
  * availability encoding. Said plainly in the dialog itself: the date is a
  * signal for people and blocks nothing (docs/decisions.md D127).
  */
-export function PlanningSettingsModal({ planningStableId, availabilityDeadline, onClose, onSaved }: Props) {
+export function PlanningSettingsModal({
+  planningStableId,
+  periodStableId,
+  availabilityDeadline,
+  onClose,
+  onSaved,
+}: Props) {
   const [deadline, setDeadline] = useState(availabilityDeadline ?? '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -27,7 +35,7 @@ export function PlanningSettingsModal({ planningStableId, availabilityDeadline, 
     setSaving(true)
     setError(null)
     try {
-      await updatePlanningSettings(planningStableId, value === '' ? null : value)
+      await updatePlanningSettings(planningStableId, value === '' ? null : value, periodStableId)
       onSaved()
       onClose()
     } catch (err) {

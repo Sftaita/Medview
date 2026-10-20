@@ -104,10 +104,19 @@ final class PlanningPublicationControllerTest extends WebTestCase
         $client = static::createClient();
         $s = $this->pilotScenario($client);
 
+        // docs/decisions.md D194: nothing demanded at all — the line is neutral, and a period without any line that
+        // counts is never publishable.
         $preflight = $this->preflight($client, $s);
+        self::assertFalse($preflight['publishable']);
+        self::assertSame([], $preflight['lines']);
+        self::assertSame('NO_DEMAND', $preflight['neutralLines'][0]['applicability']['state']);
 
+        // A demand, not generated: listed, not publishable.
+        $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-06']]);
+        $preflight = $this->preflight($client, $s);
         self::assertFalse($preflight['publishable']);
         self::assertFalse($preflight['lines'][0]['hasGeneration']);
+        self::assertSame([], $preflight['neutralLines']);
     }
 
     public function testAnInconsistentBlockIsDetectedIndependently(): void
@@ -322,7 +331,7 @@ final class PlanningPublicationControllerTest extends WebTestCase
         $planning = $container->get(PlanningRepository::class)->findOneByStableId($planningStableId);
         $line = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0];
 
-        return $line->getPlanningPeriod()->getStatus();
+        return $line->requireSingleCyclePeriod()->getStatus();
     }
 
     /**
@@ -338,7 +347,7 @@ final class PlanningPublicationControllerTest extends WebTestCase
         $em = $container->get(EntityManagerInterface::class);
         $planning = $container->get(PlanningRepository::class)->findOneByStableId($s['planningId']);
         $line = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0];
-        $generation = $container->get(PlanningGenerationRepository::class)->findMostRecentCompletedByPlanningPeriod($line->getPlanningPeriod());
+        $generation = $container->get(PlanningGenerationRepository::class)->findMostRecentCompletedByPlanningPeriod($line->requireSingleCyclePeriod());
         $snapshot = $container->get(PlanningSnapshotRepository::class)->findOneByGeneration($generation);
         $freshDuty1 = $container->get(DutyRepository::class)->findOneByStableId((string) $duty1->getStableId());
 
@@ -372,9 +381,9 @@ final class PlanningPublicationControllerTest extends WebTestCase
         $em = $container->get(EntityManagerInterface::class);
         $planning = $container->get(PlanningRepository::class)->findOneByStableId($planningStableId);
         $line = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0];
-        $generation = $container->get(PlanningGenerationRepository::class)->findMostRecentCompletedByPlanningPeriod($line->getPlanningPeriod());
+        $generation = $container->get(PlanningGenerationRepository::class)->findMostRecentCompletedByPlanningPeriod($line->requireSingleCyclePeriod());
         $snapshot = $container->get(PlanningSnapshotRepository::class)->findOneByGeneration($generation);
-        $duties = $container->get(DutyRepository::class)->findByPlanningPeriod($line->getPlanningPeriod());
+        $duties = $container->get(DutyRepository::class)->findByPlanningPeriod($line->requireSingleCyclePeriod());
         self::assertCount(2, $duties);
 
         /** @var DutyAssignment $first */

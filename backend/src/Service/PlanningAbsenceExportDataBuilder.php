@@ -22,7 +22,9 @@ use Symfony\Component\Clock\ClockInterface;
  *
  * Scope, in order:
  * 1. the planning period [startsAt, endsAt[ (dates, endsAt exclusive),
- *    extensions included since they move these very fields (D122);
+ *    extensions included since they move these very fields (D122) — or,
+ *    when asked, one planning period or a range inside the planning
+ *    (docs/decisions.md D200); everything below uses that range;
  * 2. the participants: every membership of the planning intersecting that
  *    period, one entry per User whatever their number of stints or lines;
  * 3. their UNAVAILABLE periods (never PREFER_DUTY, never the administrative
@@ -43,11 +45,17 @@ final class PlanningAbsenceExportDataBuilder
     ) {
     }
 
-    public function build(Planning $planning): PlanningAbsenceExportData
+    /**
+     * @param ?string $first        first day ("Y-m-d"), the planning's by default
+     * @param ?string $endExclusive day after the last one ("Y-m-d"), Planning::endsAt by default —
+     *                              both already checked to lie inside the planning (docs/decisions.md D200)
+     */
+    public function build(Planning $planning, ?string $first = null, ?string $endExclusive = null, ?string $scopeLabel = null): PlanningAbsenceExportData
     {
         $timezone = new \DateTimeZone($planning->getTimezone());
-        $first = $planning->getStartsAt()->format('Y-m-d');
-        $last = AbsenceDays::addDays($planning->getEndsAt()->format('Y-m-d'), -1);
+        $first ??= $planning->getStartsAt()->format('Y-m-d');
+        $endExclusive ??= $planning->getEndsAt()->format('Y-m-d');
+        $last = AbsenceDays::addDays($endExclusive, -1);
 
         $lineByTeamId = [];
         foreach ($this->lineRepository->findByPlanning($planning) as $line) {
@@ -56,7 +64,7 @@ final class PlanningAbsenceExportDataBuilder
 
         /** @var array<int, array{user: User, stints: list<PlanningTeamMember>}> $byUser */
         $byUser = [];
-        foreach ($this->teamMemberRepository->findIntersectingForPlanning($planning, $planning->getStartsAt(), $planning->getEndsAt()) as $member) {
+        foreach ($this->teamMemberRepository->findIntersectingForPlanning($planning, new \DateTimeImmutable($first), new \DateTimeImmutable($endExclusive)) as $member) {
             $user = $member->getUser();
             $byUser[$user->getId()] ??= ['user' => $user, 'stints' => []];
             $byUser[$user->getId()]['stints'][] = $member;
@@ -67,7 +75,7 @@ final class PlanningAbsenceExportDataBuilder
             array_values(array_map(static fn (array $entry): User => $entry['user'], $byUser)),
             UserAvailabilityType::UNAVAILABLE,
             AbsenceDays::startOfDay($first, $timezone),
-            AbsenceDays::startOfDay($planning->getEndsAt()->format('Y-m-d'), $timezone),
+            AbsenceDays::startOfDay($endExclusive, $timezone),
         );
         foreach ($periods as $period) {
             [$from, $to] = AbsenceDays::touchedDays($period->getStartsAt(), $period->getEndsAt(), $timezone);
@@ -116,6 +124,7 @@ final class PlanningAbsenceExportDataBuilder
             $last,
             $this->clock->now()->setTimezone($timezone),
             $members,
+            $scopeLabel,
         );
     }
 

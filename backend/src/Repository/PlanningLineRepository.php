@@ -46,12 +46,12 @@ class PlanningLineRepository extends ServiceEntityRepository
     }
 
     /**
-     * The at-most-one PlanningLine driving a given PlanningPeriod — v1's
-     * strict 1:1 PlanningTeam↔PlanningLine relationship (docs/planning.md
-     * §4) makes this a plain unique lookup, never ambiguous.
+     * The line a PlanningPeriod belongs to (planning_periods.planning_line_id,
+     * docs/planning-cycles.md §3.4) — whatever its period; null for an orphan
+     * period of a line deleted before lot L2.
      */
     public function findOneByPlanningPeriod(PlanningPeriod $planningPeriod): ?PlanningLine
     {
-        return $this->findOneBy(['planningPeriod' => $planningPeriod]);
+        return $planningPeriod->getLine();
     }
 }

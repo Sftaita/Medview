@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Entity\Planning;
-use App\Entity\PlanningLineType;
+use App\Entity\PlanningCycle;
 use App\Entity\TeamMemberRole;
 use App\Entity\User;
 use Doctrine\ORM\EntityManagerInterface;
@@ -64,9 +64,11 @@ final class PlanningService
         return $this->entityManager->wrapInTransaction(function () use ($name, $creator, $startsAt, $endsAt, $timezone, $primaryTeamName, $includeCreator): Planning {
             $planning = new Planning($name, $creator, $startsAt, $endsAt, $timezone);
             $this->entityManager->persist($planning);
+            // Its first "période", over the whole range (docs/planning-cycles.md): the lines' periods attach to it.
+            $this->entityManager->persist(new PlanningCycle($planning, 1, $startsAt, $endsAt, $creator));
             $this->entityManager->flush();
 
-            $line = $this->planningLineService->addLine($planning, $primaryTeamName, PlanningLineType::PRIMARY);
+            $line = $this->planningLineService->addPrimaryLine($planning, $primaryTeamName);
 
             if ($includeCreator) {
                 $this->membershipService->addMember($line->getPlanningTeam(), $creator, TeamMemberRole::OWNER, min($this->today(), $startsAt));

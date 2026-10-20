@@ -23,6 +23,8 @@ final class DutySwapNotApplicableException extends \RuntimeException
     public const DUTY_LOCKED = 'duty_locked';
     /** The two units are not of the same line, or are the same unit. */
     public const NOT_SWAPPABLE = 'not_swappable';
+    /** The two units are of the same line but of two periods: never swapped in V1 (docs/decisions.md D198). */
+    public const OTHER_PERIOD = 'other_period';
     /** A reinforcement the live demand does not require (or cannot evaluate) never takes a new holder (D165). */
     public const COVERAGE_NOT_REQUIRED = 'coverage_not_required';
     /** The swap would change which reinforcements are required on a conditional line depending on these duties. */

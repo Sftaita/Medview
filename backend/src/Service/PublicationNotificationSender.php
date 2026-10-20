@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Entity\PlanningPublication;
-use App\Entity\PlanningPublicationKind;
 use App\Entity\PlanningPublicationNotification;
 use App\Entity\PublicationNotificationStatus;
 use App\Repository\PlanningPublicationNotificationRepository;
@@ -124,8 +123,11 @@ final class PublicationNotificationSender
         $document ??= $this->pdfRenderer->pdfOf($publication);
         $planning = $publication->getPlanning();
 
-        $sent = PlanningPublicationKind::FIRST === $publication->getKind()
-            ? $this->mailer->sendFirstPublication($user, $planning, $document)
+        // docs/decisions.md D196: decided per recipient — the lines first published for them (with their changes on
+        // other lines, if any), or their changes only. A notification recorded before L4c: a null changes list alone
+        // meant the first publication.
+        $sent = $notification->isFirstPublicationEmail()
+            ? $this->mailer->sendFirstPublication($user, $planning, $document, $notification->getFirstLines() ?? [], $notification->getChanges() ?? [])
             : $this->mailer->sendRepublication($user, $planning, $notification->getChanges() ?? [], $document);
 
         if ($sent) {

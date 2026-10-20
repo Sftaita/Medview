@@ -22,4 +22,6 @@ export type MyDuty = {
   swappable: boolean
   /** The caller's open swap request on this unit — "Échange demandé", never a transfer (D178). */
   swapRequestStableId: string | null
+  /** The planning period the unit belongs to — each one published on its own (D198). */
+  period: { stableId: string; number: number; count?: number }
 }

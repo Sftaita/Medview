@@ -58,13 +58,13 @@ final class FairnessContextBuilderTest extends KernelTestCase
         $planningA = $this->createPlanning($planningService, $creatorA, 'Team A');
         $lineA = $lineRepository->findByPlanning($planningA)[0];
         $teamA = $lineA->getPlanningTeam();
-        $periodA = $lineA->getPlanningPeriod();
+        $periodA = $lineA->requireSingleCyclePeriod();
 
         $creatorB = $this->createUser($em);
         $planningB = $this->createPlanning($planningService, $creatorB, 'Team B');
         $lineB = $lineRepository->findByPlanning($planningB)[0];
         $teamB = $lineB->getPlanningTeam();
-        $periodB = $lineB->getPlanningPeriod();
+        $periodB = $lineB->requireSingleCyclePeriod();
 
         self::assertNotSame($planningA->getStableId(), $planningB->getStableId());
 
@@ -124,13 +124,13 @@ final class FairnessContextBuilderTest extends KernelTestCase
         $planningA = $this->createPlanning($planningService, $creatorA, 'Team A');
         $lineA = $lineRepository->findByPlanning($planningA)[0];
         $teamA = $lineA->getPlanningTeam();
-        $periodA = $lineA->getPlanningPeriod();
+        $periodA = $lineA->requireSingleCyclePeriod();
 
         $creatorB = $this->createUser($em);
         $planningB = $this->createPlanning($planningService, $creatorB, 'Team B');
         $lineB = $lineRepository->findByPlanning($planningB)[0];
         $teamB = $lineB->getPlanningTeam();
-        $periodB = $lineB->getPlanningPeriod();
+        $periodB = $lineB->requireSingleCyclePeriod();
 
         $this->activateRuleSet($ruleSetService, $teamA);
         $this->activateRuleSet($ruleSetService, $teamB);
@@ -173,13 +173,13 @@ final class FairnessContextBuilderTest extends KernelTestCase
         $planningA = $this->createPlanning($planningService, $creatorA, 'Team A');
         $lineA = $lineRepository->findByPlanning($planningA)[0];
         $teamA = $lineA->getPlanningTeam();
-        $periodA = $lineA->getPlanningPeriod();
+        $periodA = $lineA->requireSingleCyclePeriod();
 
         $creatorB = $this->createUser($em);
         $planningB = $this->createPlanning($planningService, $creatorB, 'Team B');
         $lineB = $lineRepository->findByPlanning($planningB)[0];
         $teamB = $lineB->getPlanningTeam();
-        $periodB = $lineB->getPlanningPeriod();
+        $periodB = $lineB->requireSingleCyclePeriod();
 
         $this->activateRuleSet($ruleSetService, $teamA);
         $this->activateRuleSet($ruleSetService, $teamB);
@@ -223,7 +223,7 @@ final class FairnessContextBuilderTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $userX = $this->createUser($em);

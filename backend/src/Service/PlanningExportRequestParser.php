@@ -6,7 +6,10 @@ namespace App\Service;
 
 use App\Entity\Planning;
 use App\Entity\PlanningLine;
+use App\Entity\PlanningPeriod;
+use App\Entity\PlanningPeriodStatus;
 use App\Exception\InvalidPlanningExportRequestException;
+use App\Repository\PlanningCycleRepository;
 use App\Repository\PlanningLineRepository;
 
 /**
@@ -19,7 +22,12 @@ use App\Repository\PlanningLineRepository;
  *    simply unknown here;
  *  - `from`/`to` follow the project's half-open convention (`to`
  *    exclusive, like Planning::$endsAt and `/result`), must lie inside the
- *    planning, and default to its bounds;
+ *    planning, and default to its bounds — the range may cover several
+ *    periods (docs/decisions.md D200); `period` (a period's stableId) is
+ *    the shortcut for that period's bounds, never combined with them;
+ *  - for a requester who does not manage the calendar, a line is only
+ *    exportable once one of its periods is published: a line never
+ *    published reads exactly like an unknown one (D200);
  *  - `title` and each `label` are presentation text only: control
  *    characters are dropped, whitespace collapsed, length capped — they
  *    are never used as a path and never written to Planning/PlanningLine.
@@ -29,19 +37,22 @@ final class PlanningExportRequestParser
     public const TITLE_MAX_LENGTH = 120;
     public const LABEL_MAX_LENGTH = 80;
 
-    private const FIELDS = ['format', 'title', 'from', 'to', 'lines'];
+    private const FIELDS = ['format', 'title', 'from', 'to', 'period', 'lines'];
     private const LINE_FIELDS = ['stableId', 'label'];
 
-    public function __construct(private readonly PlanningLineRepository $lineRepository)
-    {
+    public function __construct(
+        private readonly PlanningLineRepository $lineRepository,
+        private readonly PlanningCycleRepository $cycleRepository,
+    ) {
     }
 
     /**
-     * @param array<mixed> $raw the decoded JSON body
+     * @param array<mixed> $raw         the decoded JSON body
+     * @param bool         $operational the requester manages the calendar (D200)
      *
      * @throws InvalidPlanningExportRequestException
      */
-    public function parse(Planning $planning, array $raw): PlanningExportRequest
+    public function parse(Planning $planning, array $raw, bool $operational = true): PlanningExportRequest
     {
         $errors = [];
         foreach (array_keys($raw) as $field) {
@@ -59,8 +70,21 @@ final class PlanningExportRequestParser
 
         $planningFirst = $this->dateOnly($planning->getStartsAt());
         $planningEndExclusive = $this->dateOnly($planning->getEndsAt());
-        $from = $this->date($raw['from'] ?? null, 'from', $errors) ?? $planningFirst;
-        $to = $this->date($raw['to'] ?? null, 'to', $errors) ?? $planningEndExclusive;
+        $defaultFrom = $planningFirst;
+        $defaultTo = $planningEndExclusive;
+        if (null !== ($raw['period'] ?? null)) {
+            $cycle = \is_string($raw['period']) ? $this->cycleRepository->findOneForPlanning($planning, $raw['period']) : null;
+            if (null === $cycle) {
+                $errors['period'] = 'Not a period of this planning.';
+            } elseif (null !== ($raw['from'] ?? null) || null !== ($raw['to'] ?? null)) {
+                $errors['period'] = 'Give either period or from/to, not both.';
+            } else {
+                $defaultFrom = $this->dateOnly($cycle->getStartsAt());
+                $defaultTo = $this->dateOnly($cycle->getEndsAt());
+            }
+        }
+        $from = $this->date($raw['from'] ?? null, 'from', $errors) ?? $defaultFrom;
+        $to = $this->date($raw['to'] ?? null, 'to', $errors) ?? $defaultTo;
         if (!isset($errors['from']) && $from < $planningFirst) {
             $errors['from'] = 'from must not be before the start of the planning.';
         }
@@ -71,7 +95,7 @@ final class PlanningExportRequestParser
             $errors['to'] = 'to must be strictly after from.';
         }
 
-        $lines = $this->lines($planning, $raw['lines'] ?? null, $errors);
+        $lines = $this->lines($planning, $raw['lines'] ?? null, $operational, $errors);
 
         if ([] !== $errors) {
             throw new InvalidPlanningExportRequestException($errors);
@@ -85,7 +109,7 @@ final class PlanningExportRequestParser
             throw new InvalidPlanningExportRequestException(['size' => 'This PDF would hold '.$rows.' table rows, more than the '.PlanningExportPdfRenderer::MAX_ROWS.' allowed: shorten the period, export fewer lines, or choose xlsx.']);
         }
 
-        return new PlanningExportRequest($planning, $format, $title, $from, $to, $lines);
+        return new PlanningExportRequest($planning, $format, $title, $from, $to, $lines, $operational);
     }
 
     /**
@@ -93,7 +117,7 @@ final class PlanningExportRequestParser
      *
      * @return list<PlanningExportLineChoice>
      */
-    private function lines(Planning $planning, mixed $raw, array &$errors): array
+    private function lines(Planning $planning, mixed $raw, bool $operational, array &$errors): array
     {
         if (!\is_array($raw) || !array_is_list($raw)) {
             $errors['lines'] = 'Expected a list of lines.';
@@ -109,7 +133,8 @@ final class PlanningExportRequestParser
         /** @var array<string, PlanningLine> $activeLines */
         $activeLines = [];
         foreach ($this->lineRepository->findByPlanning($planning) as $line) {
-            if ($line->isActive()) {
+            $published = [] !== array_filter($line->getPeriods(), static fn (PlanningPeriod $period): bool => PlanningPeriodStatus::PUBLISHED === $period->getStatus());
+            if ($line->isActive() && ($operational || $published)) {
                 $activeLines[(string) $line->getStableId()] = $line;
             }
         }

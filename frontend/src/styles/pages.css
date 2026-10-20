@@ -689,12 +689,30 @@
 /* ---------- Statistiques de répartition (docs/decisions.md D132) ---------- */
 .stats-panel__tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 8px;
 }
 
 .stats-panel__bounds {
   margin: 0 0 12px;
+}
+
+/* Lot L6 (docs/decisions.md D201): what the cumulative is made of, the lines of the period. */
+.stats-panel__note {
+  margin: -4px 0 12px;
+  font-size: var(--text-sm);
+}
+
+.stats-panel__lines {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
 }
 
 .stats-panel__group + .stats-panel__group {
@@ -899,7 +917,20 @@
   margin: 12px 0;
 }
 
+.scope-choice > div {
+  min-width: 0;
+}
+
+/* Lot L7: the explicit scope choice (D195) wraps on a phone instead of widening the dialog. */
+.scope-choice .btn {
+  height: auto;
+  min-height: var(--control-h-md);
+  white-space: normal;
+  text-align: left;
+}
+
 .preflight-facts,
+.preflight-lines,
 .preflight-issues {
   display: grid;
   gap: 6px;

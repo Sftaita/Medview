@@ -82,7 +82,7 @@ final class CrossLineConstraintsTest extends WebTestCase
 
     private function currentGeneration(string $planningStableId, int $lineIndex): PlanningGeneration
     {
-        $generation = static::getContainer()->get(PlanningGenerationRepository::class)->findMostRecentCompletedByPlanningPeriod($this->line($planningStableId, $lineIndex)->getPlanningPeriod());
+        $generation = static::getContainer()->get(PlanningGenerationRepository::class)->findMostRecentCompletedByPlanningPeriod($this->line($planningStableId, $lineIndex)->requireSingleCyclePeriod());
         self::assertNotNull($generation);
 
         return $generation;

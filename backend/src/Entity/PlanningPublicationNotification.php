@@ -54,6 +54,18 @@ class PlanningPublicationNotification
     #[ORM\Column(type: Types::JSON, nullable: true)]
     private ?array $changes;
 
+    /**
+     * docs/decisions.md D196: the lines first published for this person by
+     * this publication (names, as published) — a "first publication" email,
+     * which also lists their $changes on other lines when there are some.
+     * Null on a pure republication email, and on a notification recorded
+     * before L4c, where a null $changes alone meant the first publication.
+     *
+     * @var list<string>|null
+     */
+    #[ORM\Column(type: Types::JSON, nullable: true)]
+    private ?array $firstLines;
+
     #[ORM\Column(length: 10, enumType: PublicationNotificationStatus::class)]
     private PublicationNotificationStatus $status = PublicationNotificationStatus::PENDING;
 
@@ -71,13 +83,29 @@ class PlanningPublicationNotification
 
     /**
      * @param list<array{kind: string, line: string, dutyType: ?string, block: ?string, dates: list<string>}>|null $changes
+     * @param list<string>|null                                                                                    $firstLines
      */
-    public function __construct(PlanningPublication $publication, User $user, ?array $changes, \DateTimeImmutable $createdAt)
+    public function __construct(PlanningPublication $publication, User $user, ?array $changes, \DateTimeImmutable $createdAt, ?array $firstLines = null)
     {
         $this->publication = $publication;
         $this->user = $user;
         $this->changes = $changes;
         $this->createdAt = $createdAt;
+        $this->firstLines = $firstLines;
+    }
+
+    /**
+     * @return list<string>|null
+     */
+    public function getFirstLines(): ?array
+    {
+        return $this->firstLines;
+    }
+
+    /** A "first publication" email (the whole planning is new to them), with or without changes elsewhere. */
+    public function isFirstPublicationEmail(): bool
+    {
+        return null !== $this->firstLines || null === $this->changes;
     }
 
     public function getId(): ?int

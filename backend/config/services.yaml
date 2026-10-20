@@ -114,3 +114,6 @@ when@test:
         # http_client answers through it (framework.yaml), nothing leaves the machine.
         App\Tests\FakeSurgicalHub:
             public: true
+        # docs/decisions.md D196: the SQL a test records, in order (off unless started).
+        App\Tests\SqlRecorder:
+            tags: ['doctrine.middleware']

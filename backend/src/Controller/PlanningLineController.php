@@ -10,11 +10,14 @@ use App\Entity\Planning;
 use App\Entity\PlanningLine;
 use App\Entity\PlanningLineType;
 use App\Exception\OverlappingFairnessPeriodException;
+use App\Exception\PlanningCycleException;
 use App\Exception\PlanningLineIsDemandSourceException;
 use App\Exception\PrimaryPlanningLineNotDeletableException;
+use App\Repository\PlanningCycleRepository;
 use App\Repository\PlanningLineRepository;
 use App\Repository\PlanningRepository;
 use App\Security\Voter\PlanningVoter;
+use App\Service\PlanningCyclePresenter;
 use App\Service\PlanningLineService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -43,6 +46,8 @@ final class PlanningLineController
         private readonly PlanningLineService $planningLineService,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
         private readonly ValidatorInterface $validator,
+        private readonly PlanningCycleRepository $cycleRepository,
+        private readonly PlanningCyclePresenter $cyclePresenter,
     ) {
     }
 
@@ -57,8 +62,13 @@ final class PlanningLineController
             return $errorResponse;
         }
 
+        // docs/planning-cycles.md §5.5: the period the line starts in (optional; default: the earliest one still open to it).
+        $raw = json_decode($request->getContent(), true);
+        $fromStableId = \is_array($raw) && \is_string($raw['fromPeriodStableId'] ?? null) ? $raw['fromPeriodStableId'] : null;
+        $fromCycle = null !== $fromStableId ? ($this->cycleRepository->findOneForPlanning($planning, $fromStableId) ?? throw PlanningCycleException::notFound()) : null;
+
         try {
-            $line = $this->planningLineService->addLine($planning, $dto->name, PlanningLineType::SECONDARY);
+            $line = $this->planningLineService->addLine($planning, $dto->name, PlanningLineType::SECONDARY, $fromCycle);
         } catch (OverlappingFairnessPeriodException $exception) {
             return new JsonResponse(['error' => 'team_already_scheduled', 'message' => $exception->getMessage()], 409);
         }
@@ -187,7 +197,8 @@ final class PlanningLineController
                 'stableId' => (string) $team->getStableId(),
                 'name' => $team->getName(),
             ],
-            'planningPeriodStableId' => (string) $line->getPlanningPeriod()->getStableId(),
+            // Its period in the planning's default period (null when it takes no part in it), and all its periods.
+            ...$this->cyclePresenter->lineView($line, $this->cyclePresenter->defaultCycle($line->getPlanning())),
             'createdAt' => $line->getCreatedAt()->format(\DATE_ATOM),
             'updatedAt' => $line->getUpdatedAt()->format(\DATE_ATOM),
         ];

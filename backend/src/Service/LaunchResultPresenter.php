@@ -52,6 +52,8 @@ final class LaunchResultPresenter
             'generationStableId' => null !== $generation ? (string) $generation->getStableId() : null,
             'status' => $generation?->getStatus()->value,
             'error' => $line->error,
+            // docs/decisions.md D191: a result not written because the final calendar would break these rules.
+            'conflicts' => $line->conflicts,
             'coverageStatus' => $result?->coverageStatus->value,
             'strictSolverStatus' => $result?->strictSolverStatus->value,
             'partialSolverStatus' => $result?->partialSolverStatus?->value,

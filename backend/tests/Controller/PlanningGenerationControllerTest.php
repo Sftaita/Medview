@@ -410,7 +410,7 @@ final class PlanningGenerationControllerTest extends WebTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
         $this->addMember($membershipService, $team, $userRepository->findOneByEmail('solve.admin@example.com'), TeamMemberRole::ADMIN);
         $this->addMember($membershipService, $team, $userRepository->findOneByEmail('solve.member@example.com'), TeamMemberRole::MEMBER);
@@ -458,7 +458,7 @@ final class PlanningGenerationControllerTest extends WebTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->addMember($membershipService, $team, $creator, TeamMemberRole::OWNER);
 
         $createUrl = \sprintf('/api/planning-periods/%s/generations', $planningPeriod->getStableId());
@@ -490,7 +490,7 @@ final class PlanningGenerationControllerTest extends WebTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
         $this->addMember($membershipService, $team, $creator, TeamMemberRole::OWNER);
 

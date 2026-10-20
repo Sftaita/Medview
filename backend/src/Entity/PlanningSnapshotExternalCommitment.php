@@ -76,6 +76,24 @@ class PlanningSnapshotExternalCommitment
     #[ORM\Column(nullable: true)]
     private ?int $sourceTeamMinRestHours;
 
+    /**
+     * The period (PlanningCycle) the duty belongs to, only when it is not the
+     * period of this snapshot's generation (docs/planning-cycles.md §5.4, lot
+     * L3) — values, for explanation: the rule is the CROSS_LINE_* one. Null
+     * for a duty of the same period (every row written before L3).
+     */
+    #[ORM\Column(type: 'uuid', nullable: true)]
+    private ?Uuid $sourceCycleStableId;
+
+    #[ORM\Column(nullable: true)]
+    private ?int $sourceCycleNumber;
+
+    #[ORM\Column(type: 'date_immutable', nullable: true)]
+    private ?\DateTimeImmutable $sourceCycleStartsAt;
+
+    #[ORM\Column(type: 'date_immutable', nullable: true)]
+    private ?\DateTimeImmutable $sourceCycleEndsAt;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -89,6 +107,7 @@ class PlanningSnapshotExternalCommitment
         \DateTimeImmutable $endsAt,
         ?int $sourceLegalMinRestHours,
         ?int $sourceTeamMinRestHours,
+        ?PlanningCycle $sourceCycle = null,
     ) {
         if ($endsAt <= $startsAt) {
             throw new \InvalidArgumentException('endsAt must be strictly after startsAt.');
@@ -103,6 +122,10 @@ class PlanningSnapshotExternalCommitment
         $this->endsAt = $endsAt;
         $this->sourceLegalMinRestHours = $sourceLegalMinRestHours;
         $this->sourceTeamMinRestHours = $sourceTeamMinRestHours;
+        $this->sourceCycleStableId = $sourceCycle?->getStableId();
+        $this->sourceCycleNumber = $sourceCycle?->getNumber();
+        $this->sourceCycleStartsAt = $sourceCycle?->getStartsAt();
+        $this->sourceCycleEndsAt = $sourceCycle?->getEndsAt();
         $this->createdAt = new \DateTimeImmutable();
         $snapshot->addExternalCommitment($this);
     }
@@ -157,6 +180,26 @@ class PlanningSnapshotExternalCommitment
         return $this->sourceTeamMinRestHours;
     }
 
+    public function getSourceCycleStableId(): ?Uuid
+    {
+        return $this->sourceCycleStableId;
+    }
+
+    public function getSourceCycleNumber(): ?int
+    {
+        return $this->sourceCycleNumber;
+    }
+
+    public function getSourceCycleStartsAt(): ?\DateTimeImmutable
+    {
+        return $this->sourceCycleStartsAt;
+    }
+
+    public function getSourceCycleEndsAt(): ?\DateTimeImmutable
+    {
+        return $this->sourceCycleEndsAt;
+    }
+
     public function getCreatedAt(): \DateTimeImmutable
     {
         return $this->createdAt;
@@ -164,7 +207,7 @@ class PlanningSnapshotExternalCommitment
 
     /**
      * Always a commitment of ANOTHER generation: a snapshot only ever
-     * freezes duties of other lines.
+     * freezes duties of other lines, or of other periods (lot L3).
      */
     public function toInterval(): CommitmentInterval
     {
@@ -176,6 +219,10 @@ class PlanningSnapshotExternalCommitment
             $this->sourceTeamMinRestHours,
             (string) $this->sourceDutyStableId,
             (string) $this->sourceLineStableId,
+            null !== $this->sourceCycleStableId ? (string) $this->sourceCycleStableId : null,
+            $this->sourceCycleNumber,
+            $this->sourceCycleStartsAt,
+            $this->sourceCycleEndsAt,
         );
     }
 }

@@ -35,6 +35,68 @@ export type PlanningSummary = {
   timezone: string
   createdAt: string
   updatedAt: string
+  /** Today in the planning's timezone (docs/planning-cycles.md §4.1). */
+  today?: string
+  /** The period that contains today, else null. */
+  currentPeriod?: PlanningPeriodSummary | null
+  /** The first period starting after today, else null. */
+  nextPeriod?: PlanningPeriodSummary | null
+  /** The last period — what a card shows once every period is over (lot L6). */
+  latestPeriod?: PlanningPeriodSummary
+  periodCount?: number
+  currentPeriodStableId?: string | null
+  nextPeriodStableId?: string | null
+}
+
+/** A period's own status, derived by the server (docs/planning-cycles.md §4.2). */
+export type PlanningCycleStatus =
+  'preparation' | 'collecting' | 'generated' | 'partially_published' | 'published'
+
+/** What a planning card reads of a period (§7.1, §7.2). `endsAt` is exclusive, `lastDay` the last day included. */
+export type PlanningPeriodSummary = {
+  stableId: string
+  number: number
+  startsAt: string
+  endsAt: string
+  lastDay: string
+  status: PlanningCycleStatus
+  timeState: 'past' | 'current' | 'future'
+  /** docs/decisions.md D194: lines that count, published, incomplete, without demand. */
+  lineCounts: { counting: number; published: number; incomplete: number; withoutDemand: number }
+  publishedAt: string | null
+  lastPublishedAt: string | null
+  generatedAt: string | null
+  /** The open collections' progress; `uncoveredDays` = days of the period no collection covers. */
+  collections: {
+    open: number
+    closed: number
+    acknowledged: number
+    expected: number
+    deadline: string | null
+    uncoveredDays: number
+  }
+}
+
+/** Whether a line takes part in a period, and why (docs/planning-cycles.md §4.3, D194). */
+export type LineApplicability = {
+  state: 'INACTIVE' | 'NOT_IN_PERIOD' | 'NO_DEMAND' | 'INCOMPLETE' | 'APPLICABLE'
+  reasons: string[]
+  dutyCount?: number
+  recurringPatternCount?: number
+  conditional?: boolean
+}
+
+/** A full period (§7.2). */
+export type PlanningPeriodView = PlanningPeriodSummary & {
+  lines: {
+    lineStableId: string
+    planningPeriodStableId: string
+    status: PlanningPeriodStatus
+    applicability: LineApplicability | null
+  }[]
+  isLast: boolean
+  canEditEnd: boolean
+  canDelete: boolean
 }
 
 export type PlanningLineTeam = {
@@ -55,12 +117,27 @@ export type PlanningLineSummary = {
   planningPeriodStableId: string
   /** Lifecycle of the line's period: DRAFT, GENERATED, VALIDATED, PUBLISHED, ARCHIVED. */
   periodStatus?: PlanningPeriodStatus
+  /** The line's period in each planning period (docs/planning-cycles.md §7). */
+  periods?: {
+    periodStableId: string
+    number: number
+    planningPeriodStableId: string
+    status: PlanningPeriodStatus
+    /** People whose membership intersects the period, each once (lot L7). */
+    memberCount?: number
+  }[]
   createdAt: string
   updatedAt: string
 }
 
 export type PlanningDetail = PlanningSummary & {
   lines: PlanningLineSummary[]
+  /** Every period, in order (docs/planning-cycles.md §7.1). */
+  periods?: PlanningPeriodView[]
+  /** The creator, and the creation of periods switched on (MEDVUE_PERIOD_CREATION_ENABLED). */
+  canCreatePeriod?: boolean
+  /** May open the collection of a period — same flag, availability right. */
+  canOpenPeriodCollection?: boolean
 }
 
 export type CreatePlanningInput = {

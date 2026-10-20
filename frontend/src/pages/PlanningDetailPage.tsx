@@ -1,8 +1,20 @@
-import { useEffect, useId, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { Field } from '../components/Field'
 import { Icon } from '../components/Icon'
 import { useAuth } from '../features/auth/useAuth'
+import { createPeriod, openPeriodCollection } from '../features/periods/api'
+import { CreatePeriodDialog } from '../features/periods/components/CreatePeriodDialog'
+import { Icon as PeriodIcon } from '../features/periods/components/Icon'
+import { PeriodDetailCard } from '../features/periods/components/PeriodDetailCard'
+import { PeriodSelector } from '../features/periods/components/PeriodSelector'
+import { PeriodTabs } from '../features/periods/components/PeriodTabs'
+import { PreparationSteps } from '../features/periods/components/PreparationSteps'
+import { addDays, formatRange } from '../features/periods/dates'
+import { collectionOpeningMessage, periodCreationError } from '../features/periods/errors'
+import { defaultPeriodNumber, hasReadableCalendar, lineStates, toPeriod } from '../features/periods/model'
+import '../features/periods/periodes.css'
+import type { ISODate } from '../features/periods/types'
 import {
   addTeamMember,
   createPlanningLine,
@@ -17,9 +29,6 @@ import { PlanningSwapHistory } from '../features/swaps/PlanningSwapHistory'
 import { LinesTab, type Face } from '../features/planning/detail/LinesTab'
 import { MembersSheet } from '../features/planning/detail/MembersSheet'
 import { LineSettingsDialog } from '../features/planning/coverage/LineSettingsDialog'
-import { PeriodCard } from '../features/planning/detail/PeriodCard'
-import { formatShortDate } from '../features/planning/detail/period'
-import { PlanningSteps, type DetailTab, type Step } from '../features/planning/detail/PlanningSteps'
 import { Sheet } from '../features/planning/detail/Sheet'
 import '../features/planning/detail/planningDetail.css'
 import { ExtendPlanningForm } from '../features/planning/ExtendPlanningForm'
@@ -32,28 +41,34 @@ import { PilotHeaderActions, type PilotDialog } from '../features/planning/pilot
 import type { CollectionStatus, LaunchResult, PlanningJob } from '../features/planning/pilot/types'
 import { completePlanning } from '../features/planning/result/api'
 import { usePlanningPilot } from '../features/planning/pilot/usePlanningPilot'
-import type { PlanningDetail, PlanningLineSummary, PlanningPeriodStatus } from '../features/planning/types'
+import type { PlanningDetail, PlanningLineSummary } from '../features/planning/types'
 import { ApiError } from '../lib/apiClient'
 
-/** Lifecycle of the primary line's period, shown next to the planning's name. */
-const PERIOD_STATUS: Record<PlanningPeriodStatus, string> = {
-  DRAFT: 'Brouillon',
-  GENERATED: 'Généré',
-  VALIDATED: 'Validé',
-  PUBLISHED: 'Publié',
-  ARCHIVED: 'Archivé',
-}
+type DetailTab = 'lines' | 'availability' | 'planning'
 
 const plural = (n: number, word: string) => `${n} ${word}${n > 1 ? 's' : ''}`
 
+/** "YYYY-MM-DD" of the browser's day — only when the server sends no `today` of the planning. */
+function localToday(): ISODate {
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+}
+
 /**
- * /plannings/:id, laid out as docs/Design/react_planning_detail (docs/decisions.md
- * D140): header, period, the three steps, and the "Lignes de garde" /
- * "Indisponibilités" / "Planning" tabs. Every action keeps its existing
- * component and endpoint; only the layout changed.
+ * /plannings/:id (docs/decisions.md D140), one permanent planning and its
+ * successive periods (docs/planning-cycles.md §8, lot L6): the header common
+ * to every period, the periods (docs/Design/medvue-periodes: frise, selected
+ * period, creation of the next one), then everything of the selected period —
+ * its preparation, its lines, its availability, its calendar, statistics and
+ * publications. The period is in the URL (`?periode=N`), so it can be shared
+ * and the browser's back and forward move between periods. Every action keeps
+ * its existing component and endpoint, now told which period it works on; an
+ * answer for a period no longer selected is never shown.
  */
 export function PlanningDetailPage() {
   const { planningId } = useParams<{ planningId: string }>()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useAuth()
   const [planning, setPlanning] = useState<PlanningDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -65,6 +80,9 @@ export function PlanningDetailPage() {
   const [renameOpen, setRenameOpen] = useState(false)
   const [newName, setNewName] = useState('')
   const [extendOpen, setExtendOpen] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [toast, setToast] = useState<string | null>(null)
+  const toastTimer = useRef<number | undefined>(undefined)
   const [membersLine, setMembersLine] = useState<PlanningLineSummary | null>(null)
   const [settingsLine, setSettingsLine] = useState<PlanningLineSummary | null>(null)
   const [pilotDialog, setPilotDialog] = useState<PilotDialog | null>(null)
@@ -78,13 +96,38 @@ export function PlanningDetailPage() {
   // "swaps": the managers' read-only swap history (docs/decisions.md D178).
   const [planningView, setPlanningView] = useState<'calendar' | 'person' | 'swaps'>('calendar')
 
-  const pilot = usePlanningPilot(planningId ?? '', planning?.canManageAvailability === true)
+  // --- the periods (docs/planning-cycles.md §4.1) ---------------------------------------------
+  const today = planning?.today ?? localToday()
+  const periodViews = useMemo(() => planning?.periods ?? [], [planning?.periods])
+  const periods = useMemo(() => periodViews.map(toPeriod), [periodViews])
+  const requested = Number(searchParams.get('periode'))
+  const selectedNumber = periods.some((p) => p.number === requested)
+    ? requested
+    : defaultPeriodNumber(periods, today)
+  const periodView = periodViews.find((p) => p.number === selectedNumber)
+  const period = periods.find((p) => p.number === selectedNumber)
+  const periodStableId = periodView?.stableId
+  const single = periods.length <= 1
+
+  /** Another period: a new history entry, so the browser's back button returns to the previous one. */
+  const selectPeriod = useCallback(
+    (number: number) => {
+      setSearchParams((previous) => {
+        const next = new URLSearchParams(previous)
+        next.set('periode', String(number))
+        return next
+      })
+    },
+    [setSearchParams],
+  )
+
+  const pilot = usePlanningPilot(planningId ?? '', planning?.canManageAvailability === true, periodStableId)
   const [jobDetail, setJobDetail] = useState<PlanningJob | null>(null)
   // The engine job (generation or completion) is followed from the server, on every tab
   // (docs/decisions.md D149): when it ends on this screen, everything that shows its effect re-reads.
   const jobs = usePlanningJob(planningId ?? '', (job) => {
     setGenerationVersion((count) => count + 1)
-    load()
+    void load()
     void pilot.reload()
     if (job.kind === 'GENERATE' && job.status === 'SUCCEEDED') {
       setTab('planning')
@@ -93,19 +136,18 @@ export function PlanningDetailPage() {
 
   async function requestCompletion() {
     if (!planningId) return
-    const { job } = await completePlanning(planningId)
+    const { job } = await completePlanning(planningId, periodStableId)
     jobs.track(job)
   }
-  const tabsId = useId()
 
-  function load() {
+  function load(): Promise<void> {
     if (!planningId) {
-      return
+      return Promise.resolve()
     }
 
     // No spinner on a reload: the page stays as it is (and keeps its notices) while the data refreshes.
     setError(null)
-    fetchPlanning(planningId)
+    return fetchPlanning(planningId)
       .then(setPlanning)
       .catch((err: unknown) => {
         if (err instanceof ApiError && err.status === 404) {
@@ -121,11 +163,52 @@ export function PlanningDetailPage() {
 
   useEffect(() => {
     setLoading(true)
-    load()
+    void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [planningId])
 
+  useEffect(() => () => window.clearTimeout(toastTimer.current), [])
+
   const facesByTeam = useMemo(() => facesFrom(pilot.status, user?.stableId), [pilot.status, user?.stableId])
+
+  function showToast(message: string) {
+    setToast(message)
+    window.clearTimeout(toastTimer.current)
+    toastTimer.current = window.setTimeout(() => setToast(null), 4500)
+  }
+
+  /** docs/planning-cycles.md §5.1: the dialog shows the last day included, the API takes the exclusive end. */
+  async function handleCreatePeriod(lastDay: ISODate, acceptHistoricalBlockCuts: boolean) {
+    const last = periodViews[periodViews.length - 1]
+    if (!planningId || !last) return
+    let created
+    try {
+      created = await createPeriod(planningId, {
+        endsAt: addDays(lastDay, 1),
+        previousPeriodStableId: last.stableId,
+        acceptHistoricalBlockCuts,
+      })
+    } catch (err) {
+      throw periodCreationError(err)
+    }
+    setCreateOpen(false)
+    await load()
+    selectPeriod(created.number)
+    showToast(`Période ${created.number} créée · ${formatRange(created.startsAt, created.lastDay)}`)
+  }
+
+  async function handleOpenCollection() {
+    if (!planningId || !periodStableId) return
+    try {
+      await openPeriodCollection(planningId, periodStableId)
+    } catch (err) {
+      throw new Error(collectionOpeningMessage(err))
+    }
+    setCollectionsReload((count) => count + 1)
+    void pilot.reload()
+    await load()
+    showToast(`Collecte des disponibilités ouverte pour la période ${selectedNumber}`)
+  }
 
   async function handleRename() {
     if (!planningId || !newName) {
@@ -138,7 +221,7 @@ export function PlanningDetailPage() {
       await renamePlanning(planningId, newName)
       setRenameOpen(false)
       setNewName('')
-      load()
+      void load()
     } catch {
       setActionError('Impossible de renommer ce planning.')
     } finally {
@@ -159,14 +242,14 @@ export function PlanningDetailPage() {
     setSaving(true)
     setActionError(null)
     try {
-      const today = new Date().toISOString().slice(0, 10)
+      const day = new Date().toISOString().slice(0, 10)
       await addTeamMember(planningId, primary.team.stableId, {
         userStableId: user.stableId,
         role: 'OWNER',
         // From the start of the planning, so the whole range is covered.
-        membershipStart: today < planning.startsAt ? today : planning.startsAt,
+        membershipStart: day < planning.startsAt ? day : planning.startsAt,
       })
-      load()
+      void load()
       void pilot.reload()
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
@@ -188,7 +271,7 @@ export function PlanningDetailPage() {
     setActionError(null)
     try {
       await createPlanningLine(planningId, { name })
-      load()
+      void load()
       return true
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
@@ -211,7 +294,7 @@ export function PlanningDetailPage() {
     setActionError(null)
     try {
       await deletePlanningLine(planningId, lineStableId)
-      load()
+      void load()
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         setActionError('La ligne principale ne peut pas être supprimée.')
@@ -250,30 +333,56 @@ export function PlanningDetailPage() {
   }
 
   const primaryLine = planning.lines.find((line) => line.type === 'PRIMARY')
-  const status = primaryLine?.periodStatus ?? 'DRAFT'
-  const generated = planning.lines.some((line) => line.periodStatus && line.periodStatus !== 'DRAFT')
-  // After publication no general (re)generation is offered (the server refuses it anyway, PERIOD_LOCKED).
-  const published = planning.lines.some((line) => line.active && line.periodStatus === 'PUBLISHED')
-  const steps = buildSteps(planning, pilot.status, generated, status)
+  // The selected period's own state — never the planning's other periods (docs/planning-cycles.md §4.2).
+  // docs/decisions.md D204: a plain member reads the published lines only — a draft period has nothing to show them.
+  const generated = periodView
+    ? hasReadableCalendar(periodView, planning.canManageCalendar === true)
+    : planning.lines.some((line) => line.periodStatus && line.periodStatus !== 'DRAFT')
+  // A fully published period offers no (re)generation (the server refuses it anyway, PERIOD_LOCKED). A partly
+  // published one does: the dialog offers to generate only the lines not published (docs/decisions.md D195).
+  const fullyPublished = periodView
+    ? periodView.status === 'published'
+    : planning.lines.some((line) => line.active && line.periodStatus === 'PUBLISHED')
+  const latest = periods[periods.length - 1]
+  const selectedIndex = period ? periods.indexOf(period) : -1
+  const memberTotal = planning.memberCount ?? 0
+  const activeLines = planning.lines.filter((line) => line.active).length
+  const canCreatePeriod = planning.canCreatePeriod === true
   const onRename = planning.canManage
     ? () => {
         setNewName(planning.name)
         setRenameOpen(true)
       }
     : undefined
-  const tabs: { id: DetailTab; long: string; short: string; count?: number }[] = [
-    { id: 'lines', long: 'Lignes de garde', short: 'Lignes', count: planning.lines.length },
+  // Extending the planning (docs/decisions.md D122) only means something while it has a single period.
+  const onExtend = planning.canManage && single ? () => setExtendOpen(true) : undefined
+  const tabs: { id: DetailTab; label: string; short: string; count?: number }[] = [
+    { id: 'lines', label: 'Lignes de garde', short: 'Lignes', count: planning.lines.length },
     {
       id: 'availability',
-      long: 'Indisponibilités',
+      label: 'Indisponibilités',
       short: 'Indispos',
       count: pilot.status?.summary.expectedCount,
     },
-    { id: 'planning', long: 'Planning', short: 'Planning' },
+    { id: 'planning', label: single ? 'Planning' : `Gardes · période ${selectedNumber}`, short: 'Gardes' },
   ]
+  // Lot L7: each line with the people who take part in the selected period — never the default period's count.
+  const linesOfPeriod = planning.lines.map((line) => {
+    const count = line.periods?.find((p) => p.periodStableId === periodStableId)?.memberCount
+    return count === undefined ? line : { ...line, memberCount: count }
+  })
+  const calendarPeriod = periodView
+    ? {
+        stableId: periodView.stableId,
+        number: periodView.number,
+        startsAt: periodView.startsAt,
+        endsAt: periodView.endsAt,
+        lastDay: periodView.lastDay,
+      }
+    : undefined
 
   return (
-    <div className="pd-page">
+    <div className={`pd-page ${canCreatePeriod ? 'pd-page--with-action' : ''}`}>
       <section className="pd-head">
         <Link to="/plannings" className="pd-back">
           <Icon name="left" size={16} strokeWidth={2.2} />
@@ -283,10 +392,6 @@ export function PlanningDetailPage() {
           <div className="pd-head-title">
             <div className="pd-title-line">
               <h1>{planning.name}</h1>
-              <span className="pd-badge" data-status={status}>
-                <span className="pd-dot" />
-                {PERIOD_STATUS[status]}
-              </span>
             </div>
             {planning.participating ? (
               <span className="pd-me">
@@ -312,24 +417,60 @@ export function PlanningDetailPage() {
               primaryLineStableId={primaryLine?.stableId}
               primaryLineName={primaryLine?.name}
               onRename={onRename}
+              onExtend={onExtend}
+              period={
+                periodView
+                  ? {
+                      stableId: periodView.stableId,
+                      number: periodView.number,
+                      startsAt: periodView.startsAt,
+                      lastDay: periodView.lastDay,
+                      named: !single,
+                      hasCollection: periodView.collections.open + periodView.collections.closed > 0,
+                    }
+                  : undefined
+              }
+              generateLabel={single ? 'Générer le planning' : `Générer la période ${selectedNumber}`}
               onChanged={() => void pilot.reload()}
               onLaunched={(job) => jobs.track(job)}
-              canLaunchGeneration={!published}
+              canLaunchGeneration={!fullyPublished}
               busy={jobs.active}
               dialog={pilotDialog}
               onDialogChange={setPilotDialog}
             />
           ) : (
-            onRename && (
+            (onRename || onExtend) && (
               <div className="pd-head-actions">
                 <ActionMenu
                   label="Plus d’actions"
                   large
-                  items={[{ label: 'Modifier le nom', icon: 'pencil', onSelect: onRename }]}
+                  items={[
+                    ...(onRename
+                      ? [{ label: 'Modifier le nom', icon: 'pencil' as const, onSelect: onRename }]
+                      : []),
+                    ...(onExtend
+                      ? [{ label: 'Prolonger la période', icon: 'calendar' as const, onSelect: onExtend }]
+                      : []),
+                  ]}
                 />
               </div>
             )
           )}
+        </div>
+        <div className="mv-shared">
+          <span className="mv-eyebrow">{single ? 'Le planning' : 'Commun à toutes les périodes'}</span>
+          <span className="mv-pill-link">
+            <PeriodIcon name="lines" size={16} />
+            {plural(activeLines, 'ligne')} de garde
+          </span>
+          <span className="mv-pill-link">
+            <PeriodIcon name="users" size={16} />
+            {plural(memberTotal, 'membre')}
+          </span>
+          <span className="mv-pill-link">
+            <PeriodIcon name="globe" size={16} />
+            {planning.timezone}
+          </span>
         </div>
       </section>
 
@@ -357,49 +498,85 @@ export function PlanningDetailPage() {
         </p>
       )}
 
-      <PeriodCard
-        startsAt={planning.startsAt}
-        endsAt={planning.endsAt}
-        timezone={planning.timezone}
-        onExtend={planning.canManage ? () => setExtendOpen(true) : undefined}
-      />
-
-      <PlanningSteps steps={steps} tab={tab} onSelect={setTab} />
-
-      <section className="pd-tabs-section">
-        <div className="pd-tabs" role="tablist" aria-label="Sections du planning">
-          {tabs.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              role="tab"
-              id={`${tabsId}-${t.id}`}
-              aria-selected={tab === t.id}
-              aria-controls={`${tabsId}-panel`}
-              // One accessible name at every width: CSS swaps the visible long/short label.
-              aria-label={t.count !== undefined ? `${t.long} (${t.count})` : t.long}
-              className="pd-tab"
-              onClick={() => setTab(t.id)}
-            >
-              <span className="pd-lg" aria-hidden>
-                {t.long}
-              </span>
-              <span className="pd-sm" aria-hidden>
-                {t.short}
-              </span>
-              {t.count !== undefined && (
-                <span className="pd-tab-count" aria-hidden>
-                  {t.count}
+      {period && latest && (
+        <section className="mv-card mv-periods-card" aria-label="Périodes du planning">
+          <div className="mv-periods-card__head">
+            <div className="mv-row mv-row--baseline">
+              <h2 className="mv-eyebrow mv-eyebrow--strong">
+                {single ? 'Période du planning' : `Périodes du planning · ${periods.length}`}
+              </h2>
+              {!single && (
+                <span className="mv-muted mv-small mv-hide-mobile">
+                  Cliquez sur une période pour la consulter
                 </span>
               )}
-            </button>
-          ))}
-        </div>
+            </div>
+            {canCreatePeriod && (
+              <button
+                type="button"
+                className="mv-btn mv-btn--primary mv-hide-mobile"
+                onClick={() => setCreateOpen(true)}
+              >
+                <PeriodIcon name="plus" strokeWidth={2.2} /> Créer la période suivante
+              </button>
+            )}
+          </div>
 
-        <div role="tabpanel" id={`${tabsId}-panel`} aria-labelledby={`${tabsId}-${tab}`}>
+          {(!single || canCreatePeriod) && (
+            <PeriodSelector
+              periods={periods}
+              selectedId={period.id}
+              today={today}
+              canCreate={canCreatePeriod}
+              onSelect={(id) => {
+                const chosen = periods.find((p) => p.id === id)
+                if (chosen) selectPeriod(chosen.number)
+              }}
+              onCreate={() => setCreateOpen(true)}
+            />
+          )}
+
+          <PeriodDetailCard
+            period={period}
+            today={today}
+            latestNumber={latest.number}
+            lineCount={activeLines}
+            memberCount={memberTotal}
+            hasPrev={selectedIndex > 0}
+            hasNext={selectedIndex < periods.length - 1}
+            single={single}
+            onPrev={() => selectPeriod(periods[selectedIndex - 1].number)}
+            onNext={() => selectPeriod(periods[selectedIndex + 1].number)}
+            onGoLatest={() => selectPeriod(latest.number)}
+          />
+        </section>
+      )}
+
+      {/* Everything below belongs to the selected period: remounted when it changes, so nothing of the previous
+          period stays on screen and its late answers land nowhere (docs/planning-cycles.md §8). */}
+      <div key={periodStableId ?? 'planning'} className="pd-period-content">
+        {period && periodView && (
+          <PreparationSteps
+            period={period}
+            canOpenCollection={planning.canOpenPeriodCollection === true}
+            onOpenCollecte={handleOpenCollection}
+            lines={lineStates(periodView, planning.lines)}
+          />
+        )}
+
+        <PeriodTabs
+          tabs={tabs}
+          selected={tab}
+          onSelect={setTab}
+          context={
+            !single && period
+              ? `Période ${period.number} · ${formatRange(period.start, period.end)}`
+              : undefined
+          }
+        >
           {tab === 'lines' && (
             <LinesTab
-              lines={planning.lines}
+              lines={linesOfPeriod}
               facesByTeam={facesByTeam}
               canManage={planning.canManage}
               canConfigure={planning.canManageLineStructure === true}
@@ -447,6 +624,7 @@ export function PlanningDetailPage() {
                   <AvailabilityCollectionsPanel
                     planningStableId={planning.stableId}
                     reloadToken={collectionsReload}
+                    periodStableId={periodStableId}
                   />
                 )}
               </div>
@@ -454,6 +632,7 @@ export function PlanningDetailPage() {
               <AvailabilityCollectionsPanel
                 planningStableId={planning.stableId}
                 reloadToken={collectionsReload}
+                periodStableId={periodStableId}
               />
             ))}
 
@@ -494,13 +673,15 @@ export function PlanningDetailPage() {
                   <PlanningCalendar
                     key={generationVersion}
                     planning={planning}
-                    onPublished={load}
+                    period={calendarPeriod}
+                    showPeriodNumber={!single}
+                    onPublished={() => void load()}
                     onRequestCompletion={requestCompletion}
                     jobActive={jobs.active}
                     jobKind={jobs.active ? (jobs.job?.kind ?? null) : null}
                   />
                 ) : (
-                  <PersonalPlanningView key={generationVersion} planning={planning} />
+                  <PersonalPlanningView key={generationVersion} planning={planning} period={calendarPeriod} />
                 )}
               </div>
             ) : (
@@ -508,25 +689,64 @@ export function PlanningDetailPage() {
                 <span className="pd-empty-icon" aria-hidden>
                   <Icon name="calendar" size={24} strokeWidth={1.9} />
                 </span>
-                <strong>Pas encore de planning</strong>
+                <strong>
+                  {single
+                    ? 'Pas encore de planning'
+                    : `Pas encore de gardes pour la période ${selectedNumber}`}
+                </strong>
                 <span>
                   {planning.canGenerate
                     ? 'Lancez la génération : les gardes de chaque membre s’afficheront ici, mois par mois.'
-                    : 'Les gardes s’afficheront ici dès que le planning aura été généré.'}
+                    : 'Les gardes s’afficheront ici dès que la période aura été générée et publiée.'}
                 </span>
-                {planning.canGenerate && (
+                {planning.canGenerate && !fullyPublished && (
                   <button
                     type="button"
                     className="pd-btn pd-btn-primary"
                     onClick={() => setPilotDialog('generate')}
                   >
-                    Générer le planning
+                    {single ? 'Générer le planning' : `Générer la période ${selectedNumber}`}
                   </button>
                 )}
               </div>
             ))}
+        </PeriodTabs>
+      </div>
+
+      {canCreatePeriod && (
+        <div className="mv-mobile-action">
+          <button
+            type="button"
+            className="mv-btn mv-btn--primary mv-btn--block"
+            onClick={() => setCreateOpen(true)}
+          >
+            <PeriodIcon name="plus" strokeWidth={2.2} /> Créer la période suivante
+          </button>
         </div>
-      </section>
+      )}
+
+      {canCreatePeriod && (
+        <CreatePeriodDialog
+          open={createOpen}
+          planningName={planning.name}
+          lineCount={activeLines}
+          memberCount={memberTotal}
+          periods={periods}
+          onCancel={() => setCreateOpen(false)}
+          onCreate={handleCreatePeriod}
+          onReload={() => {
+            setCreateOpen(false)
+            void load()
+          }}
+        />
+      )}
+
+      {toast && (
+        <div className="mv-toast" role="status">
+          <PeriodIcon name="check" strokeWidth={2.6} />
+          {toast}
+        </div>
+      )}
 
       {jobDetail?.outcome && (
         <Sheet title="Résultat de la génération" wide onClose={() => setJobDetail(null)}>
@@ -569,7 +789,7 @@ export function PlanningDetailPage() {
             onExtended={() => {
               setCollectionsReload((count) => count + 1)
               void pilot.reload()
-              load()
+              void load()
             }}
           />
         </Sheet>
@@ -580,7 +800,7 @@ export function PlanningDetailPage() {
           line={settingsLine}
           onClose={() => setSettingsLine(null)}
           onSaved={() => {
-            load()
+            void load()
             void pilot.reload()
           }}
         />
@@ -593,76 +813,13 @@ export function PlanningDetailPage() {
           canManage={planning.canManage}
           onClose={() => setMembersLine(null)}
           onChanged={() => {
-            load()
+            void load()
             void pilot.reload()
           }}
         />
       )}
     </div>
   )
-}
-
-/** Équipe → Indisponibilités → Génération, from what the page already loaded. */
-function buildSteps(
-  planning: PlanningDetail,
-  pilot: CollectionStatus | null,
-  generated: boolean,
-  status: PlanningPeriodStatus,
-): Step[] {
-  const memberTotal = planning.lines.reduce((sum, line) => sum + (line.memberCount ?? 0), 0)
-  const staffed = planning.lines.every((line) => (line.memberCount ?? 0) > 0)
-  const team: Step = {
-    title: 'Équipe',
-    detail: `${plural(planning.lines.length, 'ligne')} · ${plural(memberTotal, 'membre')}`,
-    state: staffed ? 'done' : 'todo',
-    tag: staffed ? 'Prêt' : 'À compléter',
-    tab: 'lines',
-  }
-
-  let availability: Step
-  if (pilot) {
-    const { confirmedCount, expectedCount, pendingCount } = pilot.summary
-    const deadline = pilot.availabilityDeadline
-      ? ` · fin souhaitée ${formatShortDate(pilot.availabilityDeadline)}`
-      : ''
-    availability =
-      expectedCount > 0 && pendingCount > 0
-        ? {
-            title: 'Indisponibilités',
-            detail: `${confirmedCount}/${expectedCount} confirmés${deadline}`,
-            state: 'current',
-            tag: 'En cours',
-            tab: 'availability',
-          }
-        : {
-            title: 'Indisponibilités',
-            detail:
-              expectedCount > 0 ? `${confirmedCount}/${expectedCount} confirmés` : 'Personne n’est attendu',
-            state: 'done',
-            tag: 'Prêt',
-            tab: 'availability',
-          }
-  } else {
-    availability = {
-      title: 'Indisponibilités',
-      detail: planning.canManageAvailability ? 'Chargement du suivi…' : 'Vos réponses aux collectes',
-      state: 'current',
-      tag: 'Collecte',
-      tab: 'availability',
-    }
-  }
-
-  const generation: Step = generated
-    ? {
-        title: 'Génération',
-        detail: status === 'PUBLISHED' ? 'Planning publié' : 'Planning généré',
-        state: 'done',
-        tag: PERIOD_STATUS[status],
-        tab: 'planning',
-      }
-    : { title: 'Génération', detail: 'Pas encore lancée', state: 'todo', tag: 'À faire', tab: 'planning' }
-
-  return [team, availability, generation]
 }
 
 /** Initials of each team's participants (pilot data), the current user first-class ("me"). */

@@ -155,12 +155,14 @@ Une affectation porte **à la fois** :
   l'interprétation historique si le `TeamMember` change de rôle ou quitte
   l'équipe plus tard).
 
-`DutyAssignmentService::createManual()` résout `snapshotMember` à partir
+`DutyAssignmentService` résout `snapshotMember` à partir
 de `teamMember` via `PlanningSnapshotMemberRepository::findOneBySnapshotAndTeamMemberStableId()`
 — si aucune ligne ne correspond (le membre n'était pas présent au moment
-du snapshot), `InvalidDutyAssignmentException` (422). Une affectation ne
-peut donc jamais être créée avant que la génération soit snapshottée
-(`PlanningGenerationNotSnapshottedException`, 409).
+du snapshot), `InvalidDutyAssignmentException`. Une affectation ne
+peut donc jamais être créée avant que la génération soit snapshottée.
+Depuis D197 (lot L4d), ce service ne sert plus qu'aux chemins contrôlés
+(génération, complétion, réaffectation, échange) : `createManual()` et
+l'endpoint technique qui l'appelait sont retirés (§36).
 
 `DutyAssignment` porte aussi deux garde-fous redondants directement dans
 son constructeur (`\InvalidArgumentException`, même style que
@@ -238,7 +240,7 @@ GET  /api/planning-periods/{planningPeriodStableId}/generations
 GET  /api/planning-generations/{stableId}
 POST /api/planning-generations/{stableId}/snapshot
 GET  /api/planning-generations/{stableId}/snapshot
-POST /api/planning-generations/{generationStableId}/assignments
+POST /api/planning-generations/{generationStableId}/assignments   (fermé : 410 endpoint_removed, D197)
 POST /api/planning-generations/{stableId}/solve
 ```
 
@@ -272,7 +274,7 @@ D079) étendu avec deux attributs (sujet : `PlanningTeam`) :
 - `TEAM_VIEW_PLANNING` — tout membre courant de l'équipe, n'importe quel
   rôle (lecture des générations/snapshots).
 - `TEAM_MANAGE_PLANNING` — OWNER/ADMIN uniquement (création de génération,
-  snapshot, affectation manuelle).
+  snapshot ; l'affectation manuelle technique est fermée depuis D197).
 
 Pas de nouveau Voter : ces deux attributs suivent exactement le même
 schéma que `VIEW_TEAM`/le contrôle "managing role" déjà utilisé pour la
@@ -378,7 +380,8 @@ une inconclusion technique.
 ## 15. Persistance `DutyAssignment` AUTO
 
 `DutyAssignmentService::createAuto()` — une vraie frontière distincte de
-`createManual()` (jamais un détournement de sa sémantique) :
+l'ancien `createManual()` (retiré par D197 ; jamais un détournement de sa
+sémantique) :
 `DutyAssignmentSource::AUTO` toujours forcé, ne flush jamais elle-même
 (conçue pour un usage en lot au sein d'une seule transaction plus large),
 accepte un `PlanningSnapshot` déjà résolu au lieu de le rechercher à
@@ -1001,3 +1004,187 @@ aujourd'hui.
   le message juste avant une coupure, avant l'enregistrement `SENT` (D172).
 - **Première publication** : inchangée (chaque participant, PDF joint),
   désormais par la même boîte d'envoi (donc retentée elle aussi).
+
+
+## 31. Génération et complétion par période (docs/decisions.md D189, lot L3)
+
+Spécification : `docs/planning-cycles.md` §5.4, I8. Le flag
+`MEDVUE_PERIOD_CREATION_ENABLED` reste désactivé par défaut.
+
+- **Période ciblée** :
+  - préflight, génération et complétion portent sur une période
+    (`?period=` ou `period` dans le corps) ;
+  - sur un planning à plusieurs périodes, la période est obligatoire (422
+    `period_required`) ;
+  - seules les lignes actives qui ont une période dans ce cycle sont
+    traitées ;
+  - un seul job actif par planning, toutes périodes confondues.
+- **Engagements entre périodes** :
+  - le snapshot fige aussi les gardes des autres périodes qui peuvent
+    contraindre celle-ci (chevauchement, ou écart inférieur au seuil de
+    repos le plus strict des deux générations) ;
+  - motifs `CROSS_LINE_*`, avec la période voisine dans le contexte de
+    l'exclusion ;
+  - la règle est symétrique : N avant N+1, ou l'inverse.
+- **Écriture** : sous le `CalendarWriteLock`. Le résultat est refusé si la
+  période a été verrouillée, si ses gardes ont changé, ou si l'ensemble des
+  engagements voisins relu n'est plus celui du snapshot. Le job est alors
+  en échec, avec le motif `neighbour_calendar_changed` ou `period_locked`.
+- **I8** : une période `VALIDATED`, `PUBLISHED` ou `ARCHIVED` n'est jamais
+  générée, et rien n'y est matérialisé. Elle reste complétable : la
+  complétion vérifie chaque trou contre toutes les périodes.
+- **Blocs** : aucune frontière entre deux périodes ne coupe un bloc
+  atomique. Ce point est contrôlé à la création de période, au changement
+  de fin et à la modification de la structure, et le préflight le signale
+  (`BLOCK_CUT_BY_PERIOD_BOUNDARY`).
+- **Lignes conditionnelles** : la source est la période de la ligne source
+  dans le même cycle. Si elle est absente, la génération est bloquée
+  (`CONDITIONAL_SOURCE_NOT_IN_PERIOD`).
+
+## 32. Lancement résolu en deux temps (docs/decisions.md D191)
+
+- **Résolution** : toutes les lignes d'un lancement sont résolues sans rien
+  écrire, dans l'ordre D161. Une ligne voit ce que les lignes précédentes
+  vont tenir, et une ligne conditionnelle lit les titulaires prévus de sa
+  source.
+- **Écriture** : une seule transaction sous le `CalendarWriteLock`.
+  - Chaque génération est revérifiée : période non verrouillée, gardes
+    inchangées, engagements voisins identiques, source écrite.
+  - Le calendrier final est ensuite vérifié personne par personne
+    (chevauchement, repos, auto-couverture), avec les calendriers des
+    lignes en échec.
+  - Ce qui est incohérent n'est pas écrit (`launch_inconsistent`, avec
+    `conflicts` dans la sortie du job). Ce qui en dépendait non plus.
+  - Le reste est écrit : un échec partiel reste partiel lorsqu'il est sûr.
+- **Jamais** une affectation existante supprimée, jamais une période
+  publiée régénérée.
+
+## 33. Bloc de reste à une frontière historique (docs/decisions.md D192)
+
+- **Cas** : la fin d'une période verrouillée, fixée avant L3, coupe un bloc
+  dont les premiers jours n'ont jamais été matérialisés.
+- **Création** : la période suivante est créée seulement sur confirmation
+  (`acceptHistoricalBlockCuts`).
+- **Bloc de reste** :
+  - les jours de l'occurrence situés dans la nouvelle période forment un
+    bloc de reste : même motif, même famille, un seul titulaire ;
+  - il est identifiable par `DutyGroupInstance::isRemainder()` ;
+  - le préflight le signale (`HISTORICAL_BLOCK_REMAINDER`) ;
+  - il est généré et couvert comme toute garde.
+- **Période précédente** : rien n'y est jamais ajouté.
+
+## 34. Génération ciblée : lignes non verrouillées (docs/decisions.md D195, lot L4b)
+
+- **Décision par ligne** (préflight, `lines[].decision`), à partir de
+  l'applicabilité unique (D194), lue après la matérialisation :
+  - `EXCLUDE` : rien n'est demandé à la ligne dans la période. Jamais
+    générée, jamais bloquante, laissée telle quelle (DRAFT reste DRAFT,
+    aucune génération artificielle, jamais désactivée) ;
+  - `KEEP` : sa période est VALIDATED, PUBLISHED ou ARCHIVED. Jamais
+    régénérée ; son calendrier courant est un engagement des lignes
+    générées ;
+  - `GENERATE` : générée par ce lancement, avec tous ses bloquants propres
+    (une demande réelle dont la configuration est incomplète reste bloquante,
+    explicitement : `NO_ACTIVE_RULE_SET`, `CONDITIONAL_SOURCE_NOT_IN_PERIOD`,
+    `NO_MEMBER_IN_PERIOD`). Ces prérequis sont lus dans
+    `LineApplicabilityService::missingPrerequisites()`, la même règle que
+    l'état `INCOMPLETE`, y compris pour une ligne déjà générée qu'on régénère.
+- **Trois cas à ne pas confondre** (arbitrage du 2026-10-15) :
+  - **A — aucune garde demandée** : `EXCLUDE`, voir ci-dessus ;
+  - **B — des gardes, aucun membre dans la période** : la ligne est
+    `INCOMPLETE` et le lancement est refusé avec le bloquant
+    `NO_MEMBER_IN_PERIOD`. Ce n'est plus l'avertissement
+    `LINE_WITHOUT_MEMBERS` (D129), qui n'est plus produit. Comme tout
+    bloquant, il refuse **tout** le lancement : aucune ligne n'est générée
+    (jamais une partie seulement, D129) ;
+  - **C — des membres, mais aucun candidat pour certaines gardes**
+    (indisponibilités, repos, engagements) : ce n'est pas une configuration
+    incomplète. La ligne est générée, les gardes restent non couvertes,
+    `coverage: INCOMPLETE` (jamais présenté comme complet).
+- **`scope: "unlocked_lines"`** (corps de `POST .../generations`, ou
+  `?scope=` du préflight ; toute autre valeur : 422) :
+  - sans lui, une ligne `KEEP` donne `PERIOD_LOCKED` comme avant, et
+    `requiredScope: "unlocked_lines"` est renvoyé dès qu'une autre ligne
+    serait générée (préflight et 409 `not_launchable`) ;
+  - avec lui, les lignes `KEEP` sont simplement conservées ;
+  - il est enregistré sur le job (`planning_jobs.generation_scope`) et rejoué
+    par le worker.
+- **Rien à générer** : `NO_LINE_TO_GENERATE`, aucun job n'est créé.
+- **Engagements** (`NeighbourCommitmentCollector`) : dans la même période,
+  les lignes résolues avant (D161) **et** toute ligne verrouillée, quelle
+  que soit sa place dans l'ordre.
+- **Lignes conditionnelles** :
+  - renfort généré, source conservée : sa demande est décidée depuis le
+    calendrier **courant** de la source publiée ; sous le verrou du
+    calendrier, ses titulaires sont relus en base et toute différence avec
+    la demande figée écarte le résultat (`source_calendar_changed`) ;
+  - source à générer dont un renfort est conservé : `SOURCE_OF_PUBLISHED_LINE`,
+    jamais régénérée.
+- **Résultat du job** : `lines` = les lignes générées seulement (inchangé
+  pour l'écran), plus `scope`, `keptLines` et `excludedLines`.
+- **Inchangé** : résolution sans écriture, snapshots, revalidation et
+  écriture atomique sous `CalendarWriteLock` (D191), diagnostics des lignes
+  échouées.
+
+## 35. Publication par période et par ligne (docs/decisions.md D196, lot L4c)
+
+Prolonge §22 (diffusion) et §30 (emails de republication), une période à la
+fois.
+
+- **Deux opérations, jamais déduites de l'état** :
+  - `POST .../publish` : première publication de lignes de la période.
+    Sans `lines` : tout ou rien (comportement d'avant). Avec `lines` : ces
+    lignes seulement, les autres laissées telles quelles ;
+  - `POST .../republish` : les modifications des lignes publiées, plus les
+    `newLines` cochées, en une opération.
+- **Trace** :
+  - `planning_publication_lines` : `FIRST_FOR_LINE` ou `UPDATED`, jamais
+    une ligne inchangée ;
+  - `planning_publications.cycle_complete`, figé ;
+  - les entrées figent toutes les lignes publiées de la période.
+- **Préflight par ligne** : `published`, `firstPublishable`, `blockers`,
+  `sourceLineStableId`. Il est rejoué sous le `CalendarWriteLock` dans la
+  transaction qui écrit. `republishable` ne dépend que des lignes publiées.
+- **Ligne conditionnelle** : publiée avec ou après sa ligne source
+  (`source_line_not_published`).
+- **Interface** (adaptation minimale, l'intégration complète relève du lot
+  L6) :
+  - la fenêtre « Republier » liste les « Nouvelles lignes à publier »,
+    décochées par défaut ;
+  - la fenêtre « Publier » propose, quand toutes les lignes ne sont pas
+    prêtes, de cocher celles à publier ;
+  - le bouton du calendrier devient « Publier les nouvelles lignes » quand
+    une ligne générée attend sa première publication sans autre
+    modification.
+- **PDF** : dates de la période, « Période N », lignes publiées dans la
+  période à la date de la publication, `planning-<slug>-periode-<N>.pdf`.
+  Les documents déjà stockés restent servis à l'octet près ; toute
+  publication passée est téléchargeable
+  (`GET .../publications/{publication}/pdf`).
+- **Emails** : un seul par personne. La première publication d'une ligne
+  est envoyée à ses membres sur la période ; une personne concernée à la
+  fois par une nouvelle ligne et par un changement les reçoit dans le même
+  email.
+
+## 36. Réaffectation, candidats et complétion par période (docs/decisions.md D197, lot L4d)
+
+- **Période de la garde** : candidats, réaffectation et retrait ne
+  prennent aucun paramètre `period` et ne sont plus refusés sur un
+  planning à plusieurs périodes. Le bloc, la génération courante et les
+  événements appartiennent à la période de la garde. Les réponses portent
+  `period {stableId, number}`.
+- **Contrôle en direct** : contre les gardes de toutes les périodes de
+  toutes les lignes actives (chevauchement, repos, auto-couverture), comme
+  depuis L3. Une garde de la même ligne dans la période voisine donne les
+  motifs `CROSS_LINE_*`.
+- **Période orpheline** (sans ligne) : 404 sur les trois routes.
+- **`wasPublished`** : lu en base sous le `CalendarWriteLock`
+  (réaffectation, retrait, complétion), jamais depuis une entité chargée
+  avant le verrou.
+- **Endpoint technique d'affectation** :
+  `POST /api/planning-generations/{id}/assignments` répond 410
+  `endpoint_removed`, sans rien lire ni écrire. Affecter une garde non
+  couverte passe par `POST /api/plannings/{p}/duties/{d}/reassign` avec
+  `expectedCurrentTeamMemberStableId: null`.
+- **Inchangé** : droits (`PlanningVoter::MANAGE_CALENDAR`), complétion par
+  période (L3), échanges refusés en multipériode.

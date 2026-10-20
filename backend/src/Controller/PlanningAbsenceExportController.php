@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Exception\InvalidPlanningExportRequestException;
 use App\Repository\PlanningRepository;
 use App\Security\Voter\PlanningVoter;
 use App\Service\PlanningAbsenceExportService;
 use Symfony\Component\HttpFoundation\HeaderUtils;
+use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -21,7 +24,10 @@ use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
  * time — PlanningVoter::MANAGE_AVAILABILITY, i.e. the creator or a current
  * OWNER/ADMIN of one of the planning's teams (D124), never a plain member.
  * The participants are always derived from the planning on the server; the
- * request carries nothing but the planning's identifier.
+ * request carries nothing but the planning's identifier and, optionally,
+ * the range (docs/decisions.md D200): `?period={stableId}` or
+ * `?from=YYYY-MM-DD&to=YYYY-MM-DD` (to exclusive), inside the planning —
+ * the rights are checked first and never depend on it.
  */
 final class PlanningAbsenceExportController
 {
@@ -33,7 +39,7 @@ final class PlanningAbsenceExportController
     }
 
     #[Route('/api/plannings/{planningStableId}/availability-export.pdf', name: 'api_planning_availability_export', methods: ['GET'])]
-    public function export(string $planningStableId): Response
+    public function export(string $planningStableId, Request $request): Response
     {
         $planning = $this->planningRepository->findOneByStableId($planningStableId);
         if (null === $planning) {
@@ -43,7 +49,16 @@ final class PlanningAbsenceExportController
             throw new AccessDeniedHttpException('You cannot follow the availabilities of this planning.');
         }
 
-        $file = $this->exportService->export($planning);
+        try {
+            $file = $this->exportService->export(
+                $planning,
+                $this->queryValue($request, 'period'),
+                $this->queryValue($request, 'from'),
+                $this->queryValue($request, 'to'),
+            );
+        } catch (InvalidPlanningExportRequestException $exception) {
+            return new JsonResponse(['error' => 'validation_failed', 'violations' => $exception->violations], 422);
+        }
 
         return new Response($file->content, 200, [
             'Content-Type' => $file->contentType,
@@ -52,5 +67,12 @@ final class PlanningAbsenceExportController
             'Pragma' => 'no-cache',
             'X-Content-Type-Options' => 'nosniff',
         ]);
+    }
+
+    private function queryValue(Request $request, string $name): ?string
+    {
+        $value = $request->query->getString($name);
+
+        return '' === $value ? null : $value;
     }
 }

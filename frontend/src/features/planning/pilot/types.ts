@@ -50,6 +50,8 @@ export type CollectionStatus = {
   openCollectionCount: number
   summary: PilotSummary
   members: PilotMemberRow[]
+  /** The period shown (docs/planning-cycles.md §7.4). */
+  period?: { stableId: string; number: number }
 }
 
 export type MemberPeriod = {
@@ -125,12 +127,18 @@ export type PreflightIssueCode =
   | 'LINE_WITHOUT_MEMBERS'
   | 'AMBIGUOUS_COVERAGE_SOURCE'
   | 'COVERAGE_SOURCE_MISSING'
+  | 'NO_MEMBER_IN_PERIOD'
+  | 'NO_LINE_TO_GENERATE'
+  | 'SOURCE_OF_PUBLISHED_LINE'
 
 export type PreflightIssue = {
   code: PreflightIssueCode
   lineStableId: string | null
   lineName: string | null
 }
+
+/** GENERATE: this launch generates the line; KEEP: locked, kept as it is; EXCLUDE: nothing demanded in the period. */
+export type GenerationLineDecision = 'GENERATE' | 'KEEP' | 'EXCLUDE'
 
 /** GET /api/plannings/{id}/generation-preflight — informative, captures nothing. */
 export type GenerationPreflight = {
@@ -163,10 +171,17 @@ export type GenerationPreflight = {
     familyUnitCounts: Record<string, number>
     /** docs/decisions.md D164/D167 — the line a reinforcement line depends on; its reinforcements are not counted. */
     demandSourceLineName: string | null
+    /** docs/decisions.md D195: what the launch does with the line. */
+    decision?: GenerationLineDecision
   }[]
   blockers: PreflightIssue[]
   warnings: PreflightIssue[]
   canGenerate: boolean
+  /** docs/decisions.md D195: the scope this preflight was read with, and the one that would generate the lines not locked. */
+  scope?: 'unlocked_lines' | null
+  requiredScope?: 'unlocked_lines' | null
+  /** The period read (docs/planning-cycles.md §7.4). */
+  period?: { stableId: string; number: number }
   /** Participants whose SurgicalHub leave is imported, and how fresh it is (docs/surgicalhub-integration.md §7.5). */
   surgicalHub?: SurgicalHubPreflightParticipant[]
 }

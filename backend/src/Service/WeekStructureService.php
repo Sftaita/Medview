@@ -11,6 +11,7 @@ use App\Entity\DutyType;
 use App\Entity\PlanningLine;
 use App\Entity\PlanningTeam;
 use App\Exception\InvalidWeekStructureException;
+use App\Exception\PeriodBoundarySplitsBlockException;
 use App\Repository\AllocationFamilyRepository;
 use App\Repository\DutyPatternRepository;
 use App\Repository\DutyTypeRepository;
@@ -55,6 +56,7 @@ final class WeekStructureService
         private readonly DutyTypeRepository $dutyTypeRepository,
         private readonly AllocationFamilyRepository $familyRepository,
         private readonly EntityManagerInterface $entityManager,
+        private readonly PeriodBoundaryGuard $boundaryGuard,
     ) {
     }
 
@@ -97,11 +99,17 @@ final class WeekStructureService
 
     /**
      * @throws InvalidWeekStructureException
+     * @throws PeriodBoundarySplitsBlockException a block would be cut by a boundary between two periods of the planning
+     *                                            (docs/planning-cycles.md §5.1, lot L3)
      */
     public function replace(PlanningLine $line, WeekStructureUpdateRequest $request): WeekStructureView
     {
         $team = $line->getPlanningTeam();
         $this->validate($request);
+        $this->boundaryGuard->assertStructureFits($line, array_map(
+            fn ($block): array => ['name' => $block->name, 'offsets' => array_map($this->dayOffset(...), $block->days)],
+            $request->blocks,
+        ));
 
         return $this->entityManager->wrapInTransaction(function () use ($team, $request, $line): WeekStructureView {
             foreach ($this->patternRepository->findActiveRecurringByTeam($team) as $existing) {

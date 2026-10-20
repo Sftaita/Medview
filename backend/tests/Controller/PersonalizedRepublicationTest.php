@@ -245,6 +245,8 @@ final class PersonalizedRepublicationTest extends WebTestCase
         // publication's PDF must not follow.
         $planning = $this->planning($s['planningId']);
         $planning->extendTo($planning->getStartsAt(), new \DateTimeImmutable('2027-08-01', $planning->getStartsAt()->getTimezone()));
+        // Since lot L2 an extension moves the period (cycle 1) with it — the period a new PDF is drawn on (D196).
+        $planning->getOnlyCycle()->extendTo($planning->getStartsAt(), $planning->getEndsAt());
         static::getContainer()->get(EntityManagerInterface::class)->flush();
         $this->api($client, 'PATCH', "/api/plannings/{$s['planningId']}", ['name' => 'Gardes renommées'], $s['creator']);
         self::assertResponseIsSuccessful();
@@ -255,7 +257,7 @@ final class PersonalizedRepublicationTest extends WebTestCase
         $renderer = static::getContainer()->get(PlanningPdfRenderer::class);
         $publication = $this->latestPublication($s['planningId']); // re-read: the planning as it is now
         $today = $renderer->view($publication);
-        self::assertSame('Du 1er janvier 2027 au 31 juillet 2027', $today['periodLabel']);
+        self::assertSame('Période 1 · du 1er janvier 2027 au 31 juillet 2027', $today['periodLabel']);
         self::assertNotSame(self::normalizedPdf($original), self::normalizedPdf($renderer->render($publication)));
 
         $this->stopFailing();
@@ -267,9 +269,9 @@ final class PersonalizedRepublicationTest extends WebTestCase
         self::assertInstanceOf(Email::class, $email);
         self::assertSame('alice@example.com', $email->getTo()[0]->getAddress());
         self::assertSame($original, $email->getAttachments()[0]->getBody(), 'The PDF generated with the publication, byte for byte.');
-        self::assertSame('planning-gardes-seniors.pdf', $email->getAttachments()[0]->getFilename());
-        self::assertSame('Planning de garde disponible — Gardes Seniors', $email->getSubject(), 'The name it was published under.');
-        self::assertStringContainsString('du 1er janvier 2027 au 30 avril 2027 est disponible', (string) $email->getTextBody(), 'The published period, not the extended one.');
+        self::assertSame('planning-gardes-seniors-periode-1.pdf', $email->getAttachments()[0]->getFilename());
+        self::assertSame('Planning de garde disponible — Gardes Seniors — Période 1', $email->getSubject(), 'The name it was published under.');
+        self::assertStringContainsString('période 1, du 1er janvier 2027 au 30 avril 2027) est disponible', (string) $email->getTextBody(), 'The published period, not the extended one.');
 
         // "Télécharger le PDF" serves that same file too.
         $client->request('GET', "/api/plannings/{$s['planningId']}/publication.pdf", server: ['HTTP_AUTHORIZATION' => 'Bearer '.$s['alice']]);

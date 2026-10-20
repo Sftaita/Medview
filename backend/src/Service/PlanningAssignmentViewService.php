@@ -6,6 +6,7 @@ namespace App\Service;
 
 use App\Entity\DutyAssignment;
 use App\Entity\Planning;
+use App\Entity\PlanningCycle;
 use App\Entity\PlanningGeneration;
 use App\Entity\PlanningLine;
 use App\Entity\User;
@@ -43,13 +44,17 @@ final class PlanningAssignmentViewService
      * one. Older generations stay in the database untouched (history is
      * never rewritten) but are not what the planning displays.
      *
+     * $cycle (docs/decisions.md D194): the period shown — never the generations
+     * of two periods together. Omitted: the planning's only period.
+     *
      * @return array<int, array{line: PlanningLine, generation: PlanningGeneration}> keyed by line id
      */
-    public function currentGenerations(Planning $planning): array
+    public function currentGenerations(Planning $planning, ?PlanningCycle $cycle = null): array
     {
         $result = [];
         foreach ($this->lineRepository->findByPlanning($planning) as $line) {
-            $generation = $this->generationRepository->findMostRecentCompletedByPlanningPeriod($line->getPlanningPeriod());
+            $period = null !== $cycle ? $line->periodIn($cycle) : $line->getSingleCyclePeriod();
+            $generation = null !== $period ? $this->generationRepository->findMostRecentCompletedByPlanningPeriod($period) : null;
             if (null !== $generation) {
                 $result[(int) $line->getId()] = ['line' => $line, 'generation' => $generation];
             }

@@ -124,6 +124,17 @@ class DutyGroupInstance
     }
 
     /**
+     * The remainder of an occurrence cut by a historical period boundary
+     * (docs/decisions.md D192): fewer duties than its pattern has days —
+     * the earlier days lie in the previous, locked period, where they were
+     * never materialized. Still one atomic block of its own.
+     */
+    public function isRemainder(): bool
+    {
+        return $this->duties->count() < $this->pattern->getComponents()->count();
+    }
+
+    /**
      * Keeps the inverse side of the association in sync in-memory — see
      * PlanningTeamMember::addParticipationPeriod() for why this is necessary
      * (Doctrine does not populate an already-loaded inverse collection

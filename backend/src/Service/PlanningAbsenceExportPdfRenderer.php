@@ -175,7 +175,7 @@ final class PlanningAbsenceExportPdfRenderer
         return [
             'documentTitle' => 'Absences — '.$data->planningName,
             'title' => $data->planningName,
-            'periodLabel' => 'Du '.FrenchDate::long($first).' au '.FrenchDate::long($last),
+            'periodLabel' => 'Du '.FrenchDate::long($first).' au '.FrenchDate::long($last).(null !== $data->scopeLabel ? ' · '.$data->scopeLabel : ''),
             'generatedAtLabel' => FrenchDate::long($data->generatedAt).' à '.$data->generatedAt->format('H:i'),
             'months' => $months,
             'members' => $members,

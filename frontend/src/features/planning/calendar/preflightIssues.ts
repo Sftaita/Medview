@@ -130,7 +130,31 @@ const ASSIGNMENT_FIX = 'Remplacez le titulaire ou retirez l’affectation, puis 
 export function blockingIssues(
   preflight: PublicationPreflight,
   mode: 'publish' | 'republish',
+  /** docs/decisions.md D196: only the issues of these lines (e.g. the published ones, for a republication). */
+  onlyLines?: ReadonlySet<string>,
 ): PreflightIssue[] {
+  if (onlyLines) {
+    return blockingIssues(
+      {
+        ...preflight,
+        lines: (preflight.lines ?? []).filter((line) => onlyLines.has(line.lineStableId)),
+        invalidAssignments: (preflight.invalidAssignments ?? []).filter((item) =>
+          concerns(onlyLines, item.duty.lineStableId),
+        ),
+        conflicts: (preflight.conflicts ?? []).filter((item) => concerns(onlyLines, item.duty.lineStableId)),
+        inconsistentGroups: (preflight.inconsistentGroups ?? []).filter((group) =>
+          concerns(onlyLines, group.duty?.lineStableId),
+        ),
+        undeterminedDuties: (preflight.undeterminedDuties ?? []).filter((item) =>
+          onlyLines.has(item.lineStableId),
+        ),
+        uncoveredDuties: (preflight.uncoveredDuties ?? []).filter((duty) =>
+          concerns(onlyLines, duty.lineStableId),
+        ),
+      },
+      mode,
+    )
+  }
   const issues: PreflightIssue[] = []
   // Every list may be missing from an older server response: read as empty, never a crash of the calendar.
   const statusByLine = new Map((preflight.lines ?? []).map((line) => [line.lineStableId, line.periodStatus]))
@@ -226,6 +250,11 @@ export function blockingIssues(
   }
 
   return issues
+}
+
+/** An issue of a line not named (an older server) is kept: never hidden by default. */
+function concerns(lines: ReadonlySet<string>, lineStableId: string | null | undefined): boolean {
+  return !lineStableId || lines.has(lineStableId)
 }
 
 /**

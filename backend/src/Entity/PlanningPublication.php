@@ -24,6 +24,7 @@ use Symfony\Component\Uid\Uuid;
  */
 #[ORM\Entity(repositoryClass: PlanningPublicationRepository::class)]
 #[ORM\Table(name: 'planning_publications')]
+#[ORM\Index(columns: ['planning_cycle_id'], name: 'idx_planning_publications_planning_cycle_id')]
 #[ORM\UniqueConstraint(name: 'uniq_planning_publications_stable_id', columns: ['stable_id'])]
 #[ORM\Index(columns: ['planning_id', 'published_at'], name: 'idx_planning_publications_planning')]
 class PlanningPublication
@@ -40,6 +41,15 @@ class PlanningPublication
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
     private Planning $planning;
 
+    /**
+     * The "période" of the Planning this row belongs to (docs/planning-cycles.md).
+     * NOT NULL in the database since lot L2 (docs/decisions.md D187): always
+     * set before the first flush.
+     */
+    #[ORM\ManyToOne(targetEntity: PlanningCycle::class)]
+    #[ORM\JoinColumn(name: 'planning_cycle_id', nullable: false, onDelete: 'RESTRICT')]
+    private ?PlanningCycle $cycle = null;
+
     #[ORM\Column(length: 10, enumType: PlanningPublicationKind::class)]
     private PlanningPublicationKind $kind;
 
@@ -54,7 +64,15 @@ class PlanningPublication
     #[ORM\Column]
     private int $changedDutyCount;
 
-    public function __construct(Planning $planning, PlanningPublicationKind $kind, User $publishedBy, int $changedDutyCount, \DateTimeImmutable $publishedAt)
+    /**
+     * docs/decisions.md D196: once this publication was recorded, every line
+     * that counted in its period was published and nothing required was
+     * published uncovered. Frozen: never recomputed from what changed since.
+     */
+    #[ORM\Column]
+    private bool $cycleComplete;
+
+    public function __construct(Planning $planning, PlanningPublicationKind $kind, User $publishedBy, int $changedDutyCount, \DateTimeImmutable $publishedAt, bool $cycleComplete)
     {
         $this->stableId = Uuid::v7();
         $this->planning = $planning;
@@ -62,6 +80,12 @@ class PlanningPublication
         $this->publishedBy = $publishedBy;
         $this->changedDutyCount = $changedDutyCount;
         $this->publishedAt = $publishedAt;
+        $this->cycleComplete = $cycleComplete;
+    }
+
+    public function isCycleComplete(): bool
+    {
+        return $this->cycleComplete;
     }
 
     public function getId(): ?int
@@ -72,6 +96,27 @@ class PlanningPublication
     public function getStableId(): Uuid
     {
         return $this->stableId;
+    }
+
+    public function getCycle(): ?PlanningCycle
+    {
+        return $this->cycle;
+    }
+
+    /** Set once, before the row is first written: a row never changes cycle. */
+    public function assignToCycle(PlanningCycle $cycle): void
+    {
+        if (null !== $this->cycle) {
+            if ($this->cycle === $cycle) {
+                return;
+            }
+            throw new \LogicException('A row never changes cycle.');
+        }
+        if ($cycle->getPlanning() !== $this->planning) {
+            throw new \InvalidArgumentException('The cycle must belong to the same Planning.');
+        }
+
+        $this->cycle = $cycle;
     }
 
     public function getPlanning(): Planning

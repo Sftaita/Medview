@@ -27,6 +27,9 @@ final readonly class CommitmentInterval
      * @param int|null $ownerTeamMinRestHours  same for TEAM_MIN_REST
      * @param string   $dutyStableId           the committed duty, for explanation
      * @param string   $lineStableId           the line it belongs to, for explanation
+     * @param ?string  $periodStableId         the period (PlanningCycle) it belongs to, only when that period is not the
+     *                                         one being solved/edited (docs/planning-cycles.md §5.4) — for explanation,
+     *                                         with its number and dates; the rule itself is the CROSS_LINE_* one
      */
     public function __construct(
         public \DateTimeImmutable $startsAt,
@@ -36,6 +39,10 @@ final readonly class CommitmentInterval
         public ?int $ownerTeamMinRestHours,
         public string $dutyStableId,
         public string $lineStableId,
+        public ?string $periodStableId = null,
+        public ?int $periodNumber = null,
+        public ?\DateTimeImmutable $periodStartsAt = null,
+        public ?\DateTimeImmutable $periodEndsAt = null,
     ) {
         if ($endsAt <= $startsAt) {
             throw new \InvalidArgumentException('A commitment interval must end strictly after it starts.');

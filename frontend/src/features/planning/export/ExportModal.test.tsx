@@ -98,6 +98,41 @@ describe('ExportModal', () => {
     expect(screen.getByRole('button', { name: 'Aperçu' })).toBeEnabled()
   })
 
+  it('tells a member the document is what was diffused, and never offers a line not published yet (D200)', () => {
+    const periods = (status: 'DRAFT' | 'PUBLISHED') => [
+      { periodStableId: 'c1', number: 1, planningPeriodStableId: 'pp', status },
+    ]
+    const lines = [
+      { ...lineOf('l1', 'Ligne principale', 0), periods: periods('PUBLISHED') },
+      { ...lineOf('l2', 'Ligne secondaire', 1), periods: periods('DRAFT') },
+    ]
+    render(<ExportModal planning={{ ...PLANNING, lines, canManageCalendar: false }} onClose={vi.fn()} />)
+
+    expect(
+      screen.getByText(/tel qu’il a été diffusé, sans les modifications faites depuis/),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Calendrier opérationnel/)).not.toBeInTheDocument()
+    expect(lineItems()).toEqual(['Afficher « Ligne principale » dans l’export'])
+  })
+
+  it('tells a manager unpublished changes are labelled, and offers every active line', () => {
+    const lines = [
+      lineOf('l1', 'Ligne principale', 0),
+      {
+        ...lineOf('l2', 'Ligne secondaire', 1),
+        periods: [
+          { periodStableId: 'c1', number: 1, planningPeriodStableId: 'pp', status: 'DRAFT' as const },
+        ],
+      },
+    ]
+    render(<ExportModal planning={{ ...PLANNING, lines, canManageCalendar: true }} onClose={vi.fn()} />)
+
+    expect(
+      screen.getByText(/« Calendrier opérationnel — modifications non publiées possibles »/),
+    ).toBeInTheDocument()
+    expect(lineItems()).toHaveLength(2)
+  })
+
   it('closes with "Fermer" without calling the API', () => {
     const api = stubApi({})
     const { onClose } = renderModal()
@@ -241,6 +276,10 @@ describe('ExportModal', () => {
   it.each([
     [status(409, { error: 'not_yet_published' }), 'Ce planning n’est pas encore publié'],
     [
+      status(409, { error: 'not_published_in_range' }),
+      'Aucune des lignes choisies n’est publiée sur ces dates',
+    ],
+    [
       status(422, { error: 'validation_failed', violations: { lines: 'Select at least one line.' } }),
       'Sélectionnez au moins une ligne',
     ],
@@ -296,5 +335,34 @@ describe('ExportModal', () => {
       target: { value: 'Urg.' },
     })
     expect(screen.queryByTitle('Aperçu du PDF')).not.toBeInTheDocument()
+  })
+
+  it('offers the selected period of a planning with several, every period staying one click away (lot L6)', async () => {
+    const api = stubApi({ [EXPORT]: () => file() })
+    render(
+      <ExportModal
+        planning={PLANNING}
+        period={{ number: 2, startsAt: '2026-11-01', lastDay: '2026-11-30' }}
+        onClose={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: 'Toutes les périodes' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Période 2' }))
+    expect(screen.getByRole('button', { name: 'Période 2' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Dates choisies' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByLabelText('Du')).toHaveValue('2026-11-01')
+    expect(screen.getByLabelText('Au (inclus)')).toHaveValue('2026-11-30')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Exporter' }))
+    await waitFor(() => expect(clicked).toHaveLength(1))
+    // The API's end is exclusive: the last day included + 1.
+    expect(api.requests('POST', '/api/plannings/plan-1/export')[0].body).toMatchObject({
+      from: '2026-11-01',
+      to: '2026-12-01',
+    })
   })
 })

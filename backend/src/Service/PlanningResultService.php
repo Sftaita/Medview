@@ -10,6 +10,7 @@ use App\Eligibility\ExclusionReason;
 use App\Entity\Duty;
 use App\Entity\DutyAssignment;
 use App\Entity\Planning;
+use App\Entity\PlanningCycle;
 use App\Entity\PlanningGeneration;
 use App\Entity\PlanningLine;
 use App\Repository\DutyAssignmentRepository;
@@ -49,23 +50,30 @@ final class PlanningResultService
      * `PlanningAssignmentViewService::summarize()`'s own "whatever month is
      * on screen" rule.
      */
-    public function forPlanning(Planning $planning, ?\DateTimeImmutable $from = null, ?\DateTimeImmutable $toExclusive = null): PlanningResultView
+    /**
+     * $cycle (docs/decisions.md D194): the period shown — each line's period in
+     * it, its current generation, its duties; never another period's. Omitted:
+     * the planning's only period (refused when it has several).
+     */
+    public function forPlanning(Planning $planning, ?\DateTimeImmutable $from = null, ?\DateTimeImmutable $toExclusive = null, ?PlanningCycle $cycle = null): PlanningResultView
     {
         // docs/decisions.md D164: whether a duty must be covered is the LIVE demand — intrinsic for an independent
         // line, decided by the source line's current holders for a conditional one — never Duty::isRequired() alone.
         $demand = $this->demandViewFactory->forPlanning($planning);
         $lines = [];
         foreach ($this->lineRepository->findByPlanning($planning) as $line) {
-            $lines[] = $this->forLine($line, $from, $toExclusive, $demand);
+            $lines[] = $this->forLine($line, $from, $toExclusive, $demand, $cycle);
         }
 
         return new PlanningResultView($planning, $lines);
     }
 
-    private function forLine(PlanningLine $line, ?\DateTimeImmutable $from, ?\DateTimeImmutable $toExclusive, LiveDemandView $demand): PlanningResultLine
+    private function forLine(PlanningLine $line, ?\DateTimeImmutable $from, ?\DateTimeImmutable $toExclusive, LiveDemandView $demand, ?PlanningCycle $cycle): PlanningResultLine
     {
-        $generation = $this->generationRepository->findMostRecentCompletedByPlanningPeriod($line->getPlanningPeriod());
-        if (null === $generation) {
+        // A line without period yet (docs/planning-cycles.md §5.5) reads like a line not generated yet.
+        $period = null !== $cycle ? $line->periodIn($cycle) : $line->getSingleCyclePeriod();
+        $generation = null !== $period ? $this->generationRepository->findMostRecentCompletedByPlanningPeriod($period) : null;
+        if (null === $period || null === $generation) {
             return new PlanningResultLine($line, null, null, 0, 0, 0, []);
         }
 
@@ -84,7 +92,7 @@ final class PlanningResultService
         $undeterminedCount = 0;
         $superfluousCount = 0;
         $notRequiredCount = 0;
-        foreach ($this->dutyRepository->findByPlanningPeriod($line->getPlanningPeriod()) as $duty) {
+        foreach ($this->dutyRepository->findByPlanningPeriod($period) as $duty) {
             $dutyDemand = $demand->forDuty($duty);
             $required = $dutyDemand->required;
             $assignment = $assignmentByDutyId[(int) $duty->getId()] ?? null;

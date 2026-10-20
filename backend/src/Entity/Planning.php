@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App\Entity;
 
+use App\Exception\MultiplePeriodsNotSupportedException;
 use App\Repository\PlanningRepository;
+use Doctrine\Common\Collections\ArrayCollection;
+use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Uid\Uuid;
 
@@ -21,6 +24,10 @@ use Symfony\Component\Uid\Uuid;
  * OWNER/ADMIN of one of this Planning's PlanningTeams gets no management
  * right over the Planning merely from that team role. No
  * collaborator/co-owner concept exists yet.
+ *
+ * $startsAt/$endsAt are the envelope of its cycles (docs/planning-cycles.md
+ * I5): first start, last end — changed only together with a cycle, in the
+ * same transaction.
  */
 #[ORM\Entity(repositoryClass: PlanningRepository::class)]
 #[ORM\Table(name: 'plannings')]
@@ -58,6 +65,16 @@ class Planning
     #[ORM\Column]
     private \DateTimeImmutable $updatedAt;
 
+    /**
+     * Inverse side only (no column): kept in sync by PlanningCycle's
+     * constructor and PlanningCycleService::deleteLast().
+     *
+     * @var Collection<int, PlanningCycle>
+     */
+    #[ORM\OneToMany(targetEntity: PlanningCycle::class, mappedBy: 'planning')]
+    #[ORM\OrderBy(['number' => 'ASC'])]
+    private Collection $cycles;
+
     public function __construct(
         string $name,
         User $creator,
@@ -77,6 +94,7 @@ class Planning
         $this->timezone = $timezone;
         $this->createdAt = new \DateTimeImmutable();
         $this->updatedAt = new \DateTimeImmutable();
+        $this->cycles = new ArrayCollection();
     }
 
     public function getId(): ?int
@@ -122,6 +140,81 @@ class Planning
         $this->startsAt = $startsAt;
         $this->endsAt = $endsAt;
         $this->touch();
+    }
+
+    /**
+     * Moves the envelope to [$startsAt, $endsAt) — only ever called by
+     * PlanningCycleService, together with the cycle that changes (creation,
+     * new end, deletion of the last cycle).
+     */
+    public function changeEnvelope(\DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt): void
+    {
+        if ($endsAt <= $startsAt) {
+            throw new \InvalidArgumentException('endsAt must be strictly after startsAt.');
+        }
+
+        $this->startsAt = $startsAt;
+        $this->endsAt = $endsAt;
+        $this->touch();
+    }
+
+    /**
+     * @return list<PlanningCycle> ordered by number
+     */
+    public function getCycles(): array
+    {
+        $cycles = $this->cycles->toArray();
+        usort($cycles, static fn (PlanningCycle $a, PlanningCycle $b): int => $a->getNumber() <=> $b->getNumber());
+
+        return array_values($cycles);
+    }
+
+    public function hasSeveralCycles(): bool
+    {
+        return $this->cycles->count() > 1;
+    }
+
+    /**
+     * The guard of every flow not yet made period-aware (docs/planning-cycles.md
+     * lots L3/L4, docs/decisions.md D187): generation, completion, results,
+     * publication, reassignment, swaps, exports… They read "the" period of a
+     * line, which only exists while the Planning has a single cycle. With
+     * several cycles they refuse (409) instead of guessing one.
+     *
+     * @throws MultiplePeriodsNotSupportedException
+     */
+    public function assertSingleCycle(): void
+    {
+        if ($this->hasSeveralCycles()) {
+            throw new MultiplePeriodsNotSupportedException();
+        }
+    }
+
+    /**
+     * The cycle of a single-cycle Planning, for the flows that are not
+     * period-aware yet (same guard as assertSingleCycle()).
+     *
+     * @throws MultiplePeriodsNotSupportedException
+     */
+    public function getOnlyCycle(): PlanningCycle
+    {
+        $this->assertSingleCycle();
+
+        return $this->cycles->first() ?: throw new \LogicException('Every Planning has its cycle 1 (docs/planning-cycles.md I1).');
+    }
+
+    /** @internal called by PlanningCycle's constructor */
+    public function registerCycle(PlanningCycle $cycle): void
+    {
+        if (!$this->cycles->contains($cycle)) {
+            $this->cycles->add($cycle);
+        }
+    }
+
+    /** @internal called by PlanningCycleService::deleteLast() */
+    public function unregisterCycle(PlanningCycle $cycle): void
+    {
+        $this->cycles->removeElement($cycle);
     }
 
     public function getCreator(): User

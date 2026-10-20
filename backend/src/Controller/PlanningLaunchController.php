@@ -13,6 +13,8 @@ use App\Exception\SurgicalHubDataStaleException;
 use App\Repository\PlanningRepository;
 use App\Security\Voter\PlanningVoter;
 use App\Service\LaunchLineReadiness;
+use App\Service\PlanningCyclePresenter;
+use App\Service\PlanningCycleResolver;
 use App\Service\PlanningGenerationLauncher;
 use App\Service\PlanningGenerationPreflight;
 use App\Service\PlanningJobPresenter;
@@ -52,16 +54,28 @@ final class PlanningLaunchController
         private readonly SurgicalHubFreshnessGate $surgicalHubGate,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
         private readonly RestPolicyRequestParser $restPolicyParser,
+        private readonly PlanningCycleResolver $cycleResolver,
+        private readonly PlanningCyclePresenter $cyclePresenter,
     ) {
     }
 
     #[Route('/api/plannings/{planningStableId}/generation-preflight', name: 'api_planning_generation_preflight', methods: ['GET'])]
-    public function preflight(string $planningStableId): JsonResponse
+    public function preflight(string $planningStableId, Request $request): JsonResponse
     {
         $planning = $this->resolvePlanning($planningStableId);
         $this->denyUnlessCanGenerate($planning);
+        // docs/planning-cycles.md §7.4 (lot L3): ?period=, required on a planning with several periods.
+        $cycle = $this->cycleResolver->requiredFromRequest($planning, $request);
+        // docs/decisions.md D195: ?scope=unlocked_lines — what the launch would do with it.
+        $scope = $request->query->get('scope');
+        if (null !== $scope && PlanningGenerationLauncher::SCOPE_UNLOCKED_LINES !== $scope) {
+            return $this->invalidScope();
+        }
 
-        return new JsonResponse($this->preflightToArray($planning, $this->launcher->preflight($planning)));
+        return new JsonResponse([
+            ...$this->preflightToArray($planning, $this->launcher->preflight($planning, $cycle, $scope)),
+            'period' => $this->cyclePresenter->reference($cycle),
+        ]);
     }
 
     #[Route('/api/plannings/{planningStableId}/generations', name: 'api_planning_launch', methods: ['POST'])]
@@ -74,13 +88,20 @@ final class PlanningLaunchController
         if (null !== $errorResponse) {
             return $errorResponse;
         }
+        // docs/planning-cycles.md §7.4 (lot L3): `period` (body) or ?period=, required on a planning with several.
+        $cycle = $this->cycleResolver->requiredFromRequest($planning, $request);
 
         // D8 (docs/surgicalhub-integration.md §7.5): an explicit, creator-only choice — never implied.
         $body = json_decode($request->getContent() ?: '{}', true);
         $override = \is_array($body) && true === ($body['overrideStaleSurgicalHubData'] ?? null);
+        // docs/decisions.md D195: `scope: "unlocked_lines"` — explicit, never deduced from the period's state.
+        $scope = \is_array($body) ? ($body['scope'] ?? null) : null;
+        if (null !== $scope && PlanningGenerationLauncher::SCOPE_UNLOCKED_LINES !== $scope) {
+            return $this->invalidScope();
+        }
 
         try {
-            $requested = $this->jobService->requestGeneration($planning, $user, $restPolicy ?? RestPolicyOptions::none(), $override);
+            $requested = $this->jobService->requestGeneration($planning, $user, $restPolicy ?? RestPolicyOptions::none(), $override, $cycle, $scope);
         } catch (SurgicalHubDataStaleException $exception) {
             return new JsonResponse([
                 'error' => $exception->overrideRefused ? 'surgicalhub_override_forbidden' : 'surgicalhub_data_stale',
@@ -95,6 +116,8 @@ final class PlanningLaunchController
                 'error' => 'not_launchable',
                 'message' => $exception->getMessage(),
                 'blockers' => array_map($this->issueToArray(...), $exception->preflight->blockers),
+                // docs/decisions.md D195: the scope that would generate the lines not locked, when that is why.
+                'requiredScope' => $exception->preflight->requiredScope,
             ], 409);
         } catch (PlanningJobInProgressException $exception) {
             return new JsonResponse([
@@ -130,6 +153,14 @@ final class PlanningLaunchController
             'lastSuccessfulSyncAt' => $p->link->getLastSuccessfulSyncAt()?->setTimezone(new \DateTimeZone('UTC'))->format(\DATE_ATOM),
             'error' => $p->error?->value,
         ], $participants);
+    }
+
+    private function invalidScope(): JsonResponse
+    {
+        return new JsonResponse([
+            'error' => 'validation_failed',
+            'violations' => ['scope' => \sprintf('Unknown scope; the only one is "%s".', PlanningGenerationLauncher::SCOPE_UNLOCKED_LINES)],
+        ], 422);
     }
 
     private function resolvePlanning(string $stableId): Planning
@@ -188,10 +219,16 @@ final class PlanningLaunchController
                 'familyUnitCounts' => $line->familyUnitCounts,
                 // A reinforcement line (D164): its demand is decided after its source line is assigned — no count.
                 'demandSourceLineName' => $line->demandSourceLine?->getName(),
+                // docs/decisions.md D195: GENERATE (this launch generates it), KEEP (locked, kept as it is) or EXCLUDE
+                // (nothing demanded in the period) — and why (D194).
+                'decision' => $line->decision,
+                'applicability' => $line->applicability?->toArray(),
             ], $preflight->lines),
             'blockers' => array_map($this->issueToArray(...), $preflight->blockers),
             'warnings' => array_map($this->issueToArray(...), $preflight->warnings),
             'canGenerate' => $preflight->canGenerate(),
+            'scope' => $preflight->scope,
+            'requiredScope' => $preflight->requiredScope,
             // docs/surgicalhub-integration.md §7.5: who has SurgicalHub leave, and how fresh it is.
             // Read only — the synchronisation itself happens at launch.
             'surgicalHub' => array_map(static fn (array $pair): array => [

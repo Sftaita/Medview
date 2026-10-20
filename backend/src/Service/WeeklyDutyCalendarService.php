@@ -8,6 +8,7 @@ use App\Entity\Duty;
 use App\Entity\DutyDemandType;
 use App\Entity\DutyPattern;
 use App\Entity\PlanningPeriod;
+use App\Entity\PlanningPeriodStatus;
 use App\Repository\DutyPatternRepository;
 use App\Repository\DutyRepository;
 use App\Repository\PlanningLineDemandPolicyRepository;
@@ -71,12 +72,15 @@ use App\Repository\PlanningLineRepository;
  */
 final class WeeklyDutyCalendarService
 {
+    private const LOCKED_STATUSES = [PlanningPeriodStatus::VALIDATED, PlanningPeriodStatus::PUBLISHED, PlanningPeriodStatus::ARCHIVED];
+
     public function __construct(
         private readonly DutyPatternRepository $patternRepository,
         private readonly DutyMaterializationService $materializationService,
         private readonly DutyRepository $dutyRepository,
         private readonly PlanningLineRepository $lineRepository,
         private readonly PlanningLineDemandPolicyRepository $policyRepository,
+        private readonly PeriodBoundaryGuard $boundaryGuard,
     ) {
     }
 
@@ -90,8 +94,20 @@ final class WeeklyDutyCalendarService
      */
     public function ensureMaterialized(PlanningPeriod $planningPeriod, \DateTimeImmutable $until): array
     {
+        // docs/planning-cycles.md I8 (lot L3): a validated, published or archived period never gets a new duty — a
+        // weekly structure changed since its publication applies to the periods still to be generated only.
+        if (\in_array($planningPeriod->getStatus(), self::LOCKED_STATUSES, true)) {
+            return [];
+        }
+
         $patterns = $this->patternRepository->findActiveRecurringByTeam($planningPeriod->getTeam());
         if ([] === $patterns) {
+            return [];
+        }
+
+        // A conditional line whose source takes no part in this period (§5.6): no reinforcement can exist in it —
+        // nothing is materialized (and never as an independent duty). The generation preflight reports it.
+        if ($this->isConditional($planningPeriod) && null === $this->sourcePeriodOf($planningPeriod)) {
             return [];
         }
 
@@ -115,13 +131,25 @@ final class WeeklyDutyCalendarService
         return $anomalies;
     }
 
-    /** The source line's period when $period's line is conditional (D163), null otherwise. */
+    /**
+     * The source line's period IN THE SAME CYCLE when $period's line is
+     * conditional (D163, docs/planning-cycles.md §5.6), null otherwise — or
+     * when the source line takes no part in that cycle.
+     */
     private function sourcePeriodOf(PlanningPeriod $period): ?PlanningPeriod
     {
         $line = $this->lineRepository->findOneByPlanningPeriod($period);
         $policy = null !== $line ? $this->policyRepository->findActiveForLine($line) : null;
+        $cycle = $period->getCycle();
 
-        return null !== $policy && $policy->getMode()->isConditional() ? $policy->getSourceLine()?->getPlanningPeriod() : null;
+        return null !== $policy && $policy->getMode()->isConditional() && null !== $cycle ? $policy->getSourceLine()?->periodIn($cycle) : null;
+    }
+
+    private function isConditional(PlanningPeriod $period): bool
+    {
+        $line = $this->lineRepository->findOneByPlanningPeriod($period);
+
+        return null !== $line && true === $this->policyRepository->findActiveForLine($line)?->getMode()->isConditional();
     }
 
     /**
@@ -184,10 +212,28 @@ final class WeeklyDutyCalendarService
         $componentLocalTimes = [];
         $coverageSources = [];
         $anomalies = [];
+        $earlierDays = [];
         foreach ($pattern->getComponents() as $component) {
             $day = $monday->modify(sprintf('+%d days', $component->getDayOffset()));
-            if ($day < $period->getStartsAt() || $day >= $period->getEndsAt()) {
+            if ($day >= $period->getEndsAt()) {
                 return [];
+            }
+            if ($day < $period->getStartsAt()) {
+                $earlierDays[] = $day;
+            }
+        }
+        // docs/decisions.md D192: the one exception to atomicity — an occurrence cut by a historical boundary (the end
+        // of a locked previous period, where its earlier days were never materialized) gets its days of this period
+        // as a remainder block. Any other occurrence crossing the start is never materialized, as before.
+        $remainder = [] !== $earlierDays;
+        if ($remainder && !$this->boundaryGuard->allowsRemainder($period, $earlierDays)) {
+            return [];
+        }
+
+        foreach ($pattern->getComponents() as $component) {
+            $day = $monday->modify(sprintf('+%d days', $component->getDayOffset()));
+            if ($day < $period->getStartsAt()) {
+                continue;
             }
 
             if ($this->dutyRepository->existsForPeriodAndLocalDate($period, $day)) {
@@ -211,14 +257,19 @@ final class WeeklyDutyCalendarService
             return $anomalies;
         }
 
-        $this->materializationService->materializeGroup(
-            $period,
-            $pattern,
-            $monday,
-            $componentLocalTimes,
-            null !== $sourcePeriod ? DutyDemandType::CONDITIONAL : DutyDemandType::REQUIRED,
-            coverageSourcesByOffset: $coverageSources,
-        );
+        $demandType = null !== $sourcePeriod ? DutyDemandType::CONDITIONAL : DutyDemandType::REQUIRED;
+        if ($remainder) {
+            $this->materializationService->materializeBlockRemainder($period, $pattern, $monday, $componentLocalTimes, $demandType, $coverageSources);
+        } else {
+            $this->materializationService->materializeGroup(
+                $period,
+                $pattern,
+                $monday,
+                $componentLocalTimes,
+                $demandType,
+                coverageSourcesByOffset: $coverageSources,
+            );
+        }
 
         return [];
     }

@@ -9,13 +9,12 @@ use App\Eligibility\ExclusionReason;
 use App\Entity\Duty;
 use App\Entity\DutyAssignment;
 use App\Entity\PlanningGeneration;
-use App\Entity\PlanningLine;
+use App\Entity\PlanningPeriod;
 use App\Entity\PlanningTeamMember;
 use App\Entity\UserAvailabilityType;
 use App\Exception\DutyNotGeneratedException;
 use App\Repository\DutyAssignmentRepository;
 use App\Repository\PlanningGenerationRepository;
-use App\Repository\PlanningLineRepository;
 use App\Repository\PlanningSnapshotMemberRepository;
 use App\Repository\PlanningSnapshotRepository;
 use App\Repository\PlanningTeamMemberRepository;
@@ -70,8 +69,6 @@ final class ReassignmentCandidateService
         private readonly PlanningSnapshotMemberRepository $snapshotMemberRepository,
         private readonly PersonCommitmentReader $commitmentReader,
         private readonly PersonCommitmentChecker $commitmentChecker,
-        private readonly PlanningLineOrder $lineOrder,
-        private readonly PlanningLineRepository $lineRepository,
         private readonly LiveDemandViewFactory $demandViewFactory,
     ) {
     }
@@ -82,6 +79,7 @@ final class ReassignmentCandidateService
      */
     public function forDuty(Duty $duty): ReassignmentCandidatesView
     {
+        // docs/decisions.md D197: the duty's own period — its generation, its block — never one chosen elsewhere.
         $generation = $this->generationRepository->findMostRecentCompletedByPlanningPeriod($duty->getPlanningPeriod());
         if (null === $generation) {
             throw new DutyNotGeneratedException();
@@ -277,7 +275,7 @@ final class ReassignmentCandidateService
         $blockDutyIds = array_map(static fn (Duty $duty): int => (int) $duty->getId(), [...$block, ...$releasedDuties]);
 
         $intervals = [];
-        foreach ([...$this->commitmentReader->forUser($this->linesToRead($generation), $user), ...$virtualCommitments] as $commitment) {
+        foreach ([...$this->commitmentReader->forUserInPeriods($this->periodsToRead($generation), $user), ...$virtualCommitments] as $commitment) {
             if ($commitment->teamMember->getUser() !== $user || \in_array((int) $commitment->duty->getId(), $blockDutyIds, true)) {
                 continue;
             }
@@ -288,24 +286,25 @@ final class ReassignmentCandidateService
     }
 
     /**
-     * Every active line of the Planning, plus the edited generation's own
-     * line even if it has been deactivated meanwhile — its own duties must
-     * always be checked.
+     * Every period of every active line of the Planning, in every cycle
+     * (docs/planning-cycles.md §5.4, lot L3: a duty of the neighbouring
+     * period constrains as much as one of another line), plus the edited
+     * generation's own period even if its line has been deactivated
+     * meanwhile — its own duties must always be checked. The Planning is the
+     * period's team's (a team belongs to one Planning), so the other periods
+     * are read even when the edited one has lost its line (docs/decisions.md
+     * D197) — never an empty list that would check nothing.
      *
-     * @return list<PlanningLine>
+     * @return list<PlanningPeriod>
      */
-    private function linesToRead(PlanningGeneration $generation): array
+    private function periodsToRead(PlanningGeneration $generation): array
     {
-        $line = $this->lineRepository->findOneByPlanningPeriod($generation->getPlanningPeriod());
-        if (null === $line) {
-            return [];
+        $own = $generation->getPlanningPeriod();
+        $periods = $this->commitmentReader->periodsOfActiveLines($own->getTeam()->getPlanning());
+        if (!\in_array($own, $periods, true)) {
+            $periods[] = $own;
         }
 
-        $lines = $this->lineOrder->activeInResolutionOrder($line->getPlanning());
-        if (!\in_array($line, $lines, true)) {
-            $lines[] = $line;
-        }
-
-        return $lines;
+        return $periods;
     }
 }

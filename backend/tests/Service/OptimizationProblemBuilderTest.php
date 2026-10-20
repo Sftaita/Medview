@@ -53,7 +53,7 @@ final class OptimizationProblemBuilderTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $user = $this->createUser($em);
@@ -87,7 +87,7 @@ final class OptimizationProblemBuilderTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $user = $this->createUser($em);
@@ -140,10 +140,10 @@ final class OptimizationProblemBuilderTest extends KernelTestCase
 
         $dutyTypeA = $this->createDutyType($em, $lineA->getPlanningTeam());
         $dutyTypeB = $this->createDutyType($em, $lineB->getPlanningTeam());
-        $this->createDuty($dutyMaterialization, $lineA->getPlanningPeriod(), $dutyTypeA, '2027-02-01 08:00', '2027-02-01 20:00');
-        $dutyB = $this->createDuty($dutyMaterialization, $lineB->getPlanningPeriod(), $dutyTypeB, '2027-02-01 08:00', '2027-02-01 20:00');
+        $this->createDuty($dutyMaterialization, $lineA->requireSingleCyclePeriod(), $dutyTypeA, '2027-02-01 08:00', '2027-02-01 20:00');
+        $dutyB = $this->createDuty($dutyMaterialization, $lineB->requireSingleCyclePeriod(), $dutyTypeB, '2027-02-01 08:00', '2027-02-01 20:00');
 
-        $contextA = $this->buildFairnessContext($em, $snapshotService, $matrixBuilder, $contextBuilder, $lineA->getPlanningPeriod());
+        $contextA = $this->buildFairnessContext($em, $snapshotService, $matrixBuilder, $contextBuilder, $lineA->requireSingleCyclePeriod());
         $problemA = $problemBuilder->build($contextA, new SolverParameterSet(1, 30, 1));
 
         $allKeysInA = array_map(
@@ -174,7 +174,7 @@ final class OptimizationProblemBuilderTest extends KernelTestCase
         $planning = $this->createPlanning($planningService, $creator, 'Seniors');
         $line = $lineRepository->findByPlanning($planning)[0];
         $team = $line->getPlanningTeam();
-        $planningPeriod = $line->getPlanningPeriod();
+        $planningPeriod = $line->requireSingleCyclePeriod();
         $this->activateRuleSet($ruleSetService, $team);
 
         $user = $this->createUser($em);

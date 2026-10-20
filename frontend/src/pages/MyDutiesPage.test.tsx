@@ -66,6 +66,30 @@ describe('MyDutiesPage', () => {
     expect(screen.getByRole('button', { name: /À venir \(3\)/ })).toHaveAttribute('aria-pressed', 'true')
   })
 
+  it('names the period of each duty once its planning has several, never for a single-period one (L7, D198)', async () => {
+    createFakeBackend({
+      duties: [
+        makeMyDuty(['2026-10-08']),
+        makeMyDuty(['2026-10-09'], {
+          period: { stableId: 'c1', number: 1, count: 2 },
+          planningName: 'Trauma Delta',
+        }),
+        makeMyDuty(['2026-10-10'], {
+          period: { stableId: 'c2', number: 2, count: 2 },
+          planningName: 'Trauma Delta',
+        }),
+      ],
+    }).install()
+    renderPage()
+
+    const october = await screen.findByRole('region', { name: 'Octobre 2026' })
+    const rows = within(october).getAllByRole('link')
+    expect(rows[0]).toHaveTextContent('Gardes 2026-2027 · Première ligne · Garde')
+    expect(rows[0]).not.toHaveTextContent('Période')
+    expect(rows[1]).toHaveTextContent('Trauma Delta · Période 1 · Première ligne · Garde')
+    expect(rows[2]).toHaveTextContent('Trauma Delta · Période 2 · Première ligne · Garde')
+  })
+
   it('shows past duties on demand, latest first, without a countdown', async () => {
     createFakeBackend({
       duties: [makeMyDuty(['2026-09-01']), makeMyDuty(['2026-09-29']), makeMyDuty(['2026-10-08'])],

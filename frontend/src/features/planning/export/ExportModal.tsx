@@ -6,6 +6,7 @@ import { lastDayOf } from '../detail/period'
 import type { PlanningDetail } from '../types'
 import { exportPlanning } from './api'
 import {
+  exportNote,
   fallbackFilename,
   initialExportState,
   LABEL_MAX_LENGTH,
@@ -19,6 +20,12 @@ import './export.css'
 
 type Props = {
   planning: PlanningDetail
+  /**
+   * The selected period of a planning with several (docs/planning-cycles.md
+   * §7.4, D200): offered as a one-click range. "Planning complet" still covers
+   * every period.
+   */
+  period?: { number: number; startsAt: string; lastDay: string }
   onClose: () => void
 }
 
@@ -41,6 +48,9 @@ function errorMessage(err: unknown): string {
     if (err.status === 409 && body?.error === 'not_yet_published') {
       return 'Ce planning n’est pas encore publié : il ne peut pas être exporté.'
     }
+    if (err.status === 409 && body?.error === 'not_published_in_range') {
+      return 'Aucune des lignes choisies n’est publiée sur ces dates : il n’y a rien à exporter.'
+    }
     if (err.status === 403) return 'Vous n’avez pas accès à ce planning.'
     if (err.status === 422) {
       const fields = Object.keys(body?.violations ?? {})
@@ -61,8 +71,10 @@ function errorMessage(err: unknown): string {
 }
 
 /**
- * "Exporter le planning" (docs/planning-export.md): the current calendar of
- * a published planning as a PDF or an Excel file, with the lines, their
+ * "Exporter le planning" (docs/planning-export.md): a published planning as
+ * a PDF or an Excel file — for a manager the current calendar, for anybody
+ * else what was diffused, its published periods only (docs/decisions.md
+ * D200, decided by the server; the note says which) — with the lines, their
  * order, their names in the document, the title and the period chosen
  * here. Nothing is saved: the choices live in this dialog only, and the
  * aliases and title never rename anything.
@@ -70,7 +82,7 @@ function errorMessage(err: unknown): string {
  * "Aperçu" asks the server for the very same PDF (same endpoint, same
  * parameters) and shows it here — never a second rendering of the calendar.
  */
-export function ExportModal({ planning, onClose }: Props) {
+export function ExportModal({ planning, period, onClose }: Props) {
   const [state, setState] = useState<ExportState>(() => initialExportState(planning))
   const [busy, setBusy] = useState<Busy>(null)
   const [error, setError] = useState<string | null>(null)
@@ -95,6 +107,12 @@ export function ExportModal({ planning, onClose }: Props) {
       if (preview) URL.revokeObjectURL(preview.url)
     }
   }, [preview])
+
+  const periodChosen =
+    !!period &&
+    state.period === 'custom' &&
+    state.firstDay === period.startsAt &&
+    state.lastDay === period.lastDay
 
   function update(patch: Partial<ExportState>) {
     setError(null)
@@ -175,11 +193,7 @@ export function ExportModal({ planning, onClose }: Props) {
     >
       <div className={shownPreview && !previewAsLink ? 'export export--with-preview' : 'export'}>
         <div className="export-form form">
-          <p className="muted export-note">
-            Le document reprend le calendrier tel qu’il est maintenant, modifications non encore diffusées
-            comprises. La version diffusée reste disponible avec « PDF de la dernière diffusion ». Les noms
-            choisis ici ne servent qu’au document.
-          </p>
+          <p className="muted export-note">{exportNote(planning)}</p>
 
           <fieldset className="export-fieldset">
             <legend className="field__label">Format</legend>
@@ -285,15 +299,27 @@ export function ExportModal({ planning, onClose }: Props) {
                 aria-pressed={state.period === 'full'}
                 onClick={() => update({ period: 'full' })}
               >
-                Planning complet
+                {period ? 'Toutes les périodes' : 'Planning complet'}
               </button>
+              {period && (
+                <button
+                  type="button"
+                  className="segmented__option"
+                  aria-pressed={periodChosen}
+                  onClick={() =>
+                    update({ period: 'custom', firstDay: period.startsAt, lastDay: period.lastDay })
+                  }
+                >
+                  Période {period.number}
+                </button>
+              )}
               <button
                 type="button"
                 className="segmented__option"
-                aria-pressed={state.period === 'custom'}
+                aria-pressed={state.period === 'custom' && !periodChosen}
                 onClick={() => update({ period: 'custom' })}
               >
-                Période personnalisée
+                {period ? 'Dates choisies' : 'Période personnalisée'}
               </button>
             </div>
             {state.period === 'custom' && (

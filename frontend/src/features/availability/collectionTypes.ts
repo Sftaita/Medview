@@ -35,6 +35,8 @@ export type AvailabilityCollection = {
   timezone: string
   canManage: boolean
   myResponse: MyCollectionResponse | null
+  /** The period it belongs to (docs/planning-cycles.md I12). */
+  period?: { stableId: string; number: number } | null
   /** Only present for someone who may manage the collection. */
   progress?: CollectionProgress
 }

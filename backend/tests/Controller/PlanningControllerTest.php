@@ -240,7 +240,7 @@ final class PlanningControllerTest extends WebTestCase
         self::assertFalse($summaryFor($memberToken)['collecting']);
 
         $container = static::getContainer();
-        $period = $container->get(PlanningLineRepository::class)->findByPlanning($container->get(PlanningRepository::class)->findOneByStableId($planningStableId))[0]->getPlanningPeriod();
+        $period = $container->get(PlanningLineRepository::class)->findByPlanning($container->get(PlanningRepository::class)->findOneByStableId($planningStableId))[0]->requireSingleCyclePeriod();
         $container->get(EntityManagerInterface::class)->getConnection()->executeStatement(
             'UPDATE planning_periods SET status = :status WHERE id = :id',
             ['status' => PlanningPeriodStatus::PUBLISHED->value, 'id' => $period->getId()],

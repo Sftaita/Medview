@@ -195,7 +195,7 @@ final class PlanningJobControllerTest extends WebTestCase
         $row = $this->jobRow($s['planningId']);
         $this->expectException(UniqueConstraintViolationException::class);
         static::getContainer()->get(EntityManagerInterface::class)->getConnection()->executeStatement(
-            "INSERT INTO planning_jobs (stable_id, kind, status, created_at, planning_id, requested_by_id) VALUES (gen_random_uuid(), 'COMPLETE', 'QUEUED', now(), :planning, :user)",
+            "INSERT INTO planning_jobs (stable_id, kind, status, created_at, planning_id, requested_by_id, planning_cycle_id) VALUES (gen_random_uuid(), 'COMPLETE', 'QUEUED', now(), :planning, :user, (SELECT id FROM planning_cycles WHERE planning_id = :planning AND number = 1))",
             ['planning' => $row['planning_id'], 'user' => $row['requested_by_id']],
         );
     }
@@ -266,7 +266,7 @@ final class PlanningJobControllerTest extends WebTestCase
             $duty = $container->get(\App\Repository\DutyRepository::class)->find($monday->getId());
             $generation = $container->get(PlanningGenerationRepository::class)->findMostRecentCompletedByPlanningPeriod($duty->getPlanningPeriod());
             $current = $container->get(\App\Repository\DutyAssignmentRepository::class)->findCurrentByGenerationAndDuty($generation, $duty);
-            $container->get(DutyReassignmentService::class)->unassign($duty, (string) $current->getTeamMember()->getStableId(), $this->userOf('creator@example.com'), false);
+            $container->get(DutyReassignmentService::class)->unassign($duty, (string) $current->getTeamMember()->getStableId(), $this->userOf('creator@example.com'));
         };
         $this->runQueuedPlanningJobs();
 
@@ -555,7 +555,7 @@ final class PlanningJobControllerTest extends WebTestCase
 
         return array_map(
             static fn ($g) => $g->getStatus(),
-            array_reverse($container->get(PlanningGenerationRepository::class)->findByPlanningPeriod($line->getPlanningPeriod())),
+            array_reverse($container->get(PlanningGenerationRepository::class)->findByPlanningPeriod($line->requireSingleCyclePeriod())),
         );
     }
 
@@ -565,14 +565,14 @@ final class PlanningJobControllerTest extends WebTestCase
         $planning = $container->get(PlanningRepository::class)->findOneByStableId($planningStableId);
         $line = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0];
 
-        return $container->get(PlanningGenerationRepository::class)->findMostRecentCompletedByPlanningPeriod($line->getPlanningPeriod());
+        return $container->get(PlanningGenerationRepository::class)->findMostRecentCompletedByPlanningPeriod($line->requireSingleCyclePeriod());
     }
 
     private function transitionPrimaryPeriod(string $planningStableId, PlanningPeriodStatus ...$statuses): void
     {
         $container = static::getContainer();
         $planning = $container->get(PlanningRepository::class)->findOneByStableId($planningStableId);
-        $period = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0]->getPlanningPeriod();
+        $period = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0]->requireSingleCyclePeriod();
         // Bypasses the lifecycle's own checks on purpose: the test only needs the status the worker's preflight will see.
         foreach ($statuses as $status) {
             $container->get(EntityManagerInterface::class)->getConnection()->executeStatement(

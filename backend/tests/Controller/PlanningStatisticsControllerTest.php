@@ -17,13 +17,13 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\Test\ClockSensitiveTrait;
 
 /**
- * Duty counts by weekday, two scopes (docs/decisions.md D132). Audited,
- * load-bearing fact this test class exercises directly: a PlanningLine's
- * PlanningPeriod is never superseded today (D122 only ever grows it in
- * place) — so `currentPeriod` and `cumulative` are the exact same real
- * state for any given Planning. The only real mechanism producing more
- * than one PlanningPeriod under one Planning today is a second
- * PlanningLine, which several scenarios below use for that reason.
+ * Duty counts by weekday (docs/decisions.md D132), on a planning with a
+ * single period. Since D201 (lot L5) the scopes are three distinct sets of
+ * line periods counted by the same rules: `currentPeriod` (the selected —
+ * here the only — period, every generated line), `cumulative` (published
+ * line periods only) and `provisional` (the unpublished ones, apart; null
+ * for a reader who does not manage the calendar). Several periods:
+ * PlanningCycleStatisticsTest.
  */
 final class PlanningStatisticsControllerTest extends WebTestCase
 {
@@ -70,16 +70,30 @@ final class PlanningStatisticsControllerTest extends WebTestCase
         self::fail("No row for {$teamMemberStableId} in group {$groupStableId}.");
     }
 
-    public function testASinglePeriodMeansCurrentEqualsCumulative(): void
+    public function testASinglePeriodIsProvisionalUntilPublishedThenTheCumulative(): void
     {
         $client = static::createClient();
         $s = $this->pilotScenario($client);
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-06'], ['2027-01-06', '2027-01-07']]);
         $this->generateNow($client, $s['planningId'], $s['creator']);
 
+        // D201: generated, not published — the same numbers, provisional, never in the published cumulative.
         $stats = $this->statistics($client, $s);
+        self::assertSame(1, $stats['period']['number']);
+        self::assertSame('UNPUBLISHED', $stats['currentPeriod']['groups'][0]['publication']);
+        self::assertTrue($stats['currentPeriod']['groups'][0]['provisional']);
+        self::assertSame([], $stats['cumulative']['groups']);
+        self::assertSame([], $stats['cumulative']['periodNumbers']);
+        self::assertSame($stats['currentPeriod']['groups'][0]['members'], $stats['provisional']['groups'][0]['members']);
+        self::assertSame([1], $stats['provisional']['periodNumbers']);
 
-        self::assertSame($stats['currentPeriod'], $stats['cumulative'], 'D132: only one real PlanningPeriod exists per line today — the two scopes must coincide exactly.');
+        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/publish", [], $s['creator']);
+        self::assertResponseIsSuccessful();
+        $published = $this->statistics($client, $s);
+        self::assertSame($stats['currentPeriod']['groups'][0]['members'], $published['currentPeriod']['groups'][0]['members'], 'publishing changes no count');
+        self::assertSame('PUBLISHED', $published['currentPeriod']['groups'][0]['publication']);
+        self::assertSame($published['currentPeriod']['groups'][0]['members'], $published['cumulative']['groups'][0]['members'], 'one period: the cumulative is that period');
+        self::assertSame([], $published['provisional']['groups']);
     }
 
     public function testWeekdayBucketsAndTotalAreCorrect(): void
@@ -147,8 +161,8 @@ final class PlanningStatisticsControllerTest extends WebTestCase
         $dutyType = $this->createDutyType($em, $line->getPlanningTeam());
         $materializationService = static::getContainer()->get(DutyMaterializationService::class);
         // One Duty belongs to the "Week-end" family, one has no family at all.
-        $this->createDuty($materializationService, $line->getPlanningPeriod(), $dutyType, '2027-01-05', '2027-01-06', $pattern);
-        $this->createDuty($materializationService, $line->getPlanningPeriod(), $dutyType, '2027-01-06', '2027-01-07');
+        $this->createDuty($materializationService, $line->requireSingleCyclePeriod(), $dutyType, '2027-01-05', '2027-01-06', $pattern);
+        $this->createDuty($materializationService, $line->requireSingleCyclePeriod(), $dutyType, '2027-01-06', '2027-01-07');
 
         // Only bob is available: he gets both duties.
         foreach (['admin', 'alice'] as $who) {
@@ -172,12 +186,16 @@ final class PlanningStatisticsControllerTest extends WebTestCase
         $client = static::createClient();
         $s = $this->pilotScenario($client);
         $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/lines", ['name' => 'Renfort'], $s['creator']);
+        // Its only member is away that day (a line with no member at all is no longer generated, D195).
+        $carol = $this->userToken($client, 'carol@example.com');
+        $this->addMemberAs($client, $s['creator'], $s['planningId'], $this->api($client, 'GET', "/api/plannings/{$s['planningId']}", token: $s['creator'])['lines'][1]['team']['stableId'], 'carol@example.com', 'MEMBER');
+        $this->declareRange($client, $carol, '2027-01-05', '2027-01-06');
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-06']], lineIndex: 0);
         $this->prepareGeneration($s['planningId'], [['2027-01-05', '2027-01-06']], lineIndex: 1);
-        $this->generateNow($client, $s['planningId'], $s['creator']);
+        self::assertSame('SUCCEEDED', $this->generateNow($client, $s['planningId'], $s['creator'])['status']);
 
         $stats = $this->statistics($client, $s);
-        // The second line has no members at all (never generated members for it) — real INCOMPLETE, no group entry with 0 rows expected beyond an empty members array.
+        // The second line's duty is uncovered — real INCOMPLETE, its group still listed on its own.
         self::assertCount(2, $stats['currentPeriod']['groups'], 'Two real PlanningPeriod under the same Planning today: one per line — this is the audited real mechanism for D132.');
         $labels = array_map(static fn (array $g): string => $g['groupLabel'], $stats['currentPeriod']['groups']);
         self::assertContains('Seniors', $labels);
@@ -196,8 +214,12 @@ final class PlanningStatisticsControllerTest extends WebTestCase
         [$planningId2, $teamId2] = $this->createPlanningWithTeam($client, $creator2, 'AutreEquipe');
         $s2 = ['planningId' => $planningId2, 'teamId' => $teamId2, 'creator' => $creator2];
         $this->prepareGeneration($planningId2, [['2027-01-05', '2027-01-06']]);
-        // No member at all for planning 2's line: a real INCOMPLETE outcome, no candidate to assign.
-        $this->generateNow($client, $planningId2, $creator2);
+        // Planning 2's only member is away that day: a real INCOMPLETE outcome, no candidate to assign
+        // (a line with no member at all is no longer generated, docs/decisions.md D195).
+        $dave = $this->userToken($client, 'dave@example.com');
+        $this->addMemberAs($client, $creator2, $planningId2, $teamId2, 'dave@example.com', 'MEMBER');
+        $this->declareRange($client, $dave, '2027-01-05', '2027-01-06');
+        self::assertSame('SUCCEEDED', $this->generateNow($client, $planningId2, $creator2)['status']);
 
         $stats1 = $this->statistics($client, $s1);
         $stats2 = $this->api($client, 'GET', "/api/plannings/{$planningId2}/statistics", token: $creator2);
@@ -240,7 +262,7 @@ final class PlanningStatisticsControllerTest extends WebTestCase
         foreach ($after['currentPeriod']['groups'][0]['members'] as $member) {
             self::assertNotSame($originalMemberId, $member['teamMemberStableId'], 'The previous assignee has zero duties left: no row, never a fake 0.');
         }
-        self::assertSame($after['currentPeriod'], $after['cumulative'], 'D132: still the same single real period.');
+        self::assertSame($after['currentPeriod']['groups'][0]['members'], $after['provisional']['groups'][0]['members'], 'D201: not published — the provisional scope follows too.');
     }
 
     public function testAnOlderRegeneratedGenerationIsNeverDoubleCounted(): void
@@ -284,7 +306,7 @@ final class PlanningStatisticsControllerTest extends WebTestCase
         self::assertSame($stats['currentPeriod']['endsAt'], $stats['cumulative']['endsAt']);
     }
 
-    public function testAnOutsiderCannotReadStatisticsButAMemberCan(): void
+    public function testAnOutsiderCannotReadStatisticsAndAMemberOnlyWhatIsPublished(): void
     {
         $client = static::createClient();
         $s = $this->pilotScenario($client);
@@ -294,8 +316,18 @@ final class PlanningStatisticsControllerTest extends WebTestCase
         $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/statistics", token: $s['outsider']);
         self::assertResponseStatusCodeSame(403);
 
-        $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/statistics", token: $s['alice']);
-        self::assertResponseIsSuccessful();
+        // D201: a plain member never reads a generation that is not published.
+        $member = $this->statistics($client, $s, $s['alice']);
+        self::assertSame([], $member['currentPeriod']['groups']);
+        self::assertSame([], $member['cumulative']['groups']);
+        self::assertNull($member['provisional']);
+        self::assertSame('UNPUBLISHED', $member['period']['lines'][0]['publication']);
+        self::assertNotSame([], $this->statistics($client, $s, $s['admin'])['currentPeriod']['groups'], 'a manager does');
+
+        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/publish", [], $s['creator']);
+        $member = $this->statistics($client, $s, $s['alice']);
+        self::assertSame($this->statistics($client, $s)['cumulative'], $member['cumulative'], 'published: the same numbers as a manager');
+        self::assertNull($member['provisional']);
     }
 
     private function onlyDutyStableIdOf(string $planningStableId): string
@@ -303,7 +335,7 @@ final class PlanningStatisticsControllerTest extends WebTestCase
         $container = static::getContainer();
         $planning = $container->get(PlanningRepository::class)->findOneByStableId($planningStableId);
         $line = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0];
-        $duties = $container->get(DutyRepository::class)->findByPlanningPeriod($line->getPlanningPeriod());
+        $duties = $container->get(DutyRepository::class)->findByPlanningPeriod($line->requireSingleCyclePeriod());
         self::assertCount(1, $duties);
 
         return (string) $duties[0]->getStableId();

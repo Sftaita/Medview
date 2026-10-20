@@ -363,6 +363,38 @@ describe('GenerationModal', () => {
     expect(within(dialog).queryByRole('list', { name: 'Avertissements' })).not.toBeInTheDocument()
   })
 
+  it('never says everybody confirmed for a period over which no collection was opened (lot L7)', async () => {
+    stubApi({
+      [preflightUrl]: () =>
+        makePreflight({ confirmedCount: 0, pendingCount: 0, notExpectedCount: 16, warnings: [] }),
+    })
+    render(
+      <PilotHeaderActions
+        planningStableId="plan-1"
+        timezone="Europe/Brussels"
+        status={makeStatus()}
+        period={{
+          stableId: 'c3',
+          number: 3,
+          startsAt: '2027-01-01',
+          lastDay: '2027-01-31',
+          named: true,
+          hasCollection: false,
+        }}
+        generateLabel="Générer la période 3"
+        onChanged={vi.fn()}
+        onLaunched={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 3' }))
+    const dialog = await screen.findByRole('dialog')
+    await within(dialog).findByText('Aucune collecte des disponibilités n’a été ouverte pour ces dates')
+    expect(within(dialog).queryByText('Tous ont confirmé leurs disponibilités')).not.toBeInTheDocument()
+    // Generating stays possible (never blocked by a collection, D127), said as such.
+    expect(within(dialog).getByRole('button', { name: 'Générer quand même' })).toBeEnabled()
+  })
+
   it('a passed deadline is one more warning, never a blocker', async () => {
     stubApi({
       [preflightUrl]: () =>
@@ -385,6 +417,105 @@ describe('GenerationModal', () => {
       within(dialog).getByText(/Date souhaitée dépassée depuis 2 jours\. Elle reste indicative/),
     ).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: 'Générer quand même' })).toBeEnabled()
+  })
+
+  it('names the selected period in the preflight and the launch, and in the dialog once there are several (lot L6)', async () => {
+    const api = stubApi({
+      [preflightUrl]: () => makePreflight({ period: { stableId: 'c2', number: 2 } }),
+      [launchUrl]: () => httpStatus(202, QUEUED),
+    })
+    render(
+      <PilotHeaderActions
+        planningStableId="plan-1"
+        timezone="Europe/Brussels"
+        status={makeStatus()}
+        period={{ stableId: 'c2', number: 2, startsAt: '2027-05-01', lastDay: '2027-07-31', named: true }}
+        generateLabel="Générer la période 2"
+        onChanged={vi.fn()}
+        onLaunched={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 2' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Générer la période 2 ?' })
+    expect(await within(dialog).findByText('Période 2 :')).toBeInTheDocument()
+    expect(within(dialog).getByText(/1 mai.*31 juil/)).toBeInTheDocument()
+    fireEvent.click(await enabledConfirm(within(dialog)))
+
+    await waitFor(() => expect(api.requests('POST', '/api/plannings/plan-1/generations')).toHaveLength(1))
+    expect(api.requests('GET', '/api/plannings/plan-1/generation-preflight')[0].query.get('period')).toBe(
+      'c2',
+    )
+    const launch = api.requests('POST', '/api/plannings/plan-1/generations')[0]
+    expect(launch.query.get('period')).toBe('c2')
+    expect(launch.body).not.toHaveProperty('scope')
+  })
+
+  it('generates only the lines not published when the manager chooses it — kept, generated and ignored lines told apart (D195)', async () => {
+    const lines = (decisions: ('GENERATE' | 'KEEP' | 'EXCLUDE')[]) =>
+      ['Seniors', 'Juniors', 'Renfort'].map((name, index) => ({
+        ...makePreflight().lines[0],
+        stableId: `line-${index}`,
+        name,
+        decision: decisions[index],
+      }))
+    const api = stubApi({
+      [preflightUrl]: ({ query }) =>
+        query.get('scope') === 'unlocked_lines'
+          ? makePreflight({
+              scope: 'unlocked_lines',
+              requiredScope: null,
+              lines: lines(['KEEP', 'GENERATE', 'EXCLUDE']),
+            })
+          : makePreflight({
+              canGenerate: false,
+              blockers: [{ code: 'PERIOD_LOCKED', lineStableId: 'line-0', lineName: 'Seniors' }],
+              requiredScope: 'unlocked_lines',
+              lines: lines(['KEEP', 'GENERATE', 'EXCLUDE']),
+            }),
+      [launchUrl]: () => httpStatus(202, QUEUED),
+    })
+    render(
+      <PilotHeaderActions
+        planningStableId="plan-1"
+        timezone="Europe/Brussels"
+        status={makeStatus()}
+        period={{ stableId: 'c2', number: 2, startsAt: '2027-05-01', lastDay: '2027-07-31', named: true }}
+        generateLabel="Générer la période 2"
+        onChanged={vi.fn()}
+        onLaunched={vi.fn()}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 2' }))
+    const dialog = await screen.findByRole('dialog')
+    const choose = await within(dialog).findByRole('button', {
+      name: 'Générer uniquement les lignes non publiées',
+    })
+    expect(within(dialog).getByRole('button', { name: 'Générer quand même' })).toBeDisabled()
+    expect(within(dialog).getByText(/déjà publiée : jamais régénérée/)).toBeInTheDocument()
+    fireEvent.click(choose)
+
+    const kept = await within(dialog).findByText(/déjà publiée : conservée telle quelle/)
+    expect(kept.closest('li')).toHaveTextContent('Seniors')
+    expect(
+      within(dialog)
+        .getByText(/sera générée/)
+        .closest('li'),
+    ).toHaveTextContent('Juniors')
+    expect(
+      within(dialog)
+        .getByText(/aucune garde demandée sur cette période/)
+        .closest('li'),
+    ).toHaveTextContent('Renfort')
+    fireEvent.click(await enabledConfirm(within(dialog)))
+
+    await waitFor(() => expect(api.requests('POST', '/api/plannings/plan-1/generations')).toHaveLength(1))
+    const preflights = api.requests('GET', '/api/plannings/plan-1/generation-preflight')
+    expect(preflights.map((r) => r.query.get('scope'))).toEqual([null, 'unlocked_lines'])
+    expect(api.requests('POST', '/api/plannings/plan-1/generations')[0].body).toMatchObject({
+      scope: 'unlocked_lines',
+    })
   })
 
   it('requests the generation once even on a double click, then hands the queued job over to the page (docs/decisions.md D149)', async () => {
@@ -486,6 +617,35 @@ describe('GenerationModal', () => {
     expect(
       within(blockers).getByText('Ligne « Seniors » : aucune règle de planning n’est active.'),
     ).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: 'Générer quand même' })).toBeDisabled()
+  })
+
+  it('explains the blockers of lot L4b in words (docs/decisions.md D195)', async () => {
+    stubApi({
+      [preflightUrl]: () =>
+        makePreflight({
+          canGenerate: false,
+          blockers: [
+            { code: 'NO_MEMBER_IN_PERIOD', lineStableId: 'line-2', lineName: 'Juniors' },
+            { code: 'SOURCE_OF_PUBLISHED_LINE', lineStableId: 'line-1', lineName: 'Seniors' },
+            { code: 'NO_LINE_TO_GENERATE', lineStableId: null, lineName: null },
+          ],
+        }),
+    })
+    renderActions()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+
+    const dialog = await screen.findByRole('dialog')
+    const blockers = await within(dialog).findByRole('list', { name: 'Points bloquants' })
+    expect(
+      within(blockers).getByText(
+        'Ligne « Juniors » : des gardes sont à pourvoir mais aucun membre ne participe à cette période.',
+      ),
+    ).toBeInTheDocument()
+    expect(within(blockers).getByText(/déclenche les renforts d’une ligne déjà publiée/)).toBeInTheDocument()
+    expect(within(blockers).getByText(/^Aucune ligne à générer/)).toBeInTheDocument()
+    expect(within(blockers).queryByText(/génération impossible/)).not.toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: 'Générer quand même' })).toBeDisabled()
   })
 

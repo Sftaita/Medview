@@ -1,5 +1,5 @@
 import { lastDayOf } from '../detail/period'
-import type { PlanningDetail } from '../types'
+import type { PlanningDetail, PlanningLineSummary } from '../types'
 
 /**
  * The "Exporter le planning" dialog's state and the request it becomes
@@ -38,6 +38,13 @@ export type ExportRequest = {
   lines: { stableId: string; label: string }[]
 }
 
+/** What the document will be, for the note shown before exporting (docs/decisions.md D200). */
+export function exportNote(planning: PlanningDetail): string {
+  return planning.canManageCalendar === true
+    ? 'Le document reprend le calendrier tel qu’il est maintenant, modifications non encore diffusées comprises : il est alors marqué « Calendrier opérationnel — modifications non publiées possibles ». Seules les périodes publiées y figurent. La version diffusée reste disponible avec « PDF de la dernière diffusion ». Les noms choisis ici ne servent qu’au document.'
+    : 'Le document reprend le planning tel qu’il a été diffusé, sans les modifications faites depuis. Seules les périodes publiées y figurent. Les noms choisis ici ne servent qu’au document.'
+}
+
 export const TITLE_MAX_LENGTH = 120
 export const LABEL_MAX_LENGTH = 80
 
@@ -48,10 +55,23 @@ function addDays(iso: string, days: number): string {
   return new Date(Date.UTC(y, m - 1, d) + days * DAY).toISOString().slice(0, 10)
 }
 
-/** Defaults: PDF, the planning's name, the whole period, every active line in its current order under its own name. */
+/**
+ * Whether the person may choose this line (docs/decisions.md D200): a
+ * manager, any active line; anybody else, only a line with a published
+ * period — the server refuses the others anyway, as if they did not exist.
+ */
+export function isExportableLine(line: PlanningLineSummary, manager: boolean): boolean {
+  if (!line.active) return false
+  if (manager) return true
+  if (line.periods) return line.periods.some((period) => period.status === 'PUBLISHED')
+  return line.periodStatus === undefined || line.periodStatus === 'PUBLISHED'
+}
+
+/** Defaults: PDF, the planning's name, the whole period, every exportable line in its current order under its own name. */
 export function initialExportState(planning: PlanningDetail): ExportState {
+  const manager = planning.canManageCalendar === true
   const lines = planning.lines
-    .filter((line) => line.active)
+    .filter((line) => isExportableLine(line, manager))
     .sort((a, b) => a.position - b.position)
     .map((line) => ({ stableId: line.stableId, name: line.name, selected: true, label: line.name }))
   return {

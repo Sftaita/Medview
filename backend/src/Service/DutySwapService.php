@@ -54,6 +54,12 @@ use Symfony\Component\Clock\ClockInterface;
  * the second one revalidates against the first one's swap. A double click
  * on "Accepter" returns the already-applied swap, never a second one.
  *
+ * Periods (docs/decisions.md D198, lot L4e): a unit is swappable when its
+ * own period is PUBLISHED, whatever the planning's other periods are; both
+ * units of a swap must be of the same period (other_period, refused at the
+ * request, at the proposal and again at acceptance); the live check reads
+ * what each person holds in every period.
+ *
  * Emails are outbox rows written in the step's own transaction and sent
  * only after its commit (DutySwapNotificationSender) — an email failure
  * never undoes a step, a rolled-back step never sends anything.
@@ -93,9 +99,12 @@ final class DutySwapService
      */
     public function heldUnit(Duty $duty, User $expectedHolder, bool $own = true): HeldDutyUnit
     {
+        // docs/decisions.md D198: the duty's own period — published itself, whatever the planning's other periods are.
+        // A period without line (orphan) is part of no calendar a member sees.
         $line = $this->lineRepository->findOneByPlanningPeriod($duty->getPlanningPeriod());
+        // docs/decisions.md D204: a duty nobody may see as a member (not published) answers exactly like an unknown one.
         if (null === $line || !$line->isActive() || PlanningPeriodStatus::PUBLISHED !== $duty->getPlanningPeriod()->getStatus()) {
-            throw DutySwapException::conflict('duty_not_swappable', 'Seules les gardes d\'un planning publié peuvent être échangées.');
+            throw new DutySwapException('not_found', 404, 'Garde introuvable.');
         }
 
         $generation = $this->generationRepository->findMostRecentCompletedByPlanningPeriod($duty->getPlanningPeriod());
@@ -103,6 +112,10 @@ final class DutySwapService
         $current = null !== $generation ? $this->assignmentRepository->findCurrentByGenerationAndDuties($generation, $block) : [];
         $holder = $this->candidateService->currentBlockTeamMember($block, $current);
         if (null === $holder || $holder->getUser() !== $expectedHolder) {
+            // docs/decisions.md D204: someone outside the line learns nothing of its duties, not even that they exist.
+            if ($own && null === $this->access->currentLineMember($line, $expectedHolder)) {
+                throw new DutySwapException('not_found', 404, 'Garde introuvable.');
+            }
             throw $own ? DutySwapException::conflict('duty_not_held', 'Cette garde ne vous est pas attribuée.') : DutySwapException::conflict('duty_not_held', 'Cette garde n\'est pas attribuée à la personne choisie.');
         }
 
@@ -177,6 +190,7 @@ final class DutySwapService
             if ($counterpartUnit->line !== $unit->line) {
                 throw DutySwapException::invalid('other_line', 'Les deux gardes doivent appartenir à la même ligne de garde.');
             }
+            self::assertSamePeriod($unit->representative, $counterpartUnit->representative);
             $audience = DutySwapAudience::SELECTED;
         } elseif (DutySwapAudience::SELECTED === $audience) {
             $recipients = $this->resolveRecipients($unit, $recipientUserStableIds, $actor);
@@ -249,6 +263,7 @@ final class DutySwapService
         if ($unit->line !== $request->getLine()) {
             throw DutySwapException::invalid('other_line', 'La garde proposée doit appartenir à la même ligne de garde.');
         }
+        self::assertSamePeriod($request->getOfferedDuty(), $unit->representative);
 
         [$proposal, $notifications] = $this->inTransaction(function () use ($actor, $request, $unit, $now): array {
             $this->lockRequest($request);
@@ -486,6 +501,20 @@ final class DutySwapService
     // Internals
     // ---------------------------------------------------------------------------------------------
 
+    /**
+     * docs/decisions.md D198 (lot L4e): two units of two periods of a planning
+     * are never swapped in V1 — refused as soon as asked, before anybody is
+     * notified. applySwap() checks it again (OTHER_PERIOD).
+     *
+     * @throws DutySwapException
+     */
+    private static function assertSamePeriod(Duty $offered, Duty $counterpart): void
+    {
+        if ($offered->getPlanningPeriod() !== $counterpart->getPlanningPeriod()) {
+            throw DutySwapException::invalid('other_period', 'Les deux gardes doivent appartenir à la même période du planning.');
+        }
+    }
+
     private function needsSettling(DutySwapRequest $request): bool
     {
         $now = $this->now();
@@ -657,6 +686,7 @@ final class DutySwapService
             DutySwapNotApplicableException::DUTY_CHANGED => 'Une des deux gardes a changé de titulaire depuis la demande : cet échange n\'est plus valable.',
             DutySwapNotApplicableException::DUTY_LOCKED => 'Une des deux gardes est verrouillée par le gestionnaire du planning.',
             DutySwapNotApplicableException::NOT_SWAPPABLE => 'Ces deux gardes ne peuvent pas être échangées entre elles.',
+            DutySwapNotApplicableException::OTHER_PERIOD => 'Les deux gardes doivent appartenir à la même période du planning.',
             DutySwapNotApplicableException::COVERAGE_NOT_REQUIRED => 'Ce renfort n\'est pas requis actuellement : il ne peut pas être échangé.',
             DutySwapNotApplicableException::CHANGES_REINFORCEMENTS => 'Cet échange modifierait les renforts nécessaires sur une autre ligne de ce planning : adressez-vous au gestionnaire du planning.',
             default => null,

@@ -61,7 +61,10 @@ export function CollectionStatusPanel({ status, onChanged, onEditDeadline }: Pro
     setBulkSending(true)
     setBulkResult(null)
     try {
-      setBulkResult({ tone: 'success', text: bulkMessage(await remindPendingMembers(planning.stableId)) })
+      setBulkResult({
+        tone: 'success',
+        text: bulkMessage(await remindPendingMembers(planning.stableId, status.period?.stableId)),
+      })
       onChanged()
     } catch {
       setBulkResult({ tone: 'error', text: 'Impossible d’envoyer les rappels.' })
@@ -164,7 +167,11 @@ export function CollectionStatusPanel({ status, onChanged, onEditDeadline }: Pro
                 {status.availabilityDeadline ? 'Modifier la date souhaitée' : 'Fixer une date souhaitée'}
               </button>
             )}
-            <AbsenceExportButton planningStableId={planning.stableId} planningName={planning.name} />
+            <AbsenceExportButton
+              planningStableId={planning.stableId}
+              planningName={planning.name}
+              periodStableId={status.period?.stableId}
+            />
           </div>
         )}
       </div>
@@ -267,6 +274,7 @@ export function CollectionStatusPanel({ status, onChanged, onEditDeadline }: Pro
           key={openMember}
           planningStableId={planning.stableId}
           memberStableId={openMember}
+          periodStableId={status.period?.stableId}
           timezone={planning.timezone}
           referenceYear={referenceYear}
           onClose={() => setOpenMember(null)}

@@ -18,6 +18,7 @@ export function makeMyDuty(dates: string[], overrides: Partial<MyDuty> = {}): My
     coverageState: null,
     swappable: true,
     swapRequestStableId: null,
+    period: { stableId: 'c1', number: 1, count: 1 },
     ...overrides,
   }
 }

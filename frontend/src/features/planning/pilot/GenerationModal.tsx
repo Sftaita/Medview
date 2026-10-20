@@ -6,6 +6,7 @@ import { fetchGenerationPreflight, launchGeneration } from './api'
 import { formatDateTime, formatLongDate, formatRange, overdueMessage, plural } from './format'
 import type {
   GenerationPreflight,
+  GenerationLineDecision,
   LaunchLineResult,
   LaunchResult,
   PlanningJob,
@@ -24,8 +25,22 @@ const NO_REST_POLICY: RestPolicyChoice = {
   teamMinRestHours: null,
 }
 
+/** The period a generation works on (docs/planning-cycles.md §7.4): named in every request, shown in the dialog. */
+export type GenerationPeriod = {
+  stableId: string
+  number: number
+  startsAt: string
+  lastDay: string
+  /** Several periods: the dialog says which one (a single-period planning reads as before). */
+  named?: boolean
+  /** False when no collection was ever opened over the period: nobody was asked, nobody "confirmed". */
+  hasCollection?: boolean
+}
+
 type Props = {
   planningStableId: string
+  /** Absent on a planning whose single period the server finds by itself. */
+  period?: GenerationPeriod
   onClose: () => void
   /** The generation was accepted (a QUEUED job, docs/decisions.md D149): the page follows it. */
   onLaunched: (job: PlanningJob) => void
@@ -44,8 +59,10 @@ type Props = {
  * closes, and the page follows the job (PlanningJobBanner) — the solve runs
  * in the worker, however long it takes.
  */
-export function GenerationModal({ planningStableId, onClose, onLaunched }: Props) {
+export function GenerationModal({ planningStableId, period, onClose, onLaunched }: Props) {
   const [preflight, setPreflight] = useState<GenerationPreflight | null>(null)
+  // docs/decisions.md D195: generate only the lines not locked yet — chosen by the manager in this dialog, never implied.
+  const [scope, setScope] = useState<'unlocked_lines' | undefined>(undefined)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [launching, setLaunching] = useState(false)
   const [launchError, setLaunchError] = useState<string | null>(null)
@@ -63,7 +80,7 @@ export function GenerationModal({ planningStableId, onClose, onLaunched }: Props
 
   useEffect(() => {
     let cancelled = false
-    fetchGenerationPreflight(planningStableId)
+    fetchGenerationPreflight(planningStableId, { periodStableId: period?.stableId, scope })
       .then((value) => {
         if (!cancelled) setPreflight(value)
       })
@@ -73,7 +90,7 @@ export function GenerationModal({ planningStableId, onClose, onLaunched }: Props
     return () => {
       cancelled = true
     }
-  }, [planningStableId])
+  }, [planningStableId, period?.stableId, scope])
 
   async function generate() {
     if (inFlight.current) {
@@ -87,6 +104,10 @@ export function GenerationModal({ planningStableId, onClose, onLaunched }: Props
         planningStableId,
         restPolicy,
         stale !== null && override,
+        {
+          periodStableId: period?.stableId,
+          scope,
+        },
       )
       onLaunched(job)
       if (surgicalHub && surgicalHub.warnings.length + surgicalHub.overridden.length > 0) {
@@ -116,13 +137,15 @@ export function GenerationModal({ planningStableId, onClose, onLaunched }: Props
 
   // SurgicalHub dates are shown in the planning's own timezone, like every other date of this dialog.
   const zone = preflight?.planning.timezone ?? 'Europe/Brussels'
-  const everybodyConfirmed = preflight !== null && preflight.pendingCount === 0
+  // Nobody asked (no collection over the period, lot L7) is not "everybody confirmed".
+  const noCollection = period?.hasCollection === false
+  const everybodyConfirmed = preflight !== null && preflight.pendingCount === 0 && !noCollection
   const confirmLabel =
     everybodyConfirmed && preflight.warnings.length === 0 ? 'Générer' : 'Générer quand même'
 
   return (
     <Overlay
-      title="Générer le planning ?"
+      title={period?.named ? `Générer la période ${period.number} ?` : 'Générer le planning ?'}
       onClose={onClose}
       dismissible={!launching}
       footer={
@@ -195,9 +218,31 @@ export function GenerationModal({ planningStableId, onClose, onLaunched }: Props
         </div>
       )}
 
+      {preflight && !launchedCaveats && preflight.requiredScope === 'unlocked_lines' && !scope && (
+        <div className="alert alert--warning scope-choice" role="status">
+          <Icon name="alert" size={18} strokeWidth={2} />
+          <div>
+            <p>
+              Des lignes de cette période sont déjà publiées : elles ne seront jamais régénérées. Vous pouvez
+              générer uniquement les lignes qui ne le sont pas encore.
+            </p>
+            <button
+              type="button"
+              className="btn btn--sm btn--secondary"
+              onClick={() => {
+                setPreflight(null)
+                setScope('unlocked_lines')
+              }}
+            >
+              Générer uniquement les lignes non publiées
+            </button>
+          </div>
+        </div>
+      )}
       {preflight && !launchedCaveats && (
         <PreflightBody
           preflight={preflight}
+          period={period}
           restPolicy={restPolicy}
           onRestPolicyChange={setRestPolicy}
           disabled={launching}
@@ -215,11 +260,13 @@ export function GenerationModal({ planningStableId, onClose, onLaunched }: Props
 
 function PreflightBody({
   preflight,
+  period,
   restPolicy,
   onRestPolicyChange,
   disabled,
 }: {
   preflight: GenerationPreflight
+  period?: GenerationPeriod
   restPolicy: RestPolicyChoice
   onRestPolicyChange: (next: RestPolicyChoice) => void
   disabled: boolean
@@ -231,18 +278,22 @@ function PreflightBody({
     <>
       <ul className="preflight-facts">
         <li>
-          <span className="muted">Période :</span>{' '}
+          <span className="muted">{period?.named ? `Période ${period.number} :` : 'Période :'}</span>{' '}
           <strong className="tnum">
-            {formatRange(preflight.planning.startsAt, preflight.planning.lastDay)}
+            {period
+              ? formatRange(period.startsAt, period.lastDay)
+              : formatRange(preflight.planning.startsAt, preflight.planning.lastDay)}
           </strong>
         </li>
         <li>{plural(preflight.participantCount, 'membre participe', 'membres participent')}</li>
         <li>
-          {preflight.pendingCount === 0
-            ? 'Tous ont confirmé leurs disponibilités'
-            : preflight.confirmedCount === 1
-              ? '1 a confirmé ses disponibilités'
-              : `${preflight.confirmedCount} ont confirmé leurs disponibilités`}
+          {period?.hasCollection === false
+            ? 'Aucune collecte des disponibilités n’a été ouverte pour ces dates'
+            : preflight.pendingCount === 0
+              ? 'Tous ont confirmé leurs disponibilités'
+              : preflight.confirmedCount === 1
+                ? '1 a confirmé ses disponibilités'
+                : `${preflight.confirmedCount} ont confirmé leurs disponibilités`}
         </li>
         {preflight.pendingCount > 0 && (
           <li>{plural(preflight.pendingCount, 'n’a pas encore répondu', 'n’ont pas encore répondu')}</li>
@@ -276,6 +327,16 @@ function PreflightBody({
           </li>
         ))}
       </ul>
+
+      {preflight.lines.some((line) => line.decision) && (
+        <ul className="preflight-lines" aria-label="Lignes de la période">
+          {preflight.lines.map((line) => (
+            <li key={line.stableId}>
+              <strong>{line.name}</strong> — {decisionText(line.decision, preflight.scope)}
+            </li>
+          ))}
+        </ul>
+      )}
 
       {preflight.blockers.length > 0 && (
         <ul className="preflight-issues" aria-label="Points bloquants">
@@ -609,6 +670,12 @@ function blockerText(issue: PreflightIssue): string {
       return 'Le moteur de génération n’est pas configuré.'
     case 'AMBIGUOUS_COVERAGE_SOURCE':
       return `${line}certains jours correspondent à plusieurs gardes de la ligne source : impossible de savoir laquelle déclenche le renfort.`
+    case 'NO_MEMBER_IN_PERIOD':
+      return `${line}des gardes sont à pourvoir mais aucun membre ne participe à cette période.`
+    case 'NO_LINE_TO_GENERATE':
+      return 'Aucune ligne à générer : les lignes de cette période sont déjà publiées ou n’ont aucune garde.'
+    case 'SOURCE_OF_PUBLISHED_LINE':
+      return `${line}elle déclenche les renforts d’une ligne déjà publiée : elle ne peut pas être générée de nouveau.`
     default:
       return `${line}génération impossible.`
   }
@@ -690,6 +757,25 @@ function SurgicalHubCaveats({
   )
 }
 
+/** docs/decisions.md D195: what this launch does with each line — said, so kept and generated lines are told apart. */
+function decisionText(
+  decision: GenerationLineDecision | undefined,
+  scope: string | null | undefined,
+): string {
+  switch (decision) {
+    case 'GENERATE':
+      return 'sera générée'
+    case 'KEEP':
+      return scope === 'unlocked_lines'
+        ? 'déjà publiée : conservée telle quelle'
+        : 'déjà publiée : jamais régénérée'
+    case 'EXCLUDE':
+      return 'aucune garde demandée sur cette période : ignorée, elle ne bloque rien'
+    default:
+      return 'état inconnu'
+  }
+}
+
 function launchErrorMessage(err: unknown): string {
   if (err instanceof ApiError && err.status === 409) {
     const code = (err.body as { error?: string } | null)?.error
@@ -697,7 +783,9 @@ function launchErrorMessage(err: unknown): string {
       return 'Une génération ou une complétion de ce planning est déjà en cours.'
     }
     if (code === 'not_launchable') {
-      return 'La génération est impossible : un prérequis manque.'
+      return (err.body as { requiredScope?: string | null } | null)?.requiredScope === 'unlocked_lines'
+        ? 'Des lignes de cette période sont déjà publiées : générez uniquement les lignes non publiées.'
+        : 'La génération est impossible : un prérequis manque.'
     }
   }
   return 'La génération a échoué.'

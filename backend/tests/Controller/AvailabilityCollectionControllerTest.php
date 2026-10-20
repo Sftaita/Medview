@@ -505,7 +505,7 @@ final class AvailabilityCollectionControllerTest extends WebTestCase
         $s = $this->scenario($client);
         $container = static::getContainer();
         $planning = $container->get(PlanningRepository::class)->findOneByStableId($s['planningId']);
-        $period = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0]->getPlanningPeriod();
+        $period = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0]->requireSingleCyclePeriod();
         $period->transitionTo(PlanningPeriodStatus::GENERATED);
         $period->transitionTo(PlanningPeriodStatus::VALIDATED);
         $container->get(EntityManagerInterface::class)->flush();

@@ -69,6 +69,63 @@ final class PlanningExportRenderersTest extends KernelTestCase
         self::assertFalse($week[5]['inRange'], 'The 17th is outside the exported range.');
     }
 
+    public function testSeveralPeriodsAnUnpublishedOneAndUnpublishedChangesAreSpelledOutInBothFormats(): void
+    {
+        // docs/decisions.md D200: 29 April → 2 May 2027 across periods 1 and 2; period 2 of "Juniors" is a draft.
+        $days = [];
+        foreach (['2027-04-29' => 1, '2027-04-30' => 1, '2027-05-01' => 2, '2027-05-02' => 2] as $date => $period) {
+            $days[] = new PlanningExportDay(new \DateTimeImmutable($date), [[new PlanningExportItem('Alice Martin', null)], []], $period, 2 === $period ? [1] : []);
+        }
+        $data = new PlanningExportData(
+            'Gardes',
+            PlanningExportFormat::PDF,
+            new \DateTimeImmutable('2027-04-29'),
+            new \DateTimeImmutable('2027-05-02'),
+            new \DateTimeImmutable('2026-12-10 09:00'),
+            [new PlanningExportLine('l1', 'Seniors'), new PlanningExportLine('l2', 'Juniors')],
+            $days,
+            PlanningExportData::OPERATIONAL_CHANGED,
+            PlanningExportData::OPERATIONAL_CHANGED_LABEL,
+            true,
+            [
+                ['number' => 1, 'first' => new \DateTimeImmutable('2027-04-29'), 'last' => new \DateTimeImmutable('2027-04-30')],
+                ['number' => 2, 'first' => new \DateTimeImmutable('2027-05-01'), 'last' => new \DateTimeImmutable('2027-05-02')],
+            ],
+            ['Période 2 — Juniors'],
+        );
+
+        $renderer = static::getContainer()->get(PlanningExportPdfRenderer::class);
+        $view = $renderer->view($data);
+        self::assertSame('Calendrier opérationnel — modifications non publiées possibles', $view['headingLabel']);
+        self::assertTrue($view['warning']);
+        self::assertSame('Période 1 (du 29 avril 2027 au 30 avril 2027) · Période 2 (du 1er mai 2027 au 2 mai 2027)', $view['periodsLabel']);
+        self::assertSame('Non inclus car non publiés : Période 2 — Juniors', $view['excludedLabel']);
+        $april = $view['months'][0]['weeks'][0];
+        self::assertSame(['P1', null], array_column(\array_slice($april, 3, 2), 'periodTag'), 'a tag only where a period starts in the export');
+        $may = $view['months'][1]['weeks'][0];
+        self::assertSame('P2', $may[5]['periodTag'], 'Saturday 1 May opens period 2');
+        self::assertSame([1], $may[5]['unpublished']);
+        self::assertSame([], $april[3]['unpublished']);
+        $html = static::getContainer()->get('twig')->render('pdf/planning_export.html.twig', $view);
+        self::assertSame(2, substr_count($html, 'Non publiée'), 'Juniors on 1 and 2 May — never "—"');
+        self::assertStringContainsString('class="nature warning"', $html);
+        self::assertStringStartsWith('%PDF-', $renderer->render($data));
+
+        $sheets = $this->readXlsx(static::getContainer()->get(PlanningExportXlsxRenderer::class)->render($data));
+        self::assertSame(['Date', 'Jour', 'Période', 'Seniors', 'Juniors'], $sheets['Planning'][0]);
+        self::assertSame(['Période 1', 'Alice Martin', ''], [$sheets['Planning'][1][2], $sheets['Planning'][1][3], $sheets['Planning'][1][4] ?? '']);
+        self::assertSame(['Période 2', 'Alice Martin', 'Non publiée'], \array_slice($sheets['Planning'][3], 2));
+        self::assertSame(['Personne', 'Date', 'Jour', 'Ligne', 'Période'], $sheets['Par personne'][0]);
+        self::assertContains(['Nature', 'Calendrier opérationnel — modifications non publiées possibles'], $sheets['Informations']);
+        self::assertContains(['Non inclus car non publiés', 'Période 2 — Juniors'], $sheets['Informations']);
+
+        // A current calendar identical to the diffusion: nothing more in the heading, as before.
+        $plain = $renderer->view($this->data('2026-10-14', '2026-10-16', ['Ortho']));
+        self::assertNull($plain['headingLabel']);
+        self::assertNull($plain['periodsLabel']);
+        self::assertNull($plain['excludedLabel']);
+    }
+
     public function testTheSizeLimitCountsExactlyTheRowsThePdfLaysOut(): void
     {
         $renderer = static::getContainer()->get(PlanningExportPdfRenderer::class);
@@ -87,10 +144,10 @@ final class PlanningExportRenderersTest extends KernelTestCase
         self::assertStringStartsWith("PK\x03\x04", $bytes, 'A real .xlsx (zip), never a renamed CSV.');
 
         $sheets = $this->readXlsx($bytes);
-        self::assertSame(['Planning', 'Par personne'], array_keys($sheets));
+        self::assertSame(['Planning', 'Par personne', 'Informations'], array_keys($sheets), 'docs/decisions.md D200: what the document is, last.');
 
         $planning = $sheets['Planning'];
-        self::assertSame(['Date', 'Jour', 'Orthopédie', 'Membres supérieurs'], $planning[0]);
+        self::assertSame(['Date', 'Jour', 'Orthopédie', 'Membres supérieurs'], $planning[0], 'A single period: no "Période" column, as before.');
         self::assertCount(1 + 31, $planning, 'One row per date, days without duty included.');
         self::assertInstanceOf(\DateTimeImmutable::class, $planning[1][0], 'A real Excel date.');
         self::assertSame('2026-10-01', $planning[1][0]->format('Y-m-d'));

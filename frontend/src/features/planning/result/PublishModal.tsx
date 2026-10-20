@@ -3,6 +3,7 @@ import { Icon } from '../../../components/Icon'
 import { Overlay } from '../../../components/Overlay'
 import { ApiError } from '../../../lib/apiClient'
 import { fetchPublicationPreflight, publishPlanning } from './api'
+import { NewLinesChooser } from '../calendar/NewLinesChooser'
 import { PreflightIssueList } from '../calendar/PreflightIssueList'
 import { blockingIssues } from '../calendar/preflightIssues'
 import { undeliveredMessage } from './publicationDelivery'
@@ -10,6 +11,8 @@ import type { PublicationPreflight, PublicationResult } from './types'
 
 type Props = {
   planningStableId: string
+  /** The period published (docs/planning-cycles.md §7.4) — required by the server on a planning with several. */
+  periodStableId?: string
   onClose: () => void
   /** The planning was actually published: carries the real, server-returned per-line statuses. */
   onPublished: (result: PublicationResult) => void
@@ -25,18 +28,27 @@ type Props = {
  * server always re-validates for real at that moment (§11/§19 of the
  * spec), never trusting what this modal showed when it opened.
  */
-export function PublishModal({ planningStableId, onClose, onPublished, onLocate }: Props) {
+export function PublishModal({ planningStableId, periodStableId, onClose, onPublished, onLocate }: Props) {
   const [preflight, setPreflight] = useState<PublicationPreflight | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
   const [publishError, setPublishError] = useState<string | null>(null)
   const [result, setResult] = useState<PublicationResult | null>(null)
+  // docs/decisions.md D196: a partial publication names its lines explicitly — none chosen by default.
+  const [chosen, setChosen] = useState<Set<string>>(new Set())
   // A ref, not state: two clicks on "Publier" in the same tick both read the state as "idle".
   const inFlight = useRef(false)
 
+  const unpublished = (preflight?.lines ?? []).filter((line) => line.published === false)
+  const partial =
+    !!preflight && !preflight.publishable && unpublished.some((line) => line.firstPublishable === true)
+  const publishedIds = new Set(
+    (preflight?.lines ?? []).filter((line) => line.published === true).map((line) => line.lineStableId),
+  )
+
   useEffect(() => {
     let cancelled = false
-    fetchPublicationPreflight(planningStableId)
+    fetchPublicationPreflight(planningStableId, periodStableId)
       .then((value) => {
         if (!cancelled) setPreflight(value)
       })
@@ -46,7 +58,7 @@ export function PublishModal({ planningStableId, onClose, onPublished, onLocate 
     return () => {
       cancelled = true
     }
-  }, [planningStableId])
+  }, [planningStableId, periodStableId])
 
   async function confirmPublish() {
     if (inFlight.current) {
@@ -56,7 +68,11 @@ export function PublishModal({ planningStableId, onClose, onPublished, onLocate 
     setPublishing(true)
     setPublishError(null)
     try {
-      const publicationResult = await publishPlanning(planningStableId)
+      const publicationResult = await publishPlanning(
+        planningStableId,
+        partial ? [...chosen] : undefined,
+        periodStableId,
+      )
       setResult(publicationResult)
       onPublished(publicationResult)
     } catch (err) {
@@ -82,15 +98,15 @@ export function PublishModal({ planningStableId, onClose, onPublished, onLocate 
             <button type="button" className="btn btn--secondary" onClick={onClose} disabled={publishing}>
               {preflight && !preflight.publishable ? 'Fermer' : 'Annuler'}
             </button>
-            {preflight && preflight.publishable && (
+            {preflight && (preflight.publishable || partial) && (
               <button
                 type="button"
                 className="btn btn--primary"
                 onClick={confirmPublish}
-                disabled={publishing}
+                disabled={publishing || (partial && chosen.size === 0)}
                 aria-busy={publishing}
               >
-                {publishing ? 'Publication en cours…' : 'Publier'}
+                {publishing ? 'Publication en cours…' : partial ? 'Publier les lignes cochées' : 'Publier'}
               </button>
             )}
           </>
@@ -109,7 +125,17 @@ export function PublishModal({ planningStableId, onClose, onPublished, onLocate 
         </p>
       )}
 
-      {preflight && !result && <PreflightBody preflight={preflight} onLocate={onLocate} />}
+      {preflight && !result && <PreflightBody preflight={preflight} partial={partial} onLocate={onLocate} />}
+      {preflight && !result && partial && (
+        <NewLinesChooser
+          lines={unpublished}
+          publishedIds={publishedIds}
+          selected={chosen}
+          onChange={setChosen}
+          legend="Lignes à publier maintenant"
+          disabled={publishing}
+        />
+      )}
 
       {publishError && (
         <p role="alert" className="alert alert--error">
@@ -139,7 +165,12 @@ export function PublishModal({ planningStableId, onClose, onPublished, onLocate 
             <li key={line.lineStableId} className="alert alert--success">
               <Icon name="check" size={18} strokeWidth={2} />
               <span>
-                <strong>{line.lineName}</strong> — {line.alreadyPublished ? 'déjà publiée.' : 'publiée.'}
+                <strong>{line.lineName}</strong> —{' '}
+                {line.alreadyPublished
+                  ? 'déjà publiée.'
+                  : line.kind === undefined || line.kind === 'FIRST_FOR_LINE'
+                    ? 'publiée.'
+                    : 'non publiée.'}
               </span>
             </li>
           ))}
@@ -151,9 +182,12 @@ export function PublishModal({ planningStableId, onClose, onPublished, onLocate 
 
 function PreflightBody({
   preflight,
+  partial,
   onLocate,
 }: {
   preflight: PublicationPreflight
+  /** docs/decisions.md D196: some lines are ready — they can be published now, if chosen. */
+  partial: boolean
   onLocate?: (dutyStableId: string) => void
 }) {
   if (preflight.publishable) {
@@ -184,10 +218,20 @@ function PreflightBody({
 
   return (
     <>
-      <p role="alert" className="alert alert--error">
-        <Icon name="alert" size={18} strokeWidth={2} />
-        <span>Publication impossible.</span>
-      </p>
+      {partial ? (
+        <p role="alert" className="alert alert--warning">
+          <Icon name="alert" size={18} strokeWidth={2} />
+          <span>
+            Toutes les lignes ne sont pas prêtes. Vous pouvez publier dès maintenant celles qui le sont, en
+            les cochant ci-dessous ; les autres resteront non publiées.
+          </span>
+        </p>
+      ) : (
+        <p role="alert" className="alert alert--error">
+          <Icon name="alert" size={18} strokeWidth={2} />
+          <span>Publication impossible.</span>
+        </p>
+      )}
       <ul className="preflight-issues" aria-label="Points bloquants">
         {preflight.lines
           .filter((line) => !line.hasGeneration)
@@ -258,7 +302,11 @@ function publishErrorMessage(err: unknown): string {
     if (code === 'publication_in_progress') {
       return 'Une publication de ce planning est déjà en cours.'
     }
-    if (code === 'not_publishable') {
+    if (
+      code === 'not_publishable' ||
+      code === 'line_not_publishable' ||
+      code === 'source_line_not_published'
+    ) {
       return 'Le planning a changé depuis l’ouverture de cette fenêtre et n’est plus publiable. Fermez et réessayez.'
     }
   }
