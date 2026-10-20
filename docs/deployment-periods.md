@@ -1,8 +1,13 @@
 # Mise en production des périodes successives — plan (lot L7)
 
-> **Statut : plan préparé le 2026-10-19, non exécuté.** Aucune des deux
-> étapes ci-dessous n'est autorisée tant que l'utilisateur ne l'a pas
-> validée explicitement. Chantier D185 → D205, branche
+> **Statut : étape A exécutée le 2026-10-20** (`v2026.10.20-prod`,
+> `0948c0f`, création des périodes désactivée — détail et écarts à la
+> procédure dans [`deployment.md`](deployment.md) §6). **Étape B non
+> autorisée.** Pour une prochaine migration non additive : le `--dry-run`
+> ne couvre pas une migration qui lit des colonnes créées par une
+> précédente (capturer le SQL sur une restauration jetable), et la bascule
+> se fait backend et worker arrêtés (migration depuis un conteneur jetable
+> de la nouvelle image), jamais `up` avant `migrate`. Chantier D185 → D205, branche
 > `feature/periods-components`. Procédures générales :
 > [`deployment.md`](deployment.md) (§1 étape 6, §2, §3, §4),
 > [`backup.md`](backup.md), spécification
