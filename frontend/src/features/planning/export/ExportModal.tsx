@@ -326,7 +326,7 @@ export function ExportModal({ planning, period, onClose }: Props) {
               <div className="export-period">
                 <div className="field">
                   <label htmlFor={fromId} className="field__label">
-                    Du
+                    Premier jour
                   </label>
                   <input
                     id={fromId}
@@ -341,7 +341,7 @@ export function ExportModal({ planning, period, onClose }: Props) {
                 </div>
                 <div className="field">
                   <label htmlFor={toId} className="field__label">
-                    Au (inclus)
+                    Dernier jour inclus
                   </label>
                   <input
                     id={toId}

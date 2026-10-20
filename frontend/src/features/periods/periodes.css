@@ -841,6 +841,7 @@
   gap: 18px;
   padding-top: 20px;
   border-top: 1px solid var(--border-subtle);
+  container: mv-period / inline-size;
 }
 .mv-period-detail__head {
   display: flex;
@@ -961,28 +962,37 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr) minmax(0, 0.8fr);
   gap: 12px;
-  align-items: center;
+  align-items: stretch;
 }
 .mv-dates__box {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
   padding: 18px 22px;
   border-radius: 14px;
   background: var(--surface-sunken);
+  /* The date's size follows the box (cqi), never the window. */
+  container-type: inline-size;
 }
 .mv-dates__box span {
   font-size: 14px;
   font-weight: 600;
   color: var(--gray-600);
 }
+/*
+ * "Mer. 30 sept. 2026" whole, whatever the width: the size shrinks with the box down to
+ * 17 px, then the date wraps between words — never clipped, never an ellipsis.
+ */
 .mv-dates__box strong {
-  font-size: 30px;
+  font-size: clamp(17px, 9cqi, 30px);
   font-weight: 800;
+  line-height: 1.15;
   letter-spacing: -0.02em;
   color: var(--text-strong);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  overflow-wrap: normal;
+  text-wrap: balance;
 }
 .mv-dates__box--brand {
   background: var(--green-50);
@@ -991,10 +1001,37 @@
 .mv-dates__box--brand strong {
   color: var(--green-800);
 }
+/* "92 jours" is shorter than a date: the same visual size in a narrower box. */
+.mv-dates__box--brand strong {
+  font-size: clamp(17px, 12cqi, 30px);
+}
 .mv-dates__arrow {
   display: flex;
+  align-items: center;
   justify-content: center;
   color: var(--gray-400);
+}
+/* A narrow card (tablet, laptop with the side menu): both days side by side, the length below. */
+@container mv-period (max-width: 799px) {
+  .mv-dates {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+  }
+  .mv-dates__arrow {
+    display: none;
+  }
+  .mv-dates__box {
+    padding: 14px 16px;
+  }
+  .mv-dates__box--brand {
+    grid-column: span 2;
+    flex-direction: row;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+  .mv-dates__box--brand strong {
+    font-size: 20px;
+  }
 }
 
 /* ---------- Étapes ---------- */
@@ -1002,6 +1039,7 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  container: mv-steps / inline-size;
 }
 .mv-steps__list {
   display: grid;
@@ -1010,6 +1048,16 @@
   margin: 0;
   padding: 0;
   list-style: none;
+}
+/* Three steps side by side only when each one has room for its title and its badge. */
+@container mv-steps (max-width: 759px) {
+  .mv-steps__list {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+  }
+  .mv-step {
+    padding: 14px 16px;
+  }
 }
 .mv-step {
   display: flex;
@@ -1058,9 +1106,10 @@
 }
 .mv-step__top {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 4px 8px;
   width: 100%;
   font-size: 17px;
   color: var(--text-strong);
@@ -1105,6 +1154,7 @@
 /* ---------- Onglets ---------- */
 .mv-tabs-card {
   overflow: hidden;
+  container: mv-tabs / inline-size;
 }
 .mv-tabs {
   display: flex;
@@ -1124,6 +1174,7 @@
   font-size: 15px;
   font-weight: 700;
   color: var(--gray-600);
+  white-space: nowrap;
   cursor: pointer;
 }
 .mv-tabs button.is-selected {
@@ -1845,6 +1896,39 @@
   .mv-mobile-action {
     bottom: calc(var(--bottomnav-height) + env(safe-area-inset-bottom));
     padding-bottom: 10px;
+  }
+}
+/*
+ * A narrow tab card on a tablet or a laptop with the side menu: the period reminder goes
+ * first (the period card above already says it), then the short labels — never a label
+ * broken over three lines.
+ */
+@container mv-tabs (max-width: 879px) {
+  .mv-tabs__context {
+    display: none;
+  }
+}
+@container mv-tabs (max-width: 599px) {
+  .mv-tabs__long {
+    display: none;
+  }
+  .mv-tabs__short {
+    display: inline;
+  }
+}
+.mv-tabs__context {
+  white-space: nowrap;
+}
+/* "Indisponibilités" in full whenever its tab holds it; "Indispos" only on a phone. */
+.mv-tabs__narrow {
+  display: none;
+}
+@container mv-tabs (max-width: 419px) {
+  .mv-tabs__short {
+    display: none;
+  }
+  .mv-tabs__narrow {
+    display: inline;
   }
 }
 

@@ -90,8 +90,8 @@ describe('CollectionStatusPanel — search and sort', () => {
     expect(names()).toEqual(['Camille Dupont', 'Camille Leroy', 'Camille Martin'])
     expect(screen.getByRole('button', { name: 'Nom' })).toHaveAttribute('aria-pressed', 'true')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Indispos' }))
-    expect(screen.getByRole('button', { name: 'Indispos' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(screen.getByRole('button', { name: 'Indisponibilités' }))
+    expect(screen.getByRole('button', { name: 'Indisponibilités' })).toHaveAttribute('aria-pressed', 'true')
     expect(names()).toEqual(['Camille Dupont', 'Camille Martin', 'Camille Leroy'])
   })
 

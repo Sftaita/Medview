@@ -29,14 +29,14 @@ export function PeriodCard({ startsAt, endsAt, timezone, onExtend }: Props) {
       <div className="pd-period-row">
         <div className="pd-period-dates">
           <div className="pd-period-tile">
-            <span className="pd-period-label">Du</span>
+            <span className="pd-period-label">Premier jour</span>
             <span className="pd-period-value">{formatLongDate(startsAt)}</span>
           </div>
           <span className="pd-period-arrow" aria-hidden>
             <Icon name="arrow" size={20} strokeWidth={2.2} />
           </span>
           <div className="pd-period-tile">
-            <span className="pd-period-label">Au (inclus)</span>
+            <span className="pd-period-label">Dernier jour inclus</span>
             <span className="pd-period-value">{formatLongDate(lastDay)}</span>
           </div>
         </div>

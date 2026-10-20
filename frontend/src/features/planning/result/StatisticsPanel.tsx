@@ -164,7 +164,7 @@ export function StatisticsPanel({ planningStableId, periodStableId, refreshKey }
       )}
       {shownKey === 'provisional' && (
         <p className="muted stats-panel__note">
-          Lignes générées mais pas encore publiées : provisoire, jamais ajouté au cumul publié.
+          Lignes générées mais pas encore publiées : chiffres provisoires, jamais ajoutés au cumul publié.
         </p>
       )}
       {shownKey === 'currentPeriod' && statistics.period && statistics.period.lines.length > 0 && (

@@ -30,7 +30,7 @@ export function periodCreationError(err: unknown): PeriodCreationError {
     case 'historical_block_cut_confirmation_required':
       return new PeriodCreationError(
         'historical',
-        'La fin de la période précédente, qui ne peut plus bouger, coupe un bloc de gardes. Confirmez ce qui deviendra un bloc de reste dans la nouvelle période.',
+        'La fin de la période précédente, qui ne peut plus changer, coupe un bloc de gardes. Confirmez que les jours restants deviennent la suite de ce bloc dans la nouvelle période.',
         body.details ?? [],
       )
     case 'period_boundary_splits_block':

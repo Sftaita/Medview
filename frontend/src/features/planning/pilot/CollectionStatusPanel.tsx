@@ -206,7 +206,7 @@ export function CollectionStatusPanel({ status, onChanged, onEditDeadline }: Pro
               aria-pressed={sort === 'unavailabilities'}
               onClick={() => setSort('unavailabilities')}
             >
-              Indispos
+              Indisponibilités
             </button>
           </div>
         </div>

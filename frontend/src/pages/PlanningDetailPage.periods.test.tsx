@@ -502,6 +502,11 @@ describe('PlanningDetailPage — creating the next period (lot L6)', () => {
     expect(within(dialog).getByText('Sam. 1 mai 2027')).toBeInTheDocument()
     expect(within(dialog).getByText('Lendemain du dernier jour de la période 3')).toBeInTheDocument()
     expect(within(dialog).getByText('Dernier jour inclus : vendredi 30 avril 2027')).toBeInTheDocument()
+    expect(
+      within(dialog).getByText(
+        /^Elle reste rattachée à .+ : \d+ lignes? et \d+ membres?, sans rien recréer\.$/,
+      ),
+    ).toBeInTheDocument()
 
     fireEvent.click(within(dialog).getByRole('button', { name: /3 mois/ }))
     expect(
@@ -557,7 +562,10 @@ describe('PlanningDetailPage — creating the next period (lot L6)', () => {
     const alert = await within(dialog).findByRole('alert')
     expect(alert).toHaveTextContent('Week-end · Seniors')
     expect(alert).toHaveTextContent(
-      'les jours Sam. 1 mai, Dim. 2 mai deviennent un bloc de reste de la période 4',
+      'les jours Sam. 1 mai, Dim. 2 mai deviennent la suite de ce bloc dans la période 4',
+    )
+    expect(alert).toHaveTextContent(
+      'Je confirme : ces jours forment la suite du bloc dans la période 4 et seront attribués d’un seul tenant.',
     )
     const confirm = within(dialog).getByRole('button', { name: 'Confirmer et créer la période' })
     expect(confirm).toBeDisabled()
