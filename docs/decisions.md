@@ -2964,6 +2964,23 @@ l'ancienne (voir légende).
   (buckets par IP réelle, non-usurpation depuis un autre conteneur, IP
   enregistrée) et garde-fous `ProdComposeTest` (une seule adresse exacte,
   toute clé de `backend/.env` redéfinie dans le `.env` de prod).
+- **Correction (2026-10-20)** : l'affirmation « une valeur périmée échoue en
+  sécurité » est **fausse**. Après un reboot, Docker réattribue les adresses
+  du réseau `proxy` selon l'ordre de démarrage : l'ancienne adresse de
+  Traefik peut revenir à **un autre conteneur**, qui peut alors forger
+  `X-Forwarded-For` auprès de MedVue (cas réel : `172.18.0.2` réattribuée à
+  `surgicalhub-nginx` après le reboot du 2026-10-06, `deployment.md` §2).
+  Dérive constatée deux fois : reboot du 2026-10-06 (corrigé au
+  déploiement `v2026.10.08-prod`) et reboot du 2026-10-17 (Traefik
+  `172.18.0.4` → `172.18.0.3`, la valeur périmée désignait le backend
+  MedVue lui-même ; corrigé le 2026-10-20, `deployment.md` §8 point 11).
+  La décision reste « une seule adresse exacte, jamais le `/16` » ; seule
+  une IP **fixe** de Traefik (`ipv4_address` dans
+  `/opt/stack/traefik/docker-compose.yml`, recréation de Traefik, donc
+  coupure de toutes les applications) supprimerait la dérive : proposée,
+  **non autorisée à ce jour**, de même qu'un cron lançant
+  `check-trusted-proxy.sh`. D'ici là, `check-trusted-proxy.sh` est
+  obligatoire après **tout** reboot du serveur ou recréation de Traefik.
 
 ## D109 — Sauvegardes MedVue : scripts versionnés, dump exécuté dans le conteneur, restauration prouvée dans une cible jetable
 
