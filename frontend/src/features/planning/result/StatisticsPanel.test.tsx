@@ -239,7 +239,7 @@ describe('StatisticsPanel', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'En préparation' }))
     expect(screen.getByText('Zoé Petit')).toBeInTheDocument()
-    expect(screen.getByText(/jamais ajouté au cumul publié/)).toBeInTheDocument()
+    expect(screen.getByText(/chiffres provisoires, jamais ajoutés au cumul publié/)).toBeInTheDocument()
     expect(screen.getByText(/période 2 incluse/)).toBeInTheDocument()
   })
 

@@ -3,8 +3,10 @@ import { useId, type ReactNode } from 'react'
 export interface PeriodTab<T extends string> {
   id: T
   label: string
-  /** Shorter label under 760 px. */
+  /** Shorter label when the tab bar is narrow. */
   short?: string
+  /** Shorter still, only where the short label has no room (a phone). */
+  narrow?: string
   count?: number
 }
 
@@ -45,6 +47,9 @@ export function PeriodTabs<T extends string>({ tabs, selected, onSelect, context
             </span>
             <span className="mv-tabs__short" aria-hidden="true">
               {tab.short ?? tab.label}
+            </span>
+            <span className="mv-tabs__narrow" aria-hidden="true">
+              {tab.narrow ?? tab.short ?? tab.label}
             </span>
             {tab.count !== undefined && (
               <span className="mv-count" aria-hidden="true">

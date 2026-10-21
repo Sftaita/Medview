@@ -160,6 +160,22 @@
   font-weight: var(--weight-extra);
 }
 
+/* The full word when a fifth of the bar holds it, the short one only on a narrow phone — never an overflow. */
+.shell__tabbar {
+  container: tabbar / inline-size;
+}
+.shell__tab-label--narrow {
+  display: none;
+}
+@container tabbar (max-width: 479px) {
+  .shell__tab-label {
+    display: none;
+  }
+  .shell__tab-label--narrow {
+    display: inline;
+  }
+}
+
 .shell__nav {
   display: flex;
   flex-direction: column;

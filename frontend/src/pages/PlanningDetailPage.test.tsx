@@ -142,8 +142,9 @@ describe('PlanningDetailPage — header and period', () => {
 
     const period = screen.getByRole('region', { name: 'Périodes du planning' })
     expect(within(period).getByText('Jeu. 1 oct. 2026')).toBeInTheDocument()
-    // endsAt 2027-02-01 is exclusive: the period stops on 31 January, said "inclus".
-    expect(within(period).getByText('Au (inclus)')).toBeInTheDocument()
+    // endsAt 2027-02-01 is exclusive: the period stops on 31 January, its last day included.
+    expect(within(period).getByText('Premier jour')).toBeInTheDocument()
+    expect(within(period).getByText('Dernier jour inclus')).toBeInTheDocument()
     expect(within(period).getByText('Dim. 31 janv. 2027')).toBeInTheDocument()
     expect(within(period).getByText('123 jours')).toBeInTheDocument()
     expect(within(period).getByText('Collecte en cours')).toBeInTheDocument()

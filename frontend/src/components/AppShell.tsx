@@ -10,6 +10,8 @@ type NavItem = {
   label: string
   /** Short label (bottom bar on a phone). */
   shortLabel: string
+  /** Shorter still, only where the bottom bar has no room for the short label. */
+  narrowLabel?: string
   end?: boolean
 }
 
@@ -18,7 +20,13 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/plannings', icon: 'layers', label: 'Plannings', shortLabel: 'Plannings' },
   { to: '/my-duties', icon: 'moon', label: 'Mes gardes', shortLabel: 'Gardes' },
   { to: '/swaps', icon: 'swap', label: 'Échanges', shortLabel: 'Échanges' },
-  { to: '/my-availability', icon: 'calendarX', label: 'Mes indisponibilités', shortLabel: 'Indispos' },
+  {
+    to: '/my-availability',
+    icon: 'calendarX',
+    label: 'Mes indisponibilités',
+    shortLabel: 'Indisponibilités',
+    narrowLabel: 'Indispos',
+  },
 ]
 
 function initials(firstName: string, lastName: string): string {
@@ -102,9 +110,26 @@ export function AppShell() {
 
       <nav aria-label="Navigation mobile" className="shell__tabbar">
         {NAV_ITEMS.map((item) => (
-          <NavLink key={item.to} to={item.to} end={item.end} className="shell__tab">
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.end}
+            className="shell__tab"
+            aria-label={item.narrowLabel ? item.shortLabel : undefined}
+          >
             <Icon name={item.icon} size={22} strokeWidth={1.9} />
-            {item.shortLabel}
+            {item.narrowLabel ? (
+              <>
+                <span className="shell__tab-label" aria-hidden="true">
+                  {item.shortLabel}
+                </span>
+                <span className="shell__tab-label--narrow" aria-hidden="true">
+                  {item.narrowLabel}
+                </span>
+              </>
+            ) : (
+              item.shortLabel
+            )}
           </NavLink>
         ))}
       </nav>

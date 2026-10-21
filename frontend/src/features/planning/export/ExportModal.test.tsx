@@ -193,11 +193,11 @@ describe('ExportModal', () => {
     renderModal()
 
     fireEvent.click(screen.getByRole('button', { name: 'Période personnalisée' }))
-    expect(screen.getByLabelText('Du')).toHaveValue('2026-10-01')
-    expect(screen.getByLabelText('Au (inclus)')).toHaveValue('2026-12-31')
-    expect(screen.getByLabelText('Au (inclus)')).toHaveAttribute('max', '2026-12-31')
-    fireEvent.change(screen.getByLabelText('Du'), { target: { value: '2026-11-01' } })
-    fireEvent.change(screen.getByLabelText('Au (inclus)'), { target: { value: '2026-11-30' } })
+    expect(screen.getByLabelText('Premier jour')).toHaveValue('2026-10-01')
+    expect(screen.getByLabelText('Dernier jour inclus')).toHaveValue('2026-12-31')
+    expect(screen.getByLabelText('Dernier jour inclus')).toHaveAttribute('max', '2026-12-31')
+    fireEvent.change(screen.getByLabelText('Premier jour'), { target: { value: '2026-11-01' } })
+    fireEvent.change(screen.getByLabelText('Dernier jour inclus'), { target: { value: '2026-11-30' } })
     fireEvent.click(screen.getByRole('button', { name: 'Exporter' }))
     await waitFor(() => expect(clicked).toHaveLength(1))
 
@@ -213,15 +213,15 @@ describe('ExportModal', () => {
     renderModal()
     fireEvent.click(screen.getByRole('button', { name: 'Période personnalisée' }))
 
-    fireEvent.change(screen.getByLabelText('Du'), { target: { value: '2026-12-10' } })
-    fireEvent.change(screen.getByLabelText('Au (inclus)'), { target: { value: '2026-12-01' } })
+    fireEvent.change(screen.getByLabelText('Premier jour'), { target: { value: '2026-12-10' } })
+    fireEvent.change(screen.getByLabelText('Dernier jour inclus'), { target: { value: '2026-12-01' } })
     expect(screen.getByRole('alert')).toHaveTextContent('La date de début doit précéder la date de fin.')
     expect(screen.getByRole('button', { name: 'Exporter' })).toBeDisabled()
 
-    fireEvent.change(screen.getByLabelText('Au (inclus)'), { target: { value: '2027-01-01' } })
+    fireEvent.change(screen.getByLabelText('Dernier jour inclus'), { target: { value: '2027-01-01' } })
     expect(screen.getByRole('alert')).toHaveTextContent('La période doit rester dans les dates du planning.')
 
-    fireEvent.change(screen.getByLabelText('Du'), { target: { value: '' } })
+    fireEvent.change(screen.getByLabelText('Premier jour'), { target: { value: '' } })
     expect(screen.getByRole('alert')).toHaveTextContent('Indiquez la date de début et la date de fin.')
 
     fireEvent.click(screen.getByRole('button', { name: 'Planning complet' }))
@@ -354,8 +354,8 @@ describe('ExportModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Période 2' }))
     expect(screen.getByRole('button', { name: 'Période 2' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('button', { name: 'Dates choisies' })).toHaveAttribute('aria-pressed', 'false')
-    expect(screen.getByLabelText('Du')).toHaveValue('2026-11-01')
-    expect(screen.getByLabelText('Au (inclus)')).toHaveValue('2026-11-30')
+    expect(screen.getByLabelText('Premier jour')).toHaveValue('2026-11-01')
+    expect(screen.getByLabelText('Dernier jour inclus')).toHaveValue('2026-11-30')
 
     fireEvent.click(screen.getByRole('button', { name: 'Exporter' }))
     await waitFor(() => expect(clicked).toHaveLength(1))

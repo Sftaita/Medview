@@ -356,12 +356,13 @@ export function PlanningDetailPage() {
     : undefined
   // Extending the planning (docs/decisions.md D122) only means something while it has a single period.
   const onExtend = planning.canManage && single ? () => setExtendOpen(true) : undefined
-  const tabs: { id: DetailTab; label: string; short: string; count?: number }[] = [
+  const tabs: { id: DetailTab; label: string; short: string; narrow?: string; count?: number }[] = [
     { id: 'lines', label: 'Lignes de garde', short: 'Lignes', count: planning.lines.length },
     {
       id: 'availability',
       label: 'Indisponibilités',
-      short: 'Indispos',
+      short: 'Indisponibilités',
+      narrow: 'Indispos',
       count: pilot.status?.summary.expectedCount,
     },
     { id: 'planning', label: single ? 'Planning' : `Gardes · période ${selectedNumber}`, short: 'Gardes' },

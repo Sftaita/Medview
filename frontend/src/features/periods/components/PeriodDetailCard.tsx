@@ -3,6 +3,7 @@ import { formatDate, timeState } from '../dates'
 import { STATUS_LABEL } from '../periods'
 import { MonthTimeBar } from './TimeBar'
 import { Icon } from './Icon'
+import { plural } from '../../planning/pilot/format'
 
 interface Props {
   period: Period
@@ -70,22 +71,23 @@ export function PeriodDetailCard({
         <div className="mv-banner mv-banner--new">
           <Icon name="info" size={20} strokeWidth={1.9} />
           <span>
-            <strong>Nouvelle période.</strong> Les {lineCount} lignes de garde et les {memberCount} membres du
-            planning s’y appliquent déjà : rien n’est recréé. Aucune garde n’est encore attribuée.
+            <strong>Nouvelle période.</strong> {plural(lineCount, 'ligne de garde', 'lignes de garde')} et{' '}
+            {plural(memberCount, 'membre', 'membres')} du planning s’y appliquent déjà : rien n’est recréé.
+            Aucune garde n’est encore attribuée.
           </span>
         </div>
       )}
 
       <div className="mv-dates">
         <div className="mv-dates__box">
-          <span>Du</span>
+          <span>Premier jour</span>
           <strong>{formatDate(period.start, 'card')}</strong>
         </div>
         <span className="mv-dates__arrow" aria-hidden="true">
           <Icon name="arrowRight" size={22} />
         </span>
         <div className="mv-dates__box">
-          <span>Au (inclus)</span>
+          <span>Dernier jour inclus</span>
           <strong>{formatDate(period.end, 'card')}</strong>
         </div>
         <div className="mv-dates__box mv-dates__box--brand">

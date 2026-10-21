@@ -5,6 +5,7 @@ import { MIN_PERIOD_DAYS, nextPeriodStart, validateEnd } from '../periods'
 import { PeriodCreationError } from '../errors'
 import { StatusPill } from './StatusPill'
 import { Icon } from './Icon'
+import { plural } from '../../planning/pilot/format'
 
 interface Props {
   open: boolean
@@ -150,7 +151,7 @@ export function CreatePeriodDialog({
           <span className="mv-eyebrow mv-eyebrow--brand">Nouvelle période · Période {newNumber}</span>
           <div className="mv-form-grid">
             <div className="mv-field">
-              <span className="mv-field__label">Premier jour (inclus)</span>
+              <span className="mv-field__label">Premier jour</span>
               <div className="mv-field__locked">
                 <Icon name="lock" size={18} strokeWidth={1.9} />
                 {formatDate(start, 'card')}
@@ -245,8 +246,8 @@ export function CreatePeriodDialog({
                             {' '}
                             : {cut.remainderDays.length === 1 ? 'le jour' : 'les jours'}{' '}
                             {cut.remainderDays.map((d) => formatDate(d, 'wdm')).join(', ')}{' '}
-                            {cut.remainderDays.length === 1 ? 'devient' : 'deviennent'} un bloc de reste de la
-                            période {newNumber}
+                            {cut.remainderDays.length === 1 ? 'devient' : 'deviennent'} la suite de ce bloc
+                            dans la période {newNumber}
                           </>
                         )}
                       </li>
@@ -262,8 +263,8 @@ export function CreatePeriodDialog({
                       disabled={submitting}
                     />
                     <span>
-                      Je confirme : ces jours forment un bloc de reste de la période {newNumber}, attribué
-                      d’un seul tenant. Rien ne change dans la période {previous.number}.
+                      Je confirme : ces jours forment la suite du bloc dans la période {newNumber} et seront
+                      attribués d’un seul tenant. Rien ne change dans la période {previous.number}.
                     </span>
                   </label>
                 )}
@@ -287,7 +288,8 @@ export function CreatePeriodDialog({
             </li>
             <li>
               <Icon name="check" strokeWidth={2.4} />
-              Elle reste rattachée à {planningName}, à ses {lineCount} lignes et à ses {memberCount} membres.
+              Elle reste rattachée à {planningName} : {plural(lineCount, 'ligne', 'lignes')} et{' '}
+              {plural(memberCount, 'membre', 'membres')}, sans rien recréer.
             </li>
             <li>
               <Icon name="check" strokeWidth={2.4} />

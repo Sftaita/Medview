@@ -9,6 +9,7 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+  container: cal / inline-size;
 }
 
 .cal-toolbar {
@@ -28,6 +29,55 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+/*
+ * Up to five actions, never one left alone on a row: one row when the calendar is wide
+ * enough, otherwise a grid sized on the number of actions (4 → 2 × 2, 5 → 3 + 2 with the
+ * last action — publish/republish — over two columns), then 2 columns, then 1 on a phone.
+ */
+@container cal (max-width: 999px) {
+  .cal-actions:has(> :nth-child(4)) {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .cal-actions:has(> :nth-child(4):last-child) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .cal-actions:has(> :nth-child(5):last-child) > :last-child {
+    grid-column: span 2;
+  }
+  .cal-actions > .pd-btn {
+    min-width: 0;
+    padding: 0 12px;
+    line-height: 1.2;
+    white-space: normal;
+    text-align: center;
+  }
+}
+@container cal (max-width: 559px) {
+  .cal-actions,
+  .cal-actions:has(> :nth-child(4)),
+  .cal-actions:has(> :nth-child(4):last-child) {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .cal-actions > :last-child:nth-child(odd),
+  .cal-actions:has(> :nth-child(5):last-child) > :last-child {
+    grid-column: span 2;
+  }
+}
+@container cal (max-width: 299px) {
+  .cal-actions,
+  .cal-actions:has(> :nth-child(4)),
+  .cal-actions:has(> :nth-child(4):last-child) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cal-actions > :last-child:nth-child(odd),
+  .cal-actions:has(> :nth-child(5):last-child) > :last-child {
+    grid-column: auto;
+  }
 }
 .cal-dirty {
   display: inline-flex;
@@ -109,6 +159,10 @@
   font-weight: 700;
   text-align: left;
   white-space: nowrap;
+}
+/* The day on the line of its first holder: the cell's padding plus the item's own. */
+.cal-day .cal-date {
+  padding-top: 7px;
 }
 .cal-day--weekend .cal-date {
   color: var(--green-800);
@@ -195,6 +249,8 @@ button.cal-item--uncovered:hover {
 .cal-block {
   border-left: 3px solid var(--blue-600);
   border-radius: 0;
+  /* The rail takes 3 px of the padding: names stay aligned with single duties. */
+  padding-left: 5px;
   background: var(--blue-50);
 }
 .cal-block--first,
@@ -284,6 +340,12 @@ button.cal-block:hover {
   }
   .cal-item {
     padding: 4px 6px;
+  }
+  .cal-block {
+    padding-left: 3px;
+  }
+  .cal-day .cal-date {
+    padding-top: 7px;
   }
 }
 
