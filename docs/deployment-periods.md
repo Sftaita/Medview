@@ -89,6 +89,9 @@ planning puisse recevoir une deuxième période.
    `Version20261010180000` (L1), `…1012090000` (L2), `…1013090000` (L3),
    `…1014090000` (L4b), `…1016090000` (L4c).
 6. `cache:clear`, `restart backend worker`, `check-trusted-proxy.sh`.
+   (Ici le `restart` ne sert qu'à relancer les processus : les conteneurs
+   viennent d'être recréés par `up -d`, qui a relu le `.env`. Un `restart`
+   seul ne relit **jamais** le `.env` — voir §3, étape 2.)
 7. **Preuve de conservation** : `app:planning-cycles:audit` avant (sur la
    restauration de l'étape 1) et après : empreintes identiques hors colonnes
    ajoutées.
@@ -140,8 +143,16 @@ explicitement (jamais présentée comme sans perte).
 période d'observation sans incident (P1 et P2 levés : D204, D205).
 
 1. Sauvegarde + `restore-test` PASS (nouveau point de retour).
-2. `MEDVUE_PERIOD_CREATION_ENABLED=1` dans le `.env` de production,
-   `restart backend worker` (lu au démarrage du conteneur).
+2. `MEDVUE_PERIOD_CREATION_ENABLED=1` dans le `.env` de production, puis
+   **recréer** le backend : `docker compose -f docker-compose.prod.yml up -d
+   --no-deps --no-build backend`, précédé du même `--dry-run` (seul
+   `medvue-backend` doit apparaître). **Un `restart` ne suffit pas** :
+   `env_file` n'est lu qu'à la création du conteneur, `restart` le relance
+   avec l'environnement d'origine (constaté le 2026-10-21, §6 de
+   `deployment.md`). Le worker n'a pas besoin du flag (seuls les chemins
+   HTTP le lisent) ; ne le recréer que délibérément, et toujours avec
+   `--no-deps`. Vérifier ensuite la valeur réellement chargée
+   (`printenv MEDVUE_PERIOD_CREATION_ENABLED` dans le conteneur).
 3. Activation progressive : un seul planning pilote, par son créateur —
    créer la période 2, ouvrir sa collecte, générer, publier ; vérifier la
    période 1 inchangée (`app:planning-cycles:audit`), « Mes gardes », iCal,
@@ -149,7 +160,8 @@ période d'observation sans incident (P1 et P2 levés : D204, D205).
 4. Élargissement aux autres plannings après validation du pilote.
 
 **Retour arrière (étape B)** : avant la première période 2 créée, remettre
-`0` suffit. **Dès qu'une période 2 existe, aucun `down()` n'est
+`0` suffit (puis recréer le backend comme à l'étape 2, jamais un simple
+`restart`). **Dès qu'une période 2 existe, aucun `down()` n'est
 réversible** (`planning-cycles.md` §6.1) : correctif en avant (cas
 normal) ; remettre le flag à `0` bloque toute nouvelle création mais laisse
 les périodes existantes lisibles et utilisables ; la restauration du dump de

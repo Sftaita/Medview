@@ -34,7 +34,8 @@ use Twig\Environment;
  * dates, "Période N" — and exactly the lines published in it by then, read
  * from the publication history (planning_publication_lines), with the names
  * they were published under. A publication without stored PDF (before D173)
- * keeps the rendering it always had.
+ * keeps the rendering it always had, but on the days of its own period —
+ * never the planning's, which grow with every following period (D206).
  */
 final class PlanningPdfRenderer
 {
@@ -51,8 +52,8 @@ final class PlanningPdfRenderer
      * The PDF of a publication as it was diffused (docs/decisions.md D173):
      * the bytes stored when it was recorded — never re-rendered from data
      * that may have changed since (period, names). A publication recorded
-     * before D173 has no stored PDF: rendered from its frozen entries, as it
-     * always was (its period and names are then the current ones).
+     * before D173 has no stored PDF: rendered from its frozen entries, on the
+     * days of its own period (D206), its lines under their current names.
      */
     public function pdfOf(PlanningPublication $publication): PublishedDocument
     {
@@ -62,10 +63,9 @@ final class PlanningPdfRenderer
             return new PublishedDocument($document->getContent(), $document->getFilename(), $document->getPlanningName(), $document->getPeriodFirstDay(), $document->getPeriodLastDay(), $number);
         }
 
-        $planning = $publication->getPlanning();
-        [$first, $last] = self::planningDays($publication);
+        [$first, $last] = self::cycleDays($publication);
 
-        return new PublishedDocument($this->renderView($this->legacyView($publication)), $this->legacyFilename($publication), $planning->getName(), $first, $last, $number);
+        return new PublishedDocument($this->renderView($this->legacyView($publication)), $this->legacyFilename($publication), $publication->getPlanning()->getName(), $first, $last, $number);
     }
 
     /**
@@ -134,12 +134,15 @@ final class PlanningPdfRenderer
     }
 
     /**
-     * Before D173 (no stored PDF), exactly as it was rendered then: the
-     * planning's dates, the lines found in the entries, their current names.
+     * Before D173 (no stored PDF), as it was rendered then — the lines found
+     * in the entries, their current names, the "Du … au …" label — but on the
+     * days of the publication's period, never the planning's: those grow when
+     * a following period is created (docs/decisions.md D206). Public, like
+     * view(), so tests can check the content itself.
      *
      * @return array<string, mixed>
      */
-    private function legacyView(PlanningPublication $publication): array
+    public function legacyView(PlanningPublication $publication): array
     {
         $entries = $this->entryRepository->findByPublication($publication);
 
@@ -160,7 +163,7 @@ final class PlanningPdfRenderer
 
         $lines = array_values(array_filter($lineByPeriodId));
         usort($lines, static fn (PlanningLine $a, PlanningLine $b): int => $a->getPosition() <=> $b->getPosition());
-        [$first, $last] = self::planningDays($publication);
+        [$first, $last] = self::cycleDays($publication);
 
         return $this->grid(
             $publication,
@@ -255,21 +258,6 @@ final class PlanningPdfRenderer
         return [
             new \DateTimeImmutable($cycle->getStartsAt()->format('Y-m-d')),
             new \DateTimeImmutable($cycle->getEndsAt()->modify('-1 day')->format('Y-m-d')),
-        ];
-    }
-
-    /**
-     * Before D173: the planning's first and last day (inclusive), as they are now.
-     *
-     * @return array{0: \DateTimeImmutable, 1: \DateTimeImmutable}
-     */
-    private static function planningDays(PlanningPublication $publication): array
-    {
-        $planning = $publication->getPlanning();
-
-        return [
-            new \DateTimeImmutable($planning->getStartsAt()->format('Y-m-d')),
-            new \DateTimeImmutable($planning->getEndsAt()->modify('-1 day')->format('Y-m-d')),
         ];
     }
 

@@ -7966,7 +7966,9 @@ Validé par l'utilisateur à la reprise de L4b. Une seule source de vérité :
     courant), sous le nom de leur première publication.
 - **PDF historiques** : les octets stockés (D173) sont servis tels quels.
   Une publication d'avant D173 (sans PDF stocké) garde son ancien rendu
-  (dates du planning, ancien nom de fichier).
+  (dates du planning, ancien nom de fichier). *Dates corrigées par D206 :
+  celles de sa période, le planning grandissant avec chaque période
+  suivante.*
   `GET /api/plannings/{p}/publications/{publication}/pdf` sert n'importe
   quelle publication passée.
 - **Audience** :
@@ -9116,3 +9118,59 @@ séparée), commits proposés, retour arrière et conditions d'arrêt :
   (publications, réaffectations, échanges, disponibilités, congés
   SurgicalHub importés — ces derniers reviennent à la synchronisation
   suivante) : décision explicite uniquement.
+
+## D206 — Le PDF d'une diffusion est toujours sur les jours de sa période, y compris avant D173
+
+**Contexte.** Le 2026-10-21, la création de la période 2 de Trauma Delta
+en production (`docs/deployment.md` §6) a porté la fin du planning du
+2027-01-31 au 2027-05-03 (`Planning::changeEnvelope`). Les deux diffusions
+de la période 1 datent d'avant D173 : elles n'ont pas de PDF stocké et sont
+rendues à la volée (`PlanningPdfRenderer::pdfOf` → `legacyView`). Ce rendu
+prenait **les dates du planning, telles qu'elles sont maintenant**
+(`planningDays()`, conservé tel quel par D196). Conséquence observée : les
+deux PDF historiques couvraient désormais du 1er octobre 2026 au 2 mai 2027,
+avec trois mois de lignes vides ; le téléchargement annonçait les mêmes
+dates. Gardes et titulaires restaient justes (lus dans les entrées figées).
+
+**Décision.** Tout PDF de diffusion couvre les jours de **la période de sa
+publication** (`cycleDays()`), jamais ceux du planning, qui grandissent
+avec chaque période suivante :
+
+- PDF stocké (D173) : octets, nom et dates servis tels quels, jamais
+  rendus à nouveau — inchangé ;
+- diffusion d'avant D173 : rendue comme avant (lignes trouvées dans ses
+  entrées, noms actuels des lignes, libellé « Du … au … », nom de fichier
+  `planning-<slug>.pdf`), mais sur les jours de sa période ; les dates
+  annoncées au téléchargement et dans un email renvoyé sont les mêmes ;
+- nouvelles diffusions (D196) : inchangées.
+
+`planningDays()` est supprimé : plus aucun PDF de diffusion ne dépend des
+dates du planning. `legacyView()` devient publique, comme `view()`, pour
+que les tests vérifient le contenu lui-même.
+
+**Ce qui n'est pas promis.** Un PDF d'avant D173 n'a jamais été conservé :
+son rendu retrouve les bonnes dates et le bon contenu métier, pas les
+octets d'origine (le rendu dompdf n'est pas déterministe d'un appel à
+l'autre, et les noms de ligne sont les actuels).
+
+**Autres chemins audités.**
+
+- Export du calendrier courant (`PlanningExportRequestParser`, D150) et
+  export des absences (`PlanningAbsenceExportService`, D181) : ils
+  acceptent une période ; sans période, ils couvrent le planning entier,
+  par choix explicite (« Toutes les périodes » dans le dialogue d'export ;
+  l'export des absences reçoit la période affichée). Ce ne sont pas des
+  diffusions : rien à corriger.
+- Email de publication et renvoi (`PublicationNotificationSender`) : passe
+  par `pdfOf()`, corrigé avec lui.
+
+**Tests.** `PlanningLegacyPublicationPdfTest` (période 1 raccourcie au
+28 février, période 2 jusqu'au 30 avril, le cas de production) :
+diffusion sans document avant puis après la création de la période 2
+(mêmes jours, mêmes titulaires, mêmes lignes, nom inchangé, téléchargement
+HTTP) ; document stocké servi octet pour octet après la prolongation ;
+diffusions successives sur deux périodes (aucun jour ni aucune garde de la
+période 2 dans le PDF de la période 1, et inversement) ; période
+partiellement publiée (seules les lignes de ses entrées). Mutations
+tuées : dates du planning au téléchargement, dates du planning dans le
+rendu, document stocké ignoré.
