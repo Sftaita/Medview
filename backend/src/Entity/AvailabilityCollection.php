@@ -170,6 +170,24 @@ class AvailabilityCollection
         return $this->localMidnight($this->endsAt);
     }
 
+    /**
+     * An untouched collection follows the new dates of its blank period
+     * (docs/decisions.md D207): nobody answered, changed, withdrew or was
+     * reminded yet — PlanningCycleRepository::dateFacts() decides it, the
+     * cycle has already moved. Its expected people are resynchronized by
+     * AvailabilityCollectionService::followPeriod().
+     */
+    public function followCycle(\DateTimeImmutable $now): void
+    {
+        if (null === $this->cycle) {
+            throw new \LogicException('Only a collection of a period follows its dates.');
+        }
+
+        $this->startsAt = $this->cycle->getStartsAt();
+        $this->endsAt = $this->cycle->getEndsAt();
+        $this->updatedAt = $now;
+    }
+
     public function getOpenedAt(): \DateTimeImmutable
     {
         return $this->openedAt;

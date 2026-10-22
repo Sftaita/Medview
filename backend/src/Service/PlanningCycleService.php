@@ -10,7 +10,6 @@ use App\Entity\Planning;
 use App\Entity\PlanningCycle;
 use App\Entity\PlanningLine;
 use App\Entity\PlanningPeriod;
-use App\Entity\PlanningPeriodStatus;
 use App\Entity\User;
 use App\Exception\HistoricalBlockCutConfirmationRequiredException;
 use App\Exception\PeriodBoundarySplitsBlockException;
@@ -53,8 +52,6 @@ final class PlanningCycleService
 {
     public const MIN_DAYS = 7;
 
-    private const LOCKED_STATUSES = [PlanningPeriodStatus::VALIDATED, PlanningPeriodStatus::PUBLISHED, PlanningPeriodStatus::ARCHIVED];
-
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
         private readonly PlanningCycleRepository $cycleRepository,
@@ -67,6 +64,7 @@ final class PlanningCycleService
         private readonly AvailabilityCollectionRepository $collectionRepository,
         private readonly AvailabilityCollectionService $collectionService,
         private readonly PeriodBoundaryGuard $boundaryGuard,
+        private readonly PeriodDateRules $dateRules,
         private readonly LoggerInterface $logger,
         #[Autowire('%env(bool:MEDVUE_PERIOD_CREATION_ENABLED)%')]
         private readonly bool $creationEnabled,
@@ -105,13 +103,13 @@ final class PlanningCycleService
                 throw PlanningCycleException::conflict('period_sequence_changed', 'The last period is no longer the one the request was based on: reload.');
             }
             $startsAt = $last->getEndsAt();
-            $this->assertLongEnough($startsAt, $endsAt);
-            $this->assertNoActiveJob($planning);
             // Lot L3, option A: neither its start (the boundary with the previous period) nor its end (the next
             // boundary) may cut a block of the lines that take part — the block would be lost in both periods. The one
             // exception (D192): a historical start, confirmed explicitly — never the end, always still to be chosen.
+            // The end follows the same rules as the date picker's options (D207).
+            self::throwFirst($this->dateRules->nextEndViolations($last, $endsAt));
+            $this->assertNoActiveJob($planning);
             $lines = array_values(array_filter($this->lineRepository->findByPlanning($planning), static fn (PlanningLine $line): bool => $line->isActive()));
-            $this->boundaryGuard->assertNoCut($lines, [$endsAt]);
             [$historical, $ordinary] = $this->boundaryGuard->classifyStartCuts($last, $lines);
             if ([] !== $ordinary) {
                 throw new PeriodBoundarySplitsBlockException($ordinary);
@@ -154,59 +152,91 @@ final class PlanningCycleService
     }
 
     /**
-     * §5.2. Only the last period, while none of its line periods is
-     * validated/published/archived. Growing keeps every collection and
-     * generation as it is (the added days are simply not covered yet);
-     * shrinking is refused as soon as the data would no longer fit.
+     * §5.2. The end of a period (docs/decisions.md D207, PeriodDateRules):
+     * the last one as before — it grows keeping every collection and
+     * generation (the added days are simply not covered yet), shrinks while
+     * nothing lies beyond; an earlier one only while it and the next one are
+     * blank, the next one's start moving with it (no gap, no overlap).
      *
      * @return array{cycle: PlanningCycle, generationOutdated: bool}
      *
      * @throws PlanningCycleException
+     * @throws PeriodBoundarySplitsBlockException
      */
     public function changeEnd(Planning $planning, PlanningCycle $cycle, \DateTimeImmutable $endsAt, \DateTimeImmutable $expectedEndsAt): array
+    {
+        return $this->changeDates($planning, $cycle, null, null, $endsAt, $expectedEndsAt);
+    }
+
+    /**
+     * New dates for $cycle (docs/decisions.md D207): its end ($endsAt,
+     * exclusive), and its start ($startsAt) for the first period only — a
+     * following period starts where the previous one ends. Each date comes
+     * with the one the request was based on: a stale view is refused (409
+     * `period_changed`). Everything happens under the planning's lock, in
+     * one transaction; the rules are PeriodDateRules', the same the date
+     * picker shows.
+     *
+     * @return array{cycle: PlanningCycle, generationOutdated: bool}
+     *
+     * @throws PlanningCycleException
+     * @throws PeriodBoundarySplitsBlockException
+     */
+    public function changeDates(Planning $planning, PlanningCycle $cycle, ?\DateTimeImmutable $startsAt, ?\DateTimeImmutable $expectedStartsAt, ?\DateTimeImmutable $endsAt, ?\DateTimeImmutable $expectedEndsAt): array
     {
         if (!$this->creationEnabled) {
             throw PlanningCycleException::conflict('period_management_disabled', 'Managing the periods of a planning is not enabled.');
         }
+        if (null === $startsAt && null === $endsAt) {
+            throw PlanningCycleException::invalid('invalid_request', 'Give the new start (startsAt), the new end (endsAt), or both.');
+        }
 
-        return $this->underPlanningLock($planning, function () use ($planning, $cycle, $endsAt, $expectedEndsAt): array {
-            if ($this->lastOf($planning) !== $cycle) {
-                throw PlanningCycleException::conflict('period_not_last', 'Only the end of the last period can change.');
-            }
-            if ($cycle->getEndsAt()->format('Y-m-d') !== $expectedEndsAt->format('Y-m-d')) {
+        return $this->underPlanningLock($planning, function () use ($cycle, $startsAt, $expectedStartsAt, $endsAt, $expectedEndsAt): array {
+            if (null !== $endsAt && $cycle->getEndsAt()->format('Y-m-d') !== $expectedEndsAt?->format('Y-m-d')) {
                 throw PlanningCycleException::conflict('period_changed', 'The end of this period changed since it was read: reload.');
             }
-            $periods = $this->cycleRepository->periodsOf($cycle);
-            $this->assertNoneLocked($periods);
-            $this->assertNoActiveJob($planning);
-            $this->assertLongEnough($cycle->getStartsAt(), $endsAt);
-            // Lot L3, option A: the end of the last period is the next boundary — it never cuts a block.
-            $this->boundaryGuard->assertNoCut(
-                array_values(array_filter(array_map(static fn (PlanningPeriod $period): ?PlanningLine => $period->getLine(), $periods), static fn (?PlanningLine $line): bool => null !== $line && $line->isActive())),
-                [$endsAt],
-            );
-
-            $current = $cycle->getEndsAt()->format('Y-m-d');
-            $requested = $endsAt->format('Y-m-d');
-            if ($requested === $current) {
-                return ['cycle' => $cycle, 'generationOutdated' => false];
+            if (null !== $startsAt && $cycle->getStartsAt()->format('Y-m-d') !== $expectedStartsAt?->format('Y-m-d')) {
+                throw PlanningCycleException::conflict('period_changed', 'The start of this period changed since it was read: reload.');
             }
 
-            $grows = $requested > $current;
-            if (!$grows) {
-                if ($this->cycleRepository->countGenerations($cycle) > 0) {
-                    throw PlanningCycleException::conflict('period_has_generation', 'This period was already generated: it can no longer be shortened.');
-                }
-                if ($this->cycleRepository->countDutiesFrom($cycle, $endsAt) > 0) {
-                    throw PlanningCycleException::conflict('period_has_duties_after', 'Duties already exist after the new end.');
-                }
-                if ($this->cycleRepository->countCollectionsEndingAfter($cycle, $endsAt) > 0) {
-                    throw PlanningCycleException::conflict('collection_beyond_end', 'An availability collection of this period goes beyond the new end.');
-                }
+            // Moving the whole period earlier: its start first, so that no intermediate state is too short.
+            $generationOutdated = false;
+            if (null !== $startsAt && $startsAt < $cycle->getStartsAt()) {
+                $this->moveStart($cycle, $startsAt);
+                $startsAt = null;
             }
+            if (null !== $endsAt) {
+                $generationOutdated = $this->moveEnd($cycle, $endsAt);
+            }
+            if (null !== $startsAt) {
+                $this->moveStart($cycle, $startsAt);
+            }
+            $this->assertStillContinuous($cycle->getPlanning());
 
+            return ['cycle' => $cycle, 'generationOutdated' => $generationOutdated];
+        });
+    }
+
+    /**
+     * @return bool whether the current generation no longer covers the period
+     */
+    private function moveEnd(PlanningCycle $cycle, \DateTimeImmutable $endsAt): bool
+    {
+        self::throwFirst($this->dateRules->endViolations($cycle, $endsAt));
+        $current = $cycle->getEndsAt()->format('Y-m-d');
+        $requested = $endsAt->format('Y-m-d');
+        if ($requested === $current) {
+            return false;
+        }
+        $grows = $requested > $current;
+        $planning = $cycle->getPlanning();
+        $next = $this->nextOf($cycle);
+        $facts = $this->cycleRepository->dateFacts($cycle);
+
+        if (null === $next) {
+            // The last period: the end of the planning moves with it.
             $cycle->changeEnd($endsAt);
-            foreach ($periods as $period) {
+            foreach ($this->cycleRepository->periodsOf($cycle) as $period) {
                 $fairness = $period->getFairnessPeriod();
                 if ($grows && $fairness->getEndsAt() < $endsAt) {
                     $fairness->extendTo($fairness->getStartsAt(), $endsAt);
@@ -218,13 +248,188 @@ final class PlanningCycleService
             }
             $planning->changeEnvelope($planning->getStartsAt(), $endsAt);
             $this->entityManager->flush();
+            $this->followUntouchedCollection($facts);
+            $this->entityManager->flush();
 
             // The current generation no longer covers the added days (coverage incomplete until regenerated or
             // completed — publishing still requires a complete coverage, D106). No snapshot is touched.
-            $generationOutdated = $grows && null !== $this->cycleRepository->milestones($cycle)['generatedAt'];
+            return $grows && null !== $this->cycleRepository->milestones($cycle)['generatedAt'];
+        }
 
-            return ['cycle' => $cycle, 'generationOutdated' => $generationOutdated];
-        });
+        // The boundary with the next period (both blank, PeriodDateRules): the shrinking side moves first, so that
+        // the two periods never overlap, not even within the transaction (exclusion constraints).
+        $nextFacts = $this->cycleRepository->dateFacts($next);
+        $fairnessPeriods = $this->fairnessOf([$cycle, $next]);
+        foreach ($fairnessPeriods as $fairness) {
+            $fairness->extendTo(min($fairness->getStartsAt(), $endsAt), max($fairness->getEndsAt(), $endsAt));
+        }
+        $this->entityManager->flush();
+        if ($grows) {
+            $this->shiftStart($next, $endsAt);
+            $this->shiftEnd($cycle, $endsAt);
+        } else {
+            $this->shiftEnd($cycle, $endsAt);
+            $this->shiftStart($next, $endsAt);
+        }
+        $this->fitFairness($fairnessPeriods);
+        $this->followUntouchedCollection($facts);
+        $this->followUntouchedCollection($nextFacts);
+        $this->entityManager->flush();
+        $this->logger->info('Boundary between periods {number} and {next} of planning {planning} moved to {boundary}.', [
+            'number' => $cycle->getNumber(),
+            'next' => $next->getNumber(),
+            'planning' => (string) $planning->getStableId(),
+            'boundary' => $requested,
+        ]);
+
+        return false;
+    }
+
+    /** The first period's own start (PeriodDateRules: blank; the planning's start moves with it). */
+    private function moveStart(PlanningCycle $cycle, \DateTimeImmutable $startsAt): void
+    {
+        self::throwFirst($this->dateRules->startViolations($cycle, $startsAt));
+        if ($startsAt->format('Y-m-d') === $cycle->getStartsAt()->format('Y-m-d')) {
+            return;
+        }
+        $planning = $cycle->getPlanning();
+        $facts = $this->cycleRepository->dateFacts($cycle);
+        $fairnessPeriods = $this->fairnessOf([$cycle]);
+        foreach ($fairnessPeriods as $fairness) {
+            $fairness->extendTo(min($fairness->getStartsAt(), $startsAt), $fairness->getEndsAt());
+        }
+        $this->shiftStart($cycle, $startsAt);
+        $this->fitFairness($fairnessPeriods);
+        $planning->changeEnvelope($startsAt, $planning->getEndsAt());
+        $this->entityManager->flush();
+        $this->followUntouchedCollection($facts);
+        $this->entityManager->flush();
+    }
+
+    /**
+     * What changeDates() commits, checked before the commit (docs/decisions.md
+     * D208): the periods of $planning follow each other without gap nor
+     * overlap, each line period has the dates of its period and stays inside
+     * its registry, every collection inside its period, the planning spans
+     * them all — the blocking invariants of PlanningCycleAudit, for this
+     * planning. Anything else is a bug: thrown inside the transaction, so
+     * that nothing of the move is kept.
+     */
+    private function assertStillContinuous(Planning $planning): void
+    {
+        $this->entityManager->flush();
+        $broken = $this->entityManager->getConnection()->fetchAssociative(<<<'SQL'
+            SELECT
+              (SELECT COUNT(*) FROM planning_cycles a JOIN planning_cycles b ON b.planning_id = a.planning_id AND b.number = a.number + 1
+                WHERE a.planning_id = :planning AND b.starts_at <> a.ends_at) AS gaps,
+              (SELECT COUNT(*) FROM planning_periods pp JOIN planning_cycles c ON c.id = pp.planning_cycle_id
+                WHERE c.planning_id = :planning AND pp.planning_line_id IS NOT NULL AND (pp.starts_at <> c.starts_at OR pp.ends_at <> c.ends_at)) AS line_periods,
+              (SELECT COUNT(*) FROM planning_periods pp JOIN planning_cycles c ON c.id = pp.planning_cycle_id JOIN fairness_periods f ON f.id = pp.fairness_period_id
+                WHERE c.planning_id = :planning AND pp.planning_line_id IS NOT NULL AND (pp.starts_at < f.starts_at OR pp.ends_at > f.ends_at)) AS registries,
+              (SELECT COUNT(*) FROM availability_collections a JOIN planning_cycles c ON c.id = a.planning_cycle_id
+                WHERE c.planning_id = :planning AND (a.starts_at < c.starts_at OR a.ends_at > c.ends_at)) AS collections,
+              (SELECT COUNT(*) FROM plannings p
+                WHERE p.id = :planning AND (p.starts_at <> (SELECT MIN(starts_at) FROM planning_cycles WHERE planning_id = p.id)
+                                         OR p.ends_at <> (SELECT MAX(ends_at) FROM planning_cycles WHERE planning_id = p.id))) AS envelope
+            SQL, ['planning' => $planning->getId()]);
+        $broken = array_filter(false === $broken ? [] : array_map('intval', $broken));
+        if ([] !== $broken) {
+            throw new \LogicException(\sprintf('The dates of the periods would no longer hold together (%s): nothing was changed.', implode(', ', array_keys($broken))));
+        }
+    }
+
+    private function shiftStart(PlanningCycle $cycle, \DateTimeImmutable $startsAt): void
+    {
+        $cycle->changeStart($startsAt);
+        foreach ($this->cycleRepository->periodsOf($cycle) as $period) {
+            $period->changeStart($startsAt);
+        }
+        $this->entityManager->flush();
+    }
+
+    private function shiftEnd(PlanningCycle $cycle, \DateTimeImmutable $endsAt): void
+    {
+        $cycle->changeEnd($endsAt);
+        foreach ($this->cycleRepository->periodsOf($cycle) as $period) {
+            $period->changeEnd($endsAt);
+        }
+        $this->entityManager->flush();
+    }
+
+    /**
+     * @param list<PlanningCycle> $cycles
+     *
+     * @return list<FairnessPeriod> the registries of the lines of $cycles, each once
+     */
+    private function fairnessOf(array $cycles): array
+    {
+        $fairnessPeriods = [];
+        foreach ($cycles as $cycle) {
+            foreach ($this->cycleRepository->periodsOf($cycle) as $period) {
+                $fairnessPeriods[spl_object_id($period->getFairnessPeriod())] = $period->getFairnessPeriod();
+            }
+        }
+
+        return array_values($fairnessPeriods);
+    }
+
+    /**
+     * Each registry back to exactly the span of its periods (docs/planning-cycles.md §3.5): it follows them.
+     *
+     * @param list<FairnessPeriod> $fairnessPeriods
+     */
+    private function fitFairness(array $fairnessPeriods): void
+    {
+        $this->entityManager->flush();
+        $connection = $this->entityManager->getConnection();
+        foreach ($fairnessPeriods as $fairness) {
+            $span = $connection->fetchAssociative('SELECT MIN(starts_at)::text AS first, MAX(ends_at)::text AS last FROM planning_periods WHERE fairness_period_id = ?', [$fairness->getId()]);
+            if (false === $span || null === $span['first']) {
+                continue;
+            }
+            if ($fairness->getEndsAt()->format('Y-m-d') !== $span['last']) {
+                $fairness->changeEnd(new \DateTimeImmutable($span['last']));
+            }
+            if ($fairness->getStartsAt()->format('Y-m-d') !== $span['first']) {
+                $fairness->changeStart(new \DateTimeImmutable($span['first']));
+            }
+        }
+        $this->entityManager->flush();
+    }
+
+    /**
+     * @param array{untouchedCollectionId: ?int} $facts read before the dates moved
+     */
+    private function followUntouchedCollection(array $facts): void
+    {
+        if (null === $facts['untouchedCollectionId']) {
+            return;
+        }
+        $collection = $this->collectionRepository->find($facts['untouchedCollectionId']);
+        if (null !== $collection) {
+            $this->collectionService->followPeriod($collection);
+        }
+    }
+
+    private function nextOf(PlanningCycle $cycle): ?PlanningCycle
+    {
+        foreach ($this->cycleRepository->findByPlanning($cycle->getPlanning()) as $candidate) {
+            if ($candidate->getNumber() === $cycle->getNumber() + 1) {
+                return $candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param list<PeriodDateViolation> $violations
+     */
+    private static function throwFirst(array $violations): void
+    {
+        if ([] !== $violations) {
+            throw $violations[0]->toException();
+        }
     }
 
     /**
@@ -435,29 +640,10 @@ final class PlanningCycleService
         return $cycles[\count($cycles) - 1] ?? throw new \LogicException('Every Planning has its cycle 1 (docs/planning-cycles.md I1).');
     }
 
-    private function assertLongEnough(\DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt): void
-    {
-        if ($endsAt <= $startsAt || (int) $startsAt->diff($endsAt)->days < self::MIN_DAYS) {
-            throw PlanningCycleException::invalid('period_too_short', \sprintf('A period lasts at least %d days.', self::MIN_DAYS));
-        }
-    }
-
     private function assertNoActiveJob(Planning $planning): void
     {
         if (null !== $this->jobRepository->findActiveForPlanning($planning)) {
             throw PlanningCycleException::conflict('job_in_progress', 'A generation or a completion is in progress on this planning.');
-        }
-    }
-
-    /**
-     * @param list<PlanningPeriod> $periods
-     */
-    private function assertNoneLocked(array $periods): void
-    {
-        foreach ($periods as $period) {
-            if (\in_array($period->getStatus(), self::LOCKED_STATUSES, true)) {
-                throw PlanningCycleException::conflict('period_locked', 'This period is validated or published: its dates no longer change.');
-            }
         }
     }
 }

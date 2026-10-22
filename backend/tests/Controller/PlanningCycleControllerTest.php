@@ -127,6 +127,7 @@ final class PlanningCycleControllerTest extends WebTestCase
         self::assertSame(0, $period['collections']['uncoveredDays']);
         self::assertTrue($period['isLast']);
         self::assertTrue($period['canEditEnd']);
+        self::assertTrue($period['canEditStart'], 'a blank first period: its start moves too (D208)');
         self::assertFalse($period['canDelete'], 'period 1 is never deleted');
         self::assertNull($list['currentPeriod']);
         self::assertSame($period['stableId'], $list['nextPeriod']['stableId']);
@@ -268,6 +269,7 @@ final class PlanningCycleControllerTest extends WebTestCase
         self::assertSame('published', $list['periods'][0]['status']);
         self::assertNotNull($list['periods'][0]['publishedAt']);
         self::assertFalse($list['periods'][0]['canEditEnd'], 'a published period never moves');
+        self::assertFalse($list['periods'][0]['canEditStart'], 'nor its start');
     }
 
     public function testADoubleSubmissionCreatesOnePeriod(): void
@@ -373,9 +375,15 @@ final class PlanningCycleControllerTest extends WebTestCase
 
     // --- end of the last period (B) ---------------------------------------------------------------
 
+    /**
+     * A collection someone already answered keeps its dates (docs/decisions.md D207: only an untouched collection of
+     * a blank period follows it — PlanningPeriodDatesTest).
+     */
     public function testTheEndOfTheLastPeriodGrowsKeepingItsCollectionsAndShrinksWhileNothingIsBeyond(): void
     {
         $period1 = $this->lastPeriodId();
+        $this->api($this->client, 'POST', "/api/availability-collections/{$this->s['collectionId']}/acknowledge", ['kind' => 'NO_UNAVAILABILITY'], $this->s['alice']);
+        self::assertResponseIsSuccessful();
 
         $grown = $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period1}", ['endsAt' => '2027-06-01', 'expectedEndsAt' => '2027-05-01'], $this->s['creator']);
         self::assertResponseIsSuccessful();
@@ -389,7 +397,7 @@ final class PlanningCycleControllerTest extends WebTestCase
         self::assertSame('2027-05-15', $shrunk['endsAt']);
 
         $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period1}", ['endsAt' => '2027-04-15', 'expectedEndsAt' => '2027-05-15'], $this->s['creator']);
-        $this->assertError(409, 'collection_beyond_end');
+        $this->assertError(409, 'collection_answered'); // D208: the refusal says why it keeps its window
 
         $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period1}", ['endsAt' => '2027-06-01', 'expectedEndsAt' => '2027-06-01'], $this->s['creator']);
         $this->assertError(409, 'period_changed');
@@ -434,8 +442,9 @@ final class PlanningCycleControllerTest extends WebTestCase
         $this->assertError(409, 'period_locked');
 
         $this->createPeriod('2027-08-01');
+        // D207: an earlier period's end is the boundary with the next one — never once it is published.
         $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period1}", ['endsAt' => '2027-06-01', 'expectedEndsAt' => '2027-05-01'], $this->s['creator']);
-        $this->assertError(409, 'period_not_last');
+        $this->assertError(409, 'period_locked');
 
         $period2 = $this->lastPeriodId();
         $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period2}", ['endsAt' => '2027-05-05', 'expectedEndsAt' => '2027-08-01'], $this->s['creator']);

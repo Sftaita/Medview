@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import type { ISODate, Period } from '../types'
 import { addDays, daysInclusive, endAfterMonths, formatDate, formatRange, isValidIso } from '../dates'
 import { MIN_PERIOD_DAYS, nextPeriodStart, validateEnd } from '../periods'
-import { PeriodCreationError } from '../errors'
+import { dateReasonMessage, describeCut, PeriodCreationError } from '../errors'
+import { monthOf, useDateOptions, type OptionsLoader } from '../useDateOptions'
 import { StatusPill } from './StatusPill'
 import { Icon } from './Icon'
+import { BoundaryCalendar } from './BoundaryCalendar'
 import { plural } from '../../planning/pilot/format'
 
 interface Props {
@@ -24,6 +26,11 @@ interface Props {
   onCreate: (end: ISODate, acceptHistoricalBlockCuts: boolean) => Promise<void>
   /** The periods changed meanwhile (409): reload them. */
   onReload?: () => void
+  /**
+   * The possible last days, month by month (docs/decisions.md D207): with it, the
+   * dialog shows a calendar where each refused day says why.
+   */
+  loadOptions?: OptionsLoader
 }
 
 const PRESETS = [3, 4, 6]
@@ -44,12 +51,20 @@ export function CreatePeriodDialog({
   onCancel,
   onCreate,
   onReload,
+  loadOptions,
 }: Props) {
   const [end, setEnd] = useState<ISODate | ''>(initialEnd)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<PeriodCreationError | null>(null)
   const [confirmed, setConfirmed] = useState(false)
   const dialogRef = useRef<HTMLDivElement>(null)
+  const last = periods[periods.length - 1]
+  const firstDay = last ? addDays(last.end, 1) : ''
+  const [month, setMonth] = useState(() =>
+    monthOf(initialEnd || (firstDay ? addDays(firstDay, 90) : '2000-01-01')),
+  )
+  const options = useDateOptions(loadOptions, open && last ? `next-${last.id}-${last.end}` : 'closed')
+  const { ensure } = options
 
   // À chaque ouverture, la date de fin repart de la valeur pré-remplie.
   const [shown, setShown] = useState({ open, initialEnd })
@@ -59,12 +74,17 @@ export function CreatePeriodDialog({
       setEnd(initialEnd)
       setError(null)
       setConfirmed(false)
+      if (firstDay) setMonth(monthOf(initialEnd || addDays(firstDay, 90)))
     }
   }
 
   useEffect(() => {
     if (open) dialogRef.current?.focus()
   }, [open])
+
+  useEffect(() => {
+    if (open) ensure(month)
+  }, [open, month, ensure])
 
   if (!open || periods.length === 0) return null
 
@@ -74,20 +94,26 @@ export function CreatePeriodDialog({
   const days = valid.ok && end ? daysInclusive(start, end) : 0
   const prevDays = daysInclusive(previous.start, previous.end)
   const newNumber = previous.number + 1
-  const historical = error?.kind === 'historical'
+  // docs/decisions.md D192: the cut blocks at the start, told by the options before any attempt, or by the refusal.
+  const historicalCuts = error?.kind === 'historical' ? error.cuts : (options.meta?.historicalStartCuts ?? [])
+  const historical = historicalCuts.length > 0
+  const chosen = end && isValidIso(end) ? options.days[end] : undefined
+  const refused = chosen !== undefined && !chosen.allowed
+  const blockers = options.meta?.blockers ?? []
   const close = () => {
     if (!submitting) onCancel()
   }
 
   function changeEnd(value: ISODate | '') {
     setEnd(value)
-    // Another date: the server's answer no longer describes it.
+    if (value && isValidIso(value)) setMonth(monthOf(value))
+    // Another date: the server's answer no longer describes it (the cut blocks at the start stay what they are).
     setError(null)
-    setConfirmed(false)
+    if (error?.kind === 'historical') setConfirmed(false)
   }
 
   async function submit() {
-    if (!end || !valid.ok || submitting) return
+    if (!end || !valid.ok || refused || submitting) return
     setSubmitting(true)
     try {
       await onCreate(end, historical && confirmed)
@@ -175,14 +201,38 @@ export function CreatePeriodDialog({
                 aria-describedby="mv-end-hint"
                 disabled={submitting}
               />
-              <span id="mv-end-hint" className={`mv-field__hint ${valid.error ? 'is-error' : ''}`}>
+              <span id="mv-end-hint" className={`mv-field__hint ${valid.error || refused ? 'is-error' : ''}`}>
                 {valid.error ??
+                  (refused && chosen
+                    ? `Impossible : ${chosen.reasons.map(dateReasonMessage).join(' ')}`
+                    : null) ??
                   (valid.ok && end
                     ? `Gardes jusqu’au ${formatDate(end, 'long')} inclus. Une période suivante commencerait le ${formatDate(addDays(end, 1), 'long')}.`
                     : 'Choisissez le dernier jour de la période')}
               </span>
             </div>
           </div>
+
+          {loadOptions && (
+            <BoundaryCalendar
+              month={month}
+              onMonthChange={setMonth}
+              label="Dernier jour (inclus)"
+              selected={end}
+              fixed={start}
+              optionOf={(day) => options.days[day]}
+              onSelect={changeEnd}
+              disabled={submitting}
+            />
+          )}
+          {options.failed && (
+            <p className="mv-muted mv-small">
+              Les jours possibles n’ont pas pu être chargés : la date sera vérifiée à la création.
+            </p>
+          )}
+          {blockers.length > 0 && (
+            <p className="mv-field__hint is-error">{blockers.map(dateReasonMessage).join(' ')}</p>
+          )}
 
           <div className="mv-presets" role="group" aria-label="Durées usuelles">
             {PRESETS.map((k) => {
@@ -226,6 +276,39 @@ export function CreatePeriodDialog({
               <span>Période {newNumber} · nouvelle</span>
             </div>
           </div>
+
+          {historical && error?.kind !== 'historical' && (
+            <div className="mv-banner mv-banner--info">
+              <Icon name="info" size={20} strokeWidth={1.9} />
+              <div className="mv-banner__body">
+                <span>
+                  La fin de la période {previous.number}, qui ne peut plus changer, coupe un bloc de gardes :
+                </span>
+                <ul className="mv-cuts">
+                  {historicalCuts.map((cut, index) => (
+                    <li key={`${cut.lineStableId}-${cut.firstDay}-${index}`}>
+                      {describeCut(cut)} : {cut.remainderDays.length === 1 ? 'le jour' : 'les jours'}{' '}
+                      {cut.remainderDays.map((d) => formatDate(d, 'wdm')).join(', ')}{' '}
+                      {cut.remainderDays.length === 1 ? 'devient' : 'deviennent'} la suite de ce bloc dans la
+                      période {newNumber}
+                    </li>
+                  ))}
+                </ul>
+                <label className="mv-confirm">
+                  <input
+                    type="checkbox"
+                    checked={confirmed}
+                    onChange={(e) => setConfirmed(e.target.checked)}
+                    disabled={submitting}
+                  />
+                  <span>
+                    Je confirme : ces jours forment la suite du bloc dans la période {newNumber} et seront
+                    attribués d’un seul tenant. Rien ne change dans la période {previous.number}.
+                  </span>
+                </label>
+              </div>
+            </div>
+          )}
 
           {error && (
             <div role="alert" className="mv-banner mv-banner--error">
@@ -305,7 +388,9 @@ export function CreatePeriodDialog({
           <button
             type="button"
             className="mv-btn mv-btn--primary"
-            disabled={!valid.ok || submitting || error?.kind === 'stale' || (historical && !confirmed)}
+            disabled={
+              !valid.ok || refused || submitting || error?.kind === 'stale' || (historical && !confirmed)
+            }
             aria-busy={submitting}
             onClick={() => void submit()}
           >

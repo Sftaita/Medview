@@ -95,6 +95,8 @@ export type PlanningPeriodView = PlanningPeriodSummary & {
     applicability: LineApplicability | null
   }[]
   isLast: boolean
+  /** docs/decisions.md D208: the dates a write accepts — whether the start (first period) or the end can move now. */
+  canEditStart: boolean
   canEditEnd: boolean
   canDelete: boolean
 }

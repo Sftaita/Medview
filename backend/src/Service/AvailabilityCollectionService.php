@@ -103,6 +103,40 @@ final class AvailabilityCollectionService
     }
 
     /**
+     * docs/decisions.md D207: the untouched collection of a blank period takes
+     * the period's new dates, and its expected people are those of the new
+     * window, as open() would have chosen them — a PENDING response nobody
+     * touched is removed when its person no longer takes part, one is added
+     * for a person who now does. Only ever called by
+     * PlanningCycleService::changeDates(), under the planning's lock, for the
+     * collection PlanningCycleRepository::dateFacts() named untouched.
+     */
+    public function followPeriod(AvailabilityCollection $collection): void
+    {
+        $now = $this->now();
+        $collection->followCycle($now);
+        $planning = $collection->getPlanning();
+
+        $expected = [];
+        foreach ($this->teamMemberRepository->findIntersectingForPlanning($planning, $collection->getStartsAt(), $collection->getEndsAt()) as $member) {
+            $user = $member->getUser();
+            if ($user->isActive()) {
+                $expected[$user->getId()] = $user;
+            }
+        }
+        foreach ($this->responseRepository->findByCollection($collection) as $response) {
+            if (isset($expected[$response->getUser()->getId()])) {
+                unset($expected[$response->getUser()->getId()]);
+            } elseif (AvailabilityResponseStatus::PENDING === $response->getStatus()) {
+                $this->entityManager->remove($response);
+            }
+        }
+        foreach ($expected as $user) {
+            $this->entityManager->persist(new AvailabilityCollectionResponse($collection, $user, $now));
+        }
+    }
+
+    /**
      * @throws AvailabilityCollectionClosedException
      * @throws InvalidAvailabilityDeadlineException
      */

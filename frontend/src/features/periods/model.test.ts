@@ -170,6 +170,7 @@ describe('periods model (lot L6)', () => {
         { lineStableId: 'gone', planningPeriodStableId: '', status: 'DRAFT', applicability: null },
       ],
       isLast: true,
+      canEditStart: true,
       canEditEnd: true,
       canDelete: false,
     }

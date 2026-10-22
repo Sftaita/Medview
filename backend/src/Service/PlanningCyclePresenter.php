@@ -34,7 +34,6 @@ use App\Repository\PlanningCycleRepository;
 final class PlanningCyclePresenter
 {
     private const GENERATED_OR_LATER = [PlanningPeriodStatus::GENERATED, PlanningPeriodStatus::VALIDATED, PlanningPeriodStatus::PUBLISHED, PlanningPeriodStatus::ARCHIVED];
-    private const LOCKED = [PlanningPeriodStatus::VALIDATED, PlanningPeriodStatus::PUBLISHED, PlanningPeriodStatus::ARCHIVED];
     /** What a planning card reads of a period (§7.1, lot L6). */
     private const SUMMARY_FIELDS = ['stableId', 'number', 'startsAt', 'endsAt', 'lastDay', 'status', 'lineCounts', 'timeState', 'publishedAt', 'lastPublishedAt', 'generatedAt', 'collections'];
 
@@ -45,6 +44,7 @@ final class PlanningCyclePresenter
         private readonly PlanningCycleService $cycleService,
         private readonly PlanningClock $clock,
         private readonly LineApplicabilityService $applicability,
+        private readonly PeriodDateRules $dateRules,
     ) {
     }
 
@@ -194,8 +194,9 @@ final class PlanningCyclePresenter
         $counting = array_values(array_filter($periods, static fn (PlanningPeriod $period): bool => true === ($applicability[(int) $period->getId()] ?? null)?->counts()));
 
         $isLast = $cycles[\count($cycles) - 1] === $cycle;
-        $locked = [] !== array_filter($periods, static fn (PlanningPeriod $period): bool => \in_array($period->getStatus(), self::LOCKED, true));
         $enabled = $this->cycleService->isCreationEnabled();
+        // docs/decisions.md D207/D208: the dates a write accepts, never an older approximation.
+        $editable = $enabled ? $this->dateRules->editable($cycle) : ['start' => false, 'end' => false];
 
         return [
             ...$this->reference($cycle),
@@ -227,7 +228,8 @@ final class PlanningCyclePresenter
                 'uncoveredDays' => $this->cycleService->uncoveredDays($cycle),
             ],
             'isLast' => $isLast,
-            'canEditEnd' => $enabled && $isLast && !$locked,
+            'canEditStart' => $editable['start'],
+            'canEditEnd' => $editable['end'],
             'canDelete' => $enabled && $isLast && $cycle->getNumber() > 1 && [] === $own
                 && 0 === $this->cycleRepository->countGenerations($cycle)
                 && 0 === $this->cycleRepository->countPublications($cycle)

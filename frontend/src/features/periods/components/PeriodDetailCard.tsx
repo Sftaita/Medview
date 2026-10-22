@@ -18,6 +18,8 @@ interface Props {
   onPrev: () => void
   onNext: () => void
   onGoLatest: () => void
+  /** « Modifier les dates », for the creator (docs/decisions.md D207): the dialog says what may move. */
+  onEditDates?: () => void
 }
 
 /** Grande carte de la période sélectionnée (style de la carte « Période du planning » actuelle). */
@@ -33,6 +35,7 @@ export function PeriodDetailCard({
   onPrev,
   onNext,
   onGoLatest,
+  onEditDates,
 }: Props) {
   const t = timeState(period, today)
   // History is a period over, published, with later ones (lot L7): never the current one, never a future one.
@@ -102,6 +105,11 @@ export function PeriodDetailCard({
         <span className="mv-muted">
           Du {formatDate(period.start, 'long')} au {formatDate(period.end, 'long')}
         </span>
+        {onEditDates && (
+          <button type="button" className="mv-btn mv-btn--ghost mv-btn--sm" onClick={onEditDates}>
+            <Icon name="calendar" size={16} /> Modifier les dates
+          </button>
+        )}
         {!single && (
           <div className="mv-row">
             <button

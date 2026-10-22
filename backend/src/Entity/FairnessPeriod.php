@@ -117,6 +117,20 @@ class FairnessPeriod
         $this->endsAt = $endsAt;
     }
 
+    /**
+     * Moves the start when the first period of the team's planning gets a new
+     * start (docs/decisions.md D207): the registry follows its periods. The
+     * caller checks that no period of the team lies before the new start.
+     */
+    public function changeStart(\DateTimeImmutable $startsAt): void
+    {
+        if ($startsAt >= $this->endsAt) {
+            throw new \InvalidArgumentException('startsAt must be strictly before endsAt.');
+        }
+
+        $this->startsAt = $startsAt;
+    }
+
     public function contains(\DateTimeImmutable $date): bool
     {
         return $date >= $this->startsAt && $date < $this->endsAt;
