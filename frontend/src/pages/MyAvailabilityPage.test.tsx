@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { dayIndex } from '../features/availability/calendarAxis'
 import { MyAvailabilityProvider } from '../features/availability/MyAvailabilityProvider'
 import type { UserAvailabilityPeriod } from '../features/availability/types'
@@ -508,24 +508,45 @@ describe('MyAvailabilityPage — SurgicalHub leave (docs/surgicalhub-integration
     lastSyncError: null,
   }
 
+  // A fixed month and day (June 2026: no daylight-saving change in it), never the real date: the list of
+  // SurgicalHub leave shows only leave that is not over yet, so a real date after the 22nd hid leave of the
+  // 20th-22nd and failed these tests every month from the 23rd. Only `Date` is faked; the clock is restored
+  // after each test (afterEach above).
+  const LEAVE_YEAR = 2026
+  const LEAVE_MONTH = 5
+  function freezeOn(dayOfMonth: number) {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(LEAVE_YEAR, LEAVE_MONTH, dayOfMonth, 12, 0, 0))
+  }
+  function leave(...args: Parameters<typeof storedPeriod>): UserAvailabilityPeriod {
+    const [stableId, type, fromDay, toDayExclusive, source] = args
+    return {
+      ...storedPeriod(stableId, type, fromDay, toDayExclusive, source),
+      startsAt: new Date(LEAVE_YEAR, LEAVE_MONTH, fromDay).toISOString(),
+      endsAt: new Date(LEAVE_YEAR, LEAVE_MONTH, toDayExclusive).toISOString(),
+    }
+  }
+  function day(dayOfMonth: number): HTMLElement {
+    return cell(dayOfMonth, LEAVE_YEAR, LEAVE_MONTH)
+  }
+
+  beforeEach(() => freezeOn(10))
+
   it('draws imported leave hatched and read-only, and lists it apart from the person’s own entries', async () => {
-    createFakeBackend({ periods: [storedPeriod('sh1', 'UNAVAILABLE', 20, 23, 'SURGICAL_HUB')] }).install()
+    createFakeBackend({ periods: [leave('sh1', 'UNAVAILABLE', 20, 23, 'SURGICAL_HUB')] }).install()
     await renderLoaded()
 
-    expect(cell(20)).toHaveClass('day--imported')
-    expect(cell(22)).toHaveClass('day--imported')
-    expect(cell(20)).toHaveAttribute('aria-pressed', 'false')
-    expect(cell(20).getAttribute('aria-label')).toContain('congé SurgicalHub')
+    expect(day(20)).toHaveClass('day--imported')
+    expect(day(22)).toHaveClass('day--imported')
+    expect(day(20)).toHaveAttribute('aria-pressed', 'false')
+    expect(day(20).getAttribute('aria-label')).toContain('congé SurgicalHub')
     expect(screen.getByRole('region', { name: 'Congés SurgicalHub' })).toBeInTheDocument()
     expect(summary().getByRole('heading', { name: 'Aucune date sélectionnée' })).toBeInTheDocument()
   })
 
   it('« Tout effacer » removes only the person’s own entries, never imported leave', async () => {
     const backend = createFakeBackend({
-      periods: [
-        storedPeriod('own', 'UNAVAILABLE', 15, 17),
-        storedPeriod('sh1', 'UNAVAILABLE', 20, 23, 'SURGICAL_HUB'),
-      ],
+      periods: [leave('own', 'UNAVAILABLE', 15, 17), leave('sh1', 'UNAVAILABLE', 20, 23, 'SURGICAL_HUB')],
     })
     backend.install()
     await renderLoaded()
@@ -536,43 +557,40 @@ describe('MyAvailabilityPage — SurgicalHub leave (docs/surgicalhub-integration
     await waitFor(() => expect(backend.requests('DELETE', '/api/me/calendar/own')).toHaveLength(1))
     expect(backend.requests('DELETE', '/api/me/calendar/sh1')).toHaveLength(0)
     expect(backend.requests('PATCH', '/api/me/calendar')).toHaveLength(0)
-    expect(cell(21)).toHaveClass('day--imported')
+    expect(day(21)).toHaveClass('day--imported')
   })
 
   it('never keeps a preference of duty on a day of imported leave', async () => {
     const backend = createFakeBackend({
-      periods: [storedPeriod('sh1', 'UNAVAILABLE', 20, 23, 'SURGICAL_HUB')],
+      periods: [leave('sh1', 'UNAVAILABLE', 20, 23, 'SURGICAL_HUB')],
     })
     backend.install()
     await renderLoaded()
 
     fireEvent.click(screen.getByRole('button', { name: 'Préférence de garde' }))
-    fireEvent.click(cell(21))
+    fireEvent.click(day(21))
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50))
     })
     expect(backend.requests('POST', '/api/me/calendar')).toHaveLength(0)
 
     // The same gesture on an ordinary day is saved: the refusal above is the imported day's.
-    fireEvent.click(cell(26))
+    fireEvent.click(day(26))
     await waitFor(() => expect(backend.requests('POST', '/api/me/calendar')).toHaveLength(1))
   })
 
   it('never changes a preference of the person’s own that already sits on imported leave', async () => {
     const backend = createFakeBackend({
-      periods: [
-        storedPeriod('pref', 'PREFER_DUTY', 19, 23),
-        storedPeriod('sh1', 'UNAVAILABLE', 20, 23, 'SURGICAL_HUB'),
-      ],
+      periods: [leave('pref', 'PREFER_DUTY', 19, 23), leave('sh1', 'UNAVAILABLE', 20, 23, 'SURGICAL_HUB')],
     })
     backend.install()
     await renderLoaded()
     // The leave is what the calendar shows on its days.
-    expect(cell(21)).toHaveClass('day--imported')
-    expect(cell(21)).toHaveClass('day--unavailable')
+    expect(day(21)).toHaveClass('day--imported')
+    expect(day(21)).toHaveClass('day--unavailable')
 
     // An unrelated edit elsewhere in the month.
-    fireEvent.click(cell(26))
+    fireEvent.click(day(26))
     await waitFor(() => expect(backend.requests('POST', '/api/me/calendar')).toHaveLength(1))
 
     expect(backend.requests('PATCH', '/api/me/calendar')).toHaveLength(0)
@@ -583,8 +601,8 @@ describe('MyAvailabilityPage — SurgicalHub leave (docs/surgicalhub-integration
   it('lets the owner remove imported leave no association keeps in sync any more', async () => {
     const backend = createFakeBackend({
       periods: [
-        { ...storedPeriod('kept', 'UNAVAILABLE', 20, 23, 'SURGICAL_HUB'), deletable: true },
-        { ...storedPeriod('synced', 'UNAVAILABLE', 25, 26, 'SURGICAL_HUB'), deletable: false },
+        { ...leave('kept', 'UNAVAILABLE', 20, 23, 'SURGICAL_HUB'), deletable: true },
+        { ...leave('synced', 'UNAVAILABLE', 25, 26, 'SURGICAL_HUB'), deletable: false },
       ],
     })
     backend.install()
@@ -596,13 +614,13 @@ describe('MyAvailabilityPage — SurgicalHub leave (docs/surgicalhub-integration
 
     await waitFor(() => expect(backend.requests('DELETE', '/api/me/calendar/kept')).toHaveLength(1))
     expect(backend.requests('DELETE', '/api/me/calendar/synced')).toHaveLength(0)
-    await waitFor(() => expect(cell(21)).not.toHaveClass('day--imported'))
-    expect(cell(25)).toHaveClass('day--imported')
+    await waitFor(() => expect(day(21)).not.toHaveClass('day--imported'))
+    expect(day(25)).toHaveClass('day--imported')
   })
 
   it('says a suspended association plainly and offers no synchronisation', async () => {
     createFakeBackend({
-      periods: [storedPeriod('sh1', 'UNAVAILABLE', 20, 21, 'SURGICAL_HUB')],
+      periods: [leave('sh1', 'UNAVAILABLE', 20, 21, 'SURGICAL_HUB')],
       surgicalHub: {
         available: true,
         link: { ...ACTIVE_LINK, status: 'SUSPENDED', suspendedAt: '2026-10-10T08:00:00+00:00' },
@@ -612,7 +630,7 @@ describe('MyAvailabilityPage — SurgicalHub leave (docs/surgicalhub-integration
 
     expect(await screen.findByText(/SurgicalHub ne reconnaît plus votre association/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Synchroniser SurgicalHub' })).not.toBeInTheDocument()
-    expect(cell(20)).toHaveClass('day--imported')
+    expect(day(20)).toHaveClass('day--imported')
   })
 
   it('shows nothing about SurgicalHub to someone who never associated an account', async () => {
@@ -636,19 +654,19 @@ describe('MyAvailabilityPage — SurgicalHub leave (docs/surgicalhub-integration
     expect(screen.getByText(/Congés repris le/)).toBeInTheDocument()
     const readsBefore = backend.requests('GET', '/api/me/calendar').length
 
-    backend.periods.push(storedPeriod('sh2', 'UNAVAILABLE', 24, 25, 'SURGICAL_HUB'))
+    backend.periods.push(leave('sh2', 'UNAVAILABLE', 24, 25, 'SURGICAL_HUB'))
     fireEvent.click(button)
 
     expect(await screen.findByText('Vos congés SurgicalHub ont été mis à jour.')).toBeInTheDocument()
     await waitFor(() =>
       expect(backend.requests('GET', '/api/me/calendar').length).toBeGreaterThan(readsBefore),
     )
-    await waitFor(() => expect(cell(24)).toHaveClass('day--imported'))
+    await waitFor(() => expect(day(24)).toHaveClass('day--imported'))
   })
 
   it('says a failed synchronisation in plain words and keeps what was already imported', async () => {
     createFakeBackend({
-      periods: [storedPeriod('sh1', 'UNAVAILABLE', 20, 21, 'SURGICAL_HUB')],
+      periods: [leave('sh1', 'UNAVAILABLE', 20, 21, 'SURGICAL_HUB')],
       surgicalHub: { available: true, link: ACTIVE_LINK },
       surgicalHubSyncOutcome: { status: 'FAILED', error: 'unreachable', created: 0, updated: 0, removed: 0 },
     }).install()
@@ -659,6 +677,41 @@ describe('MyAvailabilityPage — SurgicalHub leave (docs/surgicalhub-integration
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'SurgicalHub est momentanément injoignable. Vos congés déjà repris restent pris en compte.',
     )
-    expect(cell(20)).toHaveClass('day--imported')
+    expect(day(20)).toHaveClass('day--imported')
+  })
+  it('still lists leave whose last day is today (the 22nd)', async () => {
+    freezeOn(22)
+    createFakeBackend({ periods: [leave('sh1', 'UNAVAILABLE', 20, 23, 'SURGICAL_HUB')] }).install()
+    await renderLoaded()
+
+    const list = within(screen.getByRole('region', { name: 'Congés SurgicalHub' }))
+    expect(list.getAllByRole('listitem')).toHaveLength(1)
+    expect(day(22)).toHaveClass('day--imported')
+  })
+
+  it('no longer lists leave that is over (the 23rd), while the calendar still draws it', async () => {
+    freezeOn(23)
+    createFakeBackend({
+      periods: [
+        leave('past', 'UNAVAILABLE', 20, 23, 'SURGICAL_HUB'),
+        { ...leave('kept', 'UNAVAILABLE', 25, 27, 'SURGICAL_HUB'), deletable: true },
+      ],
+    }).install()
+    await renderLoaded()
+
+    const list = within(screen.getByRole('region', { name: 'Congés SurgicalHub' }))
+    expect(list.getAllByRole('listitem')).toHaveLength(1)
+    expect(list.getAllByRole('button', { name: 'Retirer' })).toHaveLength(1)
+    expect(day(20)).toHaveClass('day--imported')
+    expect(day(22)).toHaveClass('day--imported')
+  })
+
+  it('shows no list at all once every imported leave is over', async () => {
+    freezeOn(23)
+    createFakeBackend({ periods: [leave('past', 'UNAVAILABLE', 20, 23, 'SURGICAL_HUB')] }).install()
+    await renderLoaded()
+
+    expect(screen.queryByRole('region', { name: 'Congés SurgicalHub' })).not.toBeInTheDocument()
+    expect(day(21)).toHaveClass('day--imported')
   })
 })
