@@ -46,6 +46,55 @@ export function createPeriod(
   })
 }
 
+/** One reason a date is refused (docs/decisions.md D207): the API's error code, and the blocks a cut would split. */
+export type DateReason = { code: string; cuts?: BlockCut[] }
+
+export type DayOption = { date: string; allowed: boolean; reasons: DateReason[] }
+
+/**
+ * GET …/periods/date-options: what the date picker shows. For `edge: 'end'`,
+ * each `date` is a candidate last day (inclusive); for `edge: 'start'`, a
+ * first day. `blockers` are the reasons no day is possible. The write applies
+ * the same rules and answers with the same codes.
+ */
+export type DateOptions = {
+  period: { stableId: string; number: number } | null
+  edge: 'start' | 'end'
+  fixedStart: string | null
+  current: string | null
+  editable: boolean
+  blockers: DateReason[]
+  historicalStartCuts: BlockCut[]
+  days: DayOption[]
+}
+
+export function fetchDateOptions(
+  planningStableId: string,
+  input: { period: string; edge: 'start' | 'end'; from: string; to: string },
+): Promise<DateOptions> {
+  const query = new URLSearchParams(input).toString()
+  return apiFetch<DateOptions>(`/api/plannings/${planningStableId}/periods/date-options?${query}`)
+}
+
+/** New dates for a period: its end, its start (first period only), or both — each with the value it replaces. */
+export type PeriodDatesInput = {
+  startsAt?: string
+  expectedStartsAt?: string
+  endsAt?: string
+  expectedEndsAt?: string
+}
+
+export function changePeriodDates(
+  planningStableId: string,
+  periodStableId: string,
+  input: PeriodDatesInput,
+): Promise<PlanningPeriodView & { generationOutdated: boolean }> {
+  return apiFetch(`/api/plannings/${planningStableId}/periods/${periodStableId}`, {
+    method: 'PATCH',
+    body: input,
+  })
+}
+
 /** "Ouvrir la collecte": the first part of the period no collection covers yet (§5.9). */
 export function openPeriodCollection(
   planningStableId: string,

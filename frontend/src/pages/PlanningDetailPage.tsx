@@ -3,15 +3,21 @@ import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { Field } from '../components/Field'
 import { Icon } from '../components/Icon'
 import { useAuth } from '../features/auth/useAuth'
-import { createPeriod, openPeriodCollection } from '../features/periods/api'
+import {
+  changePeriodDates,
+  createPeriod,
+  fetchDateOptions,
+  openPeriodCollection,
+} from '../features/periods/api'
 import { CreatePeriodDialog } from '../features/periods/components/CreatePeriodDialog'
+import { EditPeriodDatesDialog } from '../features/periods/components/EditPeriodDatesDialog'
 import { Icon as PeriodIcon } from '../features/periods/components/Icon'
 import { PeriodDetailCard } from '../features/periods/components/PeriodDetailCard'
 import { PeriodSelector } from '../features/periods/components/PeriodSelector'
 import { PeriodTabs } from '../features/periods/components/PeriodTabs'
 import { PreparationSteps } from '../features/periods/components/PreparationSteps'
 import { addDays, formatRange } from '../features/periods/dates'
-import { collectionOpeningMessage, periodCreationError } from '../features/periods/errors'
+import { collectionOpeningMessage, periodCreationError, periodDatesError } from '../features/periods/errors'
 import { defaultPeriodNumber, hasReadableCalendar, lineStates, toPeriod } from '../features/periods/model'
 import '../features/periods/periodes.css'
 import type { ISODate } from '../features/periods/types'
@@ -81,6 +87,7 @@ export function PlanningDetailPage() {
   const [newName, setNewName] = useState('')
   const [extendOpen, setExtendOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
+  const [editDatesOpen, setEditDatesOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const toastTimer = useRef<number | undefined>(undefined)
   const [membersLine, setMembersLine] = useState<PlanningLineSummary | null>(null)
@@ -195,6 +202,22 @@ export function PlanningDetailPage() {
     await load()
     selectPeriod(created.number)
     showToast(`Période ${created.number} créée · ${formatRange(created.startsAt, created.lastDay)}`)
+  }
+
+  /** docs/decisions.md D207: the dialog shows the last day included, the API takes the exclusive end. */
+  async function handleChangeDates(dates: { start?: ISODate; end?: ISODate }) {
+    if (!planningId || !periodView) return
+    try {
+      await changePeriodDates(planningId, periodView.stableId, {
+        ...(dates.start ? { startsAt: dates.start, expectedStartsAt: periodView.startsAt } : {}),
+        ...(dates.end ? { endsAt: addDays(dates.end, 1), expectedEndsAt: periodView.endsAt } : {}),
+      })
+    } catch (err) {
+      throw new Error(periodDatesError(err))
+    }
+    setEditDatesOpen(false)
+    await load()
+    showToast(`Dates de la période ${periodView.number} enregistrées`)
   }
 
   async function handleOpenCollection() {
@@ -549,6 +572,7 @@ export function PlanningDetailPage() {
             onPrev={() => selectPeriod(periods[selectedIndex - 1].number)}
             onNext={() => selectPeriod(periods[selectedIndex + 1].number)}
             onGoLatest={() => selectPeriod(latest.number)}
+            onEditDates={canCreatePeriod ? () => setEditDatesOpen(true) : undefined}
           />
         </section>
       )}
@@ -726,6 +750,20 @@ export function PlanningDetailPage() {
         </div>
       )}
 
+      {canCreatePeriod && period && planningId && (
+        <EditPeriodDatesDialog
+          open={editDatesOpen}
+          period={period}
+          previous={periods[selectedIndex - 1]}
+          next={periods[selectedIndex + 1]}
+          loadOptions={(edge, from, to) =>
+            fetchDateOptions(planningId, { period: period.id, edge, from, to })
+          }
+          onSave={handleChangeDates}
+          onCancel={() => setEditDatesOpen(false)}
+        />
+      )}
+
       {canCreatePeriod && (
         <CreatePeriodDialog
           open={createOpen}
@@ -735,6 +773,11 @@ export function PlanningDetailPage() {
           periods={periods}
           onCancel={() => setCreateOpen(false)}
           onCreate={handleCreatePeriod}
+          loadOptions={
+            planningId
+              ? (from, to) => fetchDateOptions(planningId, { period: 'next', edge: 'end', from, to })
+              : undefined
+          }
           onReload={() => {
             setCreateOpen(false)
             void load()

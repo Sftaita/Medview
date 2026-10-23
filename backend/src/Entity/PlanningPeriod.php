@@ -291,6 +291,29 @@ class PlanningPeriod
         $this->touch();
     }
 
+    /**
+     * The new start of a period of a blank cycle (docs/decisions.md D207),
+     * after its cycle's, and inside its FairnessPeriod when it moves earlier.
+     * A VALIDATED/PUBLISHED/ARCHIVED period never moves (I8).
+     *
+     * @throws PlanningPeriodLockedException
+     */
+    public function changeStart(\DateTimeImmutable $startsAt): void
+    {
+        if (!\in_array($this->status, [PlanningPeriodStatus::DRAFT, PlanningPeriodStatus::GENERATED], true)) {
+            throw new PlanningPeriodLockedException();
+        }
+        if (null === $this->cycle || !$this->cycle->hasSameDatesAs($startsAt, $this->endsAt)) {
+            throw new \InvalidArgumentException('Change the PlanningCycle first: a period keeps exactly its cycle\'s dates.');
+        }
+        if ($startsAt < $this->fairnessPeriod->getStartsAt()) {
+            throw new \InvalidArgumentException('Extend the FairnessPeriod before the PlanningPeriod: a PlanningPeriod must fall entirely within its FairnessPeriod.');
+        }
+
+        $this->startsAt = $startsAt;
+        $this->touch();
+    }
+
     public function getCreatedAt(): \DateTimeImmutable
     {
         return $this->createdAt;

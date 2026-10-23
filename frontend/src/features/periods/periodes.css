@@ -1951,3 +1951,151 @@
 a.mv-btn {
   text-decoration: none;
 }
+
+/* docs/decisions.md D207 : calendrier des bornes d'une période — chaque jour refusé dit pourquoi. */
+.mv-banner--info {
+  align-items: flex-start;
+  background: var(--blue-50);
+  border: 1px solid var(--blue-100);
+}
+.mv-banner--info > svg {
+  color: var(--blue-700);
+}
+.mv-bcal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 420px;
+  margin-inline: auto;
+}
+.mv-bcal__nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.mv-bcal__title {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text-strong);
+  text-transform: capitalize;
+}
+.mv-bcal__grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+.mv-bcal__weekday {
+  text-align: center;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+.mv-bcal__day {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: var(--surface-card);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-strong);
+  cursor: pointer;
+}
+.mv-bcal__day.is-allowed {
+  border-color: var(--green-200);
+  background: var(--green-50);
+  color: var(--green-800);
+}
+.mv-bcal__day.is-refused {
+  background: var(--surface-sunken);
+  color: var(--text-subtle);
+  text-decoration: line-through;
+}
+.mv-bcal__day.is-unknown {
+  color: var(--text-muted);
+}
+.mv-bcal__day.is-outside {
+  opacity: 0.55;
+}
+.mv-bcal__day.is-current {
+  border: 1.5px dashed var(--gray-500);
+}
+.mv-bcal__day.is-fixed {
+  border: 1.5px solid var(--gray-500);
+}
+.mv-bcal__day.is-selected {
+  border: 2px solid var(--green-700);
+  background: var(--green-600);
+  color: #fff;
+  opacity: 1;
+}
+.mv-bcal__day.is-selected.is-refused {
+  border-color: var(--red-600);
+  background: var(--red-50);
+  color: var(--red-700);
+}
+.mv-bcal__day:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+.mv-bcal__mark {
+  position: absolute;
+  top: 1px;
+  right: 4px;
+  font-size: 11px;
+  font-style: normal;
+  text-decoration: none;
+}
+.mv-bcal__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.mv-bcal__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.mv-bcal__swatch {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-style: normal;
+}
+.mv-bcal__swatch.is-allowed {
+  background: var(--green-50);
+  border: 1px solid var(--green-200);
+}
+.mv-bcal__swatch.is-refused {
+  background: var(--surface-sunken);
+  color: var(--text-subtle);
+}
+.mv-bcal__swatch.is-selected {
+  background: var(--green-600);
+}
+.mv-date-choice {
+  text-align: left;
+  cursor: pointer;
+}
+.mv-date-choice.is-active {
+  border: 2px solid var(--green-700);
+}
+.mv-date-status p {
+  margin: 0;
+}

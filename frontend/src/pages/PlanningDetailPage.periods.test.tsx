@@ -12,6 +12,7 @@ import type {
 import type { CollectionStatus } from '../features/planning/pilot/types'
 import { makeStatus } from '../testUtils/pilotFixtures'
 import { status as httpStatus, stubApi, type Route as ApiRoute } from '../testUtils/stubApi'
+import { addDays } from '../features/periods/dates'
 import { PlanningDetailPage } from './PlanningDetailPage'
 
 /**
@@ -94,6 +95,7 @@ function period(
       applicability,
     })),
     isLast: false,
+    canEditStart: false,
     canEditEnd: false,
     canDelete: false,
     ...overrides,
@@ -639,5 +641,134 @@ describe('PlanningDetailPage — creating the next period (lot L6)', () => {
     const steps = await screen.findByRole('region', { name: 'Préparation de la période 3' })
     expect(screen.queryByRole('button', { name: /Créer la période suivante/ })).not.toBeInTheDocument()
     expect(within(steps).queryByRole('button', { name: /Ouvrir la collecte/ })).not.toBeInTheDocument()
+  })
+})
+
+/** docs/decisions.md D207: the server's options — a last day on a Friday or a Saturday cuts the weekend block. */
+function dateOptions(query: URLSearchParams, historical = false) {
+  const days = []
+  for (let day = query.get('from') ?? ''; day <= (query.get('to') ?? ''); day = addDays(day, 1)) {
+    const weekday = new Date(`${day}T00:00:00Z`).getUTCDay()
+    const reasons =
+      weekday === 5 || weekday === 6
+        ? [{ code: 'period_boundary_splits_block', cuts: [{ ...WEEKEND, boundary: addDays(day, 1) }] }]
+        : []
+    days.push({ date: day, allowed: reasons.length === 0, reasons })
+  }
+  return {
+    period: query.get('period') === 'next' ? null : { stableId: query.get('period'), number: 3 },
+    edge: query.get('edge'),
+    fixedStart: query.get('period') === 'next' ? '2027-05-01' : '2027-01-31',
+    current: query.get('period') === 'next' ? null : '2027-04-30',
+    editable: true,
+    blockers: [],
+    historicalStartCuts: historical
+      ? [
+          {
+            ...WEEKEND,
+            boundary: '2027-05-01',
+            earlierDays: ['2027-04-30'],
+            remainderDays: ['2027-05-01', '2027-05-02'],
+          },
+        ]
+      : [],
+    days,
+  }
+}
+
+const WEEKEND = {
+  lineStableId: 'sen',
+  lineName: 'Seniors',
+  blockName: 'Week-end',
+  boundary: '',
+  firstDay: '2027-04-30',
+  lastDay: '2027-05-02',
+  earlierDays: [],
+  remainderDays: [],
+}
+
+describe('PlanningDetailPage — choosing the dates of a period on a calendar (D207)', () => {
+  it('creates the next period on a possible day, after confirming the cut weekend told upfront', async () => {
+    const api = renderPage(() => planning(), {
+      'GET /api/plannings/plan-1/periods/date-options': ({ query }) => dateOptions(query, true),
+      'POST /api/plannings/plan-1/periods': () =>
+        httpStatus(201, { ...P3, stableId: 'c4', number: 4, historicalBlockCuts: [] }),
+    })
+
+    await screen.findByRole('region', { name: 'Périodes du planning' })
+    fireEvent.click(screen.getAllByRole('button', { name: /Créer la période suivante/ })[0])
+    const dialog = screen.getByRole('dialog', { name: 'Créer la période suivante' })
+    expect(await within(dialog).findByText(/coupe un bloc de gardes :/)).toBeInTheDocument()
+    expect(
+      within(dialog).getByText(
+        /les jours Sam\. 1 mai, Dim\. 2 mai deviennent la suite de ce bloc dans la période 4/,
+      ),
+    ).toBeInTheDocument()
+    expect(api.requests('GET', '/api/plannings/plan-1/periods/date-options')[0].query.get('period')).toBe(
+      'next',
+    )
+
+    fireEvent.click(
+      await within(dialog).findByRole('button', { name: /^vendredi 30 juillet 2027, impossible/ }),
+    )
+    expect(
+      within(dialog).getByText(/^Impossible : Couperait le bloc « Week-end » \(Seniors\)/),
+    ).toBeInTheDocument()
+    const create = within(dialog).getByRole('button', { name: 'Confirmer et créer la période' })
+    expect(create).toBeDisabled()
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /^jeudi 29 juillet 2027, possible/ }))
+    expect(create).toBeDisabled()
+    fireEvent.click(within(dialog).getByRole('checkbox'))
+    expect(create).toBeEnabled()
+    fireEvent.click(create)
+
+    await waitFor(() => expect(api.requests('POST', '/api/plannings/plan-1/periods')).toHaveLength(1))
+    expect(api.requests('POST', '/api/plannings/plan-1/periods')[0].body).toEqual({
+      endsAt: '2027-07-30',
+      previousPeriodStableId: 'c3',
+      acceptHistoricalBlockCuts: true,
+    })
+  })
+
+  it('changes the end of a period from its card, with the exclusive end and the date it replaces', async () => {
+    const api = renderPage(
+      () => planning(),
+      {
+        'GET /api/plannings/plan-1/periods/date-options': ({ query }) => dateOptions(query),
+        'PATCH /api/plannings/plan-1/periods/c3': () => ({
+          ...P3,
+          endsAt: '2027-04-05',
+          lastDay: '2027-04-04',
+          generationOutdated: false,
+        }),
+      },
+      '/plannings/plan-1?periode=3',
+    )
+
+    await screen.findByRole('region', { name: 'Périodes du planning' })
+    fireEvent.click(within(detailCard()).getByRole('button', { name: /Modifier les dates/ }))
+    const dialog = screen.getByRole('dialog', { name: 'Modifier les dates' })
+    expect(
+      within(dialog).getByText(/Pour le déplacer, modifiez la fin de la période 2\./),
+    ).toBeInTheDocument()
+    fireEvent.click(await within(dialog).findByRole('button', { name: /^samedi 3 avril 2027, impossible/ }))
+    expect(within(dialog).getByRole('button', { name: 'Enregistrer les dates' })).toBeDisabled()
+    fireEvent.click(within(dialog).getByRole('button', { name: /^dimanche 4 avril 2027, possible/ }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Enregistrer les dates' }))
+
+    await waitFor(() => expect(api.requests('PATCH', '/api/plannings/plan-1/periods/c3')).toHaveLength(1))
+    expect(api.requests('PATCH', '/api/plannings/plan-1/periods/c3')[0].body).toEqual({
+      endsAt: '2027-04-05',
+      expectedEndsAt: '2027-05-01',
+    })
+    expect(await screen.findByText('Dates de la période 3 enregistrées')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: 'Modifier les dates' })).not.toBeInTheDocument()
+  })
+
+  it('offers no date change to someone who cannot manage the periods', async () => {
+    renderPage(() => planning({ canCreatePeriod: false }), {}, '/plannings/plan-1?periode=3')
+    await screen.findByRole('region', { name: 'Préparation de la période 3' })
+    expect(screen.queryByRole('button', { name: /Modifier les dates/ })).not.toBeInTheDocument()
   })
 })

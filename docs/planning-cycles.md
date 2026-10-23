@@ -342,6 +342,39 @@ l'identique : un planning à **un seul cycle**, non verrouillé, peut encore
 avancer son début (`POST .../extensions` existant, D122). Ce endpoint est
 limité à ce cas ; l'allongement de fin passe par le PATCH ci-dessus.
 
+> **Complété par D207 (2026-10-21)** — les règles ci-dessus restent celles de
+> la **dernière** période. S'y ajoutent, sur le même PATCH
+> (`{startsAt?, expectedStartsAt?, endsAt?, expectedEndsAt?}`) :
+>
+> - **Frontière entre deux périodes** : la fin d'une période qui n'est pas
+>   la dernière se déplace seulement si **elle et la suivante sont
+>   vierges** (aucune période de ligne validée / publiée / archivée, aucune
+>   génération, publication, job ni garde préparée ; sinon 409
+>   `period_locked`, `period_not_blank` ou `next_period_not_blank`). Le début
+>   de la suivante suit, sans trou ni chevauchement ; chacune garde 7 jours
+>   (`next_period_too_short`) ; aucun bloc coupé.
+> - **Début de la première période** : modifiable tant qu'elle est vierge.
+>   Le début d'une période suivante n'est jamais choisi (409
+>   `period_start_follows_previous`).
+> - **Collecte intacte** : dans une période vierge, la collecte unique qui
+>   la couvre exactement, sans réponse, modification, retrait ni rappel,
+>   **suit les nouvelles dates** (personnes attendues recalculées). Toute
+>   autre collecte borne les dates (`collection_beyond_end`,
+>   `collection_before_start`) — l'alinéa « collectes inchangées » ci-dessus
+>   reste vrai pour elles.
+> - `GET .../periods/date-options` : pour le sélecteur, chaque jour possible
+>   ou non, avec tous ses motifs (mêmes codes que l'écriture).
+>
+> **Précisé par D208 (2026-10-22)** — collecte intacte : en plus, ouverte,
+> et aucun rappel sur la période (y compris un rappel sans période envoyé
+> après son ouverture) ; une absence supprimée compte comme une
+> modification. Refus explicites : `collection_announced` (participants
+> sollicités), `collection_answered` (réponse ou modification). La vue
+> d'une période expose `canEditStart` / `canEditEnd` selon ces mêmes
+> règles. Un déplacement de frontière est validé en une seule transaction,
+> contrôlée avant validation (aucun trou ni chevauchement dans les données
+> validées).
+
 ### 5.3 Supprimer la dernière période (L)
 
 `DELETE /api/plannings/{planning}/periods/{period}?expected=…`, droit `MANAGE`.
@@ -682,7 +715,7 @@ déploiement ; le frontend passe toujours le paramètre.
   "lines": [{"lineStableId": "…", "planningPeriodStableId": "…", "status": "DRAFT"}],
   "collections": {"open": 0, "closed": 0, "acknowledged": 0, "expected": 0,
                   "deadline": null, "uncoveredDays": 89},
-  "isLast": true, "canEditEnd": true, "canDelete": true
+  "isLast": true, "canEditStart": true, "canEditEnd": true, "canDelete": true
 }
 ```
 

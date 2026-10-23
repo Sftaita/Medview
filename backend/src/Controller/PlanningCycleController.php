@@ -13,6 +13,8 @@ use App\Repository\PlanningRepository;
 use App\Security\Voter\PlanningVoter;
 use App\Service\BlockCut;
 use App\Service\PeriodBoundaryGuard;
+use App\Service\PeriodDateRules;
+use App\Service\PeriodDateViolation;
 use App\Service\PlanningCyclePresenter;
 use App\Service\PlanningCycleService;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -26,8 +28,9 @@ use Symfony\Component\Security\Http\Attribute\CurrentUser;
 
 /**
  * The periods of a Planning (docs/planning-cycles.md §7.3, docs/decisions.md
- * D187). Reading them takes PlanningVoter::VIEW; creating, changing the end
- * of and deleting one take PlanningVoter::MANAGE (the creator); opening a
+ * D187). Reading them takes PlanningVoter::VIEW; creating, changing the dates
+ * of (D207), deleting one and reading the dates it may take take
+ * PlanningVoter::MANAGE (the creator); opening a
  * collection on one takes PlanningVoter::MANAGE_AVAILABILITY, like every
  * collection. The refusals of the domain (409/422 with their code) are
  * PlanningCycleException, rendered by ApiExceptionListener.
@@ -44,6 +47,7 @@ final class PlanningCycleController
         private readonly PlanningCyclePresenter $presenter,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
         private readonly PeriodBoundaryGuard $boundaryGuard,
+        private readonly PeriodDateRules $dateRules,
     ) {
     }
 
@@ -92,14 +96,89 @@ final class PlanningCycleController
         $cycle = $this->resolveCycle($planning, $periodStableId);
         $body = $this->body($request);
 
-        $outcome = $this->cycleService->changeEnd(
+        // docs/decisions.md D207: the end, the start (first period only), or both — each with the date it replaces.
+        $endsAt = $this->date($body, 'endsAt');
+        $startsAt = $this->date($body, 'startsAt');
+        $outcome = $this->cycleService->changeDates(
             $planning,
             $cycle,
-            $this->date($body, 'endsAt', required: true),
-            $this->date($body, 'expectedEndsAt', required: true),
+            $startsAt,
+            null !== $startsAt ? $this->date($body, 'expectedStartsAt', required: true) : null,
+            $endsAt,
+            null !== $endsAt ? $this->date($body, 'expectedEndsAt', required: true) : null,
         );
 
         return new JsonResponse([...$this->presenter->period($outcome['cycle']), 'generationOutdated' => $outcome['generationOutdated']]);
+    }
+
+    /**
+     * docs/decisions.md D207: the dates a period may take, day by day, for the
+     * date picker — `?period=` a period or `next` (the one "Créer la période
+     * suivante" would create), `?edge=` `end` (each candidate is a last day,
+     * inclusive) or `start` (the first period's first day), `?from=&to=` the
+     * days shown. Each day carries every reason it is refused, with the
+     * blocks concerned; `blockers` are the reasons no day is possible. The
+     * write applies the very same rules (PeriodDateRules) and refuses with
+     * the same codes: this is only what the picker shows, never a promise.
+     */
+    #[Route('/api/plannings/{planningStableId}/periods/date-options', name: 'api_planning_period_date_options', methods: ['GET'], priority: 1)]
+    public function dateOptions(string $planningStableId, Request $request): JsonResponse
+    {
+        $planning = $this->resolvePlanning($planningStableId);
+        $this->denyUnlessCanManage($planning);
+
+        $query = ['from' => $request->query->getString('from'), 'to' => $request->query->getString('to')];
+        $from = $this->date($query, 'from', required: true);
+        $to = $this->date($query, 'to', required: true);
+        if ($to < $from || (int) $from->diff($to)->days >= PeriodDateRules::MAX_OPTION_DAYS) {
+            throw PlanningCycleException::invalid('invalid_range', \sprintf('to must be on or after from, %d days at most.', PeriodDateRules::MAX_OPTION_DAYS));
+        }
+        $edge = $request->query->getString('edge', 'end');
+        if (!\in_array($edge, ['start', 'end'], true)) {
+            throw PlanningCycleException::invalid('invalid_request', 'edge is "start" or "end".');
+        }
+
+        $periodParam = $request->query->getString('period');
+        $historical = [];
+        if ('next' === $periodParam) {
+            if ('start' === $edge) {
+                throw PlanningCycleException::invalid('invalid_request', 'A new period starts the day after the last one: only its end is chosen.');
+            }
+            $cycles = $this->cycleRepository->findByPlanning($planning);
+            $last = $cycles[\count($cycles) - 1];
+            $options = $this->dateRules->nextEndOptions($last, $from, $to);
+            $historical = $options['historicalStartCuts'];
+            $cycle = null;
+            $fixedStart = $last->getEndsAt();
+            $current = null;
+        } else {
+            $cycle = $this->resolveCycle($planning, $periodParam);
+            $options = 'end' === $edge ? $this->dateRules->endOptions($cycle, $from, $to) : $this->dateRules->startOptions($cycle, $from, $to);
+            $fixedStart = 'end' === $edge ? $cycle->getStartsAt() : null;
+            $current = 'end' === $edge ? $cycle->getEndsAt()->modify('-1 day') : $cycle->getStartsAt();
+        }
+
+        $blockers = $options['blockers'];
+        if (!$this->cycleService->isCreationEnabled()) {
+            array_unshift($blockers, PeriodDateViolation::conflict('period_management_disabled', 'Managing the periods of a planning is not enabled.'));
+        }
+        $reasons = static fn (array $violations): array => array_map(static fn (PeriodDateViolation $violation): array => $violation->toArray(), $violations);
+
+        return new JsonResponse([
+            'period' => null !== $cycle ? $this->presenter->reference($cycle) : null,
+            'edge' => $edge,
+            'fixedStart' => $fixedStart?->format('Y-m-d'),
+            'current' => $current?->format('Y-m-d'),
+            'editable' => [] === $blockers,
+            'blockers' => $reasons($blockers),
+            'historicalStartCuts' => array_map(static fn (BlockCut $cut): array => $cut->toArray(), $historical),
+            // A day is possible only when nothing blocks the date at all: a blocker is a reason of every day.
+            'days' => array_map(static fn (array $day): array => [
+                'date' => $day['date'],
+                'allowed' => [] === $blockers && [] === $day['violations'],
+                'reasons' => $reasons([...$blockers, ...$day['violations']]),
+            ], $options['days']),
+        ]);
     }
 
     #[Route('/api/plannings/{planningStableId}/periods/{periodStableId}', name: 'api_planning_period_delete', methods: ['DELETE'])]

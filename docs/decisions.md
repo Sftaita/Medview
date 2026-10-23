@@ -9174,3 +9174,180 @@ période 2 dans le PDF de la période 1, et inversement) ; période
 partiellement publiée (seules les lignes de ses entrées). Mutations
 tuées : dates du planning au téléchargement, dates du planning dans le
 rendu, document stocké ignoré.
+
+## D207 — Dates des périodes choisies sur un calendrier, règles vérifiées par le serveur (préparation manuelle, lot 1)
+
+**Contexte.** Premier lot de la préparation manuelle des périodes, validé
+le 2026-10-21 (aucune automatisation récurrente, aucune génération ni
+publication automatique). Le gestionnaire choisit les dates d'une période
+dans un calendrier ; jusque-là, seule la fin de la **dernière** période
+pouvait changer (§5.2), et rien n'expliquait un jour refusé avant l'envoi.
+
+**Décisions.**
+
+1. **Une seule source pour les règles** : `PeriodDateRules`. Les
+   écritures (`PlanningCycleService::createNext()`, `changeDates()`) lèvent
+   la première violation ; `GET /api/plannings/{p}/periods/date-options`
+   (`?period=<période>|next&edge=start|end&from&to`, 400 jours au plus,
+   droit `MANAGE`) les liste toutes, jour par jour, avec les blocs
+   concernés ; un motif bloquant (période verrouillée, calcul en cours…) est
+   un motif de chaque jour, aucun n'est alors proposé. Mêmes codes d'erreur
+   des deux côtés ; le sélecteur n'est jamais une promesse, l'écriture
+   revérifie.
+2. **Continuité** : une période suivante commence toujours le lendemain du
+   dernier jour de la précédente. Son début ne se choisit pas (409
+   `period_start_follows_previous`) ; il bouge seulement avec la fin de la
+   précédente.
+3. **Frontière entre deux périodes** : la fin d'une période qui n'est pas
+   la dernière se déplace seulement si elle **et** la suivante sont
+   **vierges** — aucune période de ligne validée / publiée / archivée,
+   aucune génération, publication, job ni garde préparée. Le côté qui
+   rétrécit bouge d'abord (aucun chevauchement, même transitoire, avec les
+   contraintes d'exclusion) ; chaque registre d'équité revient exactement
+   sur l'étendue de ses périodes ; l'enveloppe du planning ne change pas.
+   Une période publiée reste protégée (409 `period_locked`, désormais aussi
+   pour une période publiée qui n'est pas la dernière, au lieu de
+   `period_not_last`).
+4. **Première période vierge** : début et fin modifiables (l'enveloppe du
+   planning et les registres d'équité suivent ; déplacer toute la période
+   plus tôt avance d'abord son début, pour qu'aucun état intermédiaire ne
+   soit trop court).
+5. **Collecte intacte** : la création d'un planning ouvre une collecte sur
+   toute la période 1 ; sans exception, une première période ne pourrait
+   jamais raccourcir. Dans une période vierge, la collecte **unique** qui la
+   couvre **exactement**, sans aucune réponse, modification de
+   disponibilité, retrait ni rappel envoyé sur la période, suit ses
+   nouvelles dates ; ses personnes attendues sont recalculées comme à
+   l'ouverture (`AvailabilityCollectionService::followPeriod()`). Toute
+   autre collecte borne les dates (`collection_beyond_end`,
+   `collection_before_start`). **Écart assumé avec §5.2 « collectes
+   inchangées »** : pour une dernière période vierge dont la collecte est
+   intacte, allonger la fin allonge aussi la collecte (avant : jours
+   ajoutés « non couverts »). Dès qu'une réponse existe, ou que la période
+   n'est plus vierge, le comportement de §5.2 est inchangé.
+6. **Blocs** : aucune frontière ne coupe un bloc — fin d'une période, début
+   de la première, fin d'une nouvelle période. L'exception historique D192
+   ne concerne que le début d'une période après une période verrouillée,
+   qui par définition ne bouge plus ; le sélecteur l'annonce
+   (`historicalStartCuts`) avant toute tentative, la confirmation reste
+   exigée par l'écriture.
+7. **Interface** : « Modifier les dates » sur la carte de la période (créateur
+   seulement) et le calendrier dans « Créer la période suivante » : chaque
+   jour refusé reste un bouton, le choisir dit pourquoi (motif du serveur,
+   bloc concerné) ; possible / impossible sont dits par le texte, un symbole
+   et la couleur. Saisie au clavier et durées usuelles conservées.
+
+**Trauma Delta (production)** : la période 2 commence obligatoirement le
+2027-01-31 (période 1 publiée, coupure D192 confirmée) ; sa fin reste
+modifiable tant qu'elle est vierge, sur un dernier jour du dimanche au
+jeudi (un vendredi ou un samedi couperait le bloc « Ven · Sam · Dim »).
+Aucune donnée de production n'a été modifiée par ce lot.
+
+**Pas de migration.** `canEditEnd` et la définition de la collecte intacte
+sont précisés par D208.
+
+**Tests.** `PlanningPeriodDatesTest` (10 tests) : première période vierge
+(début, fin, collecte intacte qui suit, déplacement complet plus tôt) ;
+collecte entamée qui borne ; vue périmée ; début figé d'une période
+suivante et d'une période non vierge ; frontière entre deux périodes vierges
+dans les deux sens (trou, chevauchement, deux lignes, registres, audit) ;
+frontière refusée si l'une ou l'autre a un historique ; blocs (fin, début,
+nouvelle période, motif détaillé) ; cas Trauma Delta (D192, début figé,
+fin du dimanche au jeudi) ; droits, plages et calcul en cours. Mutations
+tuées : 8/8 (suivante non vierge, ordre des déplacements, collecte entamée
+qui suivrait, début d'une période suivante, durée de la suivante, bloc à la
+fin, collecte intacte qui ne suivrait plus, période précédente non vierge).
+Frontend : calendrier (semaines entières, motifs, sélection), dialogue de
+modification (début figé, enregistrement, refus expliqué, verrou, début de
+la première période, refus du serveur), page (création avec confirmation
+D192 annoncée, PATCH avec fin exclusive et date remplacée, aucun bouton sans
+droit).
+
+
+## D208 — Collecte intacte précisée, `canEditStart` / `canEditEnd` alignés sur les règles, déplacement de frontière tout ou rien (lot 1, après validation)
+
+**Contexte.** D207 validé le 2026-10-22, sous trois conditions avant le
+commit : une collecte n'est redimensionnée que si elle est réellement
+vierge, et jamais en silence quand des participants ont été sollicités ;
+`canEditEnd` ne doit plus annoncer autre chose que ce que l'écriture
+accepte ; un déplacement de frontière entre deux périodes est atomique.
+D207 reste vrai ; cette décision le précise.
+
+**Décisions.**
+
+1. **Collecte intacte, définition complète**
+   (`PlanningCycleRepository::dateFacts()`). La collecte suit les dates de
+   sa période seulement si **toutes** ces conditions sont vraies :
+   - la période est vierge : aucune période de ligne validée, publiée ou
+     archivée, aucune génération, publication, job ni garde préparée ;
+   - c'est la **seule** collecte de la période, elle est **ouverte**
+     (une collecte close est de l'historique figé) et couvre **exactement**
+     la période ;
+   - **personne n'a répondu ni rien modifié** : aucune confirmation
+     (`CONFIRMED` / `NO_UNAVAILABILITY`), aucun retrait, aucune absence
+     ajoutée, modifiée ou **supprimée** dans sa fenêtre — à la main ou par
+     la synchronisation SurgicalHub, toutes passent par
+     `recordAvailabilityChange()` ;
+   - **personne n'a été sollicité** : aucun rappel envoyé sur la période.
+     Un rappel envoyé avant l'existence des périodes n'a pas de période
+     (`planning_cycle_id` NULL, jamais rempli, append-only) : il compte s'il
+     a été envoyé après l'ouverture de la collecte. Jusque-là (D207) il
+     était ignoré.
+
+   Aujourd'hui, le rappel est le **seul** message envoyé à propos d'une
+   collecte : aucune invitation ni annonce n'existe encore (l'invitation
+   d'équipe ne parle pas des dates). L'annonce automatique (lot C) devra
+   compter ses envois dans `collectionContacted`.
+2. **Jamais de redimensionnement silencieux, refus explicite.** Quand une
+   date laisserait hors de la période une collecte qui ne suit pas, le
+   motif dit pourquoi : 409 `collection_announced` (des participants ont
+   été sollicités), sinon `collection_answered` (quelqu'un a répondu ou
+   modifié ses absences), sinon `collection_beyond_end` /
+   `collection_before_start` (plusieurs collectes, collecte close ou
+   partielle). Mêmes codes dans le calendrier. Allonger une période dont la
+   collecte ne suit pas reste permis : la collecte garde la fenêtre
+   annoncée, les jours ajoutés sont « non couverts » (§5.2 inchangé).
+3. **`canEditStart` / `canEditEnd`.** Les seuls consommateurs de
+   `canEditEnd` sont le type `PlanningPeriodView` du frontend et des
+   fixtures de test ; aucun écran ne le lit, aucun autre client n'existe.
+   Il est **aligné** sur les règles plutôt que doublé :
+   `canEditEnd` = la fin peut bouger maintenant (aucun motif bloquant de
+   `PeriodDateRules`, donc aussi la frontière d'une période qui n'est pas
+   la dernière quand les deux sont vierges) ; nouveau `canEditStart`, même
+   chose pour le début (première période seulement). Mêmes motifs bloquants
+   que l'écriture et que `editable` des options ; les jours précis restent
+   donnés par les options. Différences avec l'ancien sens (`dernière
+   période et non verrouillée`) : vrai pour une frontière entre deux
+   périodes vierges, faux pendant un calcul.
+4. **Déplacement de frontière tout ou rien.** `changeDates()` s'exécute
+   dans une seule transaction, sous le verrou du planning : la fin de la
+   période, le début de la suivante, leurs périodes de ligne, les registres
+   d'équité et les collectes qui suivent sont validés ensemble ou pas du
+   tout. Le côté qui rétrécit bouge d'abord (aucun chevauchement, même
+   transitoire, contraintes d'exclusion PostgreSQL). Le trou transitoire
+   entre les deux écritures n'existe que dans la transaction, jamais dans
+   les données validées. Avant la validation,
+   `assertStillContinuous()` relit le planning : périodes contiguës,
+   périodes de ligne aux dates de leur période et dans leur registre,
+   collectes dans leur période, enveloppe du planning. Sinon tout est
+   annulé — c'est un garde-fou, aucune règle connue ne peut le déclencher.
+
+**Tests.** `PlanningPeriodDatesTest` passe à 15 tests :
+- collecte sollicitée par un rappel : refus `collection_announced` à
+  l'écriture et dans le calendrier, rien n'a bougé, l'allongement garde la
+  fenêtre ;
+- rappel sans période antérieur à la collecte ignoré, postérieur compté ;
+- absence supprimée dans la fenêtre : `collection_answered` ; collecte
+  close : jamais redimensionnée ;
+- `canEditStart` / `canEditEnd` égaux à `editable` des options, période
+  par période, avant et après une garde préparée dans la période suivante ;
+- **rollback** : un déclencheur PostgreSQL fait échouer la seconde
+  écriture, dans les deux sens. Les dates des périodes, périodes de ligne,
+  registres, planning et collectes sont identiques à l'état d'avant,
+  l'audit est propre et le même déplacement réussit ensuite.
+
+Trois assertions existantes passent de `collection_before_start` /
+`collection_beyond_end` à `collection_answered` (même refus, motif plus
+précis). Mutations tuées : 6/6 (rappel ignoré, rappel sans période
+ignoré, borne d'ouverture retirée, collecte close qui suivrait, ancien
+`canEditEnd`, motif générique au lieu de `collection_announced`).

@@ -16,6 +16,7 @@ use App\Repository\UserRepository;
 use App\Service\AvailabilityCollectionService;
 use App\Service\FairnessPeriodService;
 use App\Service\PeriodBoundaryGuard;
+use App\Service\PeriodDateRules;
 use App\Service\PlanningCycleService;
 use App\Service\PlanningPeriodLifecycleService;
 use App\Service\PlanningPeriodRemover;
@@ -60,6 +61,7 @@ final class PlanningCycleServiceTest extends WebTestCase
             $container->get(AvailabilityCollectionRepository::class),
             $container->get(AvailabilityCollectionService::class),
             $container->get(PeriodBoundaryGuard::class),
+            $container->get(PeriodDateRules::class),
             new NullLogger(),
             false,
         );
@@ -74,6 +76,7 @@ final class PlanningCycleServiceTest extends WebTestCase
             'period_creation_disabled' => fn () => $service->createNext($planning, (string) $cycle->getStableId(), new \DateTimeImmutable('2027-08-01'), $creator),
             'period_management_disabled' => fn () => $service->changeEnd($planning, $cycle, new \DateTimeImmutable('2027-06-01'), new \DateTimeImmutable('2027-05-01')),
         ];
+        $operations[] = fn () => $service->changeDates($planning, $cycle, new \DateTimeImmutable('2026-12-01'), new \DateTimeImmutable('2027-01-01'), null, null);
         $operations[] = fn () => $service->deleteLast($planning, $cycle, (string) $cycle->getStableId());
         $operations[] = fn () => $service->openCollection($planning, $cycle, $creator, null, null, null);
 

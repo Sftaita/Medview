@@ -120,6 +120,66 @@ class PlanningCycleRepository extends ServiceEntityRepository
     }
 
     /**
+     * What decides whether the dates of $cycle may move (docs/decisions.md
+     * D207), read in one query: its history, the span of its duties and of
+     * its collections, and the one collection that may follow its dates —
+     * the intact collection: in a blank period, the only collection, open,
+     * covering it exactly, nobody answered, changed (added, edited or deleted
+     * an absence in its window), withdrew, and nobody was written to about
+     * it. A reminder is the only message about a collection today; one sent
+     * before periods existed has no period (planning_cycle_id NULL) and
+     * counts once sent after the collection opened. Otherwise
+     * collectionAnswered / collectionContacted say why it keeps its window.
+     *
+     * @return array{generations: int, publications: int, jobs: int, duties: int, firstDutyDay: ?string, lastDutyDay: ?string, collections: int, firstCollectionStart: ?string, lastCollectionEnd: ?string, collectionAnswered: bool, collectionContacted: bool, untouchedCollectionId: ?int}
+     */
+    public function dateFacts(PlanningCycle $cycle): array
+    {
+        $row = $this->getEntityManager()->getConnection()->fetchAssociative(<<<'SQL'
+            SELECT
+              (SELECT COUNT(*) FROM planning_generations g JOIN planning_periods p ON p.id = g.planning_period_id WHERE p.planning_cycle_id = :cycle) AS generations,
+              (SELECT COUNT(*) FROM planning_publications WHERE planning_cycle_id = :cycle) AS publications,
+              (SELECT COUNT(*) FROM planning_jobs WHERE planning_cycle_id = :cycle) AS jobs,
+              (SELECT COUNT(*) FROM duties d JOIN planning_periods p ON p.id = d.planning_period_id WHERE p.planning_cycle_id = :cycle) AS duties,
+              (SELECT MIN(d.local_date)::text FROM duties d JOIN planning_periods p ON p.id = d.planning_period_id WHERE p.planning_cycle_id = :cycle) AS first_duty_day,
+              (SELECT MAX(d.local_date)::text FROM duties d JOIN planning_periods p ON p.id = d.planning_period_id WHERE p.planning_cycle_id = :cycle) AS last_duty_day,
+              (SELECT COUNT(*) FROM availability_collections WHERE planning_cycle_id = :cycle) AS collections,
+              (SELECT MIN(starts_at)::text FROM availability_collections WHERE planning_cycle_id = :cycle) AS first_collection_start,
+              (SELECT MAX(ends_at)::text FROM availability_collections WHERE planning_cycle_id = :cycle) AS last_collection_end,
+              EXISTS (SELECT 1 FROM availability_collection_responses r JOIN availability_collections ac ON ac.id = r.collection_id
+                WHERE ac.planning_cycle_id = :cycle
+                  AND (r.acknowledged_at IS NOT NULL OR r.last_availability_change_at IS NOT NULL OR r.withdrawn_at IS NOT NULL)) AS collection_answered,
+              EXISTS (SELECT 1 FROM planning_availability_reminders pr JOIN planning_cycles cy ON cy.id = :cycle
+                WHERE pr.planning_cycle_id = cy.id
+                   OR (pr.planning_cycle_id IS NULL AND pr.planning_id = cy.planning_id
+                       AND pr.sent_at >= (SELECT MIN(opened_at) FROM availability_collections WHERE planning_cycle_id = cy.id))) AS collection_contacted,
+              (SELECT ac.id FROM availability_collections ac JOIN planning_cycles cy ON cy.id = ac.planning_cycle_id
+                 WHERE ac.planning_cycle_id = :cycle AND ac.status = 'OPEN' AND ac.starts_at = cy.starts_at AND ac.ends_at = cy.ends_at
+                   AND (SELECT COUNT(*) FROM availability_collections other WHERE other.planning_cycle_id = :cycle) = 1) AS sole_collection_id
+        SQL, ['cycle' => $cycle->getId()]);
+
+        // Only a blank period's collection follows its dates: once generated, published, calculated or prepared,
+        // every collection keeps its window (docs/planning-cycles.md §5.2).
+        $blank = 0 === (int) $row['generations'] + (int) $row['publications'] + (int) $row['jobs'] + (int) $row['duties'];
+
+        return [
+            'generations' => (int) $row['generations'],
+            'publications' => (int) $row['publications'],
+            'jobs' => (int) $row['jobs'],
+            'duties' => (int) $row['duties'],
+            'firstDutyDay' => $row['first_duty_day'] ?? null,
+            'lastDutyDay' => $row['last_duty_day'] ?? null,
+            'collections' => (int) $row['collections'],
+            'firstCollectionStart' => $row['first_collection_start'] ?? null,
+            'lastCollectionEnd' => $row['last_collection_end'] ?? null,
+            'collectionAnswered' => (bool) $row['collection_answered'],
+            'collectionContacted' => (bool) $row['collection_contacted'],
+            'untouchedCollectionId' => $blank && !$row['collection_answered'] && !$row['collection_contacted'] && null !== ($row['sole_collection_id'] ?? null)
+                ? (int) $row['sole_collection_id'] : null,
+        ];
+    }
+
+    /**
      * @param array<string, mixed> $parameters
      */
     private function count0(string $sql, PlanningCycle $cycle, array $parameters = []): int

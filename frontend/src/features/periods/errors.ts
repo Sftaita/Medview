@@ -1,5 +1,6 @@
 import { ApiError } from '../../lib/apiClient'
-import type { BlockCut } from './api'
+import type { BlockCut, DateReason } from './api'
+import { formatDate } from './dates'
 
 export type PeriodCreationErrorKind =
   'historical' | 'split' | 'stale' | 'too_short' | 'busy' | 'disabled' | 'forbidden' | 'other'
@@ -76,4 +77,68 @@ export function collectionOpeningMessage(err: unknown): string {
   if (err instanceof ApiError && err.status === 403)
     return 'Vous ne pouvez pas ouvrir de collecte sur ce planning.'
   return 'La collecte n’a pas pu être ouverte. Réessayez.'
+}
+
+/** A cut block, for a doctor: « Ven · Sam · Dim » (Seniors), du ven. 30 avr. au dim. 2 mai. */
+export function describeCut(cut: BlockCut): string {
+  const line = cut.lineName ? ` (${cut.lineName})` : ''
+  return `« ${cut.blockName} »${line}, du ${formatDate(cut.firstDay, 'wdm')} au ${formatDate(cut.lastDay, 'wdm')}`
+}
+
+/**
+ * Why a date is refused, or why no date can be chosen (docs/decisions.md D207) —
+ * the same codes the server answers when a date is written.
+ */
+export function dateReasonMessage(reason: DateReason): string {
+  switch (reason.code) {
+    case 'period_too_short':
+      return 'Trop court : une période dure au moins 7 jours.'
+    case 'next_period_too_short':
+      return 'La période suivante durerait moins de 7 jours.'
+    case 'period_boundary_splits_block':
+      return reason.cuts && reason.cuts.length > 0
+        ? `Couperait le bloc ${reason.cuts.map(describeCut).join(' et le bloc ')} : un bloc ne se partage jamais entre deux périodes.`
+        : 'Couperait un bloc de gardes : un bloc ne se partage jamais entre deux périodes.'
+    case 'period_has_generation':
+      return 'La période est déjà générée : elle ne peut plus être raccourcie.'
+    case 'period_has_duties_after':
+      return 'Des gardes sont déjà préparées après ce jour.'
+    case 'period_has_duties_before':
+      return 'Des gardes sont déjà préparées avant ce jour.'
+    case 'collection_beyond_end':
+      return 'Une collecte des disponibilités de cette période couvre des jours après ce jour.'
+    case 'collection_before_start':
+      return 'Une collecte des disponibilités de cette période commence avant ce jour.'
+    case 'collection_announced':
+      return 'Les participants ont déjà été sollicités pour la collecte des disponibilités (rappel envoyé) : elle n’est plus redimensionnée, et ce jour la laisserait hors de la période.'
+    case 'collection_answered':
+      return 'Des participants ont déjà répondu à la collecte des disponibilités ou modifié leurs absences : elle n’est plus redimensionnée, et ce jour la laisserait hors de la période.'
+    case 'period_locked':
+      return 'Cette période est publiée ou validée : ses dates ne changent plus.'
+    case 'period_not_blank':
+      return 'Cette période a déjà une génération, une publication, un calcul ou des gardes préparées : cette date ne bouge plus.'
+    case 'next_period_not_blank':
+      return 'La période suivante a déjà une génération, une publication, un calcul ou des gardes préparées : la frontière entre les deux ne bouge plus.'
+    case 'period_start_follows_previous':
+      return 'Le premier jour suit toujours le dernier jour de la période précédente. Pour le déplacer, modifiez la fin de la période précédente.'
+    case 'job_in_progress':
+      return 'Une génération ou une complétion est en cours. Réessayez quand elle sera terminée.'
+    case 'period_management_disabled':
+      return 'La gestion des périodes n’est pas activée.'
+  }
+  return 'Cette date n’est pas possible.'
+}
+
+/** The errors of PATCH …/periods/{p}: the reason, said like in the calendar. */
+export function periodDatesError(err: unknown): string {
+  if (!(err instanceof ApiError)) {
+    return 'Les dates n’ont pas pu être enregistrées. Vérifiez votre connexion et réessayez.'
+  }
+  const body = (err.body ?? {}) as { error?: string; details?: BlockCut[] }
+  if (body.error === 'period_changed' || body.error === 'period_sequence_changed') {
+    return 'Les dates de la période ont changé entre-temps. Rechargez avant de continuer.'
+  }
+  if (err.status === 403) return 'Seul le créateur du planning peut modifier les dates.'
+  if (body.error) return dateReasonMessage({ code: body.error, cuts: body.details })
+  return 'Les dates n’ont pas pu être enregistrées. Réessayez.'
 }

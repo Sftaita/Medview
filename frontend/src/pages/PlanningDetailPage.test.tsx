@@ -66,6 +66,7 @@ function singlePeriod(lines: PlanningLineSummary[]): PlanningPeriodView {
       applicability: { state: 'APPLICABLE', reasons: [] },
     })),
     isLast: true,
+    canEditStart: true,
     canEditEnd: true,
     canDelete: false,
   }

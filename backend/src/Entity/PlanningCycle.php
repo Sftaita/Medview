@@ -150,6 +150,20 @@ class PlanningCycle
         $this->endsAt = $endsAt;
     }
 
+    /**
+     * The new start of a blank period (docs/decisions.md D207): the first
+     * period's own start, or the boundary with the previous one when that
+     * boundary moves. Every rule deciding whether it may lives in
+     * PeriodDateRules, applied by PlanningCycleService::changeDates().
+     */
+    public function changeStart(\DateTimeImmutable $startsAt): void
+    {
+        if ($startsAt >= $this->endsAt) {
+            throw new \InvalidArgumentException('startsAt must be strictly before endsAt.');
+        }
+        $this->startsAt = $startsAt;
+    }
+
     /** Whether $date (a calendar day) falls inside this cycle. */
     public function containsDay(\DateTimeImmutable $date): bool
     {
