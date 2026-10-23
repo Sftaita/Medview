@@ -54,6 +54,85 @@ crontab -l | tail -5                                       # vérifier : seules 
 `CRON_TZ=UTC` est nécessaire : le crontab existant définit `CRON_TZ=Europe/Brussels`
 avant sa dernière tâche, et ce réglage s'appliquerait sinon à la ligne ajoutée.
 
+## 2 bis. Conservation réservée (`reserved/`, 2026-10-23)
+
+La rotation du §2 supprime une sauvegarde au bout de 30 jours, **y compris**
+celles que `docs/deployment.md` §6 et `docs/decisions.md` citent comme point de
+restauration d'un déploiement. Pour qu'une sauvegarde citée reste restaurable,
+une **copie** en est rangée dans un répertoire que la rotation ne lit pas.
+
+| | Rotation normale | Conservation réservée |
+|---|---|---|
+| Emplacement | `postgres/`, `jwt-keys/` (premier niveau) | `reserved/<horodatage>/` |
+| Contenu | une sauvegarde par nuit + celles prises à la main | les sauvegardes citées par la documentation |
+| Durée | 30 jours, au moins les 7 plus récentes | **indéfinie** : rien ne la vide automatiquement |
+| Qui y écrit | `medvue-backup.sh` (cron) | à la main, par copie (jamais un déplacement) |
+
+`medvue-backup.sh` ne cherche qu'au premier niveau de `postgres/` et
+`jwt-keys/` (`find -maxdepth 1`) ; la rotation générique du serveur
+(`/home/deploy/scripts/rotate_backups.sh`) ne lit que `mysql/` et `uploads/`.
+Aucune des deux n'atteint `reserved/`.
+
+**Contenu au 2026-10-23** : 33 dossiers `reserved/<horodatage>/` (droits `700`),
+chacun avec le dump `medvue_<horodatage>.dump` et l'archive
+`jwt-keys_<horodatage>.tar.gz` de même horodatage, leurs `.sha256` (fichiers
+`600`) ; à la racine, `SHA256SUMS` (tous les fichiers), `INDEX.tsv` (fichier,
+ligne de documentation qui le cite, contexte du déploiement) et `README.txt`.
+Environ 10 Mo.
+
+- Les 31 dumps cités **par leur nom** dans `docs/` : sauvegardes d'avant et
+  d'après les déploiements du §6 de `docs/deployment.md`, de
+  `v2026.09.25-prod-2` à `v2026.10.23-prod` ; celles de l'activation des
+  périodes et de la création de la période 2 (2026-10-21) ; les dumps de
+  production sur lesquels des migrations ont été répétées
+  (`docs/surgicalhub-integration.md` §12 pour le 2026-10-10,
+  `docs/decisions.md` pour le 2026-10-17 et le 2026-10-19, D205).
+- 2 dumps du 2026-09-23 (`081157` avant migration, `082323` après), cités sans
+  nom par la ligne `v2026.09.23-prod` et identifiés par leur horodatage.
+- **Introuvables** : les sauvegardes des déploiements du 2026-09-20 et du
+  2026-09-21 (`v2026.09.20-prod` et `-2`, `v2026.09.21-prod` et `-2`), citées
+  sans nom et déjà supprimées par la rotation avant la création de
+  `reserved/`, ainsi que `medvue_20260920_073515`.
+
+Chaque original a été vérifié contre son `.sha256` avant la copie, chaque copie
+comparée à l'original ensuite ; les originaux sont restés en place (ils
+suivent la rotation normale). Deux ensembles réservés ont été restaurés dans la
+cible jetable du §3 : `20260925_125642` et `20261021_115609`, **PASS** tous les
+deux.
+
+**Ajouter une sauvegarde** (après un déploiement qui la cite), sans jamais
+déplacer ni écraser :
+
+```bash
+B=/home/deploy/backups/medvue; S=<HORODATAGE>; D="$B/reserved/$S"
+(cd "$B/postgres" && sha256sum -c "medvue_$S.dump.sha256") &&
+(cd "$B/jwt-keys" && sha256sum -c "jwt-keys_$S.tar.gz.sha256") &&
+mkdir -m 700 "$D" &&
+cp -n -p "$B/postgres/medvue_$S.dump"{,.sha256} "$B/jwt-keys/jwt-keys_$S.tar.gz"{,.sha256} "$D/" &&
+chmod 600 "$D"/* &&
+(cd "$D" && sha256sum -c ./*.sha256)
+# puis : ajouter les deux fichiers à reserved/SHA256SUMS et une ligne à reserved/INDEX.tsv
+```
+
+**Vérifier** l'ensemble : `cd /home/deploy/backups/medvue/reserved && sha256sum -c --quiet SHA256SUMS`.
+
+**Restaurer** depuis `reserved/` : mêmes procédures que le §4, avec les chemins
+du dossier réservé (le test jetable d'abord, toujours) :
+
+```bash
+R=/home/deploy/backups/medvue/reserved/<HORODATAGE>
+/opt/stack/apps/medvue/scripts/backup/medvue-restore-test.sh \
+  --dump "$R/medvue_<HORODATAGE>.dump" --keys "$R/jwt-keys_<HORODATAGE>.tar.gz"
+```
+
+Sans `--compare-live` : une sauvegarde ancienne diffère forcément de la base en
+service. Ce test réécrit `status/restore-test.json` (§4 bis).
+
+> **`reserved/` n'est pas une sauvegarde hors site.** Les copies sont sur le
+> même serveur et le même disque que les originaux et que la base : une perte du
+> disque ou du serveur les emporte toutes. Aucune n'est copiée vers Google
+> Drive (§5).
+
 ## 3. Vérifier
 
 ```bash
@@ -156,6 +235,16 @@ best-effort : un échec d'écriture n'échoue jamais la sauvegarde) :
   `failures`, `postgresDumpBytes`, `latestMigration` ;
 - `restore-test.json` : `finishedAt`, `result`, `compareLive`.
 
+`restore-test.json` décrit **le dernier test lancé, quel qu'il soit** : aucun
+cron ne lance `medvue-restore-test.sh`, il ne change qu'à un lancement manuel.
+`result` est la seule issue (`success` = `RESTORE TEST: PASS`). `compareLive`
+dit seulement si l'option `--compare-live` était passée : `false` veut dire
+« pas de comparaison avec la base en service demandée », **jamais** « la
+comparaison a échoué » (un écart avec la base en service donne
+`result: failure`). Le fichier ne dit pas quelle sauvegarde a été testée : un
+test sur un dump ancien (§2 bis) remplace le statut d'un test sur la dernière
+sauvegarde. La page « Infrastructure » n'affiche que `finishedAt` et `result`.
+
 Aucun chemin, aucun secret. Ce répertoire est monté **en lecture seule** dans
 `medvue-backend` (`/app/var/ops-status`) : la page « Infrastructure » de
 `/admin` lit ces fichiers, ne déclenche jamais rien et ne voit pas les dumps
@@ -168,6 +257,11 @@ Aucun chemin, aucun secret. Ce répertoire est monté **en lecture seule** dans
   `rclone` n'est pas installé sur le serveur, donc le `sync_gdrive.sh` existant
   (SurgicalHub, non modifié ici) échoue chaque nuit ; MedVue ne l'utilise pas.
   Une copie hors serveur chiffrée est la prochaine amélioration à décider.
+  *Mise à jour 2026-10-23* : `rclone` est désormais installé
+  (`/home/deploy/bin`) et `sync_gdrive.sh` réussit chaque nuit, mais il ne
+  copie que `/home/deploy/backups/mysql` et `/home/deploy/backups/uploads`.
+  **Aucune sauvegarde MedVue n'est hors du serveur**, ni celles de la rotation
+  normale ni celles de `reserved/` (§2 bis).
 - **Objectif de point de reprise : 24 h** (une sauvegarde par nuit).
 - **`.env` non sauvegardé** (voir §1) : sa conservation hors serveur est une
   obligation manuelle. Sans lui, la restauration des clés est impossible (elles
