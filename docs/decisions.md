@@ -9351,3 +9351,55 @@ Trois assertions existantes passent de `collection_before_start` /
 précis). Mutations tuées : 6/6 (rappel ignoré, rappel sans période
 ignoré, borne d'ouverture retirée, collecte close qui suivrait, ancien
 `canEditEnd`, motif générique au lieu de `collection_announced`).
+
+## D209 — Copie hors site chiffrée des sauvegardes MedVue, sur le modèle de MedClick
+
+**Contexte.** Le 2026-10-23, l'audit des sauvegardes montre qu'aucune
+sauvegarde MedVue ne quitte le serveur. `sync_gdrive.sh` (serveur partagé)
+ne copie que `mysql/` et `uploads/`. Les copies réservées (§2 bis de
+`docs/backup.md`) sont sur le même disque. Architecture validée le 2026-10-24.
+
+**Décision.** `scripts/backup/medvue-offsite.sh`, lancé après la sauvegarde
+nocturne :
+
+- **Chiffrement sur le serveur avant l'envoi** : gpg symétrique AES-256, avec
+  une phrase de passe propre à MedVue (`~/.medvue-backup-passphrase`, `600`).
+  C'est le modèle déjà en service pour MedClick (même remote rclone, même
+  convention de fichier).
+  - Une clé asymétrique, dont seule la partie publique serait sur le serveur,
+    a été écartée : le serveur ne pourrait plus prouver à chaque envoi que le
+    fichier se déchiffre, et un serveur compromis expose de toute façon la
+    base vivante.
+  - `JWT_PASSPHRASE` n'est pas réutilisée : une seule fuite ouvrirait alors à
+    la fois les clés et les sauvegardes.
+- **Aucune écriture destructrice sur le Drive** : `rclone copy --immutable`,
+  jamais `rclone sync`.
+  - La seule suppression est la rétention de `daily/` (7 quotidiennes,
+    4 hebdomadaires, 12 mensuelles), après un run entièrement vérifié.
+  - `reserved/` est conservé indéfiniment.
+- **Preuves à chaque envoi** :
+  - l'original correspond à son `.sha256` ;
+  - le `.gpg` se déchiffre en cette même empreinte ;
+  - `rclone check` après la copie.
+  - La récupération (`medvue-offsite-fetch.sh`) refait les mêmes contrôles
+    avant de rendre les fichiers au test de restauration.
+- **Activation conditionnelle** : la tâche quotidienne n'est ajoutée au cron
+  qu'après confirmation qu'une copie de la phrase de passe existe hors du
+  serveur. Sans elle, la copie hors site est indéchiffrable.
+
+**Compromis.**
+- La phrase de passe est sur le serveur, en clair dans un fichier `600`,
+  comme celle de MedClick. Elle protège les copies contre un accès au Drive,
+  pas contre un accès au serveur.
+- Les suppressions de la rétention passent par la corbeille du Drive.
+- L'administration ne voit pas encore l'état du hors site : amélioration
+  secondaire, non faite.
+
+**Tests.**
+- `scripts/backup/tests/medvue-offsite.test.sh`, avec le vrai rclone sur le
+  serveur ou `fake-rclone.sh` en CI : 23 vérifications, mutations tuées
+  (rétention malgré un échec, envoi d'ensembles écartés, absence de
+  chiffrement).
+- `BackupScriptsTest` vérifie les invariants statiques (copies immuables,
+  seule purge sur `daily/`, phrase de passe lue par gpg seulement, ni
+  `JWT_PASSPHRASE` ni `.env`) et lance ce banc.
