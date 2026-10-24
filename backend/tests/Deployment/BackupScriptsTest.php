@@ -111,6 +111,77 @@ final class BackupScriptsTest extends TestCase
         }
     }
 
+    /**
+     * docs/backup.md §2 ter, docs/decisions.md D209: encrypted on the server
+     * before transfer, with MedVue's own passphrase file, read by gpg only.
+     */
+    public function testOffsiteEncryptsBeforeTransferWithItsOwnPassphrase(): void
+    {
+        $script = $this->script('medvue-offsite.sh');
+        $code = $this->withoutComments($script);
+
+        self::assertStringContainsString('--symmetric --cipher-algo AES256', $code);
+        self::assertStringContainsString('${MEDVUE_OFFSITE_PASSFILE:-$HOME/.medvue-backup-passphrase}', $code);
+        self::assertStringContainsString('--passphrase-file "$PASSFILE"', $code, 'The passphrase reaches gpg through its file only, never a command line.');
+        self::assertStringContainsString('!= "600"', $code, 'A passphrase file readable by others is refused.');
+        self::assertStringContainsString('export GNUPGHOME="$work/gnupg"', $code, 'Never touches ~/.gnupg.');
+        self::assertStringContainsString('umask 077', $code);
+        self::assertDoesNotMatchRegularExpression('/JWT_PASSPHRASE|\.env\b/', $code, 'Never reuses the JWT passphrase, never reads .env.');
+        self::assertDoesNotMatchRegularExpression('/(cat|echo|printf|tee|<)\s+"?\$PASSFILE/', $code, 'The passphrase is never printed or read by the script itself.');
+
+        // The decrypted copy is proven equal to the original before anything leaves the server.
+        self::assertMatchesRegularExpression('/gpg "\$\{gpg_args\[@\]\}" -d -- "\$dest\/\$f\.gpg" \| sha256sum/', $code);
+    }
+
+    /**
+     * A local rotation must never delete anything remote, and the reserved
+     * sets are kept forever: copies are immutable, nothing is synced, and the
+     * only deletion targets daily/, after a fully verified run.
+     */
+    public function testOffsiteNeverSyncsAndOnlyEverPrunesDaily(): void
+    {
+        $code = $this->withoutComments($this->script('medvue-offsite.sh'));
+
+        preg_match_all('/"\$RCLONE" copy [^\n]*/', $code, $copies);
+        self::assertNotEmpty($copies[0]);
+        foreach ($copies[0] as $copy) {
+            self::assertStringContainsString('--immutable', $copy);
+        }
+        self::assertDoesNotMatchRegularExpression('/"\$RCLONE" (sync|move|delete|deletefile|rmdirs?|cleanup)\b/', $code);
+        preg_match_all('/"\$RCLONE" purge [^\n]*/', $code, $purges);
+        self::assertCount(1, $purges[0]);
+        self::assertStringContainsString('"$RCLONE" purge "$REMOTE/daily/$s"', $purges[0][0]);
+        self::assertStringContainsString('if [[ "$failures" -eq 0 ]]; then', $code, 'Retention only after a fully verified run.');
+        self::assertDoesNotMatchRegularExpression('/\brm\s+-\w*\s+[^\n]*\$BACKUP_ROOT/', $code, 'Never deletes a local backup.');
+
+        $fetch = $this->withoutComments($this->script('medvue-offsite-fetch.sh'));
+        self::assertDoesNotMatchRegularExpression('/"\$RCLONE" (sync|move|delete|deletefile|purge|rmdirs?)\b/', $fetch, 'Recovery only reads the remote.');
+        self::assertStringContainsString('sha256sum -c --quiet SHA256SUMS', $fetch);
+    }
+
+    /**
+     * Runs scripts/backup/tests/medvue-offsite.test.sh: encryption, upload,
+     * retention, blocked retention after a failure, fetch, tampering and a
+     * wrong passphrase, against a local directory (real rclone when installed,
+     * tests/fake-rclone.sh otherwise).
+     */
+    public function testOffsiteBehaviourOnAThrowawayTree(): void
+    {
+        if ('Windows' === \PHP_OS_FAMILY) {
+            self::markTestSkipped('Needs a Linux shell (chmod 600, GNU find).');
+        }
+        foreach (['bash', 'gpg'] as $tool) {
+            if ('' === trim((string) shell_exec('command -v '.$tool.' 2>/dev/null'))) {
+                self::markTestSkipped("$tool is not available.");
+            }
+        }
+
+        exec('bash '.escapeshellarg($this->root.'/scripts/backup/tests/medvue-offsite.test.sh').' 2>&1', $output, $status);
+
+        self::assertSame(0, $status, implode("\n", $output));
+        self::assertContains('RESULT: PASS', $output);
+    }
+
     public function testDocumentationStatesTheProductionRules(): void
     {
         $backup = (string) file_get_contents($this->root.'/docs/backup.md');

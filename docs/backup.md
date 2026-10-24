@@ -133,6 +133,88 @@ service. Ce test réécrit `status/restore-test.json` (§4 bis).
 > disque ou du serveur les emporte toutes. Aucune n'est copiée vers Google
 > Drive (§5).
 
+## 2 ter. Copie hors site chiffrée (D209, 2026-10-24)
+
+`scripts/backup/medvue-offsite.sh` copie les sauvegardes MedVue sur Google
+Drive, avec le remote `rclone` « gdrive » déjà utilisé par le serveur, sur le
+modèle de la sauvegarde MedClick.
+
+- **Chiffré sur le serveur, avant l'envoi** : `gpg --symmetric --cipher-algo
+  AES256`, avec la phrase de passe propre à MedVue
+  `~/.medvue-backup-passphrase` (droits `600`, refusée sinon). Ce n'est **pas**
+  `JWT_PASSPHRASE`, et le script ne lit jamais `.env`. Seul gpg lit ce
+  fichier : la phrase n'apparaît ni dans les journaux, ni dans une ligne de
+  commande.
+- **Vérifié avant l'envoi** : chaque original est contrôlé contre son
+  `.sha256`, puis chaque `.gpg` est déchiffré à nouveau et comparé à cette
+  empreinte.
+- **Envoyé sans jamais rien écraser** : `rclone copy --immutable`, puis
+  `rclone check`. Jamais `rclone sync` : la rotation locale (§2) ne supprime
+  rien sur le Drive.
+- **Rangement distant** (`gdrive:INFORMATIQUE/Base de donnée/medvue/`) :
+
+  | Dossier | Contenu | Rétention |
+  |---|---|---|
+  | `daily/<horodatage>/` | dump + archive JWT de `postgres/` et `jwt-keys/` | 7 quotidiennes, 4 hebdomadaires, 12 mensuelles (`medvue-offsite-retention.sh`) |
+  | `reserved/<horodatage>/` | chaque ensemble de `reserved/` (§2 bis) | **indéfinie** : aucun script n'y supprime rien |
+  | `reserved/_index/<empreinte>/` | `SHA256SUMS`, `INDEX.tsv`, `README.txt` de `reserved/` | une version par contenu, indéfinie |
+
+  Chaque ensemble contient les fichiers `.gpg`, les `.sha256` des originaux
+  (empreintes du clair) et `SHA256SUMS` (empreintes des `.gpg`).
+- **Rétention** : elle ne touche que `daily/`, et seulement si tout le run a
+  été vérifié. Un ensemble qu'elle écarterait aussitôt n'est jamais envoyé.
+  La suppression passe par `rclone purge` : le Drive la met dans sa corbeille.
+- **Coût** : environ 100 Ko chiffrés par ensemble quotidien, soit environ
+  25 Mo au total avec `reserved/`. Le Drive (100 Gio) a plus de 55 Gio libres,
+  donc aucun surcoût.
+
+**Récupérer un ensemble** (dans un dossier neuf, rien n'est restauré) :
+
+```bash
+/opt/stack/apps/medvue/scripts/backup/medvue-offsite-fetch.sh daily <HORODATAGE> /home/deploy/offsite-fetch-<HORODATAGE>
+# vérifie SHA256SUMS, déchiffre, vérifie chaque .sha256, puis :
+/opt/stack/apps/medvue/scripts/backup/medvue-restore-test.sh \
+  --dump /home/deploy/offsite-fetch-<HORODATAGE>/medvue_<HORODATAGE>.dump \
+  --keys /home/deploy/offsite-fetch-<HORODATAGE>/jwt-keys_<HORODATAGE>.tar.gz
+```
+
+Sur un serveur reconstruit (§4.3), recréer d'abord `~/.medvue-backup-passphrase`
+(`600`) à partir de la copie conservée hors du serveur. **Sans cette copie, la
+sauvegarde hors site est indéchiffrable.**
+
+**Activation** (une seule fois) :
+
+1. Créer la phrase de passe sur le serveur, sans l'afficher :
+   `( set -o noclobber; umask 077; openssl rand -base64 48 > ~/.medvue-backup-passphrase )`.
+2. **En conserver une copie hors du serveur** (gestionnaire de mots de passe,
+   à côté du `.env`). L'opérateur la lit depuis son propre terminal, jamais
+   dans un journal. Il compare ensuite l'empreinte de sa copie,
+   `printf '%s\n' '<copie>' | sha256sum`, avec celle du serveur,
+   `sha256sum ~/.medvue-backup-passphrase`.
+3. Premier envoi (`medvue-offsite.sh`), puis un ensemble récupéré et restauré
+   comme ci-dessus.
+4. Seulement après les points 2 et 3, ajouter la tâche au crontab de
+   `deploy`, après la sauvegarde de 03:45, sans rien modifier d'autre :
+
+   ```bash
+   crontab -l > ~/backups/cron/crontab-avant-offsite-$(date +%Y%m%d).txt
+   ( crontab -l; echo ''; echo '# MedVue — copie hors site chiffrée (docs/backup.md §2 ter)'; echo 'CRON_TZ=UTC'
+     echo '30 4 * * * /opt/stack/apps/medvue/scripts/backup/medvue-offsite.sh >> /home/deploy/backups/medvue/cron.log 2>&1' ) | crontab -
+   ```
+
+**Tests** : `scripts/backup/tests/medvue-offsite.test.sh` vérifie le
+comportement sur une arborescence jetable, avec le vrai rclone (serveur) ou
+`tests/fake-rclone.sh` (CI). Il couvre :
+
+- le chiffrement, l'absence de clair sur le distant, l'idempotence ;
+- la rétention, et le blocage de la rétention après un échec ;
+- `reserved/` jamais élagué, les originaux locaux intacts ;
+- la récupération, avec refus d'un fichier altéré et d'une autre phrase de
+  passe.
+
+`backend/tests/Deployment/BackupScriptsTest.php` le lance, et garantit
+statiquement les règles ci-dessus.
+
 ## 3. Vérifier
 
 ```bash
@@ -262,6 +344,18 @@ Aucun chemin, aucun secret. Ce répertoire est monté **en lecture seule** dans
   copie que `/home/deploy/backups/mysql` et `/home/deploy/backups/uploads`.
   **Aucune sauvegarde MedVue n'est hors du serveur**, ni celles de la rotation
   normale ni celles de `reserved/` (§2 bis).
+  *Mise à jour 2026-10-24* : la copie hors site chiffrée existe (§2 ter) ;
+  la tâche quotidienne n'est activée qu'une fois confirmée la copie de la
+  phrase de passe hors du serveur.
+- **Serveur partagé, hors MedVue** (2026-10-23) :
+  - `/home/deploy/scripts/rotate_backups.sh` ne supprimait jamais les dumps
+    MySQL (précédence de `-o` dans `find`). C'est corrigé, et l'original est
+    conservé dans `/home/deploy/backups/code/`.
+  - Les dumps anciens et toutes les sauvegardes manuelles sont archivés dans
+    `gdrive:…/archive-mysql-20261023/`.
+  - `archive_mysql_weekly.sh` (dimanche 02:30 UTC) copie chaque semaine les
+    dumps manuels et le premier dump de chaque mois vers `…/archive-mysql/`,
+    par `copy --immutable`, sans jamais rien supprimer.
 - **Objectif de point de reprise : 24 h** (une sauvegarde par nuit).
 - **`.env` non sauvegardé** (voir §1) : sa conservation hors serveur est une
   obligation manuelle. Sans lui, la restauration des clés est impossible (elles
