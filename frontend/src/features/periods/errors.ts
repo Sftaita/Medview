@@ -110,7 +110,15 @@ export function dateReasonMessage(reason: DateReason): string {
     case 'collection_before_start':
       return 'Une collecte des disponibilités de cette période commence avant ce jour.'
     case 'collection_announced':
-      return 'Les participants ont déjà été sollicités pour la collecte des disponibilités (rappel envoyé) : elle n’est plus redimensionnée, et ce jour la laisserait hors de la période.'
+      return 'Les participants ont déjà été sollicités pour la collecte des disponibilités (annonce ou rappel envoyé) : elle n’est plus redimensionnée, et ce jour la laisserait hors de la période.'
+    case 'preparation_past':
+      return 'Ce jour est déjà passé.'
+    case 'preparation_after_period':
+      return 'Ce jour est après la fin de la période.'
+    case 'preparation_target_not_after_announcement':
+      return 'La date cible de génération vient après l’annonce.'
+    case 'preparation_announcement_not_before_target':
+      return 'L’annonce vient avant la date cible de génération.'
     case 'collection_answered':
       return 'Des participants ont déjà répondu à la collecte des disponibilités ou modifié leurs absences : elle n’est plus redimensionnée, et ce jour la laisserait hors de la période.'
     case 'period_locked':
@@ -141,4 +149,43 @@ export function periodDatesError(err: unknown): string {
   if (err.status === 403) return 'Seul le créateur du planning peut modifier les dates.'
   if (body.error) return dateReasonMessage({ code: body.error, cuts: body.details })
   return 'Les dates n’ont pas pu être enregistrées. Réessayez.'
+}
+
+/** docs/decisions.md D210: why the preparation of a period was not saved, said for a doctor. */
+const PREPARATION_MESSAGES: Record<string, string> = {
+  period_management_disabled: 'La gestion des périodes n’est pas activée.',
+  period_generation_started: 'La génération de cette période a été lancée : sa préparation ne change plus.',
+  period_locked: 'Cette période est validée ou publiée : sa préparation ne change plus.',
+  period_over: 'Cette période est terminée.',
+  announcement_in_past: 'La date d’annonce est déjà passée.',
+  announcement_after_period_end: 'La date d’annonce est après la fin de la période.',
+  announcement_already_done: 'L’annonce a déjà été faite : elle ne change plus.',
+  target_in_past: 'La date cible de génération est déjà passée.',
+  target_after_period_end: 'La date cible de génération est après la fin de la période.',
+  target_before_announcement: 'La date cible de génération doit venir après l’annonce.',
+  reminders_need_target:
+    'Choisissez d’abord la date cible de génération : les rappels se placent avant elle.',
+  invalid_reminder: 'Un rappel se place 1 à 365 jours, ou 1 à 52 semaines, avant la date cible.',
+  duplicate_reminder: 'Deux rappels tombent le même jour.',
+  reminder_in_past: 'Un rappel tomberait un jour déjà passé.',
+  reminder_before_announcement: 'Un rappel doit venir après l’annonce.',
+  reminder_not_editable: 'Ce rappel a déjà été envoyé : il ne change plus.',
+  reminder_not_found: 'Ce rappel n’existe plus. Rechargez la page.',
+  too_many_reminders: 'Dix rappels au plus par période.',
+  invalid_date: 'Une des dates n’est pas valide.',
+}
+
+export function preparationErrorMessage(code: string): string {
+  return PREPARATION_MESSAGES[code] ?? 'La préparation n’a pas pu être enregistrée.'
+}
+
+export function preparationSaveError(err: unknown): string {
+  if (!(err instanceof ApiError)) {
+    return 'La préparation n’a pas pu être enregistrée. Vérifiez votre connexion et réessayez.'
+  }
+  if (err.status === 403) return 'Seuls le créateur et les responsables du planning préparent ses périodes.'
+  const body = (err.body ?? {}) as { error?: string }
+  return body.error
+    ? preparationErrorMessage(body.error)
+    : 'La préparation n’a pas pu être enregistrée. Réessayez.'
 }

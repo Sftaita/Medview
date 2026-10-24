@@ -1,0 +1,16 @@
+Bonjour {{ firstName }},
+
+Vous n'avez pas encore confirmé vos disponibilités pour le planning de garde {{ planningName }} (période du {{ periodLabel }}).
+
+Merci de vérifier vos indisponibilités dans MedVue et de confirmer qu'elles sont à jour — y compris si vous n'en avez aucune.
+{% if targetLabel %}
+
+La génération du planning est prévue aux alentours du {{ targetLabel }}.
+{% endif %}
+
+Confirmer mes disponibilités :
+{{ availabilityUrl }}
+
+Merci.
+
+L'équipe MedVue

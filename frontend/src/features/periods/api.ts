@@ -106,3 +106,71 @@ export function openPeriodCollection(
     body: input.deadline ? { deadline: input.deadline } : {},
   })
 }
+
+/** docs/decisions.md D210 — « Préparer la période ». */
+export type PreparationActionState = 'none' | 'scheduled' | 'executed' | 'skipped' | 'cancelled'
+export type ReminderUnit = 'DAY' | 'WEEK'
+export type PreparationEmails = {
+  queued: number
+  sent: number
+  failed: number
+  cancelled: number
+  pending: number
+}
+export type PreparationReminder = {
+  stableId: string
+  value: number
+  unit: ReminderUnit
+  /** The day it runs (08:00 Europe/Brussels): the target date minus its offset. */
+  dueOn: string
+  state: Exclude<PreparationActionState, 'none'>
+  outcome: string | null
+  executedAt: string | null
+  emails: PreparationEmails
+}
+export type PeriodPreparation = {
+  period: { stableId: string; number: number; startsAt: string; lastDay: string }
+  timezone: string
+  sendTime: string
+  today: string
+  editable: boolean
+  blockers: string[]
+  announcement: {
+    on: string | null
+    state: PreparationActionState
+    outcome: string | null
+    executedAt: string | null
+    emails: PreparationEmails
+  }
+  targetGenerationOn: string | null
+  collection: { state: 'not_open' | 'open' | 'closed'; responded: number; expected: number }
+  reminders: PreparationReminder[]
+}
+export type PreparationInput = {
+  announceOn: string | null
+  targetGenerationOn: string | null
+  reminders: { stableId?: string; value: number; unit: ReminderUnit }[]
+}
+
+export function fetchPeriodPreparation(
+  planningStableId: string,
+  periodStableId: string,
+): Promise<PeriodPreparation> {
+  return apiFetch<PeriodPreparation>(
+    `/api/plannings/${planningStableId}/periods/${periodStableId}/preparation`,
+  )
+}
+
+export function savePeriodPreparation(
+  planningStableId: string,
+  periodStableId: string,
+  input: PreparationInput,
+): Promise<PeriodPreparation> {
+  return apiFetch<PeriodPreparation>(
+    `/api/plannings/${planningStableId}/periods/${periodStableId}/preparation`,
+    {
+      method: 'PUT',
+      body: input,
+    },
+  )
+}

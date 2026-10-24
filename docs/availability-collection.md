@@ -201,6 +201,13 @@ API Platform générique. Des `stableId` partout.
 
 ## 11. Rappels (implémenté — Lot pilotage, docs/decisions.md D127)
 
+> *Depuis D210 (2026-10-24, non déployé)* : en plus de ces rappels manuels,
+> le panneau « Préparer la période » programme une annonce et des rappels N
+> jours ou N semaines avant la date cible de génération, envoyés à 08:00
+> Europe/Brussels aux seules personnes encore attendues. Ils passent par une
+> outbox propre (`period_preparation_deliveries`), pas par cette table
+> d'audit. Voir `docs/decisions.md` D210 et `docs/deployment.md` §5 octies.
+
 `GET …/responses?status=PENDING` et
 `AvailabilityCollectionService::pendingResponses()` renvoient exactement les
 personnes encore attendues — l'audience d'un rappel, réutilisée telle quelle

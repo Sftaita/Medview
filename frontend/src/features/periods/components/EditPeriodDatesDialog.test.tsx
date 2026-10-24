@@ -210,7 +210,7 @@ describe('EditPeriodDatesDialog (docs/decisions.md D207)', () => {
       await within(dialog).findByRole('button', { name: /^mercredi 28 avril 2027, impossible/ }),
     )
     expect(within(dialog).getByRole('status')).toHaveTextContent(
-      'Les participants ont déjà été sollicités pour la collecte des disponibilités (rappel envoyé)',
+      'Les participants ont déjà été sollicités pour la collecte des disponibilités (annonce ou rappel envoyé)',
     )
     expect(within(dialog).getByRole('button', { name: 'Enregistrer les dates' })).toBeDisabled()
     expect(onSave).not.toHaveBeenCalled()
