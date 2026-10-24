@@ -15,7 +15,11 @@ use App\Repository\UserRepository;
 use App\Service\PeriodPreparationRunner;
 use App\Tests\CalendarWorkflowTestHelpers;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Schema\Schema;
+use Doctrine\Migrations\Exception\AbortMigration;
 use Doctrine\ORM\EntityManagerInterface;
+use DoctrineMigrations\Version20261024090000;
+use Psr\Log\NullLogger;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -417,6 +421,21 @@ final class PeriodPreparationRunnerTest extends WebTestCase
         self::assertTrue($repository->queue($preparation, PreparationDeliveryKind::ANNOUNCEMENT, null, $alice, $now));
         self::assertFalse($repository->queue($preparation, PreparationDeliveryKind::ANNOUNCEMENT, null, $alice, $now), 'One announcement per person and period.');
         self::assertSame(1, \count($container->get(EntityManagerInterface::class)->getRepository(PeriodPreparationDelivery::class)->findAll()));
+    }
+
+    public function testTheMigrationRefusesToGoDownOnceSomethingWasSent(): void
+    {
+        require_once \dirname(__DIR__, 2).'/migrations/Version20261024090000.php';
+        $migration = new Version20261024090000($this->db(), new NullLogger());
+        $migration->down(new Schema());
+        self::assertNotEmpty($migration->getSql(), 'Nothing sent yet: the tables may be dropped.');
+
+        $period = $this->createPeriod2();
+        $this->prepare($period, ['announceOn' => '2027-03-01']);
+        $this->runAt(self::at('2027-03-01 08:00'));
+
+        $this->expectException(AbortMigration::class);
+        (new Version20261024090000($this->db(), new NullLogger()))->down(new Schema());
     }
 
     // --- the command -------------------------------------------------------------------------------
