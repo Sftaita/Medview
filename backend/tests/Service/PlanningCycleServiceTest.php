@@ -8,6 +8,7 @@ use App\Entity\PlanningCycle;
 use App\Exception\PlanningCycleException;
 use App\Repository\AvailabilityCollectionRepository;
 use App\Repository\FairnessPeriodRepository;
+use App\Repository\PeriodPreparationRepository;
 use App\Repository\PlanningCycleRepository;
 use App\Repository\PlanningJobRepository;
 use App\Repository\PlanningLineRepository;
@@ -63,6 +64,7 @@ final class PlanningCycleServiceTest extends WebTestCase
             $container->get(PeriodBoundaryGuard::class),
             $container->get(PeriodDateRules::class),
             new NullLogger(),
+            $container->get(PeriodPreparationRepository::class),
             false,
         );
         $planning = $container->get(PlanningRepository::class)->findOneByStableId($s['planningId']);

@@ -201,6 +201,28 @@ function Probe() {
   )
 }
 
+/** docs/decisions.md D210: the « Préparer la période » panel of a period, nothing planned yet. */
+function blankPreparation(stableId: string) {
+  return {
+    period: { stableId, number: Number(stableId.slice(1)), startsAt: '2026-10-01', lastDay: '2027-01-31' },
+    timezone: 'Europe/Brussels',
+    sendTime: '08:00',
+    today: '2026-10-24',
+    editable: true,
+    blockers: [],
+    announcement: {
+      on: null,
+      state: 'none',
+      outcome: null,
+      executedAt: null,
+      emails: { queued: 0, sent: 0, failed: 0, cancelled: 0, pending: 0 },
+    },
+    targetGenerationOn: null,
+    collection: { state: 'not_open', responded: 0, expected: 0 },
+    reminders: [],
+  }
+}
+
 function renderPage(
   detail: () => PlanningDetail,
   extra: Record<string, ApiRoute> = {},
@@ -215,6 +237,12 @@ function renderPage(
     'GET /api/plannings/plan-1/availability-collections': () => [],
     'GET /api/me/availability-collections': () => [],
     'GET /api/plannings/plan-1/jobs/latest': () => ({ job: null }),
+    ...Object.fromEntries(
+      ['c1', 'c2', 'c3', 'c4'].map((id) => [
+        `GET /api/plannings/plan-1/periods/${id}/preparation`,
+        () => blankPreparation(id),
+      ]),
+    ),
     ...extra,
   })
   render(

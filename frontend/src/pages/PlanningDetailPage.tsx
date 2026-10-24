@@ -15,6 +15,7 @@ import { Icon as PeriodIcon } from '../features/periods/components/Icon'
 import { PeriodDetailCard } from '../features/periods/components/PeriodDetailCard'
 import { PeriodSelector } from '../features/periods/components/PeriodSelector'
 import { PeriodTabs } from '../features/periods/components/PeriodTabs'
+import { PeriodPreparationPanel } from '../features/periods/components/PeriodPreparationPanel'
 import { PreparationSteps } from '../features/periods/components/PreparationSteps'
 import { addDays, formatRange } from '../features/periods/dates'
 import { collectionOpeningMessage, periodCreationError, periodDatesError } from '../features/periods/errors'
@@ -587,6 +588,11 @@ export function PlanningDetailPage() {
             onOpenCollecte={handleOpenCollection}
             lines={lineStates(periodView, planning.lines)}
           />
+        )}
+
+        {/* docs/decisions.md D210: announcement, target generation date and reminders of this period. */}
+        {period && periodStableId && planning.canManageAvailability && (
+          <PeriodPreparationPanel planningStableId={planning.stableId} periodStableId={periodStableId} />
         )}
 
         <PeriodTabs

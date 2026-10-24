@@ -427,6 +427,38 @@ afficherait les congés importés comme des périodes éditables : vider
 migration `down` de `Version20261010120000`, qui supprime les périodes
 importées). Côté SurgicalHub, retirer l'empreinte désactive son API.
 
+## 5 octies. Préparation des périodes : annonces et rappels (D210)
+
+> **Pas encore déployé.** À installer avec la release qui contient
+> `Version20261024090000` : une seule ligne ajoutée en fin de crontab de
+> `deploy`, après une copie de sécurité du crontab (la fréquence `*/10` est
+> indépendante du fuseau).
+
+`app:period-preparation:run` exécute ce que le panneau « Préparer la période »
+a programmé, à 08:00 Europe/Brussels le jour prévu :
+
+- l'annonce : ouverture de la collecte sur les jours que personne ne couvre
+  encore, puis une invitation par personne attendue ;
+- les rappels : uniquement aux personnes qui n'ont pas confirmé ;
+- les emails de la préparation : réservés un par un, retentés jusqu'à 5 fois.
+
+Tout est revérifié au moment de l'exécution : génération lancée, période
+validée ou publiée ou terminée, date cible dépassée, auteur toujours autorisé,
+personne toujours en attente.
+
+Après une panne, seul le dernier rappel échu d'une période part ; les autres
+sont marqués « remplacés ». Une personne ne reçoit jamais deux fois la même
+annonce ni le même rappel. Le seul doublon possible est celui de l'incertitude
+SMTP, comme au §5 quater.
+
+La commande ne ferme jamais une collecte et ne lance jamais de génération.
+Sans danger à tout moment, même deux fois en parallèle. Code de sortie ≠ 0 si
+un envoi a échoué ou si une étape a été reportée.
+
+```bash
+*/10 * * * * cd /opt/stack/apps/medvue && flock -n /tmp/medvue-period-preparation.lock docker compose -f docker-compose.prod.yml exec -T backend php bin/console app:period-preparation:run >> /home/deploy/backups/medvue/period-preparation.log 2>&1
+```
+
 ## 6. Historique des déploiements
 
 | Date | Tag | Commit | Notes |

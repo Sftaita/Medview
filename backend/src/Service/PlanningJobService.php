@@ -44,6 +44,7 @@ final class PlanningJobService
         private readonly EntityManagerInterface $entityManager,
         private readonly ManagerRegistry $registry,
         private readonly SurgicalHubFreshnessGate $surgicalHubGate,
+        private readonly PeriodPreparationService $preparationService,
     ) {
     }
 
@@ -82,6 +83,8 @@ final class PlanningJobService
             'teamMinRestHours' => $restPolicy->teamMinRestHours,
         ], $scope), $cycle);
         $this->surgicalHubGate->recordOverride($surgicalHub, $planning, $requestedBy, (string) $job->getStableId());
+        // docs/decisions.md D210: the generation is launched — the reminders not sent yet are pointless.
+        $this->preparationService->onGenerationRequested($cycle);
 
         return new RequestedGeneration($job, $surgicalHub);
     }

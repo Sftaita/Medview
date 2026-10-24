@@ -126,9 +126,11 @@ class PlanningCycleRepository extends ServiceEntityRepository
      * the intact collection: in a blank period, the only collection, open,
      * covering it exactly, nobody answered, changed (added, edited or deleted
      * an absence in its window), withdrew, and nobody was written to about
-     * it. A reminder is the only message about a collection today; one sent
-     * before periods existed has no period (planning_cycle_id NULL) and
-     * counts once sent after the collection opened. Otherwise
+     * it. A message is a manual reminder — one sent before periods existed has
+     * no period (planning_cycle_id NULL) and counts once sent after the
+     * collection opened — or an announcement / scheduled reminder of the
+     * period's preparation (D210) that was sent, or is being sent (its
+     * delivery is uncertain): one only planned never counts. Otherwise
      * collectionAnswered / collectionContacted say why it keeps its window.
      *
      * @return array{generations: int, publications: int, jobs: int, duties: int, firstDutyDay: ?string, lastDutyDay: ?string, collections: int, firstCollectionStart: ?string, lastCollectionEnd: ?string, collectionAnswered: bool, collectionContacted: bool, untouchedCollectionId: ?int}
@@ -149,10 +151,12 @@ class PlanningCycleRepository extends ServiceEntityRepository
               EXISTS (SELECT 1 FROM availability_collection_responses r JOIN availability_collections ac ON ac.id = r.collection_id
                 WHERE ac.planning_cycle_id = :cycle
                   AND (r.acknowledged_at IS NOT NULL OR r.last_availability_change_at IS NOT NULL OR r.withdrawn_at IS NOT NULL)) AS collection_answered,
-              EXISTS (SELECT 1 FROM planning_availability_reminders pr JOIN planning_cycles cy ON cy.id = :cycle
+              (EXISTS (SELECT 1 FROM planning_availability_reminders pr JOIN planning_cycles cy ON cy.id = :cycle
                 WHERE pr.planning_cycle_id = cy.id
                    OR (pr.planning_cycle_id IS NULL AND pr.planning_id = cy.planning_id
-                       AND pr.sent_at >= (SELECT MIN(opened_at) FROM availability_collections WHERE planning_cycle_id = cy.id))) AS collection_contacted,
+                       AND pr.sent_at >= (SELECT MIN(opened_at) FROM availability_collections WHERE planning_cycle_id = cy.id)))
+               OR EXISTS (SELECT 1 FROM period_preparation_deliveries pd
+                WHERE pd.planning_cycle_id = :cycle AND pd.status IN ('SENT', 'SENDING'))) AS collection_contacted,
               (SELECT ac.id FROM availability_collections ac JOIN planning_cycles cy ON cy.id = ac.planning_cycle_id
                  WHERE ac.planning_cycle_id = :cycle AND ac.status = 'OPEN' AND ac.starts_at = cy.starts_at AND ac.ends_at = cy.ends_at
                    AND (SELECT COUNT(*) FROM availability_collections other WHERE other.planning_cycle_id = :cycle) = 1) AS sole_collection_id

@@ -12,6 +12,7 @@ use Doctrine\Migrations\AbstractMigration;
 use DoctrineMigrations\Version20261010180000;
 use DoctrineMigrations\Version20261012090000;
 use DoctrineMigrations\Version20261016090000;
+use DoctrineMigrations\Version20261024090000;
 use Psr\Log\NullLogger;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 
@@ -29,6 +30,7 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 require_once \dirname(__DIR__, 2).'/migrations/Version20261010180000.php';
 require_once \dirname(__DIR__, 2).'/migrations/Version20261012090000.php';
 require_once \dirname(__DIR__, 2).'/migrations/Version20261016090000.php';
+require_once \dirname(__DIR__, 2).'/migrations/Version20261024090000.php';
 
 final class SinglePeriodCompatibilityMigrationTest extends WebTestCase
 {
@@ -77,6 +79,8 @@ final class SinglePeriodCompatibilityMigrationTest extends WebTestCase
      */
     private function undoL4c(): void
     {
+        // The period preparation (D210, nothing sent in this fixture) comes after L4c: undone first.
+        $this->migrate(Version20261024090000::class, 'down');
         $this->db->executeStatement('ALTER TABLE planning_publication_lines DISABLE TRIGGER trg_planning_publication_lines_append_only');
         $this->db->executeStatement('DELETE FROM planning_publication_lines');
         $this->db->executeStatement('ALTER TABLE planning_publication_lines ENABLE TRIGGER trg_planning_publication_lines_append_only');

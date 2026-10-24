@@ -1,0 +1,32 @@
+{# ------------------------------------------------------------------
+   MedVue — Annonce de la collecte d'une période (préparation programmée, D210)
+   Objet : Disponibilités à communiquer — <planning>
+   Contexte : firstName, planningName, periodNumber, periodLabel, targetLabel (ou null), availabilityUrl
+   Jamais de détail d'indisponibilité ni de donnée d'un autre membre ; pas de date limite.
+   Les noms saisis par un tiers passent par |e avant d'entrer dans ui.p().
+   ------------------------------------------------------------------ #}
+{% extends 'email/_base.html.twig' %}
+{% import  'email/_components.html.twig' as ui %}
+
+{% set preheader  = 'La collecte des disponibilités de ' ~ planningName ~ ' est ouverte.' %}
+{% set accent     = '#42A882' %}
+{% set eyebrow    = 'Disponibilités' %}
+{% set h1         = 'La collecte des<br>disponibilités est ouverte' %}
+{% set panelLabel = 'Planning' %}
+{% set panelTitle = planningName %}
+{% set panelSub   = 'Période ' ~ periodNumber ~ ' · du ' ~ periodLabel %}
+{% set ctaLabel   = 'Communiquer mes disponibilités' %}
+{% set ctaUrl     = availabilityUrl %}
+{% set footerNote = 'Vous recevez cet email car vous participez à un planning de garde sur MedVue.' %}
+
+{% block title %}Collecte des disponibilités{% endblock %}
+{% block postal %}{% endblock %}
+
+{% block content %}
+{{ ui.p('Bonjour ' ~ firstName|e ~ ',', 24) }}
+{{ ui.p('La préparation du planning de garde ' ~ ui.b(planningName) ~ ' pour la période du ' ~ periodLabel|e ~ ' commence.', 18) }}
+{{ ui.p('Merci d’indiquer vos indisponibilités dans MedVue, puis de confirmer qu’elles sont à jour — y compris si vous n’en avez aucune.') }}
+{% if targetLabel %}
+{{ ui.p('La génération du planning est prévue aux alentours du ' ~ targetLabel|e ~ '. Les indisponibilités prises en compte seront celles présentes dans MedVue à ce moment-là.') }}
+{% endif %}
+{% endblock %}

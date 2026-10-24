@@ -9403,3 +9403,127 @@ nocturne :
 - `BackupScriptsTest` vérifie les invariants statiques (copies immuables,
   seule purge sur `daily/`, phrase de passe lue par gpg seulement, ni
   `JWT_PASSPHRASE` ni `.env`) et lance ce banc.
+
+## D210 — « Préparer la période » : annonce programmée, date cible de génération, rappels
+
+**Contexte.** Lot 2 de la préparation manuelle d'une période, après les dates
+(D207, D208). Le gestionnaire veut programmer à l'avance trois choses :
+
+- l'annonce de la collecte des indisponibilités, avec son ouverture
+  automatique ;
+- une date cible pour la génération, qui reste manuelle ;
+- des rappels N jours ou N semaines avant cette date, à ceux qui n'ont pas
+  confirmé.
+
+Jusqu'ici, rien n'était planifié dans le temps : l'ouverture d'une collecte et
+les rappels étaient manuels et immédiats (D127). Architecture validée le
+2026-10-24.
+
+**Décision.**
+
+- **Modèle** (`Version20261024090000`) :
+  - `period_preparations`, une par période, créée au premier enregistrement du
+    panneau. Elle porte la date d'annonce et son instant UTC, l'état de
+    l'annonce, la date cible et le dernier gestionnaire qui l'a enregistrée
+    (celui au nom duquel la collecte s'ouvre).
+  - `period_preparation_reminders` : un rappel par ligne, décalage (1 à 365
+    jours, ou 1 à 52 semaines), jour et instant d'exécution. Seul un rappel
+    `SCHEDULED` change ou disparaît. Les rappels exécutés, ignorés ou annulés
+    restent comme historique. Deux rappels programmés d'une même période ne
+    tombent jamais le même jour (index partiel).
+  - `period_preparation_deliveries`, l'outbox de D172 : `PENDING` → `SENDING` →
+    `SENT`, `FAILED` ou `CANCELLED`. Une annonce par personne et par période, un
+    email par personne et par rappel (index uniques, insertion
+    `ON CONFLICT DO NOTHING`). Ces lignes sont le journal des destinataires et
+    des envois réels.
+- **Heure** : 08:00 Europe/Brussels le jour choisi, quel que soit le fuseau du
+  serveur. « Aujourd'hui » est le jour de Bruxelles.
+- **Exécution** : `app:period-preparation:run`, toutes les 10 minutes par le
+  cron de l'hôte sous `flock` (D146 : pas de Symfony Scheduler). Trois étapes :
+  - **Annonce échue** : sous le verrou du planning puis celui de la ligne de
+    préparation, tout est revérifié. Génération lancée, période validée,
+    publiée ou terminée, auteur qui n'a plus `MANAGE_AVAILABILITY` : l'annonce
+    est `SKIPPED`, avec la raison. Sinon, une collecte est ouverte sur chaque
+    partie de la période qu'aucune collecte ne couvre (jamais de doublon : si
+    une collecte adaptée existe, rien n'est créé). Puis une invitation est mise
+    en file pour chaque personne attendue qui n'a pas encore répondu, sur les
+    deux lignes de Trauma Delta, une seule fois par personne. Tout est validé
+    ensemble, ou rien.
+  - **Rappels échus** : mêmes vérifications, plus la date cible non dépassée.
+    Si plusieurs rappels d'une période sont échus à la fois (serveur arrêté),
+    seul le plus récent part ; les autres sont `SKIPPED superseded`.
+  - **Envoi** : chaque email est réservé (`claim`, un seul expéditeur), puis
+    revérifié : compte actif, personne toujours en attente (`CONFIRMED` et
+    `NO_UNAVAILABILITY` comptent comme réponses), génération non lancée.
+    Sinon `CANCELLED`, avec la raison. Un refus SMTP est retenté jusqu'à 5
+    fois ; un envoi resté `SENDING` plus de 15 minutes est repris. Le seul
+    doublon possible est celui de l'incertitude SMTP, comme D172.
+  - Les entités sont relues depuis la base au début de chaque passage (jamais
+    un rôle ou un statut gardé en mémoire).
+- **Génération lancée** : `PlanningJobService::requestGeneration()` annule
+  l'annonce non faite, les rappels programmés et les emails non partis de la
+  période. Le runner le vérifie aussi avant chaque envoi.
+- **La date cible ne fait rien d'autre** : elle ne lance jamais le solveur et
+  ne ferme jamais la collecte. Les indisponibilités prises en compte restent
+  celles présentes au lancement effectif de la génération (snapshot, D106), et
+  rien ne modifie automatiquement des affectations générées.
+- **D208** : un envoi `SENT`, ou `SENDING` (livraison incertaine), compte comme
+  « personnes sollicitées » dans `PlanningCycleRepository::dateFacts()`. Une
+  collecte annoncée n'est donc plus redimensionnée en silence
+  (`collection_announced`). Un envoi seulement programmé, ou refusé par le
+  transport, ne compte pas.
+- **Pas de date limite distincte** : les emails citent la date cible comme une
+  prévision, jamais comme une échéance.
+- **Création d'une période** : aucun email, aucune préparation créée.
+  Supprimer la dernière période efface sa préparation, jamais envoyée par
+  construction : une période qui a une collecte ne se supprime pas.
+- **API** : `GET`/`PUT /api/plannings/{p}/periods/{period}/preparation`, droit
+  `MANAGE_AVAILABILITY`. Le `PUT` remplace le plan : un rappel nommé par son
+  `stableId` change, un rappel nouveau s'ajoute, un rappel programmé absent de
+  la liste est supprimé. Refus 422/409 avec code, par exemple
+  `announcement_in_past`, `target_before_announcement`, `reminder_in_past`,
+  `duplicate_reminder`, `reminder_before_announcement`,
+  `announcement_already_done`, `period_generation_started`.
+- **Interface** : un seul panneau « Préparer la période » sous les étapes de
+  la période, réservé à ceux qui gèrent les disponibilités. Il montre la
+  période couverte, l'annonce et son état, l'état de la collecte, la date
+  cible, et les rappels programmés et passés avec leurs envois. Les
+  calendriers réutilisent `BoundaryCalendar` et disent pourquoi un jour est
+  refusé. Les mêmes règles sont vérifiées côté client avant l'envoi.
+  Utilisable à 390 px.
+
+**Compromis.**
+
+- Les emails de préparation ne sont pas écrits dans
+  `planning_availability_reminders` : cette table d'audit refuse toute
+  modification et exige un `sentBy` humain. La garde de 5 minutes des rappels
+  manuels ne voit donc pas les envois automatiques.
+- Un manager qui perd ses droits avant l'annonce la fait ignorer
+  (`manager_not_allowed`), plutôt que de faire ouvrir la collecte au nom d'un
+  autre.
+- Si la gestion des périodes est désactivée sur le serveur au moment de
+  l'annonce, elle reste programmée (configuration, pas décision) et un
+  avertissement est journalisé.
+
+**Tests.**
+
+- Backend :
+  - `PeriodPreparationControllerTest` (10) : droits, validation de chaque
+    refus, modification et échange des jours de rappels, suivi de la date
+    cible, historique non modifiable, aucun email à la création, suppression
+    de la période, annulation par une vraie génération ;
+  - `PeriodPreparationRunnerTest` (13) : 08:00 exact, collecte ouverte une
+    fois, deux lignes et une personne présente dans les deux, confirmations,
+    gestionnaire déchu, D208 seulement après un envoi réel, rattrapage après
+    panne, date cible dépassée avec collecte restée ouverte, refus SMTP puis
+    reprise, confirmation entre-temps, réservation exclusive et envoi
+    abandonné repris une fois, insertion idempotente, annulation par la
+    génération, commande.
+  - Mutations tuées : 4 sur 4 (D208 ignorant les envois, rattrapage complet
+    après panne, absence de revérification à l'envoi, réservation fraîche
+    volée).
+- Frontend : `PeriodPreparationPanel.test.tsx` (7).
+- Recette sur la pile de dev : panneau, enregistrement, commande lancée deux
+  fois (3 rappels, puis 3 invitations avec ouverture de la collecte de la
+  période 2, rien au second passage, emails dans Mailpit), affichage des états
+  exécutés, 390 px.

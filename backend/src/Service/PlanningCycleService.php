@@ -16,6 +16,7 @@ use App\Exception\PeriodBoundarySplitsBlockException;
 use App\Exception\PlanningCycleException;
 use App\Repository\AvailabilityCollectionRepository;
 use App\Repository\FairnessPeriodRepository;
+use App\Repository\PeriodPreparationRepository;
 use App\Repository\PlanningCycleRepository;
 use App\Repository\PlanningJobRepository;
 use App\Repository\PlanningLineRepository;
@@ -66,6 +67,7 @@ final class PlanningCycleService
         private readonly PeriodBoundaryGuard $boundaryGuard,
         private readonly PeriodDateRules $dateRules,
         private readonly LoggerInterface $logger,
+        private readonly PeriodPreparationRepository $preparationRepository,
         #[Autowire('%env(bool:MEDVUE_PERIOD_CREATION_ENABLED)%')]
         private readonly bool $creationEnabled,
     ) {
@@ -476,6 +478,8 @@ final class PlanningCycleService
             }
 
             $this->periodRemover->remove($periods);
+            // docs/decisions.md D210: what was planned for it, never sent (a period with a collection is never deleted).
+            $this->preparationRepository->forgetCycle($cycle);
             $planning->unregisterCycle($cycle);
             $this->entityManager->remove($cycle);
             $this->entityManager->flush();
