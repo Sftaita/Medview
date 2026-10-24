@@ -597,7 +597,7 @@ garde non couverte (`coverage: INCOMPLETE`). Détail :
   même personne reste par planning.
 - Création d'un **nouveau planning** : comportement actuel conservé (cycle 1
   créé avec sa collecte ouverte), A ne visant que les périodes suivantes.
-- *Depuis D210 (2026-10-24, non déployé)* : l'ouverture manuelle reste sans
+- *Depuis D210 (déployé le 2026-10-24, `v2026.10.24-prod-2`)* : l'ouverture manuelle reste sans
   email. Une **annonce programmée** depuis le panneau « Préparer la période »
   ouvre la collecte sur les jours non couverts à 08:00 Europe/Brussels le jour
   choisi, puis invite les personnes attendues. S'y ajoutent des rappels

@@ -201,7 +201,7 @@ API Platform générique. Des `stableId` partout.
 
 ## 11. Rappels (implémenté — Lot pilotage, docs/decisions.md D127)
 
-> *Depuis D210 (2026-10-24, non déployé)* : en plus de ces rappels manuels,
+> *Depuis D210 (déployé le 2026-10-24, `v2026.10.24-prod-2`)* : en plus de ces rappels manuels,
 > le panneau « Préparer la période » programme une annonce et des rappels N
 > jours ou N semaines avant la date cible de génération, envoyés à 08:00
 > Europe/Brussels aux seules personnes encore attendues. Ils passent par une
