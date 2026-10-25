@@ -130,6 +130,9 @@ export type PreflightIssueCode =
   | 'NO_MEMBER_IN_PERIOD'
   | 'NO_LINE_TO_GENERATE'
   | 'SOURCE_OF_PUBLISHED_LINE'
+  | 'BLOCK_CUT_BY_PERIOD_BOUNDARY'
+  | 'HISTORICAL_BLOCK_REMAINDER'
+  | 'PERIOD_END_CUTS_BLOCK'
 
 export type PreflightIssue = {
   code: PreflightIssueCode

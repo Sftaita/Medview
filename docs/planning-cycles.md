@@ -104,6 +104,10 @@ base). Une `PlanningPeriod` reste la période *d'une ligne* dans un cycle.
   publications, documents, événements).
 - I8. Une période VALIDATED / PUBLISHED / ARCHIVED n'est jamais agrandie,
   raccourcie, régénérée, ni complétée par de nouvelles gardes matérialisées.
+  *Exception explicite (D211)* : la rectification de sa fin, sur des jours
+  sans aucune garde, quand une période vierge la suit et sans couper de bloc —
+  confirmée par le créateur avec une raison, tracée
+  (`planning_cycle_rectifications`) ; le calendrier publié n'est pas touché.
   Elle reste réaffectable (D143), échangeable (D178) et complétable
   (« Compléter automatiquement », trous uniquement) comme aujourd'hui ; chaque
   changement reste tracé (`DutyAssignmentEvent`, `wasPublished`).

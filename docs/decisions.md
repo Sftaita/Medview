@@ -9527,3 +9527,142 @@ les rappels étaient manuels et immédiats (D127). Architecture validée le
   fois (3 rappels, puis 3 invitations avec ouverture de la collecte de la
   période 2, rien au second passage, emails dans Mailpit), affichage des états
   exécutés, 390 px.
+
+## D211 — Rectification exceptionnelle de la fin d'une période verrouillée ; dernière garde ≠ fin administrative
+
+**Contexte (2026-10-25).** En production, la période 1 de Trauma Delta est
+publiée du 01/10/2026 au **samedi 30/01/2027** inclus (fin exclusive au
+31/01), alors que sa dernière garde est le **jeudi 28/01**. La période 2,
+créée le 21/10 avec la coupure historique de D192, commence le **dimanche
+31/01**. Le week-end Ven–Sam–Dim du 29 au 31 janvier est donc coupé : le 29 et
+le 30 restent un trou dans la période 1, et le 31 est un bloc de reste d'un
+jour dans la période 2. Le gestionnaire veut que ce week-end appartienne
+entièrement à la période 2.
+
+**Cause.**
+
+1. Le planning a été créé le 21/09/2026 avec une fin **exclusive** au
+   31/01/2027. Le formulaire de l'époque disait « Date exclue : pour finir le
+   31 décembre, saisissez le 1er janvier ». La fin administrative a donc
+   toujours été le samedi 30. La période 1 l'a reprise telle quelle (lot L1,
+   D185) ; aucun traitement ne l'a modifiée depuis.
+2. La matérialisation hebdomadaire ne crée un bloc que si tous ses jours sont
+   dans la période. Le bloc du 29 au 31 dépassait d'un jour : il n'a pas été
+   créé, et le vendredi et le samedi ne sont pas des jours isolés de la
+   structure. La dernière garde est donc le jeudi 28. Aucun contrôle n'a
+   signalé, avant la génération et la publication, que **la fin de la
+   dernière période** coupait un bloc. Les règles de frontière (lot L3) ne
+   visaient que les frontières entre deux périodes.
+3. À la création de la période 2, D192 a fait accepter la coupure historique
+   (« fraction restante »), puisque la fin de la période 1, publiée, ne
+   pouvait plus bouger (I8).
+
+**Impact vérifié (lecture seule, base de production).**
+
+- 120 gardes, 235 affectations dont 120 courantes, et les 2 publications
+  (FIRST et UPDATE, 120 entrées chacune) s'arrêtent toutes au 28/01.
+- Aucune garde du 29 au 31.
+- 0 collecte.
+- La génération 4 (COMPLETE) et son snapshot portent sur la période d'origine
+  et restent des faits historiques.
+- Les registres d'équité des lignes 2 et 11 couvrent les deux périodes.
+
+**Décision.**
+
+- **Règle durable : la dernière garde attribuée n'est pas la fin
+  administrative.**
+  - Une période peut finir après sa dernière garde, volontairement (jours non
+    demandés, structure, choix du gestionnaire).
+  - Rien ne raccourcit jamais une période sur la seule base de sa dernière
+    garde.
+- **Prévention.** Le préflight de génération avertit (`PERIOD_END_CUTS_BLOCK`,
+  non bloquant) quand la fin de la dernière période coupe un bloc d'une
+  ligne : ses jours avant la fin resteraient sans garde. On le voit avant de
+  générer, donc avant de publier, tant que la fin peut encore bouger (D207).
+  Les codes `BLOCK_CUT_BY_PERIOD_BOUNDARY` et `HISTORICAL_BLOCK_REMAINDER`,
+  qui s'affichaient bruts, sont désormais rédigés.
+- **Correction historique exceptionnelle**, nouvelle exception explicite à
+  I8 : « rectifier la fin d'une période verrouillée ».
+  - `GET` et `POST /api/plannings/{p}/periods/{period}/end-rectification`,
+    réservés au créateur (`MANAGE`).
+  - **Conditions vérifiées sous le verrou du planning :**
+    - période verrouillée (validée, publiée ou archivée) ;
+    - suivie d'une période vierge : ni génération, ni publication, ni calcul,
+      ni garde ;
+    - aucun calcul en cours ;
+    - nouvelle fin strictement antérieure à l'actuelle, au moins 7 jours ;
+    - **aucune garde, d'aucune ligne, sur les jours retirés** ;
+    - aucune collecte de la période au-delà de la nouvelle fin ;
+    - **la nouvelle frontière ne coupe aucun bloc** : l'occurrence coupée par
+      l'ancienne frontière passe entière dans la période suivante. On
+      n'accepte jamais un bloc historique d'un jour quand le bloc complet peut
+      être conservé.
+  - **Confirmation explicite** (`confirm: true`), **raison obligatoire**
+    (500 caractères au plus) et dates attendues (`expectedEndsAt`).
+  - **Effets, atomiques :**
+    - la période et les périodes de ligne de ses lignes raccourcissent, par
+      une méthode dédiée `PlanningPeriod::rectifyEnd()`, qui ne fait que
+      raccourcir ;
+    - le début de la période suivante recule d'autant ;
+    - les registres d'équité suivent ;
+    - la collecte intacte de la période suivante suit ;
+    - l'ordre (raccourcir d'abord) évite tout chevauchement, même dans la
+      transaction ;
+    - le contrôle de continuité de D207 est appliqué.
+  - **Les périodes de ligne orphelines** (ligne supprimée, D188) ne suivent pas,
+    comme pour tout déplacement de frontière.
+  - **Rien d'autre ne change** : gardes, affectations et leurs événements,
+    publications, entrées, documents, générations, snapshots.
+  - **Trace** : table append-only `planning_cycle_rectifications`
+    (`Version20261025090000`, trigger refusant UPDATE et DELETE). Elle garde
+    les fins avant et après, la dernière garde, la raison, l'auteur et la date.
+  - **Interface** : « Corriger la fin… » sur la carte d'une période publiée
+    suivie d'une autre. Le dialogue montre :
+    - les dates actuelles, la dernière garde et le début de la période
+      suivante ;
+    - chaque dernier jour possible ou refusé, avec sa raison ;
+    - les conséquences ;
+    - la raison à saisir et la case de confirmation.
+- **PDF des anciennes diffusions** (sans document stocké, D206) : ils suivent
+  les dates actuelles de leur période. Après la rectification, leur libellé
+  passe de « au 30 janvier 2027 » à « au 28 janvier 2027 » (120 jours au lieu
+  de 122). La grille des 120 jours et les 120 gardes sont identiques ; les 2
+  jours retirés étaient vides. Les publications avec document stocké (D173)
+  restent octet pour octet ce qu'elles étaient.
+
+**Essais.**
+
+- **Tests backend :** `PeriodEndRectificationTest` (6).
+  - Cas Trauma Delta reproduit par l'API.
+  - Options proposées : le 28 possible, le 29 refusé (coupe le bloc).
+  - Chaque refus : confirmation, raison, dates attendues, bloc coupé, gardes
+    après, droits, période non verrouillée, période suivante préparée,
+    collecte au-delà.
+  - Après rectification :
+    - période 1 du 01/01 au 28/01, période 2 à partir du vendredi 29 ;
+    - périodes de ligne cohérentes ;
+    - empreintes des gardes, affectations, événements, publications,
+      entrées, documents, générations et snapshots identiques ;
+    - audit propre ;
+    - journal rempli et refusant UPDATE ;
+    - préparation de la période 2 : le week-end du 29 au 31 en un seul bloc
+      de 3 jours, sans avertissement de reste ;
+    - une seconde rectification n'est plus possible.
+  - Avertissement `PERIOD_END_CUTS_BLOCK` présent puis absent.
+  - `down()` de la migration refusé après une rectification.
+  - Mutations tuées : 2 sur 2 (contrôle des gardes, contrôle du bloc coupé).
+- **Tests frontend :** dialogue (3), page (2), libellés du préflight (1).
+- **Répétition sur une copie isolée de la production** (dump du 25/10,
+  PostgreSQL jetable en mémoire, réseau interne, sans mailer, image de la
+  branche) :
+  - mêmes résultats ;
+  - empreintes identiques ;
+  - audit propre avant, après et après préparation de la période 2 ;
+  - libellé des 2 PDF « au 28 janvier 2027 », 120 gardes, grille identique ;
+  - bloc du 29 au 31 en période 2.
+
+**Compromis.**
+
+- Une exception à I8 existe désormais, mais elle ne retire que des jours sans
+  aucune garde et ne touche pas le calendrier publié.
+- La correction est faite par le gestionnaire, pas par migration de données.

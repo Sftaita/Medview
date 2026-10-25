@@ -671,6 +671,34 @@ describe('GenerationModal', () => {
     expect(within(dialog).queryByText(/COVERAGE_SOURCE/)).not.toBeInTheDocument()
   })
 
+  it('says in words when the end of the period cuts a block, or a boundary does (docs/decisions.md D211)', async () => {
+    stubApi({
+      [preflightUrl]: () =>
+        makePreflight({
+          canGenerate: false,
+          blockers: [{ code: 'BLOCK_CUT_BY_PERIOD_BOUNDARY', lineStableId: 'line-1', lineName: 'Seniors' }],
+          warnings: [
+            { code: 'PERIOD_END_CUTS_BLOCK', lineStableId: 'line-1', lineName: 'Seniors' },
+            { code: 'HISTORICAL_BLOCK_REMAINDER', lineStableId: 'line-1', lineName: 'Seniors' },
+          ],
+        }),
+    })
+    renderActions()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+
+    const dialog = await screen.findByRole('dialog')
+    const blockers = await within(dialog).findByRole('list', { name: 'Points bloquants' })
+    expect(
+      within(blockers).getByText(/la frontière avec une période voisine coupe un bloc de gardes/),
+    ).toBeInTheDocument()
+    expect(
+      within(dialog).getByText(/la fin de la période coupe un bloc de gardes : ce bloc ne sera pas créé/),
+    ).toBeInTheDocument()
+    expect(within(dialog).getByText(/la période commence au milieu d’un bloc coupé/)).toBeInTheDocument()
+    expect(within(dialog).queryByText(/BLOCK|REMAINDER/)).not.toBeInTheDocument()
+  })
+
   it('tells when another generation is already running', async () => {
     stubApi({
       [preflightUrl]: () => makePreflight(),
