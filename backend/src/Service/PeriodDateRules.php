@@ -179,6 +179,117 @@ final class PeriodDateRules
         ];
     }
 
+    // --- the rectification of a locked period's end (docs/decisions.md D211) ------------------------
+
+    /**
+     * Why the end of $cycle can never be rectified, whatever the day: only a
+     * locked period (validated, published or archived — otherwise its dates
+     * change the usual way) followed by a blank period, with no calculation
+     * running.
+     *
+     * @return list<PeriodDateViolation>
+     */
+    public function rectificationBlockers(PlanningCycle $cycle): array
+    {
+        return $this->rectificationBlockersIn($this->context($cycle, false));
+    }
+
+    /**
+     * Every reason $endsAt (exclusive) is refused as the rectified end of $cycle.
+     *
+     * @return list<PeriodDateViolation>
+     */
+    public function rectificationViolations(PlanningCycle $cycle, \DateTimeImmutable $endsAt): array
+    {
+        $context = $this->context($cycle);
+
+        return [...$this->rectificationBlockersIn($context), ...$this->rectificationDateViolations($context, $endsAt)];
+    }
+
+    /**
+     * The last days $cycle may be brought back to: from its last duty day (or
+     * its start) to the day before its current last day.
+     *
+     * @return array{blockers: list<PeriodDateViolation>, lastDutyDay: ?string, currentLastDay: string, days: list<array{date: string, violations: list<PeriodDateViolation>}>}
+     */
+    public function rectificationOptions(PlanningCycle $cycle): array
+    {
+        $context = $this->context($cycle);
+        $lastDutyDay = $context['facts']['lastDutyDay'];
+        $currentLastDay = $cycle->getEndsAt()->modify('-1 day');
+        $from = null !== $lastDutyDay ? new \DateTimeImmutable($lastDutyDay) : $cycle->getStartsAt();
+
+        return [
+            'blockers' => $this->rectificationBlockersIn($context),
+            'lastDutyDay' => $lastDutyDay,
+            'currentLastDay' => $currentLastDay->format('Y-m-d'),
+            'days' => $from < $currentLastDay
+                ? $this->days($from, $currentLastDay->modify('-1 day'), fn (\DateTimeImmutable $lastDay): array => $this->rectificationDateViolations($context, $lastDay->modify('+1 day')))
+                : [],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $context
+     *
+     * @return list<PeriodDateViolation>
+     */
+    private function rectificationBlockersIn(array $context): array
+    {
+        if (!$context['locked']) {
+            return [PeriodDateViolation::conflict('period_not_locked', 'This period is not validated or published: change its dates the usual way.')];
+        }
+        if (null === $context['next']) {
+            return [PeriodDateViolation::conflict('no_next_period', 'Only the boundary with a next period is rectified.')];
+        }
+        $blockers = [];
+        if ($context['jobActive']) {
+            $blockers[] = self::jobInProgress();
+        }
+        if (!self::isBlank($context['nextLocked'], $context['nextFacts'])) {
+            $blockers[] = PeriodDateViolation::conflict('next_period_not_blank', 'The boundary with the next period moves only while the next period has no generation, publication, calculation or prepared duty.');
+        }
+
+        return $blockers;
+    }
+
+    /**
+     * The rectified end may only remove days without any duty of any line of
+     * the period, never leave a collection of the period beyond it, and never
+     * cut a block — the occurrence it would split goes whole into the next
+     * period instead.
+     *
+     * @param array<string, mixed> $context
+     *
+     * @return list<PeriodDateViolation>
+     */
+    private function rectificationDateViolations(array $context, \DateTimeImmutable $endsAt): array
+    {
+        /** @var PlanningCycle $cycle */
+        $cycle = $context['cycle'];
+        $facts = $context['facts'];
+        $end = $endsAt->format('Y-m-d');
+        if ($end >= $cycle->getEndsAt()->format('Y-m-d')) {
+            return [PeriodDateViolation::invalid('rectification_not_earlier', 'A rectified end comes before the current one.')];
+        }
+        $violations = [];
+        if (!self::lastsLongEnough($cycle->getStartsAt(), $endsAt)) {
+            $violations[] = self::tooShort();
+        }
+        if (null !== $facts['lastDutyDay'] && $facts['lastDutyDay'] >= $end) {
+            $violations[] = PeriodDateViolation::conflict('period_has_duties_after', 'Duties exist on or after this day: they stay in their period.');
+        }
+        if (null !== $facts['lastCollectionEnd'] && $facts['lastCollectionEnd'] > $end) {
+            $violations[] = self::collectionKept($facts, 'collection_beyond_end', 'An availability collection of this period goes beyond the new end.');
+        }
+        $cuts = $this->cutsAt($context['blocks'], $endsAt);
+        if ([] !== $cuts) {
+            $violations[] = PeriodDateViolation::splitsBlock($cuts);
+        }
+
+        return $violations;
+    }
+
     // --- facts ---------------------------------------------------------------------------------------
 
     /**

@@ -794,6 +794,57 @@ describe('PlanningDetailPage — choosing the dates of a period on a calendar (D
     expect(screen.queryByRole('dialog', { name: 'Modifier les dates' })).not.toBeInTheDocument()
   })
 
+  it('corrects the end of a published period from its card, explicitly, with the exclusive end (D211)', async () => {
+    const api = renderPage(
+      () => planning(),
+      {
+        'GET /api/plannings/plan-1/periods/c2/end-rectification': () => ({
+          period: { stableId: 'c2', number: 2 },
+          startsAt: '2026-10-01',
+          currentLastDay: '2027-01-30',
+          lastDutyDay: '2027-01-28',
+          eligible: true,
+          blockers: [],
+          proposedLastDay: '2027-01-28',
+          reasonMaxLength: 500,
+          days: [
+            { date: '2027-01-28', allowed: true, reasons: [] },
+            { date: '2027-01-29', allowed: false, reasons: [{ code: 'period_boundary_splits_block' }] },
+          ],
+        }),
+        'POST /api/plannings/plan-1/periods/c2/end-rectification': () => ({ periods: [] }),
+      },
+      '/plannings/plan-1?periode=2',
+    )
+
+    await screen.findByRole('region', { name: 'Périodes du planning' })
+    fireEvent.click(within(detailCard()).getByRole('button', { name: /Corriger la fin/ }))
+    const dialog = screen.getByRole('dialog', { name: 'Corriger la fin de la période' })
+    expect(await within(dialog).findAllByRole('radio')).toHaveLength(2)
+    fireEvent.change(within(dialog).getByLabelText('Raison de la correction'), {
+      target: { value: 'Week-end entier en période 3.' },
+    })
+    fireEvent.click(within(dialog).getByRole('checkbox'))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Corriger la fin' }))
+
+    await waitFor(() =>
+      expect(api.requests('POST', '/api/plannings/plan-1/periods/c2/end-rectification')).toHaveLength(1),
+    )
+    expect(api.requests('POST', '/api/plannings/plan-1/periods/c2/end-rectification')[0].body).toEqual({
+      endsAt: '2027-01-29',
+      expectedEndsAt: '2027-01-31',
+      reason: 'Week-end entier en période 3.',
+      confirm: true,
+    })
+    expect(await screen.findByText(/Fin de la période 2 corrigée/)).toBeInTheDocument()
+  })
+
+  it('offers no end correction on the last period, nor on one in preparation', async () => {
+    renderPage(() => planning(), {}, '/plannings/plan-1?periode=3')
+    await screen.findByRole('region', { name: 'Préparation de la période 3' })
+    expect(screen.queryByRole('button', { name: /Corriger la fin/ })).not.toBeInTheDocument()
+  })
+
   it('offers no date change to someone who cannot manage the periods', async () => {
     renderPage(() => planning({ canCreatePeriod: false }), {}, '/plannings/plan-1?periode=3')
     await screen.findByRole('region', { name: 'Préparation de la période 3' })

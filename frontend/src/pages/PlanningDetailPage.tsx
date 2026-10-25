@@ -7,7 +7,9 @@ import {
   changePeriodDates,
   createPeriod,
   fetchDateOptions,
+  fetchEndRectification,
   openPeriodCollection,
+  rectifyPeriodEnd,
 } from '../features/periods/api'
 import { CreatePeriodDialog } from '../features/periods/components/CreatePeriodDialog'
 import { EditPeriodDatesDialog } from '../features/periods/components/EditPeriodDatesDialog'
@@ -17,7 +19,8 @@ import { PeriodSelector } from '../features/periods/components/PeriodSelector'
 import { PeriodTabs } from '../features/periods/components/PeriodTabs'
 import { PeriodPreparationPanel } from '../features/periods/components/PeriodPreparationPanel'
 import { PreparationSteps } from '../features/periods/components/PreparationSteps'
-import { addDays, formatRange } from '../features/periods/dates'
+import { RectifyPeriodEndDialog } from '../features/periods/components/RectifyPeriodEndDialog'
+import { addDays, formatDate, formatRange } from '../features/periods/dates'
 import { collectionOpeningMessage, periodCreationError, periodDatesError } from '../features/periods/errors'
 import { defaultPeriodNumber, hasReadableCalendar, lineStates, toPeriod } from '../features/periods/model'
 import '../features/periods/periodes.css'
@@ -89,6 +92,7 @@ export function PlanningDetailPage() {
   const [extendOpen, setExtendOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [editDatesOpen, setEditDatesOpen] = useState(false)
+  const [rectifyOpen, setRectifyOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const toastTimer = useRef<number | undefined>(undefined)
   const [membersLine, setMembersLine] = useState<PlanningLineSummary | null>(null)
@@ -115,6 +119,11 @@ export function PlanningDetailPage() {
   const periodView = periodViews.find((p) => p.number === selectedNumber)
   const period = periods.find((p) => p.number === selectedNumber)
   const periodStableId = periodView?.stableId
+  // docs/decisions.md D211: stable, so that the dialog loads its options once per opening.
+  const loadRectification = useCallback(
+    () => fetchEndRectification(planningId ?? '', periodStableId ?? ''),
+    [planningId, periodStableId],
+  )
   const single = periods.length <= 1
 
   /** Another period: a new history entry, so the browser's back button returns to the previous one. */
@@ -219,6 +228,23 @@ export function PlanningDetailPage() {
     setEditDatesOpen(false)
     await load()
     showToast(`Dates de la période ${periodView.number} enregistrées`)
+  }
+
+  /** docs/decisions.md D211: the dialog shows last days (inclusive), the API takes the exclusive end. */
+  async function handleRectifyEnd(lastDay: ISODate, reason: string) {
+    if (!planningId || !periodView) return
+    try {
+      await rectifyPeriodEnd(planningId, periodView.stableId, {
+        endsAt: addDays(lastDay, 1),
+        expectedEndsAt: periodView.endsAt,
+        reason,
+      })
+    } catch (err) {
+      throw new Error(periodDatesError(err))
+    }
+    setRectifyOpen(false)
+    await load()
+    showToast(`Fin de la période ${periodView.number} corrigée · dernier jour le ${formatDate(lastDay)}`)
   }
 
   async function handleOpenCollection() {
@@ -574,6 +600,13 @@ export function PlanningDetailPage() {
             onNext={() => selectPeriod(periods[selectedIndex + 1].number)}
             onGoLatest={() => selectPeriod(latest.number)}
             onEditDates={canCreatePeriod ? () => setEditDatesOpen(true) : undefined}
+            onRectifyEnd={
+              canCreatePeriod &&
+              selectedIndex < periods.length - 1 &&
+              (period.status === 'publiee' || period.status === 'partielle' || period.status === 'archivee')
+                ? () => setRectifyOpen(true)
+                : undefined
+            }
           />
         </section>
       )}
@@ -767,6 +800,18 @@ export function PlanningDetailPage() {
           }
           onSave={handleChangeDates}
           onCancel={() => setEditDatesOpen(false)}
+        />
+      )}
+
+      {canCreatePeriod && period && planningId && periods[selectedIndex + 1] && (
+        <RectifyPeriodEndDialog
+          key={`rectify-${period.id}`}
+          open={rectifyOpen}
+          period={period}
+          next={periods[selectedIndex + 1]}
+          loadOptions={loadRectification}
+          onConfirm={handleRectifyEnd}
+          onCancel={() => setRectifyOpen(false)}
         />
       )}
 

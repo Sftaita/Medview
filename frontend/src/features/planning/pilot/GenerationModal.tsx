@@ -676,6 +676,8 @@ function blockerText(issue: PreflightIssue): string {
       return 'Aucune ligne à générer : les lignes de cette période sont déjà publiées ou n’ont aucune garde.'
     case 'SOURCE_OF_PUBLISHED_LINE':
       return `${line}elle déclenche les renforts d’une ligne déjà publiée : elle ne peut pas être générée de nouveau.`
+    case 'BLOCK_CUT_BY_PERIOD_BOUNDARY':
+      return `${line}la frontière avec une période voisine coupe un bloc de gardes : ses jours ne seraient dans aucune des deux périodes. Déplacez la frontière.`
     default:
       return `${line}génération impossible.`
   }
@@ -694,6 +696,10 @@ function warningText(issue: PreflightIssue, preflight: GenerationPreflight): str
       return `${line}aucun participant : ses gardes ne pourront pas être pourvues.`
     case 'COVERAGE_SOURCE_MISSING':
       return `${line}certains jours n’ont aucune garde sur la ligne source : aucun renfort n’y est possible.`
+    case 'HISTORICAL_BLOCK_REMAINDER':
+      return `${line}la période commence au milieu d’un bloc coupé par la fin de la période précédente : ses jours ici forment un bloc incomplet.`
+    case 'PERIOD_END_CUTS_BLOCK':
+      return `${line}la fin de la période coupe un bloc de gardes : ce bloc ne sera pas créé et ses jours avant la fin resteront sans garde. Avant de publier, avancez la fin juste avant ce bloc ou reculez-la après lui.`
     default:
       return issue.code
   }

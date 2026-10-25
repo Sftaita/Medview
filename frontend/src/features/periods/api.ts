@@ -174,3 +174,41 @@ export function savePeriodPreparation(
     },
   )
 }
+
+/**
+ * docs/decisions.md D211 — the exceptional rectification of a locked
+ * period's end. `days` are candidate last days (inclusive), each allowed or
+ * not with its reasons; `proposedLastDay` is the latest allowed one.
+ */
+export type EndRectificationOptions = {
+  period: { stableId: string; number: number }
+  startsAt: string
+  currentLastDay: string
+  lastDutyDay: string | null
+  eligible: boolean
+  blockers: DateReason[]
+  proposedLastDay: string | null
+  reasonMaxLength: number
+  days: DayOption[]
+}
+
+export function fetchEndRectification(
+  planningStableId: string,
+  periodStableId: string,
+): Promise<EndRectificationOptions> {
+  return apiFetch<EndRectificationOptions>(
+    `/api/plannings/${planningStableId}/periods/${periodStableId}/end-rectification`,
+  )
+}
+
+/** `endsAt` and `expectedEndsAt` are exclusive, like every period end of the API. */
+export function rectifyPeriodEnd(
+  planningStableId: string,
+  periodStableId: string,
+  input: { endsAt: string; expectedEndsAt: string; reason: string },
+): Promise<unknown> {
+  return apiFetch(`/api/plannings/${planningStableId}/periods/${periodStableId}/end-rectification`, {
+    method: 'POST',
+    body: { ...input, confirm: true },
+  })
+}

@@ -111,6 +111,18 @@ export function dateReasonMessage(reason: DateReason): string {
       return 'Une collecte des disponibilités de cette période commence avant ce jour.'
     case 'collection_announced':
       return 'Les participants ont déjà été sollicités pour la collecte des disponibilités (annonce ou rappel envoyé) : elle n’est plus redimensionnée, et ce jour la laisserait hors de la période.'
+    case 'period_not_locked':
+      return 'Cette période n’est ni validée ni publiée : modifiez ses dates normalement.'
+    case 'no_next_period':
+      return 'Seule la frontière avec une période suivante se corrige.'
+    case 'rectification_not_earlier':
+      return 'La nouvelle fin doit venir avant la fin actuelle.'
+    case 'rectification_confirmation_required':
+      return 'Confirmez cette correction exceptionnelle.'
+    case 'rectification_reason_required':
+      return 'Indiquez la raison de la correction (500 caractères au plus).'
+    case 'period_changed':
+      return 'Les dates de la période ont changé entre-temps. Rechargez avant de continuer.'
     case 'preparation_past':
       return 'Ce jour est déjà passé.'
     case 'preparation_after_period':

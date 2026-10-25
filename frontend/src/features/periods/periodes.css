@@ -2261,3 +2261,83 @@ a.mv-btn {
     grid-column: 2;
   }
 }
+
+/* ---------- Corriger la fin d'une période publiée (docs/decisions.md D211) ---------- */
+.mv-rectify__facts {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+.mv-rectify__facts div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.mv-rectify__facts dt {
+  font-weight: 600;
+  color: var(--gray-700);
+}
+.mv-rectify__facts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.mv-rectify__days {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.mv-rectify__day {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.mv-rectify__day input {
+  margin-top: 3px;
+}
+.mv-rectify__day.is-refused {
+  cursor: not-allowed;
+  background: var(--surface-sunken);
+}
+.mv-rectify__reason {
+  color: var(--red-700);
+}
+.mv-rectify__effects {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+  color: var(--gray-700);
+}
+.mv-rectify__reason-input {
+  height: auto;
+  min-height: 84px;
+  padding: 10px 14px;
+  resize: vertical;
+  font-weight: 500;
+}
+.mv-rectify__confirm {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 14px;
+}
+.mv-rectify__notice {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-sunken);
+  font-size: 14px;
+}
+.mv-rectify__error {
+  margin: 0;
+  color: var(--red-700);
+  font-size: 14px;
+}

@@ -292,6 +292,27 @@ class PlanningPeriod
     }
 
     /**
+     * docs/decisions.md D211 — the only way a VALIDATED/PUBLISHED/ARCHIVED
+     * period's dates ever change: its administrative end brought back over
+     * trailing days that hold no duty at all, by the explicit, confirmed and
+     * traced operation PlanningCycleService::rectifyLockedEnd(), which checks
+     * that emptiness under the planning's lock. Only ever earlier; the
+     * calendar (duties, assignments, publications) is not touched.
+     */
+    public function rectifyEnd(\DateTimeImmutable $endsAt): void
+    {
+        if ($endsAt >= $this->endsAt || $endsAt <= $this->startsAt) {
+            throw new \InvalidArgumentException('A rectified end is strictly earlier than the current one, and after the start.');
+        }
+        if (null === $this->cycle || !$this->cycle->hasSameDatesAs($this->startsAt, $endsAt)) {
+            throw new \InvalidArgumentException('Change the PlanningCycle first: a period keeps exactly its cycle\'s dates.');
+        }
+
+        $this->endsAt = $endsAt;
+        $this->touch();
+    }
+
+    /**
      * The new start of a period of a blank cycle (docs/decisions.md D207),
      * after its cycle's, and inside its FairnessPeriod when it moves earlier.
      * A VALIDATED/PUBLISHED/ARCHIVED period never moves (I8).

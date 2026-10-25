@@ -265,6 +265,23 @@ final class PeriodBoundaryGuard
     }
 
     /**
+     * docs/decisions.md D211: the occurrences of $line's blocks cut by the end
+     * of $cycle when it is the last period — the end of the planning, which no
+     * boundary rule checked. Such an occurrence is never materialized: its
+     * days inside the period stay without duty.
+     *
+     * @return list<BlockCut>
+     */
+    public function endCutsOfLastPeriod(PlanningLine $line, PlanningCycle $cycle): array
+    {
+        if (null !== $this->nextOf($cycle)) {
+            return [];
+        }
+
+        return $this->cutsAt($this->blocksOf($line->getPlanningTeam()), $cycle->getEndsAt(), $line);
+    }
+
+    /**
      * Every boundary between two periods of $planning: the start of each
      * period from period 2 on.
      *

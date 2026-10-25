@@ -85,6 +85,14 @@ enum PreflightIssueCode: string
      */
     case HISTORICAL_BLOCK_REMAINDER = 'HISTORICAL_BLOCK_REMAINDER';
 
+    /**
+     * docs/decisions.md D211: the end of the last period cuts one of the
+     * line's blocks — that occurrence does not fit and is not materialized,
+     * its days stay without duty. Said before generating, while the end can
+     * still move, never after publication (Trauma Delta, 29-30 January 2027).
+     */
+    case PERIOD_END_CUTS_BLOCK = 'PERIOD_END_CUTS_BLOCK';
+
     /** Some participants have not confirmed their availabilities. */
     case PENDING_MEMBERS = 'PENDING_MEMBERS';
 

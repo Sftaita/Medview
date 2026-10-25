@@ -20,6 +20,8 @@ interface Props {
   onGoLatest: () => void
   /** « Modifier les dates », for the creator (docs/decisions.md D207): the dialog says what may move. */
   onEditDates?: () => void
+  /** docs/decisions.md D211: the exceptional correction of a published period's end (creator, a next period). */
+  onRectifyEnd?: () => void
 }
 
 /** Grande carte de la période sélectionnée (style de la carte « Période du planning » actuelle). */
@@ -36,6 +38,7 @@ export function PeriodDetailCard({
   onNext,
   onGoLatest,
   onEditDates,
+  onRectifyEnd,
 }: Props) {
   const t = timeState(period, today)
   // History is a period over, published, with later ones (lot L7): never the current one, never a future one.
@@ -108,6 +111,11 @@ export function PeriodDetailCard({
         {onEditDates && (
           <button type="button" className="mv-btn mv-btn--ghost mv-btn--sm" onClick={onEditDates}>
             <Icon name="calendar" size={16} /> Modifier les dates
+          </button>
+        )}
+        {onRectifyEnd && (
+          <button type="button" className="mv-btn mv-btn--ghost mv-btn--sm" onClick={onRectifyEnd}>
+            <Icon name="calendar" size={16} /> Corriger la fin…
           </button>
         )}
         {!single && (

@@ -8,6 +8,7 @@ use App\Entity\AvailabilityCollection;
 use App\Entity\FairnessPeriod;
 use App\Entity\Planning;
 use App\Entity\PlanningCycle;
+use App\Entity\PlanningCycleRectification;
 use App\Entity\PlanningLine;
 use App\Entity\PlanningPeriod;
 use App\Entity\User;
@@ -52,6 +53,8 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
 final class PlanningCycleService
 {
     public const MIN_DAYS = 7;
+    /** The reason of a rectification of a locked period's end (D211), in characters. */
+    public const RECTIFICATION_REASON_MAX = 500;
 
     public function __construct(
         private readonly EntityManagerInterface $entityManager,
@@ -216,6 +219,81 @@ final class PlanningCycleService
             $this->assertStillContinuous($cycle->getPlanning());
 
             return ['cycle' => $cycle, 'generationOutdated' => $generationOutdated];
+        });
+    }
+
+    /**
+     * docs/decisions.md D211 — the exceptional rectification of a locked
+     * period's end: the boundary with the next (blank) period is brought back
+     * over trailing days of the locked period that hold no duty of any line,
+     * so that a block the old boundary cut goes whole into the next period.
+     * The calendar of the locked period — duties, assignments, publications,
+     * snapshots — is not touched; only its dates, its lines' periods, the next
+     * period's start and the registries that follow them. Explicitly
+     * confirmed, with a reason, by the creator; recorded in the append-only
+     * journal (PlanningCycleRectification). Same rules for the options shown
+     * and for this write (PeriodDateRules::rectificationViolations()).
+     *
+     * @throws PlanningCycleException
+     */
+    public function rectifyLockedEnd(Planning $planning, PlanningCycle $cycle, \DateTimeImmutable $endsAt, \DateTimeImmutable $expectedEndsAt, User $by, string $reason, bool $confirmed): PlanningCycle
+    {
+        if (!$this->creationEnabled) {
+            throw PlanningCycleException::conflict('period_management_disabled', 'Managing the periods of a planning is not enabled.');
+        }
+        if (!$confirmed) {
+            throw PlanningCycleException::invalid('rectification_confirmation_required', 'This exceptional correction must be confirmed explicitly.');
+        }
+        $reason = trim($reason);
+        if ('' === $reason || mb_strlen($reason) > self::RECTIFICATION_REASON_MAX) {
+            throw PlanningCycleException::invalid('rectification_reason_required', \sprintf('Say why, in at most %d characters.', self::RECTIFICATION_REASON_MAX));
+        }
+
+        return $this->underPlanningLock($planning, function () use ($planning, $cycle, $endsAt, $expectedEndsAt, $by, $reason): PlanningCycle {
+            if ($cycle->getEndsAt()->format('Y-m-d') !== $expectedEndsAt->format('Y-m-d')) {
+                throw PlanningCycleException::conflict('period_changed', 'The end of this period changed since it was read: reload.');
+            }
+            self::throwFirst($this->dateRules->rectificationViolations($cycle, $endsAt));
+            $next = $this->nextOf($cycle) ?? throw new \LogicException('Checked by the rules: a next period exists.');
+            $previousEndsAt = $cycle->getEndsAt();
+            $lastDutyDay = $this->cycleRepository->dateFacts($cycle)['lastDutyDay'];
+            $nextFacts = $this->cycleRepository->dateFacts($next);
+
+            // The registries first take both sides of the boundary, then fit their periods again.
+            $fairnessPeriods = $this->fairnessOf([$cycle, $next]);
+            foreach ($fairnessPeriods as $fairness) {
+                $fairness->extendTo(min($fairness->getStartsAt(), $endsAt), max($fairness->getEndsAt(), $endsAt));
+            }
+            $this->entityManager->flush();
+            // The locked period shrinks first, so that the two never overlap, not even within the transaction.
+            $cycle->changeEnd($endsAt);
+            foreach ($this->cycleRepository->periodsOf($cycle) as $period) {
+                $period->rectifyEnd($endsAt);
+            }
+            $this->entityManager->flush();
+            $this->shiftStart($next, $endsAt);
+            $this->fitFairness($fairnessPeriods);
+            $this->followUntouchedCollection($nextFacts);
+            $this->entityManager->persist(new PlanningCycleRectification(
+                $cycle,
+                $next,
+                $previousEndsAt,
+                $endsAt,
+                null !== $lastDutyDay ? new \DateTimeImmutable($lastDutyDay) : null,
+                $reason,
+                $by,
+                new \DateTimeImmutable('now', new \DateTimeZone('UTC')),
+            ));
+            $this->assertStillContinuous($planning);
+            $this->logger->warning('Locked period {number} of planning {planning}: end rectified from {from} to {to} (exclusive) by user {user}.', [
+                'number' => $cycle->getNumber(),
+                'planning' => (string) $planning->getStableId(),
+                'from' => $previousEndsAt->format('Y-m-d'),
+                'to' => $endsAt->format('Y-m-d'),
+                'user' => (string) $by->getStableId(),
+            ]);
+
+            return $cycle;
         });
     }
 
