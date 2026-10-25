@@ -219,6 +219,10 @@ final class PlanningGenerationLauncher
             if ([] !== array_filter($historicalCuts, static fn (BlockCut $cut): bool => $cut->line === $line)) {
                 $warnings[] = new PreflightIssue(PreflightIssueCode::HISTORICAL_BLOCK_REMAINDER, $line);
             }
+            // docs/decisions.md D211: the end of the last period cuts a block — its days there stay without duty.
+            if ([] !== $this->boundaryGuard->endCutsOfLastPeriod($line, $cycle)) {
+                $warnings[] = new PreflightIssue(PreflightIssueCode::PERIOD_END_CUTS_BLOCK, $line);
+            }
             if ([] !== array_filter($anomalies, static fn (CoverageSourceAnomaly $a): bool => CoverageSourceAnomaly::AMBIGUOUS === $a->kind)) {
                 $blockers[] = new PreflightIssue(PreflightIssueCode::AMBIGUOUS_COVERAGE_SOURCE, $line);
             }

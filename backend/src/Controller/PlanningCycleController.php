@@ -181,6 +181,72 @@ final class PlanningCycleController
         ]);
     }
 
+    /**
+     * docs/decisions.md D211: what the end of a locked period may be brought
+     * back to — its last duty day, the next period's first day, and each
+     * candidate last day with its reasons. The creator only.
+     */
+    #[Route('/api/plannings/{planningStableId}/periods/{periodStableId}/end-rectification', name: 'api_planning_period_end_rectification_options', methods: ['GET'])]
+    public function endRectificationOptions(string $planningStableId, string $periodStableId): JsonResponse
+    {
+        $planning = $this->resolvePlanning($planningStableId);
+        $this->denyUnlessCanManage($planning);
+        $cycle = $this->resolveCycle($planning, $periodStableId);
+
+        $options = $this->dateRules->rectificationOptions($cycle);
+        $blockers = $options['blockers'];
+        if (!$this->cycleService->isCreationEnabled()) {
+            array_unshift($blockers, PeriodDateViolation::conflict('period_management_disabled', 'Managing the periods of a planning is not enabled.'));
+        }
+        $reasons = static fn (array $violations): array => array_map(static fn (PeriodDateViolation $violation): array => $violation->toArray(), $violations);
+        $days = array_map(static fn (array $day): array => [
+            'date' => $day['date'],
+            'allowed' => [] === $blockers && [] === $day['violations'],
+            'reasons' => $reasons([...$blockers, ...$day['violations']]),
+        ], $options['days']);
+        $allowed = array_values(array_filter($days, static fn (array $day): bool => $day['allowed']));
+
+        return new JsonResponse([
+            'period' => $this->presenter->reference($cycle),
+            'startsAt' => $cycle->getStartsAt()->format('Y-m-d'),
+            'currentLastDay' => $options['currentLastDay'],
+            'lastDutyDay' => $options['lastDutyDay'],
+            'eligible' => [] === $blockers && [] !== $allowed,
+            'blockers' => $reasons($blockers),
+            // The latest possible last day: the least moved, never past a duty.
+            'proposedLastDay' => [] !== $allowed ? $allowed[\count($allowed) - 1]['date'] : null,
+            'reasonMaxLength' => PlanningCycleService::RECTIFICATION_REASON_MAX,
+            'days' => $days,
+        ]);
+    }
+
+    /**
+     * docs/decisions.md D211: rectifies the end of a locked period —
+     * `{endsAt (exclusive), expectedEndsAt, reason, confirm: true}`. The
+     * creator only; the refusals are the options' reasons.
+     */
+    #[Route('/api/plannings/{planningStableId}/periods/{periodStableId}/end-rectification', name: 'api_planning_period_end_rectification', methods: ['POST'])]
+    public function rectifyEnd(string $planningStableId, string $periodStableId, Request $request, #[CurrentUser] User $user): JsonResponse
+    {
+        $planning = $this->resolvePlanning($planningStableId);
+        $this->denyUnlessCanManage($planning);
+        $cycle = $this->resolveCycle($planning, $periodStableId);
+        $body = $this->body($request);
+        $reason = $body['reason'] ?? '';
+
+        $this->cycleService->rectifyLockedEnd(
+            $planning,
+            $cycle,
+            $this->date($body, 'endsAt', required: true),
+            $this->date($body, 'expectedEndsAt', required: true),
+            $user,
+            \is_string($reason) ? $reason : '',
+            true === ($body['confirm'] ?? false),
+        );
+
+        return new JsonResponse(['periods' => $this->presenter->periods($planning)]);
+    }
+
     #[Route('/api/plannings/{planningStableId}/periods/{periodStableId}', name: 'api_planning_period_delete', methods: ['DELETE'])]
     public function delete(string $planningStableId, string $periodStableId, Request $request): Response
     {
