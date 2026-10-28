@@ -2235,6 +2235,19 @@ a.mv-btn {
   color: var(--green-800);
   font-size: 14px;
 }
+/* Pourquoi le bouton reste grisé, et pourquoi un jour touché est refusé : toujours écrit, jamais un clic sans effet. */
+.mv-prep__blocked {
+  margin: 0;
+  color: var(--gray-700);
+  font-size: 14px;
+}
+.mv-prep__field-error {
+  flex-basis: 100%;
+}
+.mv-prep__note {
+  flex-basis: 100%;
+  color: var(--gray-700);
+}
 /* À 390 px : les deux boutons du pied prennent toute la largeur, l'unité passe sous le nombre si besoin. */
 @container mv-prep (max-width: 420px) {
   .mv-prep__buttons .mv-btn {
@@ -2257,7 +2270,8 @@ a.mv-btn {
   }
   .mv-prep__reminders,
   .mv-prep__history,
-  .mv-prep__row > div:not(.mv-prep__label):not(.mv-prep__value) {
+  .mv-prep__row > div:not(.mv-prep__label):not(.mv-prep__value),
+  .mv-prep__row > .mv-prep__refusal {
     grid-column: 2;
   }
 }

@@ -9,7 +9,7 @@ import {
   type ReminderUnit,
 } from '../api'
 import { addDays, formatDate } from '../dates'
-import { preparationErrorMessage, preparationSaveError } from '../errors'
+import { dateReasonMessage, preparationErrorMessage, preparationSaveError } from '../errors'
 import type { ISODate } from '../types'
 import { monthOf } from '../useDateOptions'
 import { BoundaryCalendar } from './BoundaryCalendar'
@@ -104,6 +104,8 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+  /** A day chosen that cannot be: said under its calendar, never silently nothing. */
+  const [refusal, setRefusal] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -127,21 +129,22 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
   const history = useMemo(() => view?.reminders.filter((r) => r.state !== 'scheduled') ?? [], [view])
   const dirty = view !== null && !sameDraft(draft, draftFrom(view))
 
-  /** The client-side twin of the server's rules, so a refused day says why before saving. */
+  /**
+   * The client-side twin of the server's rules on one day: past, or after the
+   * period. The order of the announcement and the target is not a refused
+   * day but an error next to the target (below), so either date can move
+   * first — refusing the day made the plan impossible to move earlier or
+   * later without knowing which date to change first.
+   */
   const optionOf = useCallback(
-    (which: Exclude<Picker, null>) =>
-      (day: ISODate): DayOption => {
-        if (!view) return { date: day, allowed: false, reasons: [] }
-        const reasons: { code: string }[] = []
-        if (day < view.today) reasons.push({ code: 'preparation_past' })
-        if (day > view.period.lastDay) reasons.push({ code: 'preparation_after_period' })
-        if (which === 'target' && draft.announceOn && day <= draft.announceOn)
-          reasons.push({ code: 'preparation_target_not_after_announcement' })
-        if (which === 'announce' && draft.target && day >= draft.target)
-          reasons.push({ code: 'preparation_announcement_not_before_target' })
-        return { date: day, allowed: reasons.length === 0, reasons }
-      },
-    [view, draft.announceOn, draft.target],
+    (day: ISODate): DayOption => {
+      if (!view) return { date: day, allowed: false, reasons: [] }
+      const reasons: { code: string }[] = []
+      if (day < view.today) reasons.push({ code: 'preparation_past' })
+      if (day > view.period.lastDay) reasons.push({ code: 'preparation_after_period' })
+      return { date: day, allowed: reasons.length === 0, reasons }
+    },
+    [view],
   )
 
   if (loadError) {
@@ -181,7 +184,11 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
       ? preparationErrorMessage('duplicate_reminder')
       : null,
   )
-  const invalid = reminderProblems.some(Boolean) || duplicates.some(Boolean)
+  const targetProblem =
+    draft.target && !announcementRan && draft.announceOn && draft.target <= draft.announceOn
+      ? preparationErrorMessage('target_before_announcement')
+      : null
+  const invalid = targetProblem !== null || reminderProblems.some(Boolean) || duplicates.some(Boolean)
 
   function openPicker(which: Exclude<Picker, null>) {
     if (picker === which) {
@@ -190,14 +197,20 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
     }
     const current = which === 'announce' ? draft.announceOn : draft.target
     setMonth(monthOf(current ?? view?.today ?? ''))
+    setRefusal(null)
     setPicker(which)
   }
 
   function choose(which: Exclude<Picker, null>, day: ISODate) {
-    if (!optionOf(which)(day).allowed) return
+    const option = optionOf(day)
+    setSaved(false)
+    if (!option.allowed) {
+      setRefusal(`${formatDate(day, 'long')} : ${option.reasons.map((r) => dateReasonMessage(r)).join(' ')}`)
+      return
+    }
+    setRefusal(null)
     setDraft((d) => (which === 'announce' ? { ...d, announceOn: day } : { ...d, target: day }))
     setPicker(null)
-    setSaved(false)
   }
 
   function updateReminder(key: string, patch: Partial<DraftReminder>) {
@@ -314,9 +327,14 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
               label="Date d’annonce"
               selected={draft.announceOn ?? ''}
               current={view.announcement.on}
-              optionOf={optionOf('announce')}
+              optionOf={optionOf}
               onSelect={(day) => choose('announce', day)}
             />
+          )}
+          {picker === 'announce' && refusal && (
+            <p role="alert" className="mv-prep__error mv-prep__refusal">
+              {refusal}
+            </p>
           )}
         </div>
 
@@ -333,6 +351,12 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
                   {collection.responded} / {collection.expected} confirmation
                   {collection.expected > 1 ? 's' : ''}
                 </span>
+                {!announcementRan && draft.announceOn && (
+                  <span className="mv-prep__note mv-small">
+                    Déjà ouverte, avant l’annonce : le {formatDate(draft.announceOn)}, l’annonce n’ouvrira
+                    rien de plus et enverra l’invitation aux seules personnes qui n’ont pas encore confirmé.
+                  </span>
+                )}
               </>
             ) : collection.state === 'closed' ? (
               <span className="mv-badge mv-badge--neutral">Clôturée</span>
@@ -365,6 +389,9 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
                 </button>
               </span>
             )}
+            {targetProblem && (
+              <span className="mv-field__hint is-error mv-prep__field-error">{targetProblem}</span>
+            )}
           </div>
           {picker === 'target' && (
             <BoundaryCalendar
@@ -373,9 +400,14 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
               label="Date cible de génération"
               selected={draft.target ?? ''}
               current={view.targetGenerationOn}
-              optionOf={optionOf('target')}
+              optionOf={optionOf}
               onSelect={(day) => choose('target', day)}
             />
+          )}
+          {picker === 'target' && refusal && (
+            <p role="alert" className="mv-prep__error mv-prep__refusal">
+              {refusal}
+            </p>
           )}
         </div>
 
@@ -496,6 +528,11 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
               {error}
             </p>
           )}
+          {dirty && invalid && !saving && (
+            <p role="status" className="mv-prep__blocked">
+              Corrigez les points signalés en rouge pour enregistrer.
+            </p>
+          )}
           {saved && !dirty && (
             <p role="status" className="mv-prep__saved">
               Préparation enregistrée.
@@ -509,6 +546,7 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
               onClick={() => {
                 setDraft(draftFrom(view))
                 setError(null)
+                setRefusal(null)
                 setPicker(null)
               }}
             >
