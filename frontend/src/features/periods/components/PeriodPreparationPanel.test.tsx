@@ -98,13 +98,17 @@ describe('PeriodPreparationPanel', () => {
     )
 
     expect(screen.queryByRole('button', { name: 'Ajouter un rappel' })).toBeEnabled()
-    // The target date: not on or before the announcement.
+    // The target date: not on or before the announcement — said next to it, the day stays choosable.
     fireEvent.click(screen.getAllByRole('button', { name: 'Choisir la date' })[0])
     fireEvent.click(screen.getByRole('button', { name: 'Mois suivant' }))
-    expect(
-      day(/2 novembre 2026, impossible : La date cible de génération vient après l’annonce\./),
-    ).toBeInTheDocument()
+    fireEvent.click(day(/^lundi 2 novembre 2026, possible/))
+    expect(screen.getByText('La date cible de génération doit venir après l’annonce.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Enregistrer la préparation' })).toBeDisabled()
+    fireEvent.click(screen.getAllByRole('button', { name: 'Changer la date' })[1])
     fireEvent.click(day(/30 novembre 2026, possible/))
+    expect(
+      screen.queryByText('La date cible de génération doit venir après l’annonce.'),
+    ).not.toBeInTheDocument()
     expect(screen.getByText(formatDate('2026-11-30'))).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Ajouter un rappel' }))
@@ -289,5 +293,271 @@ describe('PeriodPreparationPanel', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'La préparation de la période n’a pas pu être chargée.',
     )
+  })
+})
+
+/**
+ * The bug of Trauma Delta, period 2 (28 October 2026): announcement on 17
+ * January, target on 24 January, one reminder 2 days before, the collection
+ * already opened by hand. Once saved, every day refused by the order of the
+ * two dates was a click that did nothing — no message, the button still
+ * greyed, « Préparation enregistrée » still shown: the plan could not move.
+ */
+describe('PeriodPreparationPanel — a saved plan that changes (bug of 28 October 2026)', () => {
+  const reminder = (
+    stableId: string,
+    value: number,
+    unit: 'DAY' | 'WEEK',
+    dueOn: string,
+  ): PeriodPreparation['reminders'][number] => ({
+    stableId,
+    value,
+    unit,
+    dueOn,
+    state: 'scheduled',
+    outcome: null,
+    executedAt: null,
+    emails: NO_EMAILS,
+  })
+  const traumaDelta = (overrides: Partial<PeriodPreparation> = {}): PeriodPreparation =>
+    blank({
+      period: { stableId: 'c2', number: 2, startsAt: '2027-01-29', lastDay: '2027-05-02' },
+      today: '2026-10-28',
+      announcement: {
+        on: '2027-01-17',
+        state: 'scheduled',
+        outcome: null,
+        executedAt: null,
+        emails: NO_EMAILS,
+      },
+      targetGenerationOn: '2027-01-24',
+      collection: { state: 'open', responded: 0, expected: 17 },
+      reminders: [reminder('r1', 2, 'DAY', '2027-01-22')],
+      ...overrides,
+    })
+  const saveButton = () => screen.getByRole('button', { name: 'Enregistrer la préparation' })
+  const changeDate = (row: 0 | 1) =>
+    fireEvent.click(screen.getAllByRole('button', { name: 'Changer la date' })[row])
+  const months = (direction: 'Mois suivant' | 'Mois précédent', count: number) => {
+    for (let i = 0; i < count; i++) fireEvent.click(screen.getByRole('button', { name: direction }))
+  }
+
+  it('moves the whole plan earlier, the target first: the order is an error next to it, never a dead click', async () => {
+    await renderPanel(traumaDelta())
+    expect(saveButton()).toBeDisabled()
+
+    changeDate(1)
+    fireEvent.click(day(/15 janvier 2027, possible/))
+    expect(screen.getByText(formatDate('2027-01-15'))).toBeInTheDocument()
+    expect(screen.getByText('La date cible de génération doit venir après l’annonce.')).toBeInTheDocument()
+    // The reminder, now 13 January, before the announcement: said too.
+    expect(screen.getByText('Un rappel doit venir après l’annonce.')).toBeInTheDocument()
+    expect(screen.getByText('Corrigez les points signalés en rouge pour enregistrer.')).toBeInTheDocument()
+    expect(saveButton()).toBeDisabled()
+
+    changeDate(0)
+    fireEvent.click(day(/10 janvier 2027, possible/))
+    expect(screen.queryByText(/doit venir après l’annonce/)).not.toBeInTheDocument()
+    expect(screen.getByText(`Le ${formatDate('2027-01-13')} à 8 h`)).toBeInTheDocument()
+    expect(saveButton()).toBeEnabled()
+
+    api.savePeriodPreparation.mockResolvedValue(
+      traumaDelta({
+        announcement: {
+          on: '2027-01-10',
+          state: 'scheduled',
+          outcome: null,
+          executedAt: null,
+          emails: NO_EMAILS,
+        },
+        targetGenerationOn: '2027-01-15',
+        reminders: [reminder('r1', 2, 'DAY', '2027-01-13')],
+      }),
+    )
+    fireEvent.click(saveButton())
+    expect(await screen.findByText('Préparation enregistrée.')).toBeInTheDocument()
+    expect(api.savePeriodPreparation).toHaveBeenCalledTimes(1)
+    expect(api.savePeriodPreparation).toHaveBeenCalledWith('p1', 'c2', {
+      announceOn: '2027-01-10',
+      targetGenerationOn: '2027-01-15',
+      reminders: [{ stableId: 'r1', value: 2, unit: 'DAY' }],
+    })
+    expect(saveButton()).toBeDisabled()
+  })
+
+  it('moves the announcement after the target first, then the target', async () => {
+    await renderPanel(traumaDelta())
+    changeDate(0)
+    fireEvent.click(day(/25 janvier 2027, possible/))
+    expect(screen.getByText('La date cible de génération doit venir après l’annonce.')).toBeInTheDocument()
+    changeDate(1)
+    months('Mois suivant', 1)
+    fireEvent.click(day(/^vendredi 5 février 2027, possible/))
+    expect(screen.queryByText(/doit venir après l’annonce/)).not.toBeInTheDocument()
+    expect(saveButton()).toBeEnabled()
+  })
+
+  it('says, under the calendar, why a day touched cannot be chosen, and wipes « Préparation enregistrée »', async () => {
+    await renderPanel(traumaDelta())
+    api.savePeriodPreparation.mockResolvedValue(
+      traumaDelta({ targetGenerationOn: '2027-01-26', reminders: [reminder('r1', 2, 'DAY', '2027-01-24')] }),
+    )
+    changeDate(1)
+    fireEvent.click(day(/26 janvier 2027, possible/))
+    fireEvent.click(saveButton())
+    expect(await screen.findByText('Préparation enregistrée.')).toBeInTheDocument()
+
+    changeDate(1)
+    months('Mois précédent', 3)
+    fireEvent.click(day(/^mardi 27 octobre 2026/))
+    expect(screen.getByRole('alert')).toHaveTextContent('mardi 27 octobre 2026 : Ce jour est déjà passé.')
+    expect(screen.queryByText('Préparation enregistrée.')).not.toBeInTheDocument()
+    expect(screen.getByText(formatDate('2027-01-26'))).toBeInTheDocument()
+
+    months('Mois suivant', 7)
+    fireEvent.click(day(/^lundi 3 mai 2027/))
+    expect(screen.getByRole('alert')).toHaveTextContent('Ce jour est après la fin de la période.')
+  })
+
+  it('adds, changes and removes reminders of the saved plan', async () => {
+    await renderPanel(traumaDelta())
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Rappel 1 : combien avant la date cible' }), {
+      target: { value: '3' },
+    })
+    expect(screen.getByText(`Le ${formatDate('2027-01-21')} à 8 h`)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Ajouter un rappel' }))
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Rappel 2 : combien avant la date cible' }), {
+      target: { value: '1' },
+    })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Rappel 2 : unité' }), {
+      target: { value: 'WEEK' },
+    })
+    // One week before the 24th is the 17th: the day of the announcement.
+    expect(screen.getByText('Un rappel doit venir après l’annonce.')).toBeInTheDocument()
+    expect(saveButton()).toBeDisabled()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Rappel 2 : unité' }), { target: { value: 'DAY' } })
+    expect(saveButton()).toBeEnabled()
+
+    api.savePeriodPreparation.mockResolvedValue(traumaDelta())
+    fireEvent.click(saveButton())
+    await waitFor(() =>
+      expect(api.savePeriodPreparation).toHaveBeenLastCalledWith('p1', 'c2', {
+        announceOn: '2027-01-17',
+        targetGenerationOn: '2027-01-24',
+        reminders: [
+          { stableId: 'r1', value: 3, unit: 'DAY' },
+          { value: 1, unit: 'DAY' },
+        ],
+      }),
+    )
+    await screen.findByText('Préparation enregistrée.')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Supprimer le rappel 1' }))
+    expect(saveButton()).toBeEnabled()
+    api.savePeriodPreparation.mockResolvedValue(traumaDelta({ reminders: [] }))
+    fireEvent.click(saveButton())
+    await waitFor(() =>
+      expect(api.savePeriodPreparation).toHaveBeenLastCalledWith('p1', 'c2', {
+        announceOn: '2027-01-17',
+        targetGenerationOn: '2027-01-24',
+        reminders: [],
+      }),
+    )
+  })
+
+  it('a value put back as it was writes nothing', async () => {
+    await renderPanel(traumaDelta())
+    const value = screen.getByRole('spinbutton', { name: 'Rappel 1 : combien avant la date cible' })
+    fireEvent.change(value, { target: { value: '4' } })
+    expect(saveButton()).toBeEnabled()
+    fireEvent.change(value, { target: { value: '2' } })
+    expect(saveButton()).toBeDisabled()
+    expect(api.savePeriodPreparation).not.toHaveBeenCalled()
+  })
+
+  it('a failed save keeps the changes, says why, never says saved, and can be retried', async () => {
+    await renderPanel(traumaDelta())
+    changeDate(1)
+    fireEvent.click(day(/31 janvier 2027, possible/))
+    api.savePeriodPreparation.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    fireEvent.click(saveButton())
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'La préparation n’a pas pu être enregistrée. Vérifiez votre connexion et réessayez.',
+    )
+    expect(screen.queryByText('Préparation enregistrée.')).not.toBeInTheDocument()
+    expect(screen.getByText(formatDate('2027-01-31'))).toBeInTheDocument()
+    expect(saveButton()).toBeEnabled()
+
+    api.savePeriodPreparation.mockRejectedValueOnce(new ApiError(409, { error: 'period_locked' }, 'Conflict'))
+    fireEvent.click(saveButton())
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'Cette période est validée ou publiée : sa préparation ne change plus.',
+      ),
+    )
+
+    api.savePeriodPreparation.mockResolvedValueOnce(
+      traumaDelta({ targetGenerationOn: '2027-01-31', reminders: [reminder('r1', 2, 'DAY', '2027-01-29')] }),
+    )
+    fireEvent.click(saveButton())
+    expect(await screen.findByText('Préparation enregistrée.')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('shows, after reloading, what the server saved — never the draft', async () => {
+    await renderPanel(traumaDelta())
+    changeDate(1)
+    fireEvent.click(day(/31 janvier 2027, possible/))
+    const saved = traumaDelta({
+      targetGenerationOn: '2027-01-31',
+      reminders: [reminder('r1', 2, 'DAY', '2027-01-29')],
+    })
+    api.savePeriodPreparation.mockResolvedValue(saved)
+    fireEvent.click(saveButton())
+    await screen.findByText('Préparation enregistrée.')
+    cleanup()
+
+    await renderPanel(saved)
+    expect(screen.getByText(formatDate('2027-01-31'))).toBeInTheDocument()
+    expect(screen.getByText(`Le ${formatDate('2027-01-29')} à 8 h`)).toBeInTheDocument()
+    expect(saveButton()).toBeDisabled()
+  })
+
+  it('creates a preparation from nothing', async () => {
+    await renderPanel(blank({ today: '2026-10-28' }))
+    fireEvent.click(screen.getAllByRole('button', { name: 'Choisir la date' })[0])
+    fireEvent.click(day(/30 octobre 2026, possible/))
+    fireEvent.click(screen.getByRole('button', { name: 'Choisir la date' }))
+    months('Mois suivant', 1)
+    fireEvent.click(day(/20 novembre 2026, possible/))
+    fireEvent.click(screen.getByRole('button', { name: 'Ajouter un rappel' }))
+    api.savePeriodPreparation.mockResolvedValue(blank())
+    fireEvent.click(saveButton())
+    await waitFor(() =>
+      expect(api.savePeriodPreparation).toHaveBeenCalledWith('p1', 'c2', {
+        announceOn: '2026-10-30',
+        targetGenerationOn: '2026-11-20',
+        reminders: [{ value: 7, unit: 'DAY' }],
+      }),
+    )
+  })
+
+  it('tells the collection already open apart from the announcement still planned', async () => {
+    await renderPanel(traumaDelta())
+    expect(screen.getByText('Ouverte')).toBeInTheDocument()
+    expect(screen.getByText('0 / 17 confirmations')).toBeInTheDocument()
+    expect(screen.getByText('Programmée')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        `Déjà ouverte, avant l’annonce : le ${formatDate('2027-01-17')}, l’annonce n’ouvrira rien de plus et enverra l’invitation aux seules personnes qui n’ont pas encore confirmé.`,
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('says nothing of the kind when the collection is not open yet', async () => {
+    await renderPanel(traumaDelta({ collection: { state: 'not_open', responded: 0, expected: 0 } }))
+    expect(screen.getByText('Pas encore ouverte')).toBeInTheDocument()
+    expect(screen.queryByText(/Déjà ouverte, avant l’annonce/)).not.toBeInTheDocument()
   })
 })

@@ -9666,3 +9666,50 @@ entièrement à la période 2.
 - Une exception à I8 existe désormais, mais elle ne retire que des jours sans
   aucune garde et ne touche pas le calendrier publié.
 - La correction est faite par le gestionnaire, pas par migration de données.
+
+## D212 — « Préparer la période » : l'ordre annonce / date cible est une erreur à côté du champ, jamais un jour refusé sans effet
+
+**Contexte (2026-10-28).** En production, sur Trauma Delta période 2, le
+gestionnaire a enregistré une préparation : annonce le 17/01/2027, date cible
+le 24/01, un rappel 2 jours avant (le 22/01). Ensuite, il n'arrivait plus à la
+modifier. La capture montrait « Préparation enregistrée » et le bouton
+grisé. Lecture seule en production : une seule écriture (`created_at =
+updated_at`, 06:00:28 UTC), données identiques à la capture, aucun envoi.
+
+**Cause.** Le panneau refusait dans les calendriers tout jour qui ne
+respectait pas l'ordre des deux dates :
+
+- la date cible ne pouvait pas être le jour de l'annonce ou avant ;
+- l'annonce ne pouvait pas être le jour de la date cible ou après.
+
+`choose()` ignorait alors le clic **sans rien afficher**. La raison ne figurait
+que dans l'`aria-label` et le `title` du jour, invisibles au toucher.
+
+Avancer tout le plan en commençant par la date cible était donc impossible.
+Le reculer en commençant par l'annonce aussi. Le brouillon ne changeait pas,
+le bouton restait grisé et « Préparation enregistrée » restait affiché. Le
+serveur n'a jamais été appelé ni n'a rien refusé.
+
+**Décision.**
+
+- Seules les règles propres à un jour refusent ce jour : il est passé, ou il
+  est après la fin de la période. Toucher un jour refusé affiche sa raison
+  sous le calendrier (`role="alert"`) et efface « Préparation enregistrée ».
+- « La date cible doit venir après l'annonce » devient une erreur affichée à
+  côté de la date cible, comme les erreurs des rappels. Les deux dates se
+  déplacent donc dans n'importe quel ordre.
+- Tant qu'une erreur subsiste, le bouton reste grisé et une ligne le dit :
+  « Corrigez les points signalés en rouge pour enregistrer. »
+- Le serveur garde exactement les mêmes règles (`target_before_announcement`,
+  etc.) : aucun changement d'API ni de base.
+- La collecte de la période 2 avait été ouverte à la main à 05:58:14, avant
+  la préparation : d'où « Ouverte » à côté d'une annonce « Programmée ».
+  Quand la collecte est déjà ouverte et l'annonce pas encore exécutée, le
+  panneau le dit. À la date prévue, l'annonce n'ouvre rien de plus et envoie
+  l'invitation aux seules personnes sans confirmation
+  (`collection_already_open`, comportement inchangé du runner D210).
+
+**Compromis.** Un jour qui viole l'ordre des dates est maintenant
+« possible » dans le calendrier. Le refus apparaît après le choix, à côté du
+champ, et non avant. C'est voulu : un plan à deux dates liées doit pouvoir
+passer par un état intermédiaire invalide.
