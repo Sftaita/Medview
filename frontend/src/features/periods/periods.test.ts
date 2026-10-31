@@ -1,13 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  addDays,
-  daysInclusive,
-  endAfterMonths,
-  formatDate,
-  formatRange,
-  monthSegments,
-  timeState,
-} from './dates'
+import { addDays, daysInclusive, endAfterMonths, formatDate, formatRange, timeState } from './dates'
 import {
   buildNextPeriod,
   currentAndNext,
@@ -68,16 +60,6 @@ describe('dates', () => {
       daysUntil: 3,
       label: 'Commence dans 3 jours',
     })
-  })
-
-  it('splits a period by month, labels only months of 6 days or more, and fills elapsed time', () => {
-    const segs = monthSegments('2026-10-01', '2027-01-30', '2026-10-10')
-    expect(segs.map((s) => s.days)).toEqual([31, 30, 31, 30])
-    expect(segs.map((s) => s.label)).toEqual(['Oct. 2026', 'Nov.', 'Déc.', 'Janv. 2027'])
-    expect(segs[0].fillPct).toBeCloseTo((9 / 31) * 100)
-    expect(segs.slice(1).every((s) => s.fillPct === 0)).toBe(true)
-    // Un bout de mois trop court n'a pas de libellé.
-    expect(monthSegments('2027-01-31', '2027-04-30', '2026-10-10')[0]).toMatchObject({ days: 1, label: '' })
   })
 })
 

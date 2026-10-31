@@ -9666,3 +9666,32 @@ entièrement à la période 2.
 - Une exception à I8 existe désormais, mais elle ne retire que des jours sans
   aucune garde et ne touche pas le calendrier publié.
 - La correction est faite par le gestionnaire, pas par migration de données.
+
+## D212 — Détail d'une période : les cartes suffisent
+
+**Contexte (2026-10-31).** Sous la frise des périodes, une grande carte
+`PeriodDetailCard` répétait la période sélectionnée : dates (« Premier jour »
+/ « Dernier jour inclus »), durée, barre découpée par mois, statut, compte à
+rebours, boutons précédent / suivant. Tout cela figure déjà sur la carte de la
+période, et une légende (« Aujourd'hui », « Temps écoulé de la période »,
+« La largeur de chaque période suit sa durée ») n'apportait rien.
+
+**Décision.**
+
+- La carte de chaque période est le seul endroit qui porte ses dates (fin
+  incluse), sa **durée** (ajoutée sur chaque carte, et sur le sélecteur
+  téléphone quand elle n'est pas déjà dite par « jour X sur N »), son statut
+  et son avancement.
+- `PeriodDetailCard`, `MonthTimeBar`, `monthSegments` et la légende sont
+  supprimés.
+- `PeriodActions`, sous les cartes, garde ce qui s'y faisait : « Modifier les
+  dates » (D207), « Corriger la fin… » (D211), la bannière « Consultation de
+  l'historique » et son retour à la dernière période.
+- Les cartes s'affichent aussi pour un planning à une seule période ; elles
+  remplacent l'ancienne carte détail. Les flèches précédent / suivant
+  n'apparaissent qu'avec plusieurs périodes.
+- Aucun changement backend ni de données.
+
+**Compromis.** La bannière « Nouvelle période » (lignes et membres déjà
+appliqués, aucune garde attribuée) disparaît. Les étapes de préparation
+disent déjà où en est la période.

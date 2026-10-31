@@ -263,7 +263,10 @@ function renderPage(
   return api
 }
 
-const detailCard = () => document.querySelector('.mv-period-detail') as HTMLElement
+/** The card of the selected period: the one place for its dates, status, progress and countdown. */
+const selectedCard = () => document.querySelector('.mv-frise__seg[aria-pressed="true"]') as HTMLElement
+/** What can be done on the selected period, under the cards. */
+const periodActions = () => screen.getByRole('group', { name: /Actions de la période/ })
 
 describe('PlanningDetailPage — periods (lot L6)', () => {
   it('opens on the current period, with its own status, its lines and what generating it would do', async () => {
@@ -271,8 +274,8 @@ describe('PlanningDetailPage — periods (lot L6)', () => {
 
     const periods = await screen.findByRole('region', { name: 'Périodes du planning' })
     expect(within(periods).getByText('Périodes du planning · 3')).toBeInTheDocument()
-    expect(within(detailCard()).getByText(/Période 2/)).toBeInTheDocument()
-    expect(within(detailCard()).getAllByText('Partiellement publiée').length).toBeGreaterThan(0)
+    expect(within(selectedCard()).getByText(/Période 2/)).toBeInTheDocument()
+    expect(within(selectedCard()).getAllByText('Partiellement publiée').length).toBeGreaterThan(0)
     expect(screen.getByTestId('search')).toHaveTextContent('')
     await waitFor(() =>
       expect(
@@ -301,14 +304,14 @@ describe('PlanningDetailPage — periods (lot L6)', () => {
     const api = renderPage(() => planning(), {}, '/plannings/plan-1?periode=1')
 
     await screen.findByRole('region', { name: 'Périodes du planning' })
-    expect(within(detailCard()).getByText(/Période 1/)).toBeInTheDocument()
-    expect(within(detailCard()).getByText(/Consultation de l’historique/)).toBeInTheDocument()
+    expect(within(selectedCard()).getByText(/Période 1/)).toBeInTheDocument()
+    expect(within(periodActions()).getByText(/Consultation de l’historique/)).toBeInTheDocument()
     // A fully published period: no (re)generation offered.
     expect(screen.queryByRole('button', { name: /Générer la période/ })).not.toBeInTheDocument()
 
-    fireEvent.click(within(detailCard()).getByRole('button', { name: /Période suivante/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Période suivante' }))
     expect(screen.getByTestId('search')).toHaveTextContent('?periode=2')
-    expect(within(detailCard()).getByText(/Période 2/)).toBeInTheDocument()
+    expect(within(selectedCard()).getByText(/Période 2/)).toBeInTheDocument()
     await waitFor(() =>
       expect(
         api.requests('GET', '/api/plannings/plan-1/collection-status').map((r) => r.query.get('period')),
@@ -317,7 +320,7 @@ describe('PlanningDetailPage — periods (lot L6)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Retour navigateur' }))
     expect(screen.getByTestId('search')).toHaveTextContent('?periode=1')
-    expect(within(detailCard()).getByText(/Période 1/)).toBeInTheDocument()
+    expect(within(selectedCard()).getByText(/Période 1/)).toBeInTheDocument()
   })
 
   it('counts the members of each line in the selected period, never in the default one (lot L7)', async () => {
@@ -346,7 +349,7 @@ describe('PlanningDetailPage — periods (lot L6)', () => {
     expect(within(lines).getByText('Juniors · 1 membre')).toBeInTheDocument()
     expect(within(lines).queryByText(/99/)).not.toBeInTheDocument()
 
-    fireEvent.click(within(detailCard()).getByRole('button', { name: /Période précédente/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Période précédente' }))
     expect(
       await within(screen.getByRole('list', { name: 'Lignes de garde' })).findByText('Seniors · 5 membres'),
     ).toBeInTheDocument()
@@ -356,7 +359,7 @@ describe('PlanningDetailPage — periods (lot L6)', () => {
     renderPage(() => planning(), {}, '/plannings/plan-1?periode=42')
 
     await screen.findByRole('region', { name: 'Périodes du planning' })
-    expect(within(detailCard()).getByText(/Période 2/)).toBeInTheDocument()
+    expect(within(selectedCard()).getByText(/Période 2/)).toBeInTheDocument()
   })
 
   it('never shows the availability follow-up of a period no longer selected', async () => {
@@ -385,7 +388,7 @@ describe('PlanningDetailPage — periods (lot L6)', () => {
     )
 
     await screen.findByRole('region', { name: 'Périodes du planning' })
-    fireEvent.click(within(detailCard()).getByRole('button', { name: /Période suivante/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Période suivante' }))
     expect(await screen.findByRole('tab', { name: 'Indisponibilités (7)' })).toBeInTheDocument()
 
     releaseFirst(
@@ -433,7 +436,7 @@ describe('PlanningDetailPage — periods (lot L6)', () => {
     const juniors = within(steps).getByText('Juniors').closest('li')!
     expect(within(juniors).getByText('Configuration incomplète')).toBeInTheDocument()
     expect(within(juniors).getByText('À compléter : règles de génération non activées.')).toBeInTheDocument()
-    expect(within(detailCard()).getByText(/Nouvelle période/)).toBeInTheDocument()
+    expect(within(selectedCard()).getByText('Période 3')).toBeInTheDocument()
 
     fireEvent.click(within(steps).getByRole('button', { name: 'Ouvrir la collecte' }))
     await waitFor(() =>
@@ -492,7 +495,7 @@ describe('PlanningDetailPage — periods (lot L6)', () => {
     expect(screen.queryByRole('button', { name: /Période suivante.*dès le/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Générer/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Plus d’actions' })).not.toBeInTheDocument()
-    fireEvent.click(within(detailCard()).getByRole('button', { name: /Période suivante/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Période suivante' }))
     const steps = await screen.findByRole('region', { name: 'Préparation de la période 3' })
     expect(within(steps).queryByRole('button', { name: /Ouvrir/ })).not.toBeInTheDocument()
   })
@@ -553,7 +556,7 @@ describe('PlanningDetailPage — creating the next period (lot L6)', () => {
     })
     await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent('?periode=4'))
     expect(screen.queryByRole('dialog', { name: 'Créer la période suivante' })).not.toBeInTheDocument()
-    expect(within(detailCard()).getByText(/Période 4/)).toBeInTheDocument()
+    expect(within(selectedCard()).getByText(/Période 4/)).toBeInTheDocument()
     expect(screen.getByText(/Période 4 créée · 1 mai → 31 juil\. 2027/)).toBeInTheDocument()
   })
 
@@ -775,7 +778,7 @@ describe('PlanningDetailPage — choosing the dates of a period on a calendar (D
     )
 
     await screen.findByRole('region', { name: 'Périodes du planning' })
-    fireEvent.click(within(detailCard()).getByRole('button', { name: /Modifier les dates/ }))
+    fireEvent.click(within(periodActions()).getByRole('button', { name: /Modifier les dates/ }))
     const dialog = screen.getByRole('dialog', { name: 'Modifier les dates' })
     expect(
       within(dialog).getByText(/Pour le déplacer, modifiez la fin de la période 2\./),
@@ -818,7 +821,7 @@ describe('PlanningDetailPage — choosing the dates of a period on a calendar (D
     )
 
     await screen.findByRole('region', { name: 'Périodes du planning' })
-    fireEvent.click(within(detailCard()).getByRole('button', { name: /Corriger la fin/ }))
+    fireEvent.click(within(periodActions()).getByRole('button', { name: /Corriger la fin/ }))
     const dialog = screen.getByRole('dialog', { name: 'Corriger la fin de la période' })
     expect(await within(dialog).findAllByRole('radio')).toHaveLength(2)
     fireEvent.change(within(dialog).getByLabelText('Raison de la correction'), {

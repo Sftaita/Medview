@@ -61,7 +61,9 @@ function DesktopFrise({ periods, selectedId, today, canCreate, onSelect, onCreat
                 <strong>Période {p.number}</strong>
                 <StatusPill status={p.status} size="sm" />
               </span>
-              <span className="mv-frise__range">{formatRange(p.start, p.end)}</span>
+              <span className="mv-frise__range">
+                {formatRange(p.start, p.end)} <span className="mv-frise__days">{t.days} jours</span>
+              </span>
               <TimeBar kind={t.kind} elapsedPct={t.elapsedPct} thickness={6} />
               <span className="mv-frise__time">{t.label}</span>
             </button>
@@ -74,15 +76,6 @@ function DesktopFrise({ periods, selectedId, today, canCreate, onSelect, onCreat
             <span>dès le {formatDate(nextPeriodStart(periods), 'dm')}</span>
           </button>
         )}
-      </div>
-      <div className="mv-frise__legend">
-        <span>
-          <i className="mv-legend-today" /> Aujourd’hui · {formatDate(today, 'dmy')}
-        </span>
-        <span>
-          <i className="mv-legend-elapsed" /> Temps écoulé de la période
-        </span>
-        <span>La largeur de chaque période suit sa durée.</span>
       </div>
     </div>
   )
@@ -167,37 +160,46 @@ function MobileSwitcher({ periods, selectedId, today, onSelect }: Props) {
     periods.findIndex((p) => p.id === selectedId),
   )
   const p = periods[idx]
+  const pt = timeState(p, today)
   const { visible, history } = friseWindow(periods, today)
   const go = (i: number) => periods[i] && onSelect(periods[i].id)
 
   return (
     <div className="mv-switcher">
       <div className="mv-switcher__top">
-        <button
-          type="button"
-          className="mv-icon-btn"
-          aria-label="Période précédente"
-          disabled={idx === 0}
-          onClick={() => go(idx - 1)}
-        >
-          <Icon name="chevronLeft" size={20} />
-        </button>
+        {periods.length > 1 && (
+          <button
+            type="button"
+            className="mv-icon-btn"
+            aria-label="Période précédente"
+            disabled={idx === 0}
+            onClick={() => go(idx - 1)}
+          >
+            <Icon name="chevronLeft" size={20} />
+          </button>
+        )}
         <div className="mv-switcher__center">
           <span className="mv-eyebrow">
             Période {p.number} sur {periods.length}
           </span>
           <strong>{formatRange(p.start, p.end)}</strong>
+          <span className="mv-switcher__time">
+            {pt.label}
+            {pt.kind !== 'current' && ` · ${pt.days} jours`}
+          </span>
           <StatusPill status={p.status} size="sm" />
         </div>
-        <button
-          type="button"
-          className="mv-icon-btn"
-          aria-label="Période suivante"
-          disabled={idx === periods.length - 1}
-          onClick={() => go(idx + 1)}
-        >
-          <Icon name="chevronRight" size={20} />
-        </button>
+        {periods.length > 1 && (
+          <button
+            type="button"
+            className="mv-icon-btn"
+            aria-label="Période suivante"
+            disabled={idx === periods.length - 1}
+            onClick={() => go(idx + 1)}
+          >
+            <Icon name="chevronRight" size={20} />
+          </button>
+        )}
       </div>
       <div className="mv-minifrise">
         {history.length > 0 && (

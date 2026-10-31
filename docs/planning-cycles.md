@@ -838,11 +838,11 @@ ci-dessus pour ne pas casser l'écran actuel avant L6 :
 |---|---|
 | `PlanningCard` | « Mes plannings » : `currentPeriod` / `nextPeriod`, `lineCount`, `memberCount`, rôle déduit des droits (Propriétaire = `canManage`, Gestionnaire = `canPublish`, sinon Membre). Plus de badge global « Publié ». Tableau de bord aligné. |
 | `PeriodSelector` | `periods[]`, sélection dans l'URL `?periode=N`, création si `canManage`. |
-| `PeriodDetailCard` | période sélectionnée ; bannière « Consultation de l'historique » pour une période publiée antérieure à la dernière. |
+| `PeriodActions` | sous les cartes : « Modifier les dates », « Corriger la fin… » et la bannière « Consultation de l'historique » (période publiée antérieure à la dernière) ; rien quand il n'y a rien à faire. Remplace `PeriodDetailCard` depuis D212 : la carte de la période (frise, ou sélecteur à flèches sur téléphone) porte seule ses dates, sa durée, son statut et son avancement. |
 | `PreparationSteps` | collecte (progression réelle `acknowledged/expected`, échéance ; « Ouvrir la collecte » → §5.9), génération (`generatedAt`), publication (`publishedAt`). |
 | `CreatePeriodDialog` | `POST …/periods` ; `onCreate` asynchrone (attente, erreurs, 409 « la période a changé, rechargez »). |
 | `PeriodTabs` | **remplacé** par les vrais onglets existants (Lignes, Indisponibilités, Planning : calendrier, statistiques Période / Cumul publié / En préparation, publication, export), tous paramétrés par la période ; le style de barre d'onglets de la maquette est repris. |
-| `StatusPill`, `TimeBar`, `MonthTimeBar`, `dates.ts`, `periods.ts` | réutilisés ; statuts mappés §4.2 (`archivee` non produit). |
+| `StatusPill`, `TimeBar`, `dates.ts`, `periods.ts` | réutilisés ; statuts mappés §4.2 (`archivee` non produit). |
 
 - En-tête : celui de la maquette (« Commun à toutes les périodes »),
   fusionné avec `PilotHeaderActions` ; « Vous en faites partie » ←
