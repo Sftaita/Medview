@@ -57,7 +57,7 @@ final class PlanningCyclesMigrationTest extends WebTestCase
         $this->addSecondaryLine($client, $s, ['junior@example.com']);
         $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/extensions", ['endsAt' => '2027-06-01'], $s['creator']);
         self::assertResponseIsSuccessful();
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/reminders/pending", [], $s['creator']);
+        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/reminders/participants", [], $s['creator']);
         self::assertResponseIsSuccessful();
         $this->prepareLine($s['planningId'], [['2027-01-05', '2027-01-06'], ['2027-01-12', '2027-01-13']]);
         $this->prepareLine($s['planningId'], [['2027-01-07', '2027-01-08']], lineIndex: 1);

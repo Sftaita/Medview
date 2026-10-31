@@ -343,156 +343,117 @@ describe('MyAvailabilityPage — optimistic autosave', () => {
   })
 })
 
-describe('MyAvailabilityPage — answering a collection', () => {
+describe('MyAvailabilityPage — a collection, with nothing to confirm (D214)', () => {
   function frozenDecember() {
     // Only `Date` is faked: promises and timers keep running normally.
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-12-14T09:00:00Z'))
   }
 
-  it('opens on the collection window, marks its dates and states the deadline', async () => {
+  it('opens on the collection window, marks its dates and states the indicative deadline', async () => {
     frozenDecember()
     createFakeBackend({ collections: [makeCollection()] }).install()
 
     await renderLoaded('/my-availability?collection=col-1')
 
-    expect(screen.getByRole('region', { name: /Disponibilités janvier–mars 2027/ })).toBeInTheDocument()
-    expect(screen.getByText('Vos disponibilités sont attendues pour janvier–mars 2027')).toBeInTheDocument()
-    expect(screen.getByText('À renseigner avant le 20 décembre')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: /Indisponibilités janvier–mars 2027/ })).toBeInTheDocument()
+    expect(screen.getByText('Indisponibilités à indiquer pour janvier–mars 2027')).toBeInTheDocument()
+    expect(screen.getByText('Date limite indicative : le 20 décembre.')).toBeInTheDocument()
     expect(document.querySelector('.cal__nav-label')?.textContent).toMatch(/Janvier/)
     expect(cell(15, 2027, 0)).toHaveClass('day--window')
     expect(cell(15, 2026, 11)).not.toHaveClass('day--window')
   })
 
-  it('answers "no unavailability" and immediately shows the confirmation', async () => {
+  it('never asks for a confirmation, before or after entering absences', async () => {
     frozenDecember()
     const backend = createFakeBackend({ collections: [makeCollection()] })
     backend.install()
     await renderLoaded('/my-availability?collection=col-1')
 
-    fireEvent.click(screen.getByRole('button', { name: "Je n'ai aucune indisponibilité sur cette période" }))
-
-    expect(await screen.findByText(/Disponibilités confirmées le/)).toHaveTextContent('14/12')
-    expect(screen.getByText(/aucune indisponibilité/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /aucune indisponibilité|Confirmer/ })).not.toBeInTheDocument()
+    const callout = screen.getByRole('region', { name: /Indisponibilités janvier–mars 2027/ })
     expect(
-      backend.requests('POST', '/api/availability-collections/col-1/acknowledge')[0].body as object,
-    ).toEqual({
-      noUnavailability: true,
-    })
-    expect(screen.queryByRole('button', { name: /Confirmer que mes disponibilités/ })).not.toBeInTheDocument()
-  })
-
-  it('confirms that the availabilities are up to date after entering absences', async () => {
-    frozenDecember()
-    const backend = createFakeBackend({ collections: [makeCollection()] })
-    backend.install()
-    await renderLoaded('/my-availability?collection=col-1')
+      within(callout).getByText(/Sans indisponibilité renseignée, vous êtes considéré comme disponible/),
+    ).toBeInTheDocument()
 
     fireEvent.click(cell(10, 2027, 0))
     await waitFor(() => expect(backend.periods).toHaveLength(1))
-    // Absences now sit inside the window: "no unavailability" would contradict them, so it is not offered.
-    expect(
-      screen.queryByRole('button', { name: /aucune indisponibilité sur cette période/ }),
-    ).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Confirmer que mes disponibilités sont à jour' }))
-
-    expect(await screen.findByText(/Disponibilités confirmées le/)).toBeInTheDocument()
-    expect(backend.requests('POST', '/api/availability-collections/col-1/acknowledge')[0].body).toEqual({})
+    expect(screen.queryByRole('button', { name: /aucune indisponibilité|Confirmer/ })).not.toBeInTheDocument()
+    expect(backend.requests('POST', '/api/availability-collections/col-1/acknowledge')).toHaveLength(0)
   })
 
-  it('does not treat existing absences as a confirmation', async () => {
+  it('keeps the calendar editable once the deadline is past', async () => {
     frozenDecember()
+    const backend = createFakeBackend({ collections: [makeCollection({ deadline: '2026-12-01' })] })
+    backend.install()
+    await renderLoaded('/my-availability?collection=col-1')
+
+    expect(screen.getByText(/est passée : votre calendrier reste modifiable/)).toBeInTheDocument()
+    fireEvent.click(cell(12, 2027, 0))
+    await waitFor(() => expect(backend.periods).toHaveLength(1))
+  })
+})
+
+describe('MyAvailabilityPage — after a generation (docs/decisions.md D216)', () => {
+  const generated = {
+    planningStableId: 'plan-1',
+    planningName: 'Trauma Delta',
+    period: { stableId: 'c2', number: 2, count: 2 },
+    lines: ['Seniors'],
+    generatedAt: '2027-01-24T08:15:00+00:00',
+    published: true,
+    from: '2026-12-20',
+    to: '2026-12-20',
+    conflicts: [] as { dates: string[]; lineName: string; dutyTypeName: string; blockName: string | null }[],
+  }
+
+  it('saves the absence, then says it does not change the generated planning — never blocking, never asking twice', async () => {
+    const backend = createFakeBackend({ impactsFor: () => [generated] })
+    backend.install()
+    await renderLoaded()
+
+    fireEvent.click(cell(20))
+
+    const notice = await screen.findByRole('status', { name: 'Plannings déjà générés' })
+    expect(notice).toHaveTextContent('Trauma Delta – Période 2, déjà généré le 24 janvier 2027 et publié')
+    expect(notice).toHaveTextContent(
+      'Votre indisponibilité a bien été enregistrée, mais elle ne modifiera pas automatiquement ce planning.',
+    )
+    expect(backend.periods).toHaveLength(1)
+    expect(screen.getByText(/Enregistré automatiquement/)).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Compris' }))
+    expect(screen.queryByRole('status', { name: 'Plannings déjà générés' })).not.toBeInTheDocument()
+  })
+
+  it('warns harder about a duty held that day, which stays assigned', async () => {
     createFakeBackend({
-      collections: [makeCollection()],
-      periods: [
+      impactsFor: () => [
         {
-          stableId: 'old',
-          type: 'UNAVAILABLE',
-          source: 'MANUAL',
-          editable: true,
-          startsAt: new Date(2027, 0, 15).toISOString(),
-          endsAt: new Date(2027, 0, 18).toISOString(),
-          createdAt: '',
-          updatedAt: '',
+          ...generated,
+          conflicts: [{ dates: ['2026-12-20'], lineName: 'Seniors', dutyTypeName: 'Garde', blockName: null }],
         },
       ],
     }).install()
+    await renderLoaded()
 
-    await renderLoaded('/my-availability?collection=col-1')
+    fireEvent.click(cell(20))
 
-    expect(screen.getByText('Vos disponibilités sont attendues pour janvier–mars 2027')).toBeInTheDocument()
-    expect(screen.queryByText(/Disponibilités confirmées/)).not.toBeInTheDocument()
+    const notice = await screen.findByRole('status', { name: 'Plannings déjà générés' })
+    expect(notice).toHaveTextContent(
+      'Vous êtes déjà de garde le 20 décembre 2026 (Seniors). Cette garde reste attribuée.',
+    )
   })
 
-  it('explains an answer the server refuses', async () => {
-    frozenDecember()
-    const backend = createFakeBackend({ collections: [makeCollection()] })
-    backend.install()
-    await renderLoaded('/my-availability?collection=col-1')
-    backend.failNext('POST', '/api/availability-collections/col-1/acknowledge', 409, {
-      error: 'collection_closed',
-    })
+  it('says nothing when the day belongs to no generated planning', async () => {
+    createFakeBackend().install()
+    await renderLoaded()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Confirmer que mes disponibilités sont à jour' }))
+    fireEvent.click(cell(20))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('clôturée')
-    expect(screen.queryByText(/Disponibilités confirmées/)).not.toBeInTheDocument()
-  })
-
-  it('re-reads the calendar when the server refuses "no unavailability" because of absences the screen did not know', async () => {
-    frozenDecember()
-    const backend = createFakeBackend({ collections: [makeCollection()] })
-    backend.install()
-    await renderLoaded('/my-availability?collection=col-1')
-    expect(
-      screen.getByRole('button', { name: "Je n'ai aucune indisponibilité sur cette période" }),
-    ).toBeInTheDocument()
-
-    // Another tab of the same person saves an absence inside the window.
-    backend.periods.push({
-      stableId: 'other-tab',
-      type: 'UNAVAILABLE',
-      source: 'MANUAL',
-      editable: true,
-      startsAt: new Date(2027, 0, 19).toISOString(),
-      endsAt: new Date(2027, 0, 20).toISOString(),
-      createdAt: '',
-      updatedAt: '',
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: "Je n'ai aucune indisponibilité sur cette période" }))
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('Vous avez encore des indisponibilités')
-    // The screen now agrees with the message: the absence is shown and the contradicting answer is no longer offered.
-    await waitFor(() => expect(cell(19, 2027, 0)).toHaveAttribute('aria-pressed', 'true'))
-    expect(
-      screen.queryByRole('button', { name: "Je n'ai aucune indisponibilité sur cette période" }),
-    ).not.toBeInTheDocument()
-    expect(screen.queryByText(/Disponibilités confirmées/)).not.toBeInTheDocument()
-  })
-  it('does not send a double click twice', async () => {
-    frozenDecember()
-    const backend = createFakeBackend({ collections: [makeCollection()] })
-    backend.install()
-    const release = backend.hold('POST', '/api/availability-collections/')
-    await renderLoaded('/my-availability?collection=col-1')
-
-    const button = screen.getByRole('button', { name: 'Confirmer que mes disponibilités sont à jour' })
-    fireEvent.click(button)
-    fireEvent.click(button)
-    release()
-
-    await screen.findByText(/Disponibilités confirmées le/)
-    expect(backend.requests('POST', '/api/availability-collections/col-1/acknowledge')).toHaveLength(1)
-  })
-
-  it('says so when the collection is not open anymore', async () => {
-    createFakeBackend({ collections: [] }).install()
-
-    await renderLoaded('/my-availability?collection=gone')
-
-    expect(screen.getByText(/n'est plus ouverte/)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText(/Enregistré automatiquement/)).toBeInTheDocument())
+    expect(screen.queryByRole('status', { name: 'Plannings déjà générés' })).not.toBeInTheDocument()
   })
 })
 

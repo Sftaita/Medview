@@ -179,7 +179,8 @@ final class PlanningPeriodDatesTest extends WebTestCase
     public function testAnAnsweredCollectionBoundsTheFirstPeriodAndAStaleViewIsRefused(): void
     {
         $period1 = $this->periods()[0]['stableId'];
-        $this->api($this->client, 'POST', "/api/availability-collections/{$this->s['collectionId']}/acknowledge", ['kind' => 'NO_UNAVAILABILITY'], $this->s['alice']);
+        // Touched: a calendar change inside its window (D214: no confirmation any more).
+        $this->api($this->client, 'POST', '/api/me/calendar', ['type' => 'UNAVAILABLE', 'startsAt' => '2027-02-10T00:00:00+01:00', 'endsAt' => '2027-02-12T00:00:00+01:00'], $this->s['alice']);
         self::assertResponseIsSuccessful();
 
         $this->patch($period1, ['startsAt' => '2027-01-15', 'expectedStartsAt' => '2027-01-01']);
@@ -243,8 +244,8 @@ final class PlanningPeriodDatesTest extends WebTestCase
         self::assertCount(4, $dates['linePeriods']);
         $this->assertAuditClean();
 
-        // Later, once someone answered: period 2 starts later first, then period 1 grows; the collection stays.
-        $this->api($this->client, 'POST', "/api/availability-collections/{$this->s['collectionId']}/acknowledge", ['kind' => 'NO_UNAVAILABILITY'], $this->s['alice']);
+        // Later, once someone touched it: period 2 starts later first, then period 1 grows; the collection stays.
+        $this->api($this->client, 'POST', '/api/me/calendar', ['type' => 'UNAVAILABLE', 'startsAt' => '2027-02-10T00:00:00+01:00', 'endsAt' => '2027-02-12T00:00:00+01:00'], $this->s['alice']);
         self::assertResponseIsSuccessful();
         $this->patch($period1, ['endsAt' => '2027-06-01', 'expectedEndsAt' => '2027-04-01']);
         self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
@@ -406,7 +407,7 @@ final class PlanningPeriodDatesTest extends WebTestCase
     public function testACollectionPeopleWereWrittenToIsNeverResizedAndTheRefusalSaysWhy(): void
     {
         $period1 = $this->periods()[0]['stableId'];
-        $sent = $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/reminders/pending", [], $this->s['creator']);
+        $sent = $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/reminders/participants", [], $this->s['creator']);
         self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
         self::assertGreaterThan(0, $sent['sentCount']);
         $before = $this->dates();

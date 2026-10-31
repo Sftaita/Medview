@@ -58,7 +58,7 @@ function singlePeriod(lines: PlanningLineSummary[]): PlanningPeriodView {
     publishedAt: published > 0 ? '2026-09-20T08:00:00+00:00' : null,
     lastPublishedAt: published > 0 ? '2026-09-20T08:00:00+00:00' : null,
     generatedAt: statuses.some((s) => s !== 'DRAFT') ? '2026-09-18T08:00:00+00:00' : null,
-    collections: { open: 1, closed: 0, acknowledged: 1, expected: 3, deadline: null, uncoveredDays: 0 },
+    collections: { open: 1, closed: 0, participants: 3, deadline: null, uncoveredDays: 0 },
     lines: lines.map((l) => ({
       lineStableId: l.stableId,
       planningPeriodStableId: `pp-${l.stableId}`,
@@ -128,7 +128,7 @@ function blankPreparation(stableId: string) {
       emails: { queued: 0, sent: 0, failed: 0, cancelled: 0, pending: 0 },
     },
     targetGenerationOn: null,
-    collection: { state: 'not_open', responded: 0, expected: 0 },
+    collection: { state: 'not_open', participants: 0 },
     reminders: [],
   }
 }
@@ -238,14 +238,17 @@ describe('PlanningDetailPage — steps and tabs', () => {
     renderPage()
 
     const steps = await screen.findByRole('region', { name: 'Préparation de la période 1' })
-    expect(within(steps).getByText('1 / 3 réponses')).toBeInTheDocument()
+    // docs/decisions.md D214: the collection is open, never a count of answers.
+    expect(within(steps).getByText('Collecte ouverte')).toBeInTheDocument()
+    expect(within(steps).queryByText(/réponses/)).not.toBeInTheDocument()
     expect(within(steps).getByText('Pas encore lancée')).toBeInTheDocument()
     expect(within(steps).getByText('Non publiée')).toBeInTheDocument()
     const lines = within(steps).getByRole('list', { name: 'Lignes de la période 1' })
     expect(within(lines).getAllByText('À générer')).toHaveLength(2)
 
     fireEvent.click(screen.getByRole('tab', { name: /Indisponibilités/ }))
-    expect(await screen.findByText('1 / 3 membres ont confirmé leurs disponibilités.')).toBeInTheDocument()
+    expect(await screen.findByText('3 participants')).toBeInTheDocument()
+    expect(screen.queryByText(/ont confirmé/)).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: /Planning/ }))
     expect(screen.getByText('Pas encore de planning')).toBeInTheDocument()
@@ -293,13 +296,15 @@ describe('PlanningDetailPage — steps and tabs', () => {
     expect(await screen.findByRole('dialog')).toBeInTheDocument()
   })
 
-  it('opens the planning settings from "Fixer une date souhaitée"', async () => {
+  it('opens the planning settings from "Fixer une date limite indicative"', async () => {
     renderPage()
 
     fireEvent.click(await screen.findByRole('tab', { name: /Indisponibilités/ }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Fixer une date souhaitée' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Fixer une date limite indicative' }))
 
-    expect(await screen.findByLabelText('Fin souhaitée d’encodage des indisponibilités')).toBeInTheDocument()
+    expect(
+      await screen.findByLabelText('Date limite indicative de déclaration des indisponibilités'),
+    ).toBeInTheDocument()
   })
 
   it('shows the collection history on demand', async () => {
@@ -350,7 +355,9 @@ describe('PlanningDetailPage — lines', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Actions pour Première ligne' }))
     const primaryMenu = screen.getByRole('menu', { name: 'Actions pour Première ligne' })
     expect(within(primaryMenu).getByRole('menuitem', { name: 'Paramètres de la ligne' })).toBeInTheDocument()
-    expect(within(primaryMenu).queryByRole('menuitem', { name: 'Supprimer la ligne' })).not.toBeInTheDocument()
+    expect(
+      within(primaryMenu).queryByRole('menuitem', { name: 'Supprimer la ligne' }),
+    ).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Actions pour Première ligne' })) // closes it
 
     fireEvent.click(screen.getByRole('button', { name: 'Actions pour Assistant' }))
@@ -358,7 +365,9 @@ describe('PlanningDetailPage — lines', () => {
     expect(within(menu).getByRole('menuitem', { name: 'Supprimer la ligne' })).toBeInTheDocument()
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Paramètres de la ligne' }))
     expect(await screen.findByText('Paramètres — Assistant')).toBeInTheDocument()
-    expect(await screen.findByRole('radio', { name: /Renfort selon le chirurgien de garde/ })).toBeInTheDocument()
+    expect(
+      await screen.findByRole('radio', { name: /Renfort selon le chirurgien de garde/ }),
+    ).toBeInTheDocument()
   })
 
   it('adds a line with a name', async () => {
@@ -641,7 +650,9 @@ describe('PlanningDetailPage — engine jobs (docs/decisions.md D149)', () => {
     const running = await screen.findByRole('button', { name: 'Complétion en cours…' })
     expect(running).toBeDisabled()
     expect(running).toHaveAttribute('aria-busy', 'true')
-    expect(screen.getByText(/Complétion automatique en cours : les gardes non attribuées/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/Complétion automatique en cours : les gardes non attribuées/),
+    ).toBeInTheDocument()
   })
 })
 

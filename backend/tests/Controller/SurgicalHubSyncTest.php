@@ -117,6 +117,11 @@ final class SurgicalHubSyncTest extends WebTestCase
         self::assertSame(0, $result['outcome']['created'] + $result['outcome']['updated'] + $result['outcome']['removed']);
         self::assertSame($before, $this->imported($client, $token));
         self::assertSame(1, (int) $this->connection()->fetchOne('SELECT COUNT(*) FROM surgical_hub_imported_leaves'));
+        // docs/decisions.md D215: journaled once, by the synchronisation (no human actor), never again on a repeat.
+        self::assertSame(
+            [['action' => 'CREATED', 'origin' => 'SURGICAL_HUB_SYNC', 'actor_id' => null, 'source' => 'SURGICAL_HUB']],
+            $this->connection()->fetchAllAssociative('SELECT action, origin, actor_id, source FROM user_availability_events'),
+        );
     }
 
     public function testModifiedLeaveMovesTheSamePeriod(): void
@@ -136,6 +141,7 @@ final class SurgicalHubSyncTest extends WebTestCase
         self::assertSame($stableId, $imported[0]['stableId']);
         self::assertSame(self::midnight(self::day(7)), $imported[0]['startsAt']);
         self::assertSame(self::midnight(self::day(11)), $imported[0]['endsAt']);
+        self::assertSame(['CREATED', 'RESCHEDULED'], $this->connection()->fetchFirstColumn('SELECT action FROM user_availability_events ORDER BY id'));
     }
 
     public function testASplitInSurgicalHubShrinksOneAndCreatesTheOther(): void
@@ -562,7 +568,7 @@ final class SurgicalHubSyncTest extends WebTestCase
         $this->sync($client, $token);
 
         $response = $responseRow($this);
-        self::assertNull($response['acknowledged_at'], 'An import is never an answer.');
+        self::assertNull($response['acknowledged_at'], 'An import never writes a confirmation (none exists any more, D214).');
         self::assertNotNull($response['last_availability_change_at']);
     }
 

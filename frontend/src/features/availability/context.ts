@@ -1,7 +1,7 @@
 import { createContext } from 'react'
-import type { AcknowledgementKind, AvailabilityCollection } from './collectionTypes'
+import type { AvailabilityCollection } from './collectionTypes'
 import type { DayRange } from './selection'
-import type { UserAvailabilityPeriod } from './types'
+import type { CalendarImpact, UserAvailabilityPeriod } from './types'
 
 export type MyAvailabilityContextValue = {
   /**
@@ -30,12 +30,17 @@ export type MyAvailabilityContextValue = {
   dismissSyncError: () => void
   /** Re-reads the calendar from the server (ignored while an edit is unsaved). */
   reload: () => Promise<void>
+  /**
+   * docs/decisions.md D216: what the last saved edit's new unavailable days
+   * meet — periods already generated, duties held. Empty when nothing is to be
+   * said; recorded, never applied to a planning.
+   */
+  impacts: CalendarImpact[]
+  dismissImpacts: () => void
 
-  /** The open collections the user has to answer or has answered; null until loaded. */
+  /** The open collections the user takes part in, once announced; null until loaded. */
   collections: AvailabilityCollection[] | null
   refreshCollections: () => Promise<void>
-  /** The current user's own confirmation. Rejects with the ApiError so the caller can explain it. */
-  acknowledge: (collectionStableId: string, kind: AcknowledgementKind) => Promise<void>
 }
 
 export const MyAvailabilityContext = createContext<MyAvailabilityContextValue | null>(null)

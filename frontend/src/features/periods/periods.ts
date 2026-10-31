@@ -63,6 +63,6 @@ export function buildNextPeriod(periods: Period[], end: ISODate, id: string): Pe
     start: nextPeriodStart(periods),
     end,
     status: 'preparation',
-    collecte: { state: 'non-ouverte', responses: 0 },
+    collecte: { state: 'non-ouverte' },
   }
 }

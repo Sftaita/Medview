@@ -65,6 +65,15 @@ class PeriodPreparation
     #[ORM\Column(type: Types::DATE_IMMUTABLE, nullable: true)]
     private ?\DateTimeImmutable $targetGenerationOn = null;
 
+    /**
+     * docs/decisions.md D214: the indicative date by which the participants
+     * are asked to have updated their calendar. Informative only — nothing
+     * refuses an edit or a generation once it is past. Given to the period's
+     * open collections, and to those the announcement opens.
+     */
+    #[ORM\Column(type: Types::DATE_IMMUTABLE, nullable: true)]
+    private ?\DateTimeImmutable $declarationDeadlineOn = null;
+
     /** The last manager who saved it — the one on whose behalf the collection is opened. */
     #[ORM\ManyToOne(targetEntity: User::class)]
     #[ORM\JoinColumn(nullable: false, onDelete: 'RESTRICT')]
@@ -165,6 +174,16 @@ class PeriodPreparation
     public function changeTarget(?\DateTimeImmutable $on): void
     {
         $this->targetGenerationOn = $on;
+    }
+
+    public function getDeclarationDeadlineOn(): ?\DateTimeImmutable
+    {
+        return $this->declarationDeadlineOn;
+    }
+
+    public function changeDeclarationDeadline(?\DateTimeImmutable $on): void
+    {
+        $this->declarationDeadlineOn = $on;
     }
 
     public function getUpdatedBy(): User

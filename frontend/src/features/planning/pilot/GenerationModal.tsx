@@ -137,11 +137,9 @@ export function GenerationModal({ planningStableId, period, onClose, onLaunched 
 
   // SurgicalHub dates are shown in the planning's own timezone, like every other date of this dialog.
   const zone = preflight?.planning.timezone ?? 'Europe/Brussels'
-  // Nobody asked (no collection over the period, lot L7) is not "everybody confirmed".
-  const noCollection = period?.hasCollection === false
-  const everybodyConfirmed = preflight !== null && preflight.pendingCount === 0 && !noCollection
+  // docs/decisions.md D214: nobody confirms anything — only a warning makes it "anyway".
   const confirmLabel =
-    everybodyConfirmed && preflight.warnings.length === 0 ? 'Générer' : 'Générer quand même'
+    preflight !== null && preflight.warnings.length === 0 ? 'Générer' : 'Générer quand même'
 
   return (
     <Overlay
@@ -287,17 +285,9 @@ function PreflightBody({
         </li>
         <li>{plural(preflight.participantCount, 'membre participe', 'membres participent')}</li>
         <li>
-          {period?.hasCollection === false
-            ? 'Aucune collecte des disponibilités n’a été ouverte pour ces dates'
-            : preflight.pendingCount === 0
-              ? 'Tous ont confirmé leurs disponibilités'
-              : preflight.confirmedCount === 1
-                ? '1 a confirmé ses disponibilités'
-                : `${preflight.confirmedCount} ont confirmé leurs disponibilités`}
+          Les calendriers sont pris tels qu’ils sont au lancement : sans indisponibilité, un membre est
+          disponible
         </li>
-        {preflight.pendingCount > 0 && (
-          <li>{plural(preflight.pendingCount, 'n’a pas encore répondu', 'n’ont pas encore répondu')}</li>
-        )}
         <li>
           {plural(
             preflight.unavailabilityCount,
@@ -306,7 +296,7 @@ function PreflightBody({
           )}
         </li>
         {preflight.availabilityDeadline && (
-          <li>Fin souhaitée d’encodage : {formatLongDate(preflight.availabilityDeadline)}</li>
+          <li>Date limite indicative : {formatLongDate(preflight.availabilityDeadline)}</li>
         )}
         {familyCounts.length > 0 &&
           familyCounts.map(([name, count]) => (
@@ -686,8 +676,6 @@ function blockerText(issue: PreflightIssue): string {
 function warningText(issue: PreflightIssue, preflight: GenerationPreflight): string {
   const line = issue.lineName ? `Ligne « ${issue.lineName} » : ` : ''
   switch (issue.code) {
-    case 'PENDING_MEMBERS':
-      return `${plural(preflight.pendingCount, 'membre n’a pas', 'membres n’ont pas')} confirmé ${preflight.pendingCount > 1 ? 'leurs' : 'ses'} disponibilités : les indisponibilités déjà enregistrées seront prises en compte, les autres non.`
     case 'DEADLINE_PASSED':
       return `${overdueMessage(preflight.deadlineOverdueDays ?? 0)} Elle reste indicative et ne bloque pas la génération.`
     case 'VALIDATION_WILL_BE_INVALIDATED':

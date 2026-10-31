@@ -12,8 +12,8 @@ enum ReminderStatus: string
     /** A reminder already went to this person a moment ago (double click, two admins): nothing sent. */
     case TOO_RECENT = 'TOO_RECENT';
 
-    /** The person has no unanswered open collection: there is nothing to remind. */
-    case NOTHING_PENDING = 'NOTHING_PENDING';
+    /** The person takes part in no open collection: there is nothing to remind them of. */
+    case NOT_PARTICIPANT = 'NOT_PARTICIPANT';
 
     /** The transport refused the message: nothing is recorded. */
     case EMAIL_FAILED = 'EMAIL_FAILED';

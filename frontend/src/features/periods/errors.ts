@@ -72,7 +72,7 @@ export function collectionOpeningMessage(err: unknown): string {
     case 'period_management_disabled':
       return 'La gestion des périodes n’est pas activée.'
     case 'deadline_in_past':
-      return 'La date souhaitée est déjà passée.'
+      return 'La date limite indicative est déjà passée.'
   }
   if (err instanceof ApiError && err.status === 403)
     return 'Vous ne pouvez pas ouvrir de collecte sur ce planning.'
@@ -131,6 +131,10 @@ export function dateReasonMessage(reason: DateReason): string {
       return 'La date cible de génération vient après l’annonce.'
     case 'preparation_announcement_not_before_target':
       return 'L’annonce vient avant la date cible de génération.'
+    case 'preparation_deadline_not_after_announcement':
+      return 'La date limite indicative vient après l’annonce.'
+    case 'preparation_deadline_after_target':
+      return 'La date limite indicative vient au plus tard à la date cible de génération.'
     case 'collection_answered':
       return 'Des participants ont déjà répondu à la collecte des disponibilités ou modifié leurs absences : elle n’est plus redimensionnée, et ce jour la laisserait hors de la période.'
     case 'period_locked':
@@ -185,6 +189,10 @@ const PREPARATION_MESSAGES: Record<string, string> = {
   reminder_not_found: 'Ce rappel n’existe plus. Rechargez la page.',
   too_many_reminders: 'Dix rappels au plus par période.',
   invalid_date: 'Une des dates n’est pas valide.',
+  deadline_in_past: 'La date limite indicative est déjà passée.',
+  deadline_after_period_end: 'La date limite indicative est après la fin de la période.',
+  deadline_before_announcement: 'La date limite indicative doit venir après l’annonce.',
+  deadline_after_target: 'La date limite indicative doit venir au plus tard à la date cible de génération.',
 }
 
 export function preparationErrorMessage(code: string): string {

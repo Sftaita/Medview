@@ -1,14 +1,18 @@
 Bonjour {{ firstName }},
 
-Vous n'avez pas encore confirmé vos disponibilités pour le planning de garde {{ planningName }} (période du {{ periodLabel }}).
+La génération des gardes du planning {{ planningName }} (période du {{ periodLabel }}) approche.
 
-Merci de vérifier vos indisponibilités dans MedVue et de confirmer qu'elles sont à jour — y compris si vous n'en avez aucune.
+Pensez à vérifier et à actualiser vos éventuelles indisponibilités avant la date prévue de génération. Sans indisponibilité renseignée, vous êtes considéré comme disponible.
+{% if deadlineLabel %}
+
+Date limite indicative : {{ deadlineLabel }}. Votre calendrier reste modifiable après cette date.
+{% endif %}
 {% if targetLabel %}
 
-La génération du planning est prévue aux alentours du {{ targetLabel }}.
+Génération prévue aux alentours du {{ targetLabel }}. Les indisponibilités prises en compte seront celles présentes dans MedVue à ce moment-là.
 {% endif %}
 
-Confirmer mes disponibilités :
+Vérifier mon calendrier :
 {{ availabilityUrl }}
 
 Merci.

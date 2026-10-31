@@ -40,9 +40,9 @@ final class PlanningCollectionStatusControllerTest extends WebTestCase
             self::assertSame('2027-04-30', $status['planning']['lastDay']);
             // The creator did not include themself: admin, alice and bob participate.
             self::assertSame(3, $status['summary']['participantCount']);
-            self::assertSame(3, $status['summary']['expectedCount']);
-            self::assertSame(0, $status['summary']['confirmedCount']);
-            self::assertSame(3, $status['summary']['pendingCount']);
+            self::assertSame(3, $status['summary']['concernedCount']);
+            // docs/decisions.md D214: no confirmation counter of any kind.
+            self::assertSame(['participantCount', 'concernedCount', 'unavailabilityCount'], array_keys($status['summary']));
             self::assertSame(1, $status['openCollectionCount']);
         }
     }
@@ -64,9 +64,9 @@ final class PlanningCollectionStatusControllerTest extends WebTestCase
         self::assertResponseStatusCodeSame(403);
     }
 
-    // --- PENDING is never inferred from the absence of unavailabilities -----
+    // --- available by default: nothing to confirm (D214) ---------------------
 
-    public function testAMemberWithoutUnavailabilityWhoDidNotConfirmStaysPending(): void
+    public function testAMemberWithoutUnavailabilityIsAvailableAndHasNothingToConfirm(): void
     {
         $client = static::createClient();
         $s = $this->pilotScenario($client);
@@ -74,13 +74,14 @@ final class PlanningCollectionStatusControllerTest extends WebTestCase
         $row = $this->rowOf($this->collectionStatus($client, $s), 'alice@example.com');
 
         self::assertSame(0, $row['unavailabilityCount']);
-        self::assertSame('PENDING', $row['collectionState'], '"No unavailability recorded" must never read as "confirmed".');
-        self::assertNull($row['acknowledgedAt']);
-        self::assertNull($row['acknowledgementKind']);
-        self::assertSame(1, $row['pendingCollectionCount']);
+        self::assertTrue($row['participant']);
+        self::assertNull($row['lastAvailabilityChangeAt']);
+        foreach (['collectionState', 'acknowledgedAt', 'acknowledgementKind', 'pendingCollectionCount'] as $gone) {
+            self::assertArrayNotHasKey($gone, $row);
+        }
     }
 
-    public function testAMemberWithUnavailabilitiesWhoDidNotConfirmStaysPending(): void
+    public function testAMemberWithUnavailabilitiesShowsThemAndWhenTheyLastChanged(): void
     {
         $client = static::createClient();
         $s = $this->pilotScenario($client);
@@ -89,27 +90,8 @@ final class PlanningCollectionStatusControllerTest extends WebTestCase
         $row = $this->rowOf($this->collectionStatus($client, $s), 'alice@example.com');
 
         self::assertSame(1, $row['unavailabilityCount']);
-        self::assertSame('PENDING', $row['collectionState']);
-        self::assertNotNull($row['lastAvailabilityChangeAt'], 'Touching the calendar is recorded, but is not an answer (D121).');
-    }
-
-    public function testAMemberWhoExplicitlyConfirmedNoUnavailabilityIsConfirmed(): void
-    {
-        $client = static::createClient();
-        $s = $this->pilotScenario($client);
-
-        $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", ['noUnavailability' => true], $s['alice']);
-        self::assertResponseIsSuccessful();
-
-        $status = $this->collectionStatus($client, $s);
-        $row = $this->rowOf($status, 'alice@example.com');
-        self::assertSame('ACKNOWLEDGED', $row['collectionState']);
-        self::assertSame('NO_UNAVAILABILITY', $row['acknowledgementKind']);
-        self::assertNotNull($row['acknowledgedAt']);
-        self::assertSame(0, $row['pendingCollectionCount']);
-        self::assertSame(1, $status['summary']['confirmedCount']);
-        self::assertSame(2, $status['summary']['pendingCount']);
-        self::assertSame('PENDING', $this->rowOf($status, 'bob@example.com')['collectionState']);
+        self::assertTrue($row['participant']);
+        self::assertNotNull($row['lastAvailabilityChangeAt'], 'the change is recorded in the journal (D215)');
     }
 
     // --- unavailabilities: read live, limited to the planning period ------
@@ -153,11 +135,10 @@ final class PlanningCollectionStatusControllerTest extends WebTestCase
         self::assertSame(0, $status['summary']['unavailabilityCount']);
     }
 
-    public function testMemberDetailExposesIdentityRoleParticipationAndAnswers(): void
+    public function testMemberDetailExposesIdentityRoleAndParticipation(): void
     {
         $client = static::createClient();
         $s = $this->pilotScenario($client);
-        $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", [], $s['alice']);
 
         $detail = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/members/{$this->memberIdOf($client, $s, 'alice@example.com')}/availability-status", token: $s['admin']);
         self::assertResponseIsSuccessful();
@@ -165,13 +146,12 @@ final class PlanningCollectionStatusControllerTest extends WebTestCase
         self::assertSame('Test', $detail['member']['firstName']);
         self::assertSame('User', $detail['member']['lastName']);
         self::assertSame('MEMBER', $detail['member']['role']);
-        self::assertSame('ACKNOWLEDGED', $detail['member']['collectionState']);
-        self::assertSame('CONFIRMED', $detail['member']['acknowledgementKind']);
+        self::assertTrue($detail['member']['participant']);
         self::assertSame('2027-01-01', $detail['participation']['membershipStart']);
         self::assertNull($detail['participation']['membershipEnd']);
         self::assertEquals(1.0, $detail['participation']['participationPeriods'][0]['participationFactor']);
         self::assertCount(1, $detail['collections']);
-        self::assertSame('ACKNOWLEDGED', $detail['collections'][0]['status']);
+        self::assertSame('PARTICIPANT', $detail['collections'][0]['status']);
         self::assertSame([], $detail['reminders']);
         // No email address, no other member's data.
         self::assertStringNotContainsString('@example.com', (string) json_encode($detail));
@@ -289,9 +269,6 @@ final class PlanningCollectionStatusControllerTest extends WebTestCase
         $extra = $this->declareRange($client, $s['alice'], '2027-03-10', '2027-03-11');
         $this->api($client, 'DELETE', "/api/me/calendar/{$extra['stableId']}", token: $s['alice']);
         self::assertResponseStatusCodeSame(204);
-        // … can still confirm …
-        $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", [], $s['alice']);
-        self::assertResponseIsSuccessful();
         $this->api($client, 'GET', '/api/me/calendar', token: $s['alice']);
         self::assertResponseIsSuccessful();
         // … and a manager can still move the deadline forward.
@@ -302,12 +279,10 @@ final class PlanningCollectionStatusControllerTest extends WebTestCase
     }
     // --- several collections / closed collections ----------------------------
 
-    public function testAnExtensionMakesEverybodyPendingAgainForTheNewWindowOnly(): void
+    public function testAnExtensionAddsAWindowWithTheSameParticipants(): void
     {
         $client = static::createClient();
         $s = $this->pilotScenario($client);
-        $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", ['noUnavailability' => true], $s['alice']);
-        $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", [], $s['bob']);
 
         // The planning is extended to 2027-07-01: a second collection opens for May–June only.
         $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/extensions", ['endsAt' => '2027-07-01', 'deadline' => '2027-01-31'], $s['creator']);
@@ -316,11 +291,8 @@ final class PlanningCollectionStatusControllerTest extends WebTestCase
         $status = $this->collectionStatus($client, $s);
         self::assertSame(2, $status['openCollectionCount']);
         self::assertSame('2027-06-30', $status['planning']['lastDay']);
-        // Alice and bob answered the first window, not the new one: they are pending again, for one window.
-        $alice = $this->rowOf($status, 'alice@example.com');
-        self::assertSame('PENDING', $alice['collectionState']);
-        self::assertSame(1, $alice['pendingCollectionCount']);
-        self::assertSame(0, $status['summary']['confirmedCount']);
+        self::assertTrue($this->rowOf($status, 'alice@example.com')['participant']);
+        self::assertSame(3, $status['summary']['concernedCount']);
         self::assertSame('2027-01-31', $status['availabilityDeadline']);
 
         // Setting the planning deadline sets it on every open window, and the latest one is reported.
@@ -328,19 +300,13 @@ final class PlanningCollectionStatusControllerTest extends WebTestCase
         self::assertResponseIsSuccessful();
         $collections = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/availability-collections", token: $s['creator']);
         self::assertSame(['2027-02-15', '2027-02-15'], array_column($collections, 'deadline'));
-
-        // Confirming the new window brings alice back to confirmed.
-        $newWindow = array_values(array_filter($collections, static fn (array $c): bool => '2027-05-01' === $c['startsAt']))[0];
-        $this->api($client, 'POST', "/api/availability-collections/{$newWindow['stableId']}/acknowledge", ['noUnavailability' => true], $s['alice']);
-        self::assertResponseIsSuccessful();
-        self::assertSame('ACKNOWLEDGED', $this->rowOf($this->collectionStatus($client, $s), 'alice@example.com')['collectionState']);
     }
 
     public function testAClosedCollectionKeepsReadingAsItEnded(): void
     {
         $client = static::createClient();
         $s = $this->pilotScenario($client);
-        $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", ['noUnavailability' => true], $s['alice']);
+        $this->declareRange($client, $s['alice'], '2027-02-10', '2027-02-12');
         $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/close", [], $s['creator']);
         self::assertResponseIsSuccessful();
 
@@ -348,7 +314,7 @@ final class PlanningCollectionStatusControllerTest extends WebTestCase
 
         self::assertSame(0, $status['openCollectionCount']);
         self::assertNull($status['availabilityDeadline']);
-        self::assertSame(1, $status['summary']['confirmedCount']);
-        self::assertSame(2, $status['summary']['pendingCount'], 'People who never answered before the closing stay listed as pending.');
+        self::assertSame(3, $status['summary']['concernedCount'], 'the people of the closed window stay listed');
+        self::assertSame(1, $status['summary']['unavailabilityCount']);
     }
 }

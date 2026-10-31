@@ -30,6 +30,9 @@ function day(value: string | null): ISODate | undefined {
 
 export function toPeriod(view: PlanningPeriodSummary): Period {
   const c = view.collections
+  const preparation = view.preparation ?? null
+  // docs/decisions.md D214: an announcement still scheduled means nobody was told — never "Collecte ouverte".
+  const scheduled = preparation?.announcementState === 'scheduled'
   return {
     id: view.stableId,
     number: view.number,
@@ -38,12 +41,13 @@ export function toPeriod(view: PlanningPeriodSummary): Period {
     end: view.lastDay,
     status: STATUS[view.status],
     collecte: {
-      state: c.open > 0 ? 'en-cours' : c.closed > 0 ? 'cloturee' : 'non-ouverte',
-      responses: c.acknowledged,
-      expected: c.expected,
-      closesOn: c.deadline ?? undefined,
+      state: scheduled ? 'programmee' : c.open > 0 ? 'en-cours' : c.closed > 0 ? 'cloturee' : 'non-ouverte',
+      participants: c.participants,
+      closesOn: c.deadline ?? preparation?.declarationDeadlineOn ?? undefined,
+      announceOn: scheduled ? (preparation?.announceOn ?? undefined) : undefined,
       uncoveredDays: c.uncoveredDays,
     },
+    targetGenerationOn: preparation?.targetGenerationOn ?? undefined,
     generatedOn: day(view.generatedAt),
     publishedOn: day(view.publishedAt),
     lastPublishedOn: day(view.lastPublishedAt),

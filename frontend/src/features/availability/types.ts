@@ -17,6 +17,34 @@ export type UserAvailabilityPeriod = {
   updatedAt: string
 }
 
+/** A duty the person holds on the days just declared (published lines only, docs/decisions.md D216). */
+export type CalendarConflict = {
+  dates: string[]
+  lineName: string
+  dutyTypeName: string
+  blockName: string | null
+}
+
+/**
+ * docs/decisions.md D216 — a period already generated that new unavailable
+ * days fall in. Recorded in the calendar, never applied to the planning.
+ * Dates are calendar dates ("YYYY-MM-DD"), `to` inclusive.
+ */
+export type CalendarImpact = {
+  planningStableId: string
+  planningName: string
+  period: { stableId: string; number: number; count: number }
+  lines: string[]
+  generatedAt: string | null
+  published: boolean
+  from: string
+  to: string
+  conflicts: CalendarConflict[]
+}
+
+/** What a creation or a change answers: the entry, and what its new days meet. */
+export type SavedUserAvailabilityPeriod = UserAvailabilityPeriod & { impacts?: CalendarImpact[] }
+
 export type UpsertUserAvailabilityPeriodInput = {
   type: UserAvailabilityType
   startsAt: string

@@ -7,9 +7,10 @@ namespace App\Service;
 use App\Entity\Planning;
 
 /**
- * The picture an OWNER/ADMIN needs before generating: who confirmed, who did
- * not, how many unavailabilities the period holds, and the (informative)
- * deadline. Read model only — see PlanningCollectionStatusService.
+ * The picture an OWNER/ADMIN needs before generating: who takes part, how
+ * many unavailabilities the period holds, and the (informative) deadline.
+ * Read model only — see PlanningCollectionStatusService. docs/decisions.md
+ * D214: no count of confirmations, nobody is asked for one.
  */
 final readonly class PlanningCollectionStatus
 {
@@ -27,39 +28,20 @@ final readonly class PlanningCollectionStatus
     ) {
     }
 
-    /** Participants who are expected to answer (confirmed + pending). */
-    public function expectedCount(): int
-    {
-        return $this->confirmedCount() + $this->pendingCount();
-    }
-
-    public function confirmedCount(): int
-    {
-        return $this->countState(MemberCollectionState::ACKNOWLEDGED);
-    }
-
-    public function pendingCount(): int
-    {
-        return $this->countState(MemberCollectionState::PENDING);
-    }
-
-    public function notExpectedCount(): int
-    {
-        return $this->countState(MemberCollectionState::NOT_EXPECTED);
-    }
-
+    /** Everyone listed (members of the period). */
     public function participantCount(): int
     {
         return \count($this->rows);
     }
 
+    /** Listed people an announcement or a reminder reaches. */
+    public function concernedCount(): int
+    {
+        return \count(array_filter($this->rows, static fn (MemberCollectionRow $row): bool => $row->participant));
+    }
+
     public function unavailabilityCount(): int
     {
         return array_sum(array_map(static fn (MemberCollectionRow $row): int => $row->unavailabilityCount, $this->rows));
-    }
-
-    private function countState(MemberCollectionState $state): int
-    {
-        return \count(array_filter($this->rows, static fn (MemberCollectionRow $row): bool => $row->state === $state));
     }
 }

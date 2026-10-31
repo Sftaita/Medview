@@ -38,7 +38,7 @@ const closed = (
   start,
   end,
   status,
-  collecte: { state: 'cloturee', responses },
+  collecte: { state: 'cloturee', participants: responses },
   generatedOn: gen,
   publishedOn: pub,
 })
@@ -58,7 +58,7 @@ export function demoPeriods(scenario: Scenario): Period[] {
         start: '2027-01-31',
         end: '2027-04-30',
         status: 'preparation',
-        collecte: { state: 'non-ouverte', responses: 0 },
+        collecte: { state: 'non-ouverte' },
       },
     ]
   }
@@ -89,7 +89,7 @@ export function demoPeriods(scenario: Scenario): Period[] {
       start: '2027-01-31',
       end: '2027-04-30',
       status: 'collecte',
-      collecte: { state: 'en-cours', responses: 11, closesOn: '2026-11-15' },
+      collecte: { state: 'en-cours', participants: 14, closesOn: '2026-11-15' },
     },
   ]
 }

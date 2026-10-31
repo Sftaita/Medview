@@ -9725,3 +9725,130 @@ du bouton, et l'état grisé ressemblait à « rien à enregistrer ».
   de « Enregistrement impossible, à corriger d'abord » (encadré, la liste des
   rappels en cause avec leur date).
 - Aucune règle serveur n'est modifiée ; aucun changement backend ni de données.
+
+## D214 — Plus aucune confirmation des disponibilités ; disponible par défaut ; quatre dates distinctes
+
+**Contexte (2026-10-31).** Depuis D120, un participant devait « confirmer »
+ses disponibilités (« Confirmer que mes disponibilités sont à jour » ou « Je
+n'ai aucune indisponibilité sur cette période »), et l'interface comptait les
+confirmations (« X/17 confirmations », « Confirmé / En attente »). Un
+calendrier vide se lisait « en attente », et une personne ayant déjà saisi des
+absences paraissait « avoir fini » alors qu'elle pouvait encore en ajouter. En
+production, la période 2 de Trauma Delta affichait « collecte en cours, 0/17 »
+dès le 28/10 : une collecte avait été ouverte à la main ce jour-là, alors que
+l'annonce aux participants était programmée pour le 17/01/2027.
+
+**Décision.**
+
+- **Disponible par défaut.** Sans indisponibilité déclarée, une personne est
+  disponible. Personne ne confirme rien ; aucun statut « Confirmé / À
+  confirmer » ni compteur de confirmations. `POST
+  /api/availability-collections/{id}/acknowledge` répond **410**
+  `confirmation_removed` (un ancien client comprend pourquoi, sans 404).
+- **La collecte reste une notion technique** : une fenêtre de dates, ses
+  participants (`AvailabilityCollectionResponse` = participant tant que
+  `withdrawnAt` est nul ; statut dérivé `PARTICIPANT` / `WITHDRAWN`), une date
+  limite indicative, son ouverture. Les confirmations données avant D214
+  restent en base (`acknowledged_at`, `acknowledgement_kind`) comme historique :
+  elles ne sont plus écrites, ni exposées, ni comptées. Aucune donnée supprimée.
+- **Rappels.** Programmés (D210) ou manuels, ils vont à **tous les
+  participants** (comptes actifs), jamais filtrés sur une confirmation ni sur
+  le nombre d'absences saisies : quelqu'un qui a saisi des absences peut en
+  ajouter. Le texte dit que la génération approche, invite à vérifier le
+  calendrier et rappelle « Sans indisponibilité renseignée, vous êtes considéré
+  comme disponible ». La relance groupée devient « Rappeler les participants »
+  (`POST …/reminders/participants`). Un rappel non envoyé reste annulé dès que
+  la génération est lancée (D210, inchangé) ; l'audit des envois est conservé.
+  Issues : `sent_to_participants`, `no_participant` ; un email en attente pour
+  quelqu'un qui n'est plus participant est annulé `not_participant`.
+- **Quatre dates distinctes** : (1) l'annonce aux participants, (2) la **date
+  limite indicative** de déclaration (`period_preparations.declaration_deadline_on`,
+  jamais bloquante ; après l'annonce et au plus tard à la date cible ; donnée
+  aux collectes ouvertes de la période et à celles que l'annonce ouvre ;
+  synchronisée avec la date réglée depuis « Réglages du planning »), (3) la
+  date cible de génération (l'atteindre ne génère rien, la génération reste
+  manuelle), (4) la date réelle de génération (`generatedAt`). Une date passée
+  n'est jamais affichée comme prochaine échéance (« date limite indicative
+  passée · calendriers toujours modifiables », « date cible passée · à lancer
+  manuellement »).
+- **« Collecte ouverte » seulement une fois annoncée.** Tant que l'annonce de
+  la période est programmée, la période n'est pas `collecting` (même si une
+  collecte existe déjà techniquement), la liste des plannings n'est pas
+  `collecting`, et les membres ne voient pas la collecte sur leur tableau de
+  bord ; le panneau « Préparer la période » dit « Pas encore annoncée — les
+  participants seront prévenus le … ».
+- Le préflight de génération ne compte plus de confirmations (avertissement
+  `PENDING_MEMBERS` supprimé) : les calendriers sont pris tels qu'ils sont au
+  lancement.
+
+**Compromis.** Plus d'indicateur « qui a vérifié son calendrier » : la date de
+dernière modification du calendrier sur la période (D215) et le nombre
+d'indisponibilités le remplacent, sans en tirer de conclusion.
+
+## D215 — Journal permanent des indisponibilités (`user_availability_events`)
+
+**Contexte.** Une entrée du calendrier personnel est modifiée en place (D057) ;
+`createdAt` / `updatedAt` ne disent ni qui a fait quoi, ni ce qu'il y avait
+avant, et une suppression efface tout.
+
+**Décision.** Chaque création, modification (dates et/ou type) et suppression
+d'une entrée du calendrier écrit un `UserAvailabilityEvent`, **dans la même
+transaction** que le changement : identifiant stable, personne concernée,
+auteur (`actor` ; nul pour la synchronisation SurgicalHub, `origin =
+SURGICAL_HUB_SYNC`), action, identifiant stable de l'entrée (sans clé
+étrangère : l'événement survit à la suppression), source (MANUAL /
+SURGICAL_HUB), anciennes et nouvelles valeurs (type, début, fin, instants
+exacts), horodatage UTC, et ce que le changement rencontrait à ce moment
+(`impacts`, D216). Table append-only (trigger refusant UPDATE et DELETE),
+contraintes de cohérence (une création n'a pas d'anciennes valeurs, une
+suppression pas de nouvelles, un auteur humain exactement pour `USER`). Pas de
+doublon : un changement qui ne change rien n'écrit rien (requête rejouée,
+synchronisation identique) ; un changement refusé (chevauchement) n'écrit rien.
+Rien n'est reconstitué pour les entrées antérieures : leur historique commence
+au déploiement ; ce qu'une génération a réellement utilisé reste dans son
+snapshot.
+
+## D216 — Une indisponibilité ajoutée après une génération : enregistrée, dite, jamais appliquée
+
+**Décision.** Le calendrier reste modifiable sans restriction liée à un
+planning. Un changement ne touche jamais une affectation, ne déclenche aucune
+réaffectation ni régénération, et ne modifie aucun snapshot. Pour les seuls
+**jours nouvellement indisponibles** (une création ; pour une modification, les
+jours ajoutés ; une préférence ne compte pas ; un rétrécissement ne dit rien),
+`AvailabilityImpactService` cherche les périodes de ligne déjà générées
+(GENERATED / VALIDATED / PUBLISHED / ARCHIVED) dont la personne est membre de
+l'équipe, groupées par planning et période, avec leur dernière date de
+génération, et — sur les seules lignes **publiées** (lecture de « Mes gardes »,
+D168 ; jamais un brouillon, D204) — les gardes que la personne détient ces
+jours-là. `POST` / `PATCH /api/me/calendar` répondent `impacts` ; le calendrier
+affiche, sans bloquer ni demander de seconde confirmation : « Attention : cette
+date appartient au planning Trauma Delta – Période 2, déjà généré le … Votre
+indisponibilité a bien été enregistrée, mais elle ne modifiera pas
+automatiquement ce planning. » et, si une garde est attribuée : « Vous êtes
+déjà de garde le … Cette garde reste attribuée. Contactez le responsable du
+planning si une modification est nécessaire. » Rien n'est affiché quand aucun
+planning généré n'est concerné.
+
+**Compromis.** Sur une ligne générée mais pas encore publiée, la personne
+apprend que le planning est généré, pas quelles gardes elle y aurait : le
+brouillon reste invisible aux membres (D204). Le responsable voit le conflit
+dans l'historique (D217).
+
+## D217 — Historique d'une période pour ses responsables
+
+**Décision.** `GET /api/plannings/{id}/history?period=&member=` (droit
+`MANAGE_AVAILABILITY`, comme le suivi des indisponibilités) fusionne, par ordre
+chronologique, trois sources écrites au moment des faits, jamais reconstruites :
+le journal du calendrier (D215) des participants de la période, **limité aux
+dates de la période** ; les générations des lignes de la période (lancée par,
+demandée le, **calendriers capturés le** = `PlanningSnapshot.createdAt`, finie
+le, statut, couverture, raison d'échec, indisponibilités capturées) ; les
+changements de titulaire d'une garde (`DutyAssignmentEvent` : réattribution,
+retrait, échange). Une déclaration est dite « postérieure à la génération du … :
+aucune modification automatique du planning » quand elle suit la capture ; elle
+est dite « présente dans les données capturées par la génération du … »
+seulement quand le snapshot contient cette entrée avec ces dates exactes (dans
+la même seconde que la capture, c'est le contenu du snapshot qui tranche). Une
+génération suivante ne modifie jamais les précédentes. Interface :
+« Historique » dans l'onglet Indisponibilités (ouvert à la demande) et dans le
+panneau d'un membre (restreint à lui), heures en Europe/Brussels.

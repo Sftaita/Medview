@@ -88,7 +88,7 @@ final class PlanningCycleWiringTest extends WebTestCase
         $client = static::createClient();
         $s = $this->pilotScenario($client);
 
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/reminders/pending", [], $s['creator']);
+        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/reminders/participants", [], $s['creator']);
         self::assertResponseIsSuccessful();
 
         $this->prepareLine($s['planningId'], [['2027-01-05', '2027-01-06'], ['2027-01-12', '2027-01-13']]);

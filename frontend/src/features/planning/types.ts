@@ -66,15 +66,24 @@ export type PlanningPeriodSummary = {
   publishedAt: string | null
   lastPublishedAt: string | null
   generatedAt: string | null
-  /** The open collections' progress; `uncoveredDays` = days of the period no collection covers. */
+  /**
+   * The collections of the period (docs/decisions.md D214: who takes part — never a count of confirmations);
+   * `deadline` is the indicative one; `uncoveredDays` = days of the period no collection covers.
+   */
   collections: {
     open: number
     closed: number
-    acknowledged: number
-    expected: number
+    participants: number
     deadline: string | null
     uncoveredDays: number
   }
+  /** docs/decisions.md D214: the dates of « Préparer la période », each with its own meaning; null when nothing is planned. */
+  preparation?: {
+    announceOn: string | null
+    announcementState: 'scheduled' | 'executed' | 'skipped' | 'cancelled' | null
+    declarationDeadlineOn: string | null
+    targetGenerationOn: string | null
+  } | null
 }
 
 /** Whether a line takes part in a period, and why (docs/planning-cycles.md §4.3, D194). */

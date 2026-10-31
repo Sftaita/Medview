@@ -436,3 +436,22 @@ impact : l'en-tête et le §9 annoncent `EligibilityService`/snapshot comme
 global » ne mentionne pas `ROLE_PLATFORM_ADMIN` (D174, sans droit sur les
 calendriers).
 
+## 13. Journal, avertissement après génération, historique (D214-D217)
+
+- **Toujours modifiable, disponible par défaut** (D214) : aucune date limite,
+  génération ou publication ne refuse un changement du calendrier ; sans
+  indisponibilité, une personne est disponible ; rien n'est à confirmer.
+- **Journal** `user_availability_events` (D215) : chaque création,
+  modification et suppression, avec l'auteur, les anciennes et nouvelles
+  valeurs, l'heure exacte (UTC) ; écrit dans la même transaction, append-only,
+  conservé après la suppression de l'entrée ; la synchronisation SurgicalHub
+  y apparaît sans auteur humain (`SURGICAL_HUB_SYNC`). Rien n'est reconstitué
+  pour les entrées antérieures au 2026-10-31.
+- **Après une génération** (D216) : un changement ne modifie jamais les
+  affectations ni un snapshot. `POST` / `PATCH /api/me/calendar` répondent
+  `impacts` — les périodes déjà générées où tombent les jours nouvellement
+  indisponibles, et les gardes détenues ces jours-là sur les lignes publiées —
+  que le calendrier affiche sans bloquer.
+- **Historique** (D217) : `GET /api/plannings/{id}/history?period=&member=`,
+  réservé à ceux qui gèrent les disponibilités du planning ; limité aux
+  participants et aux dates de la période.

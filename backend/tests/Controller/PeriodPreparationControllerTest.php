@@ -95,7 +95,11 @@ final class PeriodPreparationControllerTest extends WebTestCase
         self::assertNull($view['announcement']['on']);
         self::assertNull($view['targetGenerationOn']);
         self::assertSame([], $view['reminders']);
-        self::assertSame(['state' => 'not_open', 'responded' => 0, 'expected' => 0], $view['collection']);
+        self::assertSame(['state' => 'not_open', 'participants' => 0], $view['collection']);
+        // docs/decisions.md D214: the four dates of a period, each with its own meaning.
+        self::assertNull($view['declarationDeadlineOn']);
+        self::assertNull($view['deadlineOn']);
+        self::assertNull($view['generatedAt']);
         self::assertSame('Europe/Brussels', $view['timezone']);
         self::assertSame('08:00', $view['sendTime']);
         self::assertTrue($view['editable']);
@@ -162,6 +166,11 @@ final class PeriodPreparationControllerTest extends WebTestCase
             'reminder_before_announcement' => ['announceOn' => '2027-03-01', 'targetGenerationOn' => '2027-04-01', 'reminders' => [['value' => 31, 'unit' => 'DAY']]],
             'reminder_in_past' => ['targetGenerationOn' => '2027-04-01', 'reminders' => [['value' => 52, 'unit' => 'WEEK']]],
             'invalid_date' => ['announceOn' => '2027-02-30'],
+            // docs/decisions.md D214: the indicative deadline sits between the announcement and the target.
+            'deadline_in_past' => ['declarationDeadlineOn' => '2026-01-05'],
+            'deadline_after_period_end' => ['declarationDeadlineOn' => '2027-08-01'],
+            'deadline_before_announcement' => ['announceOn' => '2027-03-01', 'declarationDeadlineOn' => '2027-03-01'],
+            'deadline_after_target' => ['targetGenerationOn' => '2027-04-01', 'declarationDeadlineOn' => '2027-04-02'],
         ];
         foreach ($cases as $code => $body) {
             $this->save($period, $body);
@@ -175,6 +184,38 @@ final class PeriodPreparationControllerTest extends WebTestCase
         $this->assertError(422, 'too_many_reminders');
 
         self::assertSame(0, (int) $this->db()->fetchOne('SELECT COUNT(*) FROM period_preparations'), 'A refused save writes nothing.');
+    }
+
+    public function testTheIndicativeDeadlineIsPlannedGivenToTheOpenCollectionsAndKeptInStepWithTheSettings(): void
+    {
+        $period = $this->createPeriod2();
+        $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/periods/{$period}/availability-collections", [], $this->s['creator']);
+        self::assertResponseIsSuccessful();
+
+        $view = $this->save($period, ['announceOn' => '2027-03-01', 'declarationDeadlineOn' => '2027-03-20', 'targetGenerationOn' => '2027-04-01']);
+        self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
+        self::assertSame('2027-03-20', $view['declarationDeadlineOn']);
+        self::assertSame('2027-03-20', $view['deadlineOn']);
+        self::assertSame('2027-04-01', $view['targetGenerationOn']);
+        self::assertNull($view['generatedAt'], 'reaching the target date generates nothing');
+        $deadlineOfPeriod2 = fn (): ?string => $this->db()->fetchOne('SELECT c.deadline FROM availability_collections c JOIN planning_cycles cy ON cy.id = c.planning_cycle_id WHERE cy.stable_id = ?', [$period]) ?: null;
+        self::assertSame('2027-03-20', $deadlineOfPeriod2());
+
+        // A client that does not send it leaves it as it is.
+        $kept = $this->api($this->client, 'PUT', "/api/plannings/{$this->s['planningId']}/periods/{$period}/preparation", ['announceOn' => '2027-03-01', 'targetGenerationOn' => '2027-04-01', 'reminders' => []], $this->s['creator']);
+        self::assertSame('2027-03-20', $kept['declarationDeadlineOn']);
+        // Moving the target before it is refused: the deadline is never after the target.
+        $this->save($period, ['announceOn' => '2027-03-01', 'declarationDeadlineOn' => '2027-03-20', 'targetGenerationOn' => '2027-03-15']);
+        $this->assertError(422, 'deadline_after_target');
+
+        // The planning settings change the same date: one deadline per period.
+        $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/settings?period={$period}", ['availabilityDeadline' => '2027-03-25'], $this->s['creator']);
+        self::assertResponseIsSuccessful();
+        self::assertSame('2027-03-25', $this->show($period)['declarationDeadlineOn']);
+        self::assertSame('2027-03-25', $deadlineOfPeriod2());
+        $periods = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/periods", token: $this->s['creator'])['periods'];
+        self::assertSame('2027-03-25', $periods[1]['collections']['deadline']);
+        self::assertSame(['announceOn' => '2027-03-01', 'announcementState' => 'scheduled', 'declarationDeadlineOn' => '2027-03-25', 'targetGenerationOn' => '2027-04-01'], $periods[1]['preparation']);
     }
 
     public function testChangesAndRemovesRemindersNotSentAndFollowsTheTargetDate(): void
@@ -238,7 +279,7 @@ final class PeriodPreparationControllerTest extends WebTestCase
         $period = $this->createPeriod2();
         $view = $this->save($period, ['targetGenerationOn' => '2027-04-01', 'reminders' => [['value' => 1, 'unit' => 'WEEK'], ['value' => 2, 'unit' => 'DAY']]]);
         $ran = $view['reminders'][0];
-        $this->db()->executeStatement("UPDATE period_preparation_reminders SET state = 'EXECUTED', outcome = 'sent_to_pending', executed_at = NOW() WHERE stable_id = :id", ['id' => $ran['stableId']]);
+        $this->db()->executeStatement("UPDATE period_preparation_reminders SET state = 'EXECUTED', outcome = 'sent_to_participants', executed_at = NOW() WHERE stable_id = :id", ['id' => $ran['stableId']]);
 
         $this->save($period, ['targetGenerationOn' => '2027-04-01', 'reminders' => [['stableId' => $ran['stableId'], 'value' => 2, 'unit' => 'WEEK']]]);
         $this->assertError(409, 'reminder_not_editable');

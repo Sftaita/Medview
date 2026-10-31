@@ -34,7 +34,10 @@ function blank(overrides: Partial<PeriodPreparation> = {}): PeriodPreparation {
     blockers: [],
     announcement: { on: null, state: 'none', outcome: null, executedAt: null, emails: NO_EMAILS },
     targetGenerationOn: null,
-    collection: { state: 'not_open', responded: 0, expected: 0 },
+    declarationDeadlineOn: null,
+    deadlineOn: null,
+    generatedAt: null,
+    collection: { state: 'not_open', participants: 0 },
     reminders: [],
     ...overrides,
   }
@@ -60,7 +63,8 @@ describe('PeriodPreparationPanel', () => {
     expect(screen.getByText(/08 h 00 \(heure de Bruxelles\)/)).toBeInTheDocument()
     expect(screen.getByText('Non programmée')).toBeInTheDocument()
     expect(screen.getByText('Pas encore ouverte')).toBeInTheDocument()
-    expect(screen.getByText('Non définie')).toBeInTheDocument()
+    // Neither the indicative deadline nor the target date.
+    expect(screen.getAllByText('Non définie')).toHaveLength(2)
     expect(screen.getByRole('button', { name: 'Enregistrer la préparation' })).toBeDisabled()
   })
 
@@ -102,8 +106,8 @@ describe('PeriodPreparationPanel', () => {
     expect(screen.getByRole('button', { name: 'Ajouter un rappel' })).toHaveAccessibleDescription(
       'Choisissez d’abord la date cible de génération : les rappels se placent avant elle.',
     )
-    // The target date: not on or before the announcement.
-    fireEvent.click(screen.getAllByRole('button', { name: 'Choisir la date' })[0])
+    // The target date (after the deadline's picker): not on or before the announcement.
+    fireEvent.click(screen.getAllByRole('button', { name: 'Choisir la date' })[1])
     fireEvent.click(screen.getByRole('button', { name: 'Mois suivant' }))
     expect(
       day(/2 novembre 2026, impossible : La date cible de génération vient après l’annonce\./),
@@ -171,6 +175,7 @@ describe('PeriodPreparationPanel', () => {
     expect(await screen.findByText('Préparation enregistrée.')).toBeInTheDocument()
     expect(api.savePeriodPreparation).toHaveBeenCalledWith('p1', 'c2', {
       announceOn: '2026-11-02',
+      declarationDeadlineOn: null,
       targetGenerationOn: '2026-11-30',
       reminders: [
         { value: 7, unit: 'DAY' },
@@ -218,6 +223,7 @@ describe('PeriodPreparationPanel', () => {
     await waitFor(() =>
       expect(api.savePeriodPreparation).toHaveBeenCalledWith('p1', 'c2', {
         announceOn: null,
+        declarationDeadlineOn: null,
         targetGenerationOn: '2026-12-15',
         reminders: [{ stableId: 'r2', value: 5, unit: 'DAY' }],
       }),
@@ -249,7 +255,7 @@ describe('PeriodPreparationPanel', () => {
           emails: { ...NO_EMAILS, queued: 9, sent: 9 },
         },
         targetGenerationOn: '2026-12-15',
-        collection: { state: 'open', responded: 6, expected: 9 },
+        collection: { state: 'open', participants: 9 },
         reminders: [
           {
             stableId: 'r1',
@@ -257,7 +263,7 @@ describe('PeriodPreparationPanel', () => {
             unit: 'WEEK',
             dueOn: '2026-12-01',
             state: 'executed',
-            outcome: 'sent_to_pending',
+            outcome: 'sent_to_participants',
             executedAt: '2026-12-01T07:00:00+00:00',
             emails: { ...NO_EMAILS, queued: 4, sent: 4 },
           },
@@ -280,17 +286,114 @@ describe('PeriodPreparationPanel', () => {
     )
     expect(screen.getByText('Faite')).toBeInTheDocument()
     expect(screen.getByText(/collecte ouverte · 9 emails envoyés/)).toBeInTheDocument()
-    expect(screen.getByText('6 / 9 confirmations')).toBeInTheDocument()
+    expect(screen.getByText('9 participants')).toBeInTheDocument()
+    expect(screen.queryByText(/confirmations?\b/)).not.toBeInTheDocument()
     const history = screen.getByRole('list', { name: 'Rappels passés' })
     expect(within(history).getByText('Exécuté')).toBeInTheDocument()
-    expect(
-      within(history).getByText(/envoyé aux personnes sans confirmation · 4 emails envoyés/),
-    ).toBeInTheDocument()
+    expect(within(history).getByText(/envoyé à tous les participants · 4 emails envoyés/)).toBeInTheDocument()
     expect(within(history).getByText('Annulé')).toBeInTheDocument()
     expect(within(history).getByText('la génération a été lancée')).toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: /Choisir la date|Changer la date|Ajouter un rappel|Enregistrer/ }),
     ).not.toBeInTheDocument()
+  })
+
+  it('plans an indicative deadline between the announcement and the target, and says why one is refused (D214)', async () => {
+    await renderPanel(
+      blank({
+        announcement: {
+          on: '2026-11-02',
+          state: 'scheduled',
+          outcome: null,
+          executedAt: null,
+          emails: NO_EMAILS,
+        },
+        targetGenerationOn: '2026-11-30',
+      }),
+    )
+
+    expect(screen.getByText('Date limite indicative de déclaration')).toBeInTheDocument()
+    expect(screen.getByText(/Jamais bloquante/)).toBeInTheDocument()
+    // The deadline's picker (the announcement's reads "Changer la date"), opened on today's month.
+    fireEvent.click(screen.getAllByRole('button', { name: 'Choisir la date' })[0])
+    fireEvent.click(screen.getByRole('button', { name: 'Mois suivant' }))
+    // On the announcement day itself: refused, with the reason.
+    expect(day(/2 novembre 2026, impossible/)).toBeInTheDocument()
+    fireEvent.click(day(/20 novembre 2026, possible/))
+    expect(screen.getByText(formatDate('2026-11-20'))).toBeInTheDocument()
+
+    api.savePeriodPreparation.mockResolvedValue(
+      blank({
+        declarationDeadlineOn: '2026-11-20',
+        deadlineOn: '2026-11-20',
+        targetGenerationOn: '2026-11-30',
+      }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer la préparation' }))
+    await waitFor(() =>
+      expect(api.savePeriodPreparation).toHaveBeenCalledWith('p1', 'c2', {
+        announceOn: '2026-11-02',
+        declarationDeadlineOn: '2026-11-20',
+        targetGenerationOn: '2026-11-30',
+        reminders: [],
+      }),
+    )
+  })
+
+  it('refuses a deadline after the target date, and says it next to "Enregistrer"', async () => {
+    await renderPanel(
+      blank({
+        targetGenerationOn: '2026-11-30',
+        declarationDeadlineOn: '2026-11-25',
+        deadlineOn: '2026-11-25',
+      }),
+    )
+
+    // The target moves before the deadline: the deadline is now wrong.
+    fireEvent.click(screen.getAllByRole('button', { name: 'Changer la date' })[1])
+    fireEvent.click(day(/20 novembre 2026, possible/))
+
+    const message = 'La date limite indicative doit venir au plus tard à la date cible de génération.'
+    expect(screen.getAllByText(message, { exact: false }).length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByRole('button', { name: 'Enregistrer la préparation' })).toBeDisabled()
+  })
+
+  it('never says "Ouverte" while the announcement is still scheduled (Trauma Delta, D214)', async () => {
+    await renderPanel(
+      blank({
+        announcement: {
+          on: '2027-01-17',
+          state: 'scheduled',
+          outcome: null,
+          executedAt: null,
+          emails: NO_EMAILS,
+        },
+        targetGenerationOn: '2027-01-24',
+        collection: { state: 'open', participants: 17 },
+      }),
+    )
+
+    expect(screen.getByText('Pas encore annoncée')).toBeInTheDocument()
+    expect(
+      screen.getByText(`Les participants seront prévenus le ${formatDate('2027-01-17')}.`),
+    ).toBeInTheDocument()
+    expect(screen.queryByText('Ouverte')).not.toBeInTheDocument()
+    expect(screen.getByText(/Personne n’a rien à confirmer/)).toBeInTheDocument()
+  })
+
+  it('shows the real generation date next to the target date, distinctly', async () => {
+    await renderPanel(
+      blank({
+        editable: false,
+        blockers: ['period_generation_started'],
+        targetGenerationOn: '2027-01-24',
+        generatedAt: '2027-01-25T09:15:00+00:00',
+      }),
+    )
+
+    expect(screen.getByText('Date cible de génération')).toBeInTheDocument()
+    expect(screen.getByText(formatDate('2027-01-24'))).toBeInTheDocument()
+    expect(screen.getByText(`Générée le ${formatDate('2027-01-25')}`)).toBeInTheDocument()
   })
 
   it('tells when the preparation cannot be loaded', async () => {
@@ -373,6 +476,7 @@ describe('PeriodPreparationPanel — adding a reminder (Trauma Delta, 17 → 24 
     expect(await screen.findByText('Préparation enregistrée.')).toBeInTheDocument()
     expect(api.savePeriodPreparation).toHaveBeenCalledWith('p1', 'c2', {
       announceOn: '2027-01-17',
+      declarationDeadlineOn: null,
       targetGenerationOn: '2027-01-24',
       reminders: [
         { stableId: 'r1', value: 2, unit: 'DAY' },

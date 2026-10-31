@@ -165,10 +165,11 @@ final class PeriodPreparationRunnerTest extends WebTestCase
         return (string) $this->db()->fetchOne("SELECT c.stable_id FROM availability_collections c JOIN planning_cycles cy ON cy.id = c.planning_cycle_id WHERE cy.stable_id = :period AND c.status = 'OPEN' ORDER BY c.starts_at LIMIT 1", ['period' => $period]);
     }
 
-    private function acknowledge(string $period, string $token, bool $noUnavailability = false): void
+    /** Absences entered by $token over the given days: never a reason to skip anybody (D214). */
+    private function declareAbsence(string $token, string $from, string $to): void
     {
-        $this->api($this->client, 'POST', '/api/availability-collections/'.$this->collectionOf($period).'/acknowledge', ['noUnavailability' => $noUnavailability], $token);
-        self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
+        $this->api($this->client, 'POST', '/api/me/calendar', ['type' => 'UNAVAILABLE', 'startsAt' => $from.'T00:00:00+01:00', 'endsAt' => $to.'T00:00:00+01:00'], $token);
+        self::assertResponseStatusCodeSame(201);
     }
 
     /** The mail transport refuses every email to $address, or to everybody when null (until stopFailing()). */
@@ -221,7 +222,7 @@ final class PeriodPreparationRunnerTest extends WebTestCase
         $view = $this->view($period);
         self::assertSame(['executed', 'collection_opened'], [$view['announcement']['state'], $view['announcement']['outcome']]);
         self::assertSame(\count($respondents), $view['announcement']['emails']['sent']);
-        self::assertSame(['state' => 'open', 'responded' => 0, 'expected' => \count($respondents)], $view['collection']);
+        self::assertSame(['state' => 'open', 'participants' => \count($respondents)], $view['collection']);
 
         // Again later, and the next day: nothing more, ever.
         self::assertSame([], $this->runAt(self::at('2027-03-01 08:10'))['to']);
@@ -229,19 +230,55 @@ final class PeriodPreparationRunnerTest extends WebTestCase
         self::assertSame(1, (int) $this->db()->fetchOne('SELECT COUNT(*) FROM availability_collections c JOIN planning_cycles cy ON cy.id = c.planning_cycle_id WHERE cy.stable_id = :p', ['p' => $period]));
     }
 
-    public function testAnExistingOpenCollectionIsNeverDuplicatedAndWhoAnsweredIsNotInvited(): void
+    public function testAnExistingOpenCollectionIsNeverDuplicatedAndEveryParticipantIsInvited(): void
     {
         $period = $this->period1();
-        $this->acknowledge($period, $this->s['alice']);
-        $this->acknowledge($period, $this->s['bob'], noUnavailability: true);
-        $this->prepare($period, ['announceOn' => '2026-11-02']);
+        // Alice already entered absences: she is invited all the same (D214).
+        $this->declareAbsence($this->s['alice'], '2027-02-01', '2027-02-04');
+        $this->prepare($period, ['announceOn' => '2026-11-02', 'declarationDeadlineOn' => '2026-11-20', 'targetGenerationOn' => '2026-11-25']);
 
         $run = $this->runAt(self::at('2026-11-02 08:00'));
         self::assertSame(1, (int) $this->db()->fetchOne('SELECT COUNT(*) FROM availability_collections'));
         self::assertSame('collection_already_open', $this->view($period)['announcement']['outcome']);
-        self::assertNotContains('alice@example.com', $run['to'], 'CONFIRMED counts as answered.');
-        self::assertNotContains('bob@example.com', $run['to'], 'NO_UNAVAILABILITY counts as answered.');
-        self::assertContains('admin@example.com', $run['to']);
+        self::assertSame($this->respondents($period), $run['to']);
+        self::assertContains('alice@example.com', $run['to']);
+        // The collection takes the planned indicative deadline, and the email says it is indicative.
+        self::assertSame('2026-11-20', $this->db()->fetchOne('SELECT deadline FROM availability_collections'));
+        $text = (string) $run['emails'][0]->getTextBody();
+        self::assertStringContainsString('Date limite indicative : 20 novembre 2026. Votre calendrier reste modifiable après cette date.', $text);
+        self::assertStringContainsString('Sans indisponibilité renseignée, vous êtes considéré comme disponible.', $text);
+        self::assertStringNotContainsString('confirmer', $text);
+    }
+
+    /**
+     * Trauma Delta, period 2 in production (October 2026): a collection opened by hand on 28 October, the
+     * announcement planned for 17 January. Until the announcement runs, nobody is told: the period does not
+     * read "collecting", members do not see the collection, the planning is not "collecting" either.
+     */
+    public function testACollectionOpenedBeforeItsScheduledAnnouncementIsNotShownAsOpen(): void
+    {
+        $period = $this->createPeriod2();
+        $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/periods/{$period}/availability-collections", [], $this->s['creator']);
+        self::assertResponseIsSuccessful();
+        $this->prepare($period, ['announceOn' => '2027-03-01', 'targetGenerationOn' => '2027-04-01']);
+        $status = fn (): string => $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/periods", token: $this->s['creator'])['periods'][1]['status'];
+        $mine = fn (): array => array_column($this->api($this->client, 'GET', '/api/me/availability-collections', token: $this->s['alice']), 'period');
+        $collecting = fn (): bool => array_values(array_filter($this->api($this->client, 'GET', '/api/plannings', token: $this->s['creator']), fn (array $p): bool => $p['stableId'] === $this->s['planningId']))[0]['collecting'];
+
+        self::assertSame('preparation', $status(), 'announcement still scheduled: not "Collecte ouverte"');
+        self::assertNotContains(2, array_column($mine(), 'number'), 'members are not shown a collection nobody announced yet');
+
+        // Period 1's collection is open and announced (no preparation): the planning collects for it.
+        self::assertTrue($collecting());
+        $this->api($this->client, 'POST', "/api/availability-collections/{$this->s['collectionId']}/close", token: $this->s['creator']);
+        self::assertFalse($collecting(), 'only the not-yet-announced collection is open');
+
+        // The announcement runs: now it is open for everyone, and said so.
+        $run = $this->runAt(self::at('2027-03-01 08:00'));
+        self::assertSame($this->respondents($period), $run['to']);
+        self::assertSame('collecting', $status());
+        self::assertContains(2, array_column($mine(), 'number'));
+        self::assertTrue($collecting());
     }
 
     public function testBothLinesAreInvitedAndAPersonOnBothLinesOnlyOnce(): void
@@ -297,22 +334,25 @@ final class PeriodPreparationRunnerTest extends WebTestCase
 
     // --- reminders ---------------------------------------------------------------------------------
 
-    public function testAfterAnOutageOnlyTheLatestReminderGoesOutAndOnlyToWhoHasNotConfirmed(): void
+    public function testAfterAnOutageOnlyTheLatestReminderGoesOutToEveryParticipant(): void
     {
         $period = $this->createPeriod2();
         $this->prepare($period, ['announceOn' => '2027-03-01', 'targetGenerationOn' => '2027-04-01', 'reminders' => [['value' => 2, 'unit' => 'WEEK'], ['value' => 3, 'unit' => 'DAY']]]);
         $this->runAt(self::at('2027-03-01 08:00'));
-        $this->acknowledge($period, $this->s['alice']);
+        // Alice entered absences since the announcement: she may still add some, she is reminded too (D214).
+        $this->declareAbsence($this->s['alice'], '2027-03-10', '2027-03-12');
 
         // Down from 17 March to 29 March 10:00: both reminders are overdue.
         $run = $this->runAt(self::at('2027-03-29 10:00'));
-        $expected = array_values(array_diff($this->respondents($period), ['alice@example.com']));
+        $expected = $this->respondents($period);
+        self::assertContains('alice@example.com', $expected);
         self::assertSame($expected, $run['to']);
         self::assertSame(1, $run['report']['reminders']);
         $reminders = $this->view($period)['reminders'];
-        self::assertSame([['skipped', 'superseded'], ['executed', 'sent_to_pending']], array_map(static fn (array $r): array => [$r['state'], $r['outcome']], $reminders));
+        self::assertSame([['skipped', 'superseded'], ['executed', 'sent_to_participants']], array_map(static fn (array $r): array => [$r['state'], $r['outcome']], $reminders));
         self::assertSame(\count($expected), $reminders[1]['emails']['sent']);
-        self::assertStringContainsString('Rappel', (string) $run['emails'][0]->getSubject());
+        self::assertStringContainsString('La génération des gardes approche', (string) $run['emails'][0]->getSubject());
+        self::assertStringContainsString('Pensez à vérifier et à actualiser vos éventuelles indisponibilités avant la date prévue de génération.', (string) $run['emails'][0]->getTextBody());
 
         self::assertSame([], $this->runAt(self::at('2027-03-29 10:10'))['to']);
     }
@@ -352,18 +392,21 @@ final class PeriodPreparationRunnerTest extends WebTestCase
         self::assertSame([], array_filter($this->deliveries(), static fn (string $d): bool => !str_ends_with($d, 'SENT')));
     }
 
-    public function testAnEmailWhosePersonConfirmedMeanwhileIsCancelled(): void
+    public function testAnEmailWhosePersonLeftMeanwhileIsCancelledButAbsencesNeverCancelOne(): void
     {
         $period = $this->createPeriod2();
         $this->prepare($period, ['announceOn' => '2027-03-01']);
-        $this->failFor('bob@example.com');
+        $this->failFor(null);
         $this->runAt(self::at('2027-03-01 08:00'));
-        $this->acknowledge($period, $this->s['bob'], noUnavailability: true);
+        // Bob is no longer a participant of the window; Alice entered absences (that cancels nothing).
+        $this->db()->executeStatement("UPDATE availability_collection_responses SET withdrawn_at = NOW() WHERE user_id = (SELECT id FROM users WHERE email = 'bob@example.com')");
+        $this->declareAbsence($this->s['alice'], '2027-03-10', '2027-03-12');
         $this->stopFailing();
 
         $run = $this->runAt(self::at('2027-03-01 08:10'));
-        self::assertSame([], $run['to']);
-        self::assertContains('ANNOUNCEMENT bob@example.com CANCELLED already_confirmed', $this->deliveries());
+        self::assertNotContains('bob@example.com', $run['to']);
+        self::assertContains('alice@example.com', $run['to']);
+        self::assertContains('ANNOUNCEMENT bob@example.com CANCELLED not_participant', $this->deliveries());
     }
 
     public function testAClaimIsExclusiveAndAnAbandonedSendIsRecoveredOnce(): void

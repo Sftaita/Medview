@@ -1,23 +1,23 @@
 export type CollectionStatus = 'OPEN' | 'CLOSED'
 
-/** PENDING ("À renseigner"), ACKNOWLEDGED ("Répondu"), WITHDRAWN (left the planning before answering). */
-export type ResponseStatus = 'PENDING' | 'ACKNOWLEDGED' | 'WITHDRAWN'
+/**
+ * docs/decisions.md D214: PARTICIPANT (told by the announcement and the
+ * reminders) or WITHDRAWN (left the planning before the window). Nobody
+ * confirms anything: without any unavailability, a person is available.
+ */
+export type ResponseStatus = 'PARTICIPANT' | 'WITHDRAWN'
 
-export type AcknowledgementKind = 'CONFIRMED' | 'NO_UNAVAILABILITY'
-
-/** The current user's own answer to a collection. */
+/** The current user's own participation in a collection. */
 export type MyCollectionResponse = {
   stableId: string
   status: ResponseStatus
-  acknowledgedAt: string | null
-  acknowledgementKind: AcknowledgementKind | null
   lastAvailabilityChangeAt: string | null
 }
 
-export type CollectionProgress = { expected: number; acknowledged: number; pending: number }
+export type CollectionProgress = { participants: number }
 
 /**
- * "Who has reviewed their availabilities for this slice of the planning".
+ * A window of a planning whose participants are invited to keep their calendar up to date.
  * Dates are calendar dates ("YYYY-MM-DD") in the planning's timezone;
  * `endsAt` is exclusive, `lastDay` is the inclusive last day for display.
  */

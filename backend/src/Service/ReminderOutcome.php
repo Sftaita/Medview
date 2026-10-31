@@ -10,7 +10,7 @@ use App\Entity\User;
 /**
  * What happened for one recipient. Domain refusals are returned rather than
  * thrown: they happen inside a locked transaction, and throwing there would
- * close the EntityManager (same reasoning as AvailabilityCollectionService::acknowledge()).
+ * close the EntityManager (same reasoning as the other services writing in a transaction).
  */
 final readonly class ReminderOutcome
 {

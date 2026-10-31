@@ -87,7 +87,7 @@ function period(
     publishedAt: null,
     lastPublishedAt: null,
     generatedAt: null,
-    collections: { open: 0, closed: 1, acknowledged: 0, expected: 0, deadline: null, uncoveredDays: 0 },
+    collections: { open: 0, closed: 1, participants: 0, deadline: null, uncoveredDays: 0 },
     lines: lines.map(([lineStableId, lineStatus, applicability]) => ({
       lineStableId,
       planningPeriodStableId: `pp-${lineStableId}-${number}`,
@@ -146,7 +146,7 @@ const P3 = period(
   {
     timeState: 'future',
     isLast: true,
-    collections: { open: 0, closed: 0, acknowledged: 0, expected: 0, deadline: null, uncoveredDays: 90 },
+    collections: { open: 0, closed: 0, participants: 0, deadline: null, uncoveredDays: 90 },
   },
 )
 
@@ -218,7 +218,7 @@ function blankPreparation(stableId: string) {
       emails: { queued: 0, sent: 0, failed: 0, cancelled: 0, pending: 0 },
     },
     targetGenerationOn: null,
-    collection: { state: 'not_open', responded: 0, expected: 0 },
+    collection: { state: 'not_open', participants: 0 },
     reminders: [],
   }
 }
@@ -374,14 +374,7 @@ describe('PlanningDetailPage — periods (lot L6)', () => {
               })
             : makeStatus({
                 period: { stableId: 'c2', number: 2 },
-                summary: {
-                  participantCount: 7,
-                  expectedCount: 7,
-                  confirmedCount: 2,
-                  pendingCount: 5,
-                  notExpectedCount: 0,
-                  unavailabilityCount: 0,
-                },
+                summary: { participantCount: 7, concernedCount: 7, unavailabilityCount: 0 },
               }),
       },
       '/plannings/plan-1?periode=1',
@@ -394,14 +387,7 @@ describe('PlanningDetailPage — periods (lot L6)', () => {
     releaseFirst(
       makeStatus({
         period: { stableId: 'c1', number: 1 },
-        summary: {
-          participantCount: 99,
-          expectedCount: 99,
-          confirmedCount: 0,
-          pendingCount: 99,
-          notExpectedCount: 0,
-          unavailabilityCount: 0,
-        },
+        summary: { participantCount: 99, concernedCount: 99, unavailabilityCount: 0 },
       }),
     )
     await new Promise((resolve) => setTimeout(resolve, 20))
@@ -422,7 +408,7 @@ describe('PlanningDetailPage — periods (lot L6)', () => {
               {
                 ...P3,
                 status: 'collecting',
-                collections: { ...P3.collections, open: 1, expected: 9, uncoveredDays: 0 },
+                collections: { ...P3.collections, open: 1, participants: 9, uncoveredDays: 0 },
               },
             ],
           })
@@ -444,7 +430,7 @@ describe('PlanningDetailPage — periods (lot L6)', () => {
         1,
       ),
     )
-    expect(await within(steps).findByText('0 / 9 réponses')).toBeInTheDocument()
+    expect(await within(steps).findByText('Collecte ouverte')).toBeInTheDocument()
     expect(screen.getByText('Collecte des disponibilités ouverte pour la période 3')).toHaveAttribute(
       'role',
       'status',

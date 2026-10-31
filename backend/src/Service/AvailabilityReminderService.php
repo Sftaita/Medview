@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Entity\AvailabilityCollection;
-use App\Entity\AvailabilityResponseStatus;
 use App\Entity\Planning;
 use App\Entity\PlanningAvailabilityReminder;
 use App\Entity\PlanningCycle;
@@ -19,21 +18,20 @@ use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Clock\ClockInterface;
 
 /**
- * Sends "please review your availabilities" reminders and audits each one
- * (docs/decisions.md D127).
+ * Sends "please check your calendar" reminders and audits each one
+ * (docs/decisions.md D127, D214).
  *
- * - Audience = people with an unanswered OPEN collection of the planning
- *   (`AvailabilityCollectionResponse` PENDING), exactly what
- *   AvailabilityCollectionService::pendingResponses() defines. Someone who
- *   confirmed "no unavailability" is not reminded; someone with zero
- *   unavailabilities who did not confirm is (D120).
+ * - Audience = the participants of the OPEN collections of the planning
+ *   (AvailabilityCollectionService::participantResponses()): never filtered
+ *   on a confirmation nor on the number of unavailabilities entered —
+ *   someone who already entered absences may still add some (D214).
  * - Accidental double sends: the Planning row is locked for the whole
  *   operation (two concurrent requests are serialised, the second sees the
  *   first one's audit row) and a person reminded less than MIN_INTERVAL ago
  *   is skipped as TOO_RECENT. No job infrastructure: a send is synchronous
  *   and small.
  * - The audit row is written only after the transport accepted the message.
- * - Supports many recipients (`remindPending`) with the same per-recipient
+ * - Supports many recipients (`remindParticipants`) with the same per-recipient
  *   rules as a single one (`remind`).
  */
 final class AvailabilityReminderService
@@ -67,18 +65,17 @@ final class AvailabilityReminderService
     }
 
     /**
-     * "Relancer les membres en attente": one reminder per person still
-     * expected to answer, in name order.
+     * "Rappeler les participants": one reminder per participant, in name order.
      *
      * @return list<ReminderOutcome>
      */
-    public function remindPending(Planning $planning, User $sentBy, ?PlanningCycle $cycle = null): array
+    public function remindParticipants(Planning $planning, User $sentBy, ?PlanningCycle $cycle = null): array
     {
         return $this->entityManager->wrapInTransaction(function () use ($planning, $sentBy, $cycle): array {
             $this->entityManager->refresh($planning, LockMode::PESSIMISTIC_WRITE);
 
             $outcomes = [];
-            foreach ($this->pendingRecipients($planning, $cycle) as $recipient) {
+            foreach ($this->participants($planning, $cycle) as $recipient) {
                 $outcomes[] = $this->deliver($planning, $cycle, $recipient, $sentBy, true);
             }
 
@@ -88,9 +85,9 @@ final class AvailabilityReminderService
 
     private function deliver(Planning $planning, ?PlanningCycle $cycle, User $recipient, User $sentBy, bool $bulk): ReminderOutcome
     {
-        $pending = $this->pendingCollections($planning, $cycle, $recipient);
+        $pending = $this->collectionsOf($planning, $cycle, $recipient);
         if ([] === $pending || !$recipient->isActive()) {
-            return new ReminderOutcome($recipient, ReminderStatus::NOTHING_PENDING);
+            return new ReminderOutcome($recipient, ReminderStatus::NOT_PARTICIPANT);
         }
 
         $now = $this->now();
@@ -116,33 +113,33 @@ final class AvailabilityReminderService
     }
 
     /**
-     * The open collections $recipient has not answered, earliest window first.
+     * The open collections $recipient takes part in, earliest window first.
      *
      * @return list<AvailabilityCollection>
      */
-    private function pendingCollections(Planning $planning, ?PlanningCycle $cycle, User $recipient): array
+    private function collectionsOf(Planning $planning, ?PlanningCycle $cycle, User $recipient): array
     {
-        $pending = [];
+        $collections = [];
         foreach ($this->openCollections($planning, $cycle) as $collection) {
             $response = $this->responseRepository->findOneForUser($collection, $recipient);
-            if (null !== $response && AvailabilityResponseStatus::PENDING === $response->getStatus()) {
-                $pending[] = $collection;
+            if (null !== $response && $response->isParticipant()) {
+                $collections[] = $collection;
             }
         }
 
-        return $pending;
+        return $collections;
     }
 
     /**
      * @return list<User>
      */
-    private function pendingRecipients(Planning $planning, ?PlanningCycle $cycle): array
+    private function participants(Planning $planning, ?PlanningCycle $cycle): array
     {
         $recipients = [];
         foreach ($this->openCollections($planning, $cycle) as $collection) {
             // findByCollection() is ordered by name, so the first collection fixes a stable order.
             foreach ($this->responseRepository->findByCollection($collection) as $response) {
-                if (AvailabilityResponseStatus::PENDING === $response->getStatus()) {
+                if ($response->isParticipant()) {
                     $recipients[$response->getUser()->getId()] ??= $response->getUser();
                 }
             }

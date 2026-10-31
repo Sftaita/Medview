@@ -9,6 +9,7 @@ import {
   monthIndexOfDay,
   type MonthInfo,
 } from '../features/availability/calendarAxis'
+import { CalendarImpactNotice } from '../features/availability/CalendarImpactNotice'
 import { CollectionCallout } from '../features/availability/CollectionCallout'
 import { collectionDays } from '../features/availability/collectionFormat'
 import type { AvailabilityCollection } from '../features/availability/collectionTypes'
@@ -79,7 +80,9 @@ export function MyAvailabilityPage() {
           <h1>Mes indisponibilités</h1>
           <p className="page__lead">
             Indiquez les jours où vous êtes indisponible ou préférez être de garde. Chaque modification est
-            enregistrée aussitôt et partagée par toutes vos équipes.
+            enregistrée aussitôt et partagée par toutes vos équipes. Sans indisponibilité renseignée, vous
+            êtes considéré comme disponible : rien à confirmer, et le calendrier reste modifiable à tout
+            moment.
           </p>
         </div>
       </header>
@@ -120,6 +123,8 @@ function AvailabilityEditor({ collection }: { collection: AvailabilityCollection
     syncError,
     dismissSyncError,
     lastSavedAt,
+    impacts,
+    dismissImpacts,
   } = useMyAvailability()
   const ranges = storedRanges ?? []
 
@@ -238,6 +243,7 @@ function AvailabilityEditor({ collection }: { collection: AvailabilityCollection
               </p>
             )}
           </div>
+          <CalendarImpactNotice impacts={impacts} onDismiss={dismissImpacts} />
           {syncError && (
             <p role="alert" className="alert alert--error">
               <Icon name="alert" size={18} strokeWidth={2} />

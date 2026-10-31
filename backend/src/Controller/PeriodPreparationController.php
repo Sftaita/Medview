@@ -61,11 +61,16 @@ final class PeriodPreparationController
             }
         }
 
-        $this->preparationService->save($cycle, $user, [
+        $input = [
             'announceOn' => $body['announceOn'] ?? null,
             'targetGenerationOn' => $body['targetGenerationOn'] ?? null,
             'reminders' => $reminders,
-        ]);
+        ];
+        // docs/decisions.md D214: the indicative deadline — left as it is when the client does not send it.
+        if (\array_key_exists('declarationDeadlineOn', $body)) {
+            $input['declarationDeadlineOn'] = $body['declarationDeadlineOn'];
+        }
+        $this->preparationService->save($cycle, $user, $input);
 
         return new JsonResponse($this->preparationService->view($cycle));
     }

@@ -2,13 +2,17 @@ Bonjour {{ firstName }},
 
 La préparation du planning de garde {{ planningName }} pour la période du {{ periodLabel }} commence.
 
-Merci d'indiquer vos indisponibilités dans MedVue, puis de confirmer qu'elles sont à jour — y compris si vous n'en avez aucune.
+Merci d'indiquer vos éventuelles indisponibilités dans votre calendrier MedVue. Sans indisponibilité renseignée, vous êtes considéré comme disponible. Aucune confirmation n'est nécessaire.
+{% if deadlineLabel %}
+
+Date limite indicative : {{ deadlineLabel }}. Votre calendrier reste modifiable après cette date.
+{% endif %}
 {% if targetLabel %}
 
 La génération du planning est prévue aux alentours du {{ targetLabel }}. Les indisponibilités prises en compte seront celles présentes dans MedVue à ce moment-là.
 {% endif %}
 
-Communiquer mes disponibilités :
+Ouvrir mon calendrier :
 {{ availabilityUrl }}
 
 Merci.
