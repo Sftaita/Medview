@@ -140,7 +140,11 @@ Double garde-fou, comme pour `FairnessPeriod`/`TeamMemberParticipationPeriod` :
    avant toute création/modification et lèvent une exception dédiée
    (`OverlappingUserAvailabilityPeriodException` /
    `OverlappingNonParticipationPeriodException`), traduite en `409` par le
-   contrôleur.
+   contrôleur. Les bornes y sont comparées comme des **instants**, quel que
+   soit le décalage envoyé (normalisées en UTC, liées en
+   `datetimetz_immutable`, D219), et un refus de la contrainte en base dû à
+   une requête concurrente (`23P01`) devient la même exception, donc un
+   `409`, jamais une 500.
 2. **Base de données** — contrainte `EXCLUDE USING gist` (`btree_gist`,
    déjà activé par `Version20260915212500`), mais avec des bornes
    **inclusives** `tstzrange(starts_at, ends_at, '[]')` plutôt que `'[)'`

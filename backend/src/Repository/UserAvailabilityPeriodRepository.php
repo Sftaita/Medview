@@ -9,6 +9,7 @@ use App\Entity\UserAvailabilityPeriod;
 use App\Entity\UserAvailabilitySource;
 use App\Entity\UserAvailabilityType;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
+use Doctrine\DBAL\Types\Types;
 use Doctrine\Persistence\ManagerRegistry;
 use Symfony\Component\Uid\Uuid;
 
@@ -60,6 +61,14 @@ class UserAvailabilityPeriodRepository extends ServiceEntityRepository
      * SurgicalHub may overlap anything (docs/surgicalhub-integration.md §6.1),
      * exactly like the partial database constraint.
      *
+     * The bounds are compared as instants, whatever offset they carry
+     * (D219): normalised to UTC and bound as TIMESTAMPTZ. Left to Doctrine's
+     * inference, a DateTimeImmutable is bound as a plain TIMESTAMP whose
+     * offset is dropped ("2027-01-13 00:00:00" for 00:00+01:00) and that the
+     * UTC session then reads as UTC, shifted by the offset: the check missed
+     * a real overlap (the exclusion constraint then answered 500) or saw a
+     * false one.
+     *
      * @return list<UserAvailabilityPeriod>
      */
     public function findOverlappingOrTouchingForUser(
@@ -78,8 +87,8 @@ class UserAvailabilityPeriodRepository extends ServiceEntityRepository
             ->andWhere('p.endsAt >= :startsAt')
             ->setParameter('user', $user)
             ->setParameter('type', $type)
-            ->setParameter('startsAt', $startsAt)
-            ->setParameter('endsAt', $endsAt);
+            ->setParameter('startsAt', self::utc($startsAt), Types::DATETIMETZ_IMMUTABLE)
+            ->setParameter('endsAt', self::utc($endsAt), Types::DATETIMETZ_IMMUTABLE);
 
         if (null !== $excluding) {
             $qb->andWhere('p.id != :excludingId')->setParameter('excludingId', $excluding->getId());
@@ -139,5 +148,11 @@ class UserAvailabilityPeriodRepository extends ServiceEntityRepository
             ->addOrderBy('p.id', 'ASC')
             ->getQuery()
             ->getResult();
+    }
+
+    /** The same instant in UTC — the overlap checks never depend on the offset a client sent. */
+    public static function utc(\DateTimeImmutable $instant): \DateTimeImmutable
+    {
+        return $instant->setTimezone(new \DateTimeZone('UTC'));
     }
 }

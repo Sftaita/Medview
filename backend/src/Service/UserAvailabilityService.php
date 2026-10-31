@@ -12,6 +12,7 @@ use App\Exception\ImportedAvailabilityPeriodException;
 use App\Exception\OverlappingUserAvailabilityPeriodException;
 use App\Repository\SurgicalHubImportedLeaveRepository;
 use App\Repository\UserAvailabilityPeriodRepository;
+use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
@@ -57,11 +58,11 @@ final class UserAvailabilityService
 
         $period = new UserAvailabilityPeriod($user, $type, $startsAt, $endsAt);
 
-        $this->entityManager->wrapInTransaction(function () use ($period, $user, $startsAt, $endsAt): void {
+        self::overlapFromDatabase(fn () => $this->entityManager->wrapInTransaction(function () use ($period, $user, $startsAt, $endsAt): void {
             $this->entityManager->persist($period);
             $this->entityManager->flush();
             $this->collectionService->recordAvailabilityChange($user, [[$startsAt, $endsAt]]);
-        });
+        }));
 
         return $period;
     }
@@ -93,12 +94,35 @@ final class UserAvailabilityService
 
         $previous = [$period->getStartsAt(), $period->getEndsAt()];
 
-        $this->entityManager->wrapInTransaction(function () use ($period, $type, $startsAt, $endsAt, $previous): void {
+        self::overlapFromDatabase(fn () => $this->entityManager->wrapInTransaction(function () use ($period, $type, $startsAt, $endsAt, $previous): void {
             $period->reschedule($type, $startsAt, $endsAt);
             $this->entityManager->flush();
             // Both the dates left and the dates taken count as "touched".
             $this->collectionService->recordAvailabilityChange($period->getUser(), [$previous, [$startsAt, $endsAt]]);
-        });
+        }));
+    }
+
+    /**
+     * The exclusion constraint (SQLSTATE 23P01) refusing a write the check
+     * above let through — a concurrent request inserted the overlapping
+     * period in between — is the same business conflict, never a 500 (D219).
+     * The transaction is rolled back: nothing of the write remains.
+     *
+     * @param callable(): mixed $write
+     *
+     * @throws OverlappingUserAvailabilityPeriodException
+     */
+    private static function overlapFromDatabase(callable $write): void
+    {
+        try {
+            $write();
+        } catch (DriverException $exception) {
+            if ('23P01' === $exception->getSQLState()) {
+                throw new OverlappingUserAvailabilityPeriodException();
+            }
+
+            throw $exception;
+        }
     }
 
     /**

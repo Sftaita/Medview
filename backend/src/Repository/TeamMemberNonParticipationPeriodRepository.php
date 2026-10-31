@@ -7,6 +7,7 @@ namespace App\Repository;
 use App\Entity\PlanningTeamMember;
 use App\Entity\TeamMemberNonParticipationPeriod;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
+use Doctrine\DBAL\Types\Types;
 use Doctrine\Persistence\ManagerRegistry;
 use Symfony\Component\Uid\Uuid;
 
@@ -47,7 +48,8 @@ class TeamMemberNonParticipationPeriodRepository extends ServiceEntityRepository
     /**
      * Same overlap-or-touch policy as
      * UserAvailabilityPeriodRepository::findOverlappingOrTouchingForUser()
-     * — see that method's docblock.
+     * — see that method's docblock, instants compared whatever their
+     * offset included (D219).
      *
      * @return list<TeamMemberNonParticipationPeriod>
      */
@@ -62,8 +64,8 @@ class TeamMemberNonParticipationPeriodRepository extends ServiceEntityRepository
             ->andWhere('p.startsAt <= :endsAt')
             ->andWhere('p.endsAt >= :startsAt')
             ->setParameter('teamMember', $teamMember)
-            ->setParameter('startsAt', $startsAt)
-            ->setParameter('endsAt', $endsAt);
+            ->setParameter('startsAt', UserAvailabilityPeriodRepository::utc($startsAt), Types::DATETIMETZ_IMMUTABLE)
+            ->setParameter('endsAt', UserAvailabilityPeriodRepository::utc($endsAt), Types::DATETIMETZ_IMMUTABLE);
 
         if (null !== $excluding) {
             $qb->andWhere('p.id != :excludingId')->setParameter('excludingId', $excluding->getId());

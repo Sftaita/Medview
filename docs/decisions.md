@@ -9725,3 +9725,46 @@ du bouton, et l'état grisé ressemblait à « rien à enregistrer ».
   de « Enregistrement impossible, à corriger d'abord » (encadré, la liste des
   rappels en cause avec leur date).
 - Aucune règle serveur n'est modifiée ; aucun changement backend ni de données.
+
+## D219 — Chevauchement d'indisponibilités : comparer des instants, quel que soit le décalage envoyé
+
+**Contexte (recette de la PR #26, 2026-10-31).** Sur une copie de la base de
+production, une indisponibilité envoyée à l'API avec des heures `+01:00`, et
+qui touchait une indisponibilité existante, a reçu une erreur **500** au lieu
+du refus métier **409**. Défaut préexistant en production, indépendant de la
+PR #26. L'interface n'est pas concernée : elle envoie toujours de l'UTC
+(`toISOString`).
+
+**Cause.** `findOverlappingOrTouchingForUser()` (et
+`findOverlappingOrTouchingForTeamMember()`, même construction) liait ses bornes
+sans type. Doctrine infère alors `datetime_immutable`, formaté `Y-m-d H:i:s` :
+le décalage disparaît (`2027-01-13 00:00:00` pour `00:00+01:00`), et
+PostgreSQL, dont la session est en UTC, relit cette valeur comme de l'UTC,
+décalée d'autant. Le contrôle applicatif voyait donc une autre plage que celle
+enregistrée : un contact ou un chevauchement réel passait inaperçu, puis la
+contrainte `EXCLUDE … tstzrange(starts_at, ends_at, '[]')` refusait l'écriture
+(500) ; à l'inverse, un décalage négatif pouvait produire un faux 409.
+
+**Décision.**
+
+- Les deux contrôles de chevauchement normalisent leurs bornes en UTC et les
+  lient explicitement en `datetimetz_immutable` (`Y-m-d H:i:sO`) : la
+  comparaison porte sur des instants, quelle que soit la forme reçue (`Z`,
+  `+01:00`, `+02:00`, négatif, de part et d'autre d'un changement d'heure).
+- La règle ne change pas : intervalles semi-ouverts `[startsAt, endsAt[`,
+  deux périodes du même type qui se chevauchent **ou se touchent** sont
+  refusées, comme la contrainte en base (`'[]'`).
+- Course entre deux requêtes : si la contrainte d'exclusion refuse malgré
+  tout l'écriture (SQLSTATE `23P01`, une requête concurrente a inséré la
+  période entre le contrôle et l'écriture), le service lève la même exception
+  métier (409). La transaction est annulée : ni la période, ni la trace dans
+  les collectes ne restent.
+- Rien d'autre ne change : les instants enregistrés et renvoyés sont les
+  mêmes, la base et ses contraintes sont inchangées, aucune migration.
+
+**Hors périmètre, à traiter à part si besoin.** Les autres lectures par plage
+(`findIntersecting()`, `findByTypeIntersectingForUsers()` et leurs équivalents)
+lient aussi leurs bornes sans type. Leurs appelants construisent leurs bornes
+en interne (instants du planning) et non depuis l'API ; les corriger changerait
+la composition des snapshots, donc leur `snapshotHash`. Elles sont laissées en
+l'état volontairement.
