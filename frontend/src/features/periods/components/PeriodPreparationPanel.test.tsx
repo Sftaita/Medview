@@ -97,7 +97,11 @@ describe('PeriodPreparationPanel', () => {
       }),
     )
 
-    expect(screen.queryByRole('button', { name: 'Ajouter un rappel' })).toBeEnabled()
+    // No target date yet: no reminder can be placed, and the panel says why.
+    expect(screen.getByRole('button', { name: 'Ajouter un rappel' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Ajouter un rappel' })).toHaveAccessibleDescription(
+      'Choisissez d’abord la date cible de génération : les rappels se placent avant elle.',
+    )
     // The target date: not on or before the announcement.
     fireEvent.click(screen.getAllByRole('button', { name: 'Choisir la date' })[0])
     fireEvent.click(screen.getByRole('button', { name: 'Mois suivant' }))
@@ -106,10 +110,17 @@ describe('PeriodPreparationPanel', () => {
     ).toBeInTheDocument()
     fireEvent.click(day(/30 novembre 2026, possible/))
     expect(screen.getByText(formatDate('2026-11-30'))).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Ajouter un rappel' })).toBeEnabled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Ajouter un rappel' }))
     expect(screen.getByText(`Le ${formatDate('2026-11-23')} à 8 h`)).toBeInTheDocument()
+    // The next one is never proposed on a day already taken: 6 days before.
     fireEvent.click(screen.getByRole('button', { name: 'Ajouter un rappel' }))
+    expect(screen.getByRole('spinbutton', { name: 'Rappel 2 : combien avant la date cible' })).toHaveValue(6)
+    expect(screen.getByText(`Le ${formatDate('2026-11-24')} à 8 h`)).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('spinbutton', { name: 'Rappel 2 : combien avant la date cible' }), {
+      target: { value: '7' },
+    })
     expect(screen.getAllByText('Deux rappels tombent le même jour.')).toHaveLength(2)
     expect(screen.getByRole('button', { name: 'Enregistrer la préparation' })).toBeDisabled()
 
@@ -289,5 +300,213 @@ describe('PeriodPreparationPanel', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'La préparation de la période n’a pas pu être chargée.',
     )
+  })
+})
+
+/**
+ * The real case (production, Trauma Delta period 2, saved on 28 October 2026):
+ * announcement 17 January 2027, target 24 January, a reminder 2 days before.
+ * "Ajouter un rappel" used to propose 7 days — the announcement day itself —
+ * and greyed "Enregistrer" with only a small line under the reminder.
+ */
+function trauma(overrides: Partial<PeriodPreparation> = {}): PeriodPreparation {
+  return blank({
+    period: { stableId: 'c2', number: 2, startsAt: '2027-01-29', lastDay: '2027-05-02' },
+    today: '2026-10-28',
+    announcement: {
+      on: '2027-01-17',
+      state: 'scheduled',
+      outcome: null,
+      executedAt: null,
+      emails: NO_EMAILS,
+    },
+    targetGenerationOn: '2027-01-24',
+    reminders: [reminder('r1', 2, 'DAY', '2027-01-22')],
+    ...overrides,
+  })
+}
+
+function reminder(
+  stableId: string,
+  value: number,
+  unit: 'DAY' | 'WEEK',
+  dueOn: string,
+): PeriodPreparation['reminders'][number] {
+  return {
+    stableId,
+    value,
+    unit,
+    dueOn,
+    state: 'scheduled',
+    outcome: null,
+    executedAt: null,
+    emails: NO_EMAILS,
+  }
+}
+
+const saveButton = () => screen.getByRole('button', { name: 'Enregistrer la préparation' })
+const addButton = () => screen.getByRole('button', { name: 'Ajouter un rappel' })
+const valueOf = (n: number) =>
+  screen.getByRole('spinbutton', { name: `Rappel ${n} : combien avant la date cible` })
+const unitOf = (n: number) => screen.getByRole('combobox', { name: `Rappel ${n} : unité` })
+
+describe('PeriodPreparationPanel — adding a reminder (Trauma Delta, 17 → 24 January 2027)', () => {
+  it('proposes the first free day after the announcement, shows its date, saves it and finds it again on reload', async () => {
+    await renderPanel(trauma())
+
+    expect(screen.getByText('Aucune modification à enregistrer.')).toBeInTheDocument()
+    expect(saveButton()).toBeDisabled()
+
+    fireEvent.click(addButton())
+    // Never 7 days (17 January, the announcement day) nor 2 days (taken): 6 days, the 18th.
+    expect(valueOf(2)).toHaveValue(6)
+    expect(screen.getByText(`Le ${formatDate('2027-01-18')} à 8 h`)).toBeInTheDocument()
+    expect(screen.queryByText(/Enregistrement impossible/)).not.toBeInTheDocument()
+    expect(saveButton()).toBeEnabled()
+
+    const saved = trauma({
+      reminders: [reminder('r1', 2, 'DAY', '2027-01-22'), reminder('r2', 6, 'DAY', '2027-01-18')],
+    })
+    api.savePeriodPreparation.mockResolvedValue(saved)
+    fireEvent.click(saveButton())
+
+    expect(await screen.findByText('Préparation enregistrée.')).toBeInTheDocument()
+    expect(api.savePeriodPreparation).toHaveBeenCalledWith('p1', 'c2', {
+      announceOn: '2027-01-17',
+      targetGenerationOn: '2027-01-24',
+      reminders: [
+        { stableId: 'r1', value: 2, unit: 'DAY' },
+        { value: 6, unit: 'DAY' },
+      ],
+    })
+
+    // Reload: the panel reads the plan again from the server, as saved.
+    cleanup()
+    await renderPanel(saved)
+    expect(valueOf(1)).toHaveValue(2)
+    expect(valueOf(2)).toHaveValue(6)
+    expect(screen.getByText(`Le ${formatDate('2027-01-22')} à 8 h`)).toBeInTheDocument()
+    expect(screen.getByText(`Le ${formatDate('2027-01-18')} à 8 h`)).toBeInTheDocument()
+    expect(screen.getByText('Aucune modification à enregistrer.')).toBeInTheDocument()
+  })
+
+  it('says next to "Enregistrer" why a reminder on the announcement day cannot be saved, and keeps its own error', async () => {
+    await renderPanel(trauma())
+    fireEvent.click(addButton())
+    fireEvent.change(valueOf(2), { target: { value: '7' } })
+
+    // The day it would fall on stays visible, with the precise error under the field.
+    expect(screen.getByText(`Le ${formatDate('2027-01-17')} à 8 h`)).toBeInTheDocument()
+    const fieldError = `Un rappel doit venir après l’annonce. L’annonce est le ${formatDate('2027-01-17')}.`
+    expect(screen.getByText(fieldError)).toBeInTheDocument()
+    expect(valueOf(2)).toHaveAttribute('aria-invalid', 'true')
+
+    // Invalid is not "nothing to save": the footer says what to fix, and the button says why it is off.
+    expect(screen.queryByText('Aucune modification à enregistrer.')).not.toBeInTheDocument()
+    expect(saveButton()).toBeDisabled()
+    expect(saveButton()).toHaveAccessibleDescription(
+      new RegExp(`Enregistrement impossible.*Rappel 2 \\(le ${formatDate('2027-01-17')}\\)`),
+    )
+
+    // One week before is the same day: refused as well.
+    fireEvent.change(valueOf(2), { target: { value: '1' } })
+    fireEvent.change(unitOf(2), { target: { value: 'WEEK' } })
+    expect(screen.getByText(fieldError)).toBeInTheDocument()
+
+    fireEvent.change(unitOf(2), { target: { value: 'DAY' } })
+    fireEvent.change(valueOf(2), { target: { value: '3' } })
+    expect(screen.getByText(`Le ${formatDate('2027-01-21')} à 8 h`)).toBeInTheDocument()
+    expect(screen.queryByText(/Enregistrement impossible/)).not.toBeInTheDocument()
+    expect(saveButton()).toBeEnabled()
+  })
+
+  it('flags two reminders on the same day, in days or in weeks', async () => {
+    await renderPanel(
+      trauma({
+        announcement: {
+          on: '2027-01-03',
+          state: 'scheduled',
+          outcome: null,
+          executedAt: null,
+          emails: NO_EMAILS,
+        },
+        reminders: [reminder('r1', 7, 'DAY', '2027-01-17')],
+      }),
+    )
+    fireEvent.click(addButton())
+    fireEvent.change(valueOf(2), { target: { value: '1' } })
+    fireEvent.change(unitOf(2), { target: { value: 'WEEK' } })
+
+    expect(screen.getAllByText('Deux rappels tombent le même jour.')).toHaveLength(2)
+    expect(screen.getByText(/Enregistrement impossible/)).toBeInTheDocument()
+    expect(saveButton()).toBeDisabled()
+  })
+
+  it('moves every reminder with the target date, and re-checks it against the announcement', async () => {
+    await renderPanel(trauma())
+
+    // Target 19 January: 2 days before is the 17th, the announcement day.
+    fireEvent.click(screen.getAllByRole('button', { name: 'Changer la date' })[1])
+    fireEvent.click(day(/19 janvier 2027, possible/))
+    expect(screen.getByText(`Le ${formatDate('2027-01-17')} à 8 h`)).toBeInTheDocument()
+    // Under the field and in the footer, next to the button.
+    expect(screen.getAllByText(/Un rappel doit venir après l’annonce\./)).toHaveLength(2)
+    expect(saveButton()).toBeDisabled()
+
+    // An earlier announcement frees the day.
+    fireEvent.click(screen.getAllByRole('button', { name: 'Changer la date' })[0])
+    fireEvent.click(day(/10 janvier 2027, possible/))
+    expect(screen.queryAllByText(/Un rappel doit venir après l’annonce\./)).toHaveLength(0)
+    expect(saveButton()).toBeEnabled()
+  })
+
+  it('disables "Ajouter un rappel" and says why when no day is left', async () => {
+    await renderPanel(
+      trauma({
+        announcement: {
+          on: '2027-01-21',
+          state: 'scheduled',
+          outcome: null,
+          executedAt: null,
+          emails: NO_EMAILS,
+        },
+        reminders: [reminder('r1', 1, 'DAY', '2027-01-23'), reminder('r2', 2, 'DAY', '2027-01-22')],
+      }),
+    )
+
+    expect(addButton()).toBeDisabled()
+    expect(addButton()).toHaveAccessibleDescription(
+      `Aucun jour libre pour un nouveau rappel : il doit tomber après l’annonce (${formatDate('2027-01-21')}) et avant la date cible (${formatDate('2027-01-24')}), sans tomber le même jour qu’un autre rappel.`,
+    )
+
+    // Removing one frees its day again.
+    fireEvent.click(screen.getByRole('button', { name: 'Supprimer le rappel 2' }))
+    expect(addButton()).toBeEnabled()
+    fireEvent.click(addButton())
+    expect(valueOf(2)).toHaveValue(2)
+  })
+
+  it('keeps the draft and says why when the server refuses or cannot be reached', async () => {
+    await renderPanel(trauma())
+    fireEvent.click(addButton())
+
+    api.savePeriodPreparation.mockRejectedValueOnce(
+      new ApiError(409, { error: 'period_generation_started' }, 'Conflict'),
+    )
+    fireEvent.click(saveButton())
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'La génération de cette période a été lancée : sa préparation ne change plus.',
+    )
+    expect(valueOf(2)).toHaveValue(6)
+
+    api.savePeriodPreparation.mockRejectedValueOnce(new Error('offline'))
+    fireEvent.click(saveButton())
+    await waitFor(() =>
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        'La préparation n’a pas pu être enregistrée. Vérifiez votre connexion et réessayez.',
+      ),
+    )
+    expect(valueOf(2)).toHaveValue(6)
+    expect(saveButton()).toBeEnabled()
   })
 })
