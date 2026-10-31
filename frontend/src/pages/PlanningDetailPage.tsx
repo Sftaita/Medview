@@ -14,7 +14,7 @@ import {
 import { CreatePeriodDialog } from '../features/periods/components/CreatePeriodDialog'
 import { EditPeriodDatesDialog } from '../features/periods/components/EditPeriodDatesDialog'
 import { Icon as PeriodIcon } from '../features/periods/components/Icon'
-import { PeriodDetailCard } from '../features/periods/components/PeriodDetailCard'
+import { PeriodActions } from '../features/periods/components/PeriodActions'
 import { PeriodSelector } from '../features/periods/components/PeriodSelector'
 import { PeriodTabs } from '../features/periods/components/PeriodTabs'
 import { PeriodPreparationPanel } from '../features/periods/components/PeriodPreparationPanel'
@@ -573,31 +573,23 @@ export function PlanningDetailPage() {
             )}
           </div>
 
-          {(!single || canCreatePeriod) && (
-            <PeriodSelector
-              periods={periods}
-              selectedId={period.id}
-              today={today}
-              canCreate={canCreatePeriod}
-              onSelect={(id) => {
-                const chosen = periods.find((p) => p.id === id)
-                if (chosen) selectPeriod(chosen.number)
-              }}
-              onCreate={() => setCreateOpen(true)}
-            />
-          )}
+          {/* The cards are the one place for the dates, status, progress and countdown of every period. */}
+          <PeriodSelector
+            periods={periods}
+            selectedId={period.id}
+            today={today}
+            canCreate={canCreatePeriod}
+            onSelect={(id) => {
+              const chosen = periods.find((p) => p.id === id)
+              if (chosen) selectPeriod(chosen.number)
+            }}
+            onCreate={() => setCreateOpen(true)}
+          />
 
-          <PeriodDetailCard
+          <PeriodActions
             period={period}
             today={today}
             latestNumber={latest.number}
-            lineCount={activeLines}
-            memberCount={memberTotal}
-            hasPrev={selectedIndex > 0}
-            hasNext={selectedIndex < periods.length - 1}
-            single={single}
-            onPrev={() => selectPeriod(periods[selectedIndex - 1].number)}
-            onNext={() => selectPeriod(periods[selectedIndex + 1].number)}
             onGoLatest={() => selectPeriod(latest.number)}
             onEditDates={canCreatePeriod ? () => setEditDatesOpen(true) : undefined}
             onRectifyEnd={

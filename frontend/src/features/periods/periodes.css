@@ -254,24 +254,6 @@
   border: 1.5px solid var(--green-600);
   background: linear-gradient(90deg, var(--green-600) 50%, transparent 50%);
 }
-.mv-fg--preparation {
-  color: var(--gray-700);
-}
-.mv-fg--collecte {
-  color: var(--mv-amber-text);
-}
-.mv-fg--generee {
-  color: var(--blue-700);
-}
-.mv-fg--publiee {
-  color: var(--green-800);
-}
-.mv-fg--archivee {
-  color: var(--gray-600);
-}
-.mv-fg--partielle {
-  color: var(--green-800);
-}
 
 .mv-badge {
   display: inline-flex;
@@ -368,46 +350,6 @@
   top: -5px;
   bottom: -5px;
   width: 3px;
-  margin-left: -1.5px;
-  border-radius: 2px;
-  background: var(--gray-900);
-}
-
-.mv-months {
-  position: relative;
-  padding-top: 4px;
-}
-.mv-months__row {
-  display: flex;
-  gap: 4px;
-}
-.mv-months__seg {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.mv-months__bar {
-  position: relative;
-  display: block;
-  height: 12px;
-  border-radius: 999px;
-  overflow: hidden;
-}
-.mv-months__bar .mv-timebar__fill {
-  border-radius: 0;
-}
-.mv-months__label {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--gray-600);
-  white-space: nowrap;
-}
-.mv-months__today {
-  position: absolute;
-  top: -2px;
-  width: 3px;
-  height: 24px;
   margin-left: -1.5px;
   border-radius: 2px;
   background: var(--gray-900);
@@ -625,6 +567,18 @@
   color: var(--gray-800);
   font-variant-numeric: tabular-nums;
 }
+.mv-frise__days {
+  display: block;
+  font-weight: 500;
+  color: var(--gray-600);
+  white-space: nowrap;
+}
+.mv-switcher__time {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gray-600);
+  font-variant-numeric: tabular-nums;
+}
 .mv-frise__time {
   font-size: 12.5px;
   font-weight: 600;
@@ -652,33 +606,6 @@
   font-size: 12px;
   font-weight: 600;
   color: var(--gray-600);
-}
-.mv-frise__legend {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 20px;
-  font-size: 12.5px;
-  color: var(--gray-600);
-}
-.mv-frise__legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-.mv-legend-today {
-  display: inline-block;
-  width: 3px;
-  height: 14px;
-  border-radius: 2px;
-  background: var(--gray-900);
-}
-.mv-legend-elapsed {
-  display: inline-block;
-  width: 22px;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--green-500);
 }
 
 .mv-history {
@@ -834,59 +761,6 @@
   color: var(--green-800);
 }
 
-/* ---------- Détail de la période ---------- */
-.mv-period-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  padding-top: 20px;
-  border-top: 1px solid var(--border-subtle);
-  container: mv-period / inline-size;
-}
-.mv-period-detail__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-.mv-period-detail__foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  font-size: 14px;
-}
-.mv-time-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  height: 32px;
-  padding: 0 14px;
-  border-radius: 999px;
-  font-size: 14px;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-.mv-time-pill i {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: currentColor;
-}
-.mv-time-pill--current {
-  background: var(--green-50);
-  color: var(--green-800);
-}
-.mv-time-pill--future {
-  background: var(--blue-50);
-  color: var(--blue-700);
-}
-.mv-time-pill--past {
-  background: var(--gray-75);
-  color: var(--gray-700);
-}
 .mv-banner {
   display: flex;
   align-items: center;
@@ -905,20 +779,6 @@
 }
 .mv-banner strong {
   color: var(--text-strong);
-}
-.mv-banner--history {
-  background: var(--surface-sunken);
-  border: 1px solid var(--border-subtle);
-}
-.mv-banner--history > svg {
-  color: var(--gray-600);
-}
-.mv-banner--new {
-  background: var(--blue-50);
-  border: 1px solid var(--blue-100);
-}
-.mv-banner--new > svg {
-  color: var(--blue-700);
 }
 /* Lot L6 : refus de l'API, blocs coupés et confirmation D192. */
 .mv-banner--error {
@@ -957,81 +817,6 @@
 .mv-confirm input {
   margin-top: 3px;
   flex: none;
-}
-.mv-dates {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr) minmax(0, 0.8fr);
-  gap: 12px;
-  align-items: stretch;
-}
-.mv-dates__box {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-  padding: 18px 22px;
-  border-radius: 14px;
-  background: var(--surface-sunken);
-  /* The date's size follows the box (cqi), never the window. */
-  container-type: inline-size;
-}
-.mv-dates__box span {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--gray-600);
-}
-/*
- * "Mer. 30 sept. 2026" whole, whatever the width: the size shrinks with the box down to
- * 17 px, then the date wraps between words — never clipped, never an ellipsis.
- */
-.mv-dates__box strong {
-  font-size: clamp(17px, 9cqi, 30px);
-  font-weight: 800;
-  line-height: 1.15;
-  letter-spacing: -0.02em;
-  color: var(--text-strong);
-  font-variant-numeric: tabular-nums;
-  overflow-wrap: normal;
-  text-wrap: balance;
-}
-.mv-dates__box--brand {
-  background: var(--green-50);
-}
-.mv-dates__box--brand span,
-.mv-dates__box--brand strong {
-  color: var(--green-800);
-}
-/* "92 jours" is shorter than a date: the same visual size in a narrower box. */
-.mv-dates__box--brand strong {
-  font-size: clamp(17px, 12cqi, 30px);
-}
-.mv-dates__arrow {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--gray-400);
-}
-/* A narrow card (tablet, laptop with the side menu): both days side by side, the length below. */
-@container mv-period (max-width: 799px) {
-  .mv-dates {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 8px;
-  }
-  .mv-dates__arrow {
-    display: none;
-  }
-  .mv-dates__box {
-    padding: 14px 16px;
-  }
-  .mv-dates__box--brand {
-    grid-column: span 2;
-    flex-direction: row;
-    align-items: baseline;
-    justify-content: space-between;
-  }
-  .mv-dates__box--brand strong {
-    font-size: 20px;
-  }
 }
 
 /* ---------- Étapes ---------- */
@@ -1676,42 +1461,6 @@
     display: flex;
   }
 
-  .mv-period-detail {
-    padding-top: 14px;
-    gap: 12px;
-  }
-  .mv-dates {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 8px;
-  }
-  .mv-dates__arrow {
-    display: none;
-  }
-  .mv-dates__box {
-    padding: 12px;
-  }
-  .mv-dates__box strong {
-    font-size: 16px;
-    white-space: normal;
-  }
-  .mv-dates__box--brand {
-    grid-column: span 2;
-    flex-direction: row;
-    align-items: baseline;
-    justify-content: space-between;
-  }
-  .mv-months__label {
-    font-size: 11.5px;
-  }
-  .mv-period-detail__foot > .mv-muted {
-    display: none;
-  }
-  .mv-period-detail__foot .mv-row {
-    width: 100%;
-  }
-  .mv-period-detail__foot .mv-btn {
-    flex: 1;
-  }
   .mv-banner {
     flex-wrap: wrap;
   }
@@ -2340,4 +2089,41 @@ a.mv-btn {
   margin: 0;
   color: var(--red-700);
   font-size: 14px;
+}
+
+/* ---------- Actions de la période sélectionnée (sous les cartes, qui portent dates, statut et progression) ---------- */
+.mv-period-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-subtle);
+}
+.mv-period-actions__history {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--surface-sunken);
+  color: var(--gray-700);
+  font-size: 14px;
+}
+.mv-period-actions__history > span {
+  flex: 1 1 260px;
+}
+.mv-period-actions__history strong {
+  color: var(--text-strong);
+}
+.mv-period-actions__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+@media (max-width: 720px) {
+  .mv-period-actions__buttons .mv-btn {
+    flex: 1 1 160px;
+  }
 }

@@ -165,14 +165,14 @@ describe('PlanningDetailPage — header and period', () => {
     expect(screen.getByText('Europe/Brussels')).toBeInTheDocument()
 
     const period = screen.getByRole('region', { name: 'Périodes du planning' })
-    expect(within(period).getByText('Jeu. 1 oct. 2026')).toBeInTheDocument()
+    // Its card is the one place for its dates, duration and status — no separate detail card any more.
+    const card = period.querySelector('.mv-frise__seg[aria-pressed="true"]') as HTMLElement
+    expect(within(card).getByText('Période 1')).toBeInTheDocument()
     // endsAt 2027-02-01 is exclusive: the period stops on 31 January, its last day included.
-    expect(within(period).getByText('Premier jour')).toBeInTheDocument()
-    expect(within(period).getByText('Dernier jour inclus')).toBeInTheDocument()
-    expect(within(period).getByText('Dim. 31 janv. 2027')).toBeInTheDocument()
-    expect(within(period).getByText('123 jours')).toBeInTheDocument()
-    expect(within(period).getByText('Collecte en cours')).toBeInTheDocument()
-    // A single period, creation off: no frise, no navigation between periods.
+    expect(card).toHaveTextContent('1 oct. 2026 → 31 janv. 2027 123 jours')
+    expect(within(card).getByText('Collecte en cours')).toBeInTheDocument()
+    expect(document.querySelector('.mv-period-detail, .mv-frise__legend')).toBeNull()
+    // A single period, creation off: no navigation between periods.
     expect(within(period).queryByRole('button', { name: 'Période suivante' })).not.toBeInTheDocument()
   })
 
@@ -182,7 +182,8 @@ describe('PlanningDetailPage — header and period', () => {
     })
 
     const period = await screen.findByRole('region', { name: 'Périodes du planning' })
-    expect(within(period).getByText('Publiée')).toBeInTheDocument()
+    const card = period.querySelector('.mv-frise__seg[aria-pressed="true"]') as HTMLElement
+    expect(within(card).getByText('Publiée')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: "M'inclure dans ce planning" }))
     await waitFor(() =>
       expect(api.requests('POST', '/api/plannings/plan-1/teams/team-1/members')).toHaveLength(1),
