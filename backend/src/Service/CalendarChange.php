@@ -7,9 +7,11 @@ namespace App\Service;
 use App\Entity\UserAvailabilityPeriod;
 
 /**
- * A personal calendar entry just written, and what its new unavailable days
- * meet without changing it (docs/decisions.md D216): the generated periods,
- * the duties held. Empty when nothing generated is met — never a false alarm.
+ * A personal calendar entry just written (or just deleted), and what the
+ * change meets without changing it (docs/decisions.md D216, D218): the
+ * generated periods whose days it makes unavailable or available again, the
+ * duties held on the days added. Empty when nothing generated is met — never
+ * a false alarm.
  */
 final readonly class CalendarChange
 {

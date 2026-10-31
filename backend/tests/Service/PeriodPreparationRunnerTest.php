@@ -250,6 +250,21 @@ final class PeriodPreparationRunnerTest extends WebTestCase
         self::assertStringNotContainsString('confirmer', $text);
     }
 
+    /** docs/decisions.md D218: a deadline removed before the announcement is not announced. */
+    public function testADeadlineRemovedBeforeTheAnnouncementIsNeitherGivenNorSaid(): void
+    {
+        $period = $this->period1();
+        $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/settings?period={$period}", ['availabilityDeadline' => '2026-11-20'], $this->s['creator']);
+        self::assertResponseIsSuccessful();
+        $this->prepare($period, ['announceOn' => '2026-11-02', 'declarationDeadlineOn' => null, 'targetGenerationOn' => '2026-11-25']);
+
+        $run = $this->runAt(self::at('2026-11-02 08:00'));
+        self::assertNotSame([], $run['to']);
+        self::assertNull($this->db()->fetchOne('SELECT deadline FROM availability_collections'));
+        self::assertNull($this->view($period)['deadlineOn']);
+        self::assertStringNotContainsString('Date limite', (string) $run['emails'][0]->getTextBody());
+    }
+
     /**
      * Trauma Delta, period 2 in production (October 2026): a collection opened by hand on 28 October, the
      * announcement planned for 17 January. Until the announcement runs, nobody is told: the period does not

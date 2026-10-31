@@ -15,9 +15,10 @@ use App\Repository\PlanningGenerationRepository;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
- * docs/decisions.md D216 — what a new unavailability meets that it will not
- * change: the periods of the person's lines already generated on those days,
- * and the duties the person currently holds on them.
+ * docs/decisions.md D216 / D218 — what a change of the calendar meets that it
+ * will not change: the periods of the person's lines already generated on the
+ * days it makes unavailable (added) or available again (released), and the
+ * duties the person currently holds on the days added.
  *
  * Read only, and only about the caller's own lines: the plannings named are
  * those whose generated line period the person takes part in (their
@@ -42,14 +43,16 @@ final class AvailabilityImpactService
     }
 
     /**
-     * @param list<array{0: \DateTimeImmutable, 1: \DateTimeImmutable}> $added the new unavailable instants [from, to)
+     * @param list<array{0: \DateTimeImmutable, 1: \DateTimeImmutable}> $added    the new unavailable instants [from, to)
+     * @param list<array{0: \DateTimeImmutable, 1: \DateTimeImmutable}> $released the instants no longer unavailable [from, to)
      *
      * @return list<array<string, mixed>> one entry per planning period met, in date order
      */
-    public function impacts(User $user, array $added): array
+    public function impacts(User $user, array $added, array $released = []): array
     {
         $added = array_values(array_filter($added, static fn (array $range): bool => $range[0] < $range[1]));
-        if ([] === $added) {
+        $released = array_values(array_filter($released, static fn (array $range): bool => $range[0] < $range[1]));
+        if ([] === $added && [] === $released) {
             return [];
         }
 
@@ -61,20 +64,22 @@ final class AvailabilityImpactService
                 continue;
             }
             $planning = $cycle->getPlanning();
-            $days = $this->daysMet($planning, $period->getStartsAt(), $period->getEndsAt(), $added);
-            if (null === $days) {
+            $addedDays = $this->daysMet($planning, $period->getStartsAt(), $period->getEndsAt(), $added);
+            $releasedDays = $this->daysMet($planning, $period->getStartsAt(), $period->getEndsAt(), $released);
+            if ([] === $addedDays && [] === $releasedDays) {
                 continue;
             }
 
             $key = (string) $cycle->getStableId();
-            $entry = $byCycle[$key] ?? ['planning' => $planning, 'cycle' => $cycle, 'lines' => [], 'generatedAt' => null, 'published' => false, 'days' => $days];
+            $entry = $byCycle[$key] ?? ['planning' => $planning, 'cycle' => $cycle, 'lines' => [], 'generatedAt' => null, 'published' => false, 'added' => [], 'released' => []];
             $entry['lines'][(string) $line->getStableId()] = $line->getName();
             $entry['published'] = $entry['published'] || PlanningPeriodStatus::PUBLISHED === $period->getStatus();
             $generatedAt = $this->generationRepository->findMostRecentCompletedByPlanningPeriod($period)?->getGeneratedAt();
             if (null !== $generatedAt && (null === $entry['generatedAt'] || $generatedAt > $entry['generatedAt'])) {
                 $entry['generatedAt'] = $generatedAt;
             }
-            $entry['days'] = [min($entry['days'][0], $days[0]), max($entry['days'][1], $days[1])];
+            $entry['added'] = array_merge($entry['added'], $addedDays);
+            $entry['released'] = array_merge($entry['released'], $releasedDays);
             $byCycle[$key] = $entry;
         }
 
@@ -83,7 +88,8 @@ final class AvailabilityImpactService
         }
 
         $conflicts = [];
-        foreach ($this->myDuties->dutiesOf($user) as $unit) {
+        // Only a day made unavailable can clash with a duty held; a day released never does.
+        foreach ([] === $added ? [] : $this->myDuties->dutiesOf($user) as $unit) {
             $startsAt = new \DateTimeImmutable($unit['startsAt']);
             $endsAt = new \DateTimeImmutable($unit['endsAt']);
             foreach ($added as [$from, $to]) {
@@ -105,6 +111,9 @@ final class AvailabilityImpactService
             $planning = $entry['planning'];
             /** @var PlanningCycle $cycle */
             $cycle = $entry['cycle'];
+            $addedDays = self::sortedDays($entry['added']);
+            $releasedDays = self::sortedDays($entry['released']);
+            $all = self::sortedDays([...$addedDays, ...$releasedDays]);
             $result[] = [
                 'planningStableId' => (string) $planning->getStableId(),
                 'planningName' => $planning->getName(),
@@ -112,8 +121,11 @@ final class AvailabilityImpactService
                 'lines' => array_values($entry['lines']),
                 'generatedAt' => $entry['generatedAt']?->format(\DATE_ATOM),
                 'published' => $entry['published'],
-                'from' => $entry['days'][0],
-                'to' => $entry['days'][1],
+                // The local days of the period met, made unavailable / available again.
+                'addedDays' => $addedDays,
+                'releasedDays' => $releasedDays,
+                'from' => $all[0],
+                'to' => $all[\count($all) - 1],
                 'conflicts' => $conflicts[$key] ?? [],
             ];
         }
@@ -132,19 +144,57 @@ final class AvailabilityImpactService
      */
     public static function addedRanges(?array $before, array $after): array
     {
-        if (null === $before || $before[1] <= $after[0] || $before[0] >= $after[1]) {
-            return [$after];
+        return self::minus($after, $before);
+    }
+
+    /**
+     * The days a change gives back (docs/decisions.md D218): $before minus
+     * $after — all of $before for a deletion or a change to a preference.
+     *
+     * @param array{0: \DateTimeImmutable, 1: \DateTimeImmutable}      $before
+     * @param array{0: \DateTimeImmutable, 1: \DateTimeImmutable}|null $after
+     *
+     * @return list<array{0: \DateTimeImmutable, 1: \DateTimeImmutable}>
+     */
+    public static function releasedRanges(array $before, ?array $after): array
+    {
+        return self::minus($before, $after);
+    }
+
+    /**
+     * @param array{0: \DateTimeImmutable, 1: \DateTimeImmutable}      $range
+     * @param array{0: \DateTimeImmutable, 1: \DateTimeImmutable}|null $cut
+     *
+     * @return list<array{0: \DateTimeImmutable, 1: \DateTimeImmutable}>
+     */
+    private static function minus(array $range, ?array $cut): array
+    {
+        if (null === $cut || $cut[1] <= $range[0] || $cut[0] >= $range[1]) {
+            return [$range];
         }
 
         $ranges = [];
-        if ($after[0] < $before[0]) {
-            $ranges[] = [$after[0], $before[0]];
+        if ($range[0] < $cut[0]) {
+            $ranges[] = [$range[0], $cut[0]];
         }
-        if ($after[1] > $before[1]) {
-            $ranges[] = [$before[1], $after[1]];
+        if ($range[1] > $cut[1]) {
+            $ranges[] = [$cut[1], $range[1]];
         }
 
         return $ranges;
+    }
+
+    /**
+     * @param list<string> $days
+     *
+     * @return list<string>
+     */
+    private static function sortedDays(array $days): array
+    {
+        $days = array_values(array_unique($days));
+        sort($days);
+
+        return $days;
     }
 
     /**
@@ -175,33 +225,34 @@ final class AvailabilityImpactService
     }
 
     /**
-     * The first and last local day of [$startsAt, $endsAt) met by $added, or null.
+     * The local days of [$startsAt, $endsAt) that $ranges touch, in order.
      *
-     * @param list<array{0: \DateTimeImmutable, 1: \DateTimeImmutable}> $added
+     * @param list<array{0: \DateTimeImmutable, 1: \DateTimeImmutable}> $ranges
      *
-     * @return array{0: string, 1: string}|null
+     * @return list<string>
      */
-    private function daysMet(Planning $planning, \DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt, array $added): ?array
+    private function daysMet(Planning $planning, \DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt, array $ranges): array
     {
         $zone = new \DateTimeZone($planning->getTimezone());
         $from = new \DateTimeImmutable($startsAt->format('Y-m-d').' 00:00:00', $zone);
         $to = new \DateTimeImmutable($endsAt->format('Y-m-d').' 00:00:00', $zone);
 
-        $first = null;
-        $last = null;
-        foreach ($added as [$a, $b]) {
+        $days = [];
+        foreach ($ranges as [$a, $b]) {
             $lo = max($a, $from);
             $hi = min($b, $to);
             if ($lo >= $hi) {
                 continue;
             }
-            $day = $lo->setTimezone($zone)->format('Y-m-d');
+            $day = new \DateTimeImmutable($lo->setTimezone($zone)->format('Y-m-d'), $zone);
             // The last instant inside the range, read as a local day.
-            $end = $hi->modify('-1 second')->setTimezone($zone)->format('Y-m-d');
-            $first = null === $first || $day < $first ? $day : $first;
-            $last = null === $last || $end > $last ? $end : $last;
+            $last = $hi->modify('-1 second')->setTimezone($zone)->format('Y-m-d');
+            while ($day->format('Y-m-d') <= $last) {
+                $days[] = $day->format('Y-m-d');
+                $day = $day->modify('+1 day');
+            }
         }
 
-        return null === $first ? null : [$first, (string) $last];
+        return self::sortedDays($days);
     }
 }

@@ -460,7 +460,7 @@ final class SurgicalHubSyncTest extends WebTestCase
         self::assertResponseStatusCodeSame(409);
 
         $client->request('DELETE', '/api/me/calendar/'.$kept['stableId'], server: $this->userHeaders($token));
-        self::assertResponseStatusCodeSame(204);
+        self::assertResponseStatusCodeSame(200);
         self::assertSame([], $this->imported($client, $token));
         self::assertSame(0, (int) $this->connection()->fetchOne('SELECT COUNT(*) FROM surgical_hub_imported_leaves'));
     }

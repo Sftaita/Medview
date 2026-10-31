@@ -227,8 +227,9 @@ final class PlanningCyclePresenter
                 'open' => \count($open),
                 'closed' => \count($own) - \count($open),
                 'participants' => $participants,
-                // The indicative deadline (D214): the one the preparation plans, else the latest of the open collections.
-                'deadline' => $preparation?->getDeclarationDeadlineOn()?->format('Y-m-d') ?? $deadline,
+                // The indicative deadline (D214/D218): the preparation's once there is one — removed there, removed —
+                // else the latest of the open collections.
+                'deadline' => null !== $preparation ? $preparation->getDeclarationDeadlineOn()?->format('Y-m-d') : $deadline,
                 'uncoveredDays' => $this->cycleService->uncoveredDays($cycle),
             ],
             // docs/decisions.md D214: the dates of « Préparer la période », each with its own meaning.

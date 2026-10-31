@@ -24,9 +24,25 @@ function day(date: string): string {
   return DAY.format(new Date(`${date}T00:00:00Z`))
 }
 
+function nextDay(date: string): string {
+  const next = new Date(`${date}T00:00:00Z`)
+  next.setUTCDate(next.getUTCDate() + 1)
+  return next.toISOString().slice(0, 10)
+}
+
+/** "le 3 mars 2027", "du 3 mars 2027 au 5 mars 2027", or several of them: consecutive days read as one range. */
 function days(dates: string[]): string {
-  if (dates.length === 1) return `le ${day(dates[0])}`
-  return `du ${day(dates[0])} au ${day(dates[dates.length - 1])}`
+  const sorted = [...dates].sort()
+  const ranges: [string, string][] = []
+  for (const date of sorted) {
+    const last = ranges[ranges.length - 1]
+    if (last && nextDay(last[1]) === date) last[1] = date
+    else ranges.push([date, date])
+  }
+  const parts = ranges.map(([from, to]) =>
+    from === to ? `le ${day(from)}` : `du ${day(from)} au ${day(to)}`,
+  )
+  return parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} et ${parts[parts.length - 1]}`
 }
 
 function planningLabel(impact: CalendarImpact): string {
@@ -36,11 +52,12 @@ function planningLabel(impact: CalendarImpact): string {
 }
 
 /**
- * docs/decisions.md D216 — said right after a save, never a second
- * confirmation: the new unavailable days fall in a planning already
- * generated. The unavailability is recorded; the planning is not adapted.
- * When a duty the person currently holds is on those days, the warning is
- * stronger. Each planning concerned is named.
+ * docs/decisions.md D216 / D218 — said right after a save, never a second
+ * confirmation: the change touches days of a planning already generated —
+ * days made unavailable, or days given back (an absence shrunk, moved or
+ * deleted). The personal calendar changed; the generated planning did not.
+ * When a duty the person currently holds is on a day made unavailable, the
+ * warning is stronger. Each planning concerned is named.
  */
 export function CalendarImpactNotice({ impacts, onDismiss }: Props) {
   if (impacts.length === 0) {
@@ -61,14 +78,20 @@ export function CalendarImpactNotice({ impacts, onDismiss }: Props) {
           <div key={impact.period.stableId} className="impact-notice__item">
             <p>
               <strong>Attention :</strong>{' '}
-              {impact.from === impact.to ? 'cette date appartient' : 'ces dates appartiennent'} au planning{' '}
-              <strong>{planningLabel(impact)}</strong>, déjà généré
+              {impact.addedDays.length + impact.releasedDays.length === 1
+                ? 'cette date appartient'
+                : 'ces dates appartiennent'}{' '}
+              au planning <strong>{planningLabel(impact)}</strong>, déjà généré
               {impact.generatedAt ? ` le ${DATE.format(new Date(impact.generatedAt))}` : ''}
               {impact.published ? ' et publié' : ''}.
             </p>
+            {impact.addedDays.length > 0 && <p>Indisponibilité ajoutée {days(impact.addedDays)}.</p>}
+            {impact.releasedDays.length > 0 && (
+              <p>Indisponibilité retirée {days(impact.releasedDays)} : vous y êtes de nouveau disponible.</p>
+            )}
             <p>
-              Votre indisponibilité a bien été enregistrée, mais elle ne modifiera pas automatiquement ce
-              planning.
+              Votre calendrier personnel a bien été modifié, mais le planning généré reste inchangé : aucune
+              garde n’est réattribuée automatiquement.
             </p>
             {impact.conflicts.map((conflict) => (
               <p key={`${conflict.lineName}-${conflict.dates.join()}`} className="impact-notice__duty">

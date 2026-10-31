@@ -133,7 +133,7 @@ export function MyAvailabilityProvider({ children }: { children: ReactNode }) {
     }
     runningRef.current = true
     setSyncing(true)
-    // What this save's new unavailable days meet (D216), gathered over its requests.
+    // What this save meets in generated plannings (D216, D218), gathered over its requests.
     const met: CalendarImpact[] = []
 
     try {
@@ -149,7 +149,8 @@ export function MyAvailabilityProvider({ children }: { children: ReactNode }) {
         // Deletions first, then in-place edits (shrinks before growths), then creations: the backend
         // refuses two periods of the same nature that overlap or touch, even for an instant.
         for (const period of plan.toDelete) {
-          await deleteCalendarPeriod(period.stableId)
+          const deleted = await deleteCalendarPeriod(period.stableId)
+          met.push(...(deleted?.impacts ?? []))
           serverRef.current = serverRef.current.filter((known) => known.stableId !== period.stableId)
         }
         for (const { period, range } of plan.toUpdate) {
@@ -212,9 +213,10 @@ export function MyAvailabilityProvider({ children }: { children: ReactNode }) {
 
   const removeImported = useCallback(
     async (stableId: string) => {
-      await deleteCalendarPeriod(stableId)
+      const deleted = await deleteCalendarPeriod(stableId)
       serverRef.current = serverRef.current.filter((known) => known.stableId !== stableId)
       adoptServer(serverRef.current)
+      setImpacts(mergeImpacts(deleted?.impacts ?? []))
     },
     [adoptServer],
   )

@@ -147,6 +147,15 @@ final class AvailabilityCollectionService
         }
         $this->assertDeadlineNotPast($collection->getPlanning(), $deadline);
 
+        // docs/decisions.md D218: once the period has a preparation, it has one deadline — the
+        // preparation and every open collection of the period say the same.
+        $cycle = $collection->getCycle();
+        if (null !== $cycle && null !== $this->preparationRepository->findOneByCycle($cycle)) {
+            $this->changePlanningDeadline($collection->getPlanning(), $deadline, $cycle);
+
+            return;
+        }
+
         $collection->changeDeadline($deadline, $this->now());
         $this->entityManager->flush();
     }

@@ -358,6 +358,35 @@ describe('PeriodPreparationPanel', () => {
     expect(screen.getByRole('button', { name: 'Enregistrer la préparation' })).toBeDisabled()
   })
 
+  it('removes the deadline for good: « Non définie », sent as null, no older date shown (D218)', async () => {
+    await renderPanel(
+      blank({
+        targetGenerationOn: '2026-11-30',
+        declarationDeadlineOn: '2026-11-25',
+        deadlineOn: '2026-11-25',
+      }),
+    )
+    expect(screen.getByText(formatDate('2026-11-25'))).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retirer' }))
+
+    expect(screen.getByText('Non définie')).toBeInTheDocument()
+    expect(screen.queryByText(formatDate('2026-11-25'))).not.toBeInTheDocument()
+    expect(screen.queryByText(/réglages/)).not.toBeInTheDocument()
+
+    api.savePeriodPreparation.mockResolvedValue(blank({ targetGenerationOn: '2026-11-30' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer la préparation' }))
+    await waitFor(() =>
+      expect(api.savePeriodPreparation).toHaveBeenCalledWith(
+        'p1',
+        'c2',
+        expect.objectContaining({ declarationDeadlineOn: null }),
+      ),
+    )
+    expect(await screen.findByText('Non définie')).toBeInTheDocument()
+    expect(screen.queryByText(formatDate('2026-11-25'))).not.toBeInTheDocument()
+  })
+
   it('never says "Ouverte" while the announcement is still scheduled (Trauma Delta, D214)', async () => {
     await renderPanel(
       blank({

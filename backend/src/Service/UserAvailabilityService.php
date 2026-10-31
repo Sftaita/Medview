@@ -84,7 +84,7 @@ final class UserAvailabilityService
 
         return $this->entityManager->wrapInTransaction(function () use ($period, $user, $actor, $startsAt, $endsAt): CalendarChange {
             $this->entityManager->persist($period);
-            $impacts = $this->impactsOf($user, null, $period);
+            $impacts = $this->impactsOf($user, null, [$period->getType(), $startsAt, $endsAt]);
             $this->record($period, $actor, UserAvailabilityEventAction::CREATED, null, $impacts);
             $this->entityManager->flush();
             $this->collectionService->recordAvailabilityChange($user, [[$startsAt, $endsAt]]);
@@ -135,7 +135,7 @@ final class UserAvailabilityService
      *
      * @throws ImportedAvailabilityPeriodException $period is still synchronised from SurgicalHub
      */
-    public function delete(UserAvailabilityPeriod $period, ?User $actor = null): void
+    public function delete(UserAvailabilityPeriod $period, ?User $actor = null): CalendarChange
     {
         if ($period->isImported()) {
             if ($this->isSynchronised($period)) {
@@ -148,7 +148,7 @@ final class UserAvailabilityService
             }
         }
 
-        $this->remove($period, $actor ?? $period->getUser());
+        return $this->remove($period, $actor ?? $period->getUser());
     }
 
     /** Whether an imported period is still kept up to date by a current (ACTIVE or SUSPENDED) association. */
@@ -170,7 +170,7 @@ final class UserAvailabilityService
 
         $this->entityManager->wrapInTransaction(function () use ($period, $user, $startsAt, $endsAt): void {
             $this->entityManager->persist($period);
-            $this->record($period, null, UserAvailabilityEventAction::CREATED, null, $this->impactsOf($user, null, $period));
+            $this->record($period, null, UserAvailabilityEventAction::CREATED, null, $this->impactsOf($user, null, [$period->getType(), $startsAt, $endsAt]));
             $this->entityManager->flush();
             $this->collectionService->recordAvailabilityChange($user, [[$startsAt, $endsAt]]);
         });
@@ -205,7 +205,7 @@ final class UserAvailabilityService
 
         return $this->entityManager->wrapInTransaction(function () use ($period, $type, $startsAt, $endsAt, $previous, $actor): CalendarChange {
             $period->reschedule($type, $startsAt, $endsAt);
-            $impacts = $this->impactsOf($period->getUser(), $previous, $period);
+            $impacts = $this->impactsOf($period->getUser(), $previous, [$type, $startsAt, $endsAt]);
             $this->record($period, $actor, UserAvailabilityEventAction::RESCHEDULED, $previous, $impacts);
             $this->entityManager->flush();
             // Both the dates left and the dates taken count as "touched".
@@ -215,36 +215,43 @@ final class UserAvailabilityService
         });
     }
 
-    private function remove(UserAvailabilityPeriod $period, ?User $actor): void
+    private function remove(UserAvailabilityPeriod $period, ?User $actor): CalendarChange
     {
         $user = $period->getUser();
         $range = [$period->getStartsAt(), $period->getEndsAt()];
         $previous = [$period->getType(), $period->getStartsAt(), $period->getEndsAt()];
 
-        $this->entityManager->wrapInTransaction(function () use ($period, $user, $range, $previous, $actor): void {
-            $this->record($period, $actor, UserAvailabilityEventAction::DELETED, $previous, null);
+        return $this->entityManager->wrapInTransaction(function () use ($period, $user, $range, $previous, $actor): CalendarChange {
+            $impacts = $this->impactsOf($user, $previous, null);
+            $this->record($period, $actor, UserAvailabilityEventAction::DELETED, $previous, $impacts);
             $this->entityManager->remove($period);
             $this->entityManager->flush();
             $this->collectionService->recordAvailabilityChange($user, [$range]);
+
+            return new CalendarChange($period, $impacts);
         });
     }
 
     /**
-     * What the new unavailable days of $period meet (docs/decisions.md D216).
-     * A preference never warns; a change warns only about the days it adds.
+     * What a change meets in plannings already generated (docs/decisions.md
+     * D216, D218): the days it makes unavailable and the days it gives back.
+     * A preference never warns; days unavailable before and after say nothing.
      *
-     * @param array{0: UserAvailabilityType, 1: \DateTimeImmutable, 2: \DateTimeImmutable}|null $previous
+     * @param array{0: UserAvailabilityType, 1: \DateTimeImmutable, 2: \DateTimeImmutable}|null $previous null for a creation
+     * @param array{0: UserAvailabilityType, 1: \DateTimeImmutable, 2: \DateTimeImmutable}|null $next     null for a deletion
      *
      * @return list<array<string, mixed>>
      */
-    private function impactsOf(User $user, ?array $previous, UserAvailabilityPeriod $period): array
+    private function impactsOf(User $user, ?array $previous, ?array $next): array
     {
-        if (UserAvailabilityType::UNAVAILABLE !== $period->getType()) {
-            return [];
-        }
         $before = null !== $previous && UserAvailabilityType::UNAVAILABLE === $previous[0] ? [$previous[1], $previous[2]] : null;
+        $after = null !== $next && UserAvailabilityType::UNAVAILABLE === $next[0] ? [$next[1], $next[2]] : null;
 
-        return $this->impactService->impacts($user, AvailabilityImpactService::addedRanges($before, [$period->getStartsAt(), $period->getEndsAt()]));
+        return $this->impactService->impacts(
+            $user,
+            null === $after ? [] : AvailabilityImpactService::addedRanges($before, $after),
+            null === $before ? [] : AvailabilityImpactService::releasedRanges($before, $after),
+        );
     }
 
     /**

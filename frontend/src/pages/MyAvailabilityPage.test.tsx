@@ -402,6 +402,8 @@ describe('MyAvailabilityPage — after a generation (docs/decisions.md D216)', (
     lines: ['Seniors'],
     generatedAt: '2027-01-24T08:15:00+00:00',
     published: true,
+    addedDays: ['2026-12-20'],
+    releasedDays: [] as string[],
     from: '2026-12-20',
     to: '2026-12-20',
     conflicts: [] as { dates: string[]; lineName: string; dutyTypeName: string; blockName: string | null }[],
@@ -417,7 +419,7 @@ describe('MyAvailabilityPage — after a generation (docs/decisions.md D216)', (
     const notice = await screen.findByRole('status', { name: 'Plannings déjà générés' })
     expect(notice).toHaveTextContent('Trauma Delta – Période 2, déjà généré le 24 janvier 2027 et publié')
     expect(notice).toHaveTextContent(
-      'Votre indisponibilité a bien été enregistrée, mais elle ne modifiera pas automatiquement ce planning.',
+      'Votre calendrier personnel a bien été modifié, mais le planning généré reste inchangé',
     )
     expect(backend.periods).toHaveLength(1)
     expect(screen.getByText(/Enregistré automatiquement/)).toBeInTheDocument()
@@ -444,6 +446,26 @@ describe('MyAvailabilityPage — after a generation (docs/decisions.md D216)', (
     expect(notice).toHaveTextContent(
       'Vous êtes déjà de garde le 20 décembre 2026 (Seniors). Cette garde reste attribuée.',
     )
+  })
+
+  it('tells a deleted absence too: the calendar changed, the generated planning did not (D218)', async () => {
+    const backend = createFakeBackend({
+      periods: [storedPeriod('p-20', 'UNAVAILABLE', 20, 21)],
+      impactsFor: (_input, action) =>
+        action === 'delete' ? [{ ...generated, addedDays: [], releasedDays: ['2026-12-20'] }] : [],
+    })
+    backend.install()
+    await renderLoaded()
+
+    fireEvent.click(cell(20))
+
+    const notice = await screen.findByRole('status', { name: 'Plannings déjà générés' })
+    expect(notice).toHaveTextContent(
+      'Indisponibilité retirée le 20 décembre 2026 : vous y êtes de nouveau disponible.',
+    )
+    expect(notice).toHaveTextContent('le planning généré reste inchangé')
+    expect(backend.periods).toHaveLength(0)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
   it('says nothing when the day belongs to no generated planning', async () => {

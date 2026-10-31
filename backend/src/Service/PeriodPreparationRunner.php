@@ -146,12 +146,10 @@ final class PeriodPreparationRunner
 
             return 'skipped';
         }
-        // docs/decisions.md D214: the collections announced take the planned indicative deadline.
+        // docs/decisions.md D214/D218: the collections announced take the period's indicative deadline — none if it has none.
         $deadline = $preparation->getDeclarationDeadlineOn();
-        if (null !== $deadline) {
-            foreach ($this->preparationService->openCollections($cycle) as $collection) {
-                $collection->changeDeadline($deadline, $now);
-            }
+        foreach ($this->preparationService->openCollections($cycle) as $collection) {
+            $collection->changeDeadline($deadline, $now);
         }
         foreach ($this->preparationService->participants($cycle) as ['user' => $user]) {
             $this->deliveryRepository->queue($preparation, PreparationDeliveryKind::ANNOUNCEMENT, null, $user, $now);

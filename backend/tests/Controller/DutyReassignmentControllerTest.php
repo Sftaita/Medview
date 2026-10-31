@@ -226,7 +226,7 @@ final class DutyReassignmentControllerTest extends WebTestCase
         // bob becomes available again (like the live browser smoke test: remove the
         // unavailability, live eligibility re-reads it fresh) — a real, valid candidate now.
         $this->api($client, 'DELETE', '/api/me/calendar/'.$this->onlyAvailabilityStableIdOf('bob'), token: $s['bob']);
-        self::assertResponseStatusCodeSame(204);
+        self::assertResponseStatusCodeSame(200);
 
         $bobMemberId = $this->memberIdOf($client, $s, 'bob@example.com');
         $response = $this->reassign($client, $s, $dutyStableId, $bobMemberId, null);

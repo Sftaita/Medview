@@ -9852,3 +9852,49 @@ la même seconde que la capture, c'est le contenu du snapshot qui tranche). Une
 génération suivante ne modifie jamais les précédentes. Interface :
 « Historique » dans l'onglet Indisponibilités (ouvert à la demande) et dans le
 panneau d'un membre (restreint à lui), heures en Europe/Brussels.
+
+## D218 — Avertir aussi d'une indisponibilité réduite, déplacée ou supprimée ; une seule date limite par période
+
+**Contexte (revue de la PR #26).** D216 n'avertissait que des jours
+nouvellement indisponibles : réduire, déplacer (côté jours libérés) ou supprimer
+une absence sur un planning déjà généré ne disait rien, et `DELETE
+/api/me/calendar/{id}` répondait 204 sans contenu. Par ailleurs, retirer la date
+limite indicative dans « Préparer la période » laissait la date des collectes
+ouvertes en place, et `effectiveDeadline()` se rabattait sur elle : l'ancienne
+échéance réapparaissait (« … (fixée dans les réglages) »), restait dans les
+emails de rappel et sur le tableau de bord des membres.
+
+**Décision 1 — jours libérés.** Un changement du calendrier rapporte, par
+période générée concernée, les jours locaux qu'il rend indisponibles
+(`addedDays`) **et** ceux qu'il rend de nouveau disponibles (`releasedDays`) :
+réduction, déplacement, passage en préférence, suppression. `POST`, `PATCH` et
+désormais `DELETE /api/me/calendar` (200 `{impacts}`) répondent `impacts` ; le
+journal (D215) les garde, suppressions comprises. Les gardes détenues
+(`conflicts`) ne concernent que les jours ajoutés : un jour libéré ne crée
+jamais de conflit. Message : « Indisponibilité retirée le … : vous y êtes de
+nouveau disponible. Votre calendrier personnel a bien été modifié, mais le
+planning généré reste inchangé : aucune garde n'est réattribuée
+automatiquement. » Jamais bloquant, aucune réaffectation, aucun snapshot
+touché ; rien n'est dit hors d'une période générée, ni pour une préférence.
+Côté écran, une même sauvegarde peut libérer puis reprendre un jour (suppression
+puis création) : ce jour n'a pas changé et n'est pas signalé.
+
+**Décision 2 — une seule date limite par période.** Dès qu'une période a une
+préparation, sa date limite indicative est celle de la préparation, `null`
+compris : `effectiveDeadline()`, la carte de la période et le panneau ne se
+rabattent plus sur les collectes. Elle est tenue identique sur les collectes
+**ouvertes** de la période dans tous les sens : « Préparer la période »,
+paramètres du planning (D127) et date d'une collecte. La retirer la retire
+donc aussi des collectes ouvertes (plus d'ancienne date dans les emails ni
+sur le tableau de bord). Une collecte **clôturée** garde la sienne comme
+historique. Une préparation créée reprend la date déjà fixée dans les
+paramètres. L'annonce programmée applique la date de la préparation, aucune
+si elle n'en a pas. Migration `Version20261101090100` : une préparation sans
+date reprend la plus tardive de ses collectes ouvertes, pour que la date déjà
+annoncée reste celle affichée. Aucune autre donnée n'est modifiée.
+
+**Compromis.** Effacer la date d'une collecte ouverte efface une valeur de
+réglage, pas un historique : la date annoncée reste dans les emails déjà
+envoyés, et les collectes clôturées ne bougent pas. Plusieurs collectes
+ouvertes d'une même période aux dates différentes (cas ancien) sont alignées
+sur la date de la période au premier changement.

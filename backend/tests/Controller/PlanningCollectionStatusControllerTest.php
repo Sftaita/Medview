@@ -268,7 +268,7 @@ final class PlanningCollectionStatusControllerTest extends WebTestCase
         self::assertResponseIsSuccessful();
         $extra = $this->declareRange($client, $s['alice'], '2027-03-10', '2027-03-11');
         $this->api($client, 'DELETE', "/api/me/calendar/{$extra['stableId']}", token: $s['alice']);
-        self::assertResponseStatusCodeSame(204);
+        self::assertResponseStatusCodeSame(200);
         $this->api($client, 'GET', '/api/me/calendar', token: $s['alice']);
         self::assertResponseIsSuccessful();
         // … and a manager can still move the deadline forward.

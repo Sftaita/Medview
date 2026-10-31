@@ -376,11 +376,8 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
           </div>
           <div className="mv-prep__value">
             <span className="mv-prep__date">
-              {draft.deadline
-                ? formatDate(draft.deadline)
-                : view.deadlineOn
-                  ? `${formatDate(view.deadlineOn)} (fixée dans les réglages)`
-                  : 'Non définie'}
+              {/* docs/decisions.md D218: one deadline per period — removed, it is « Non définie », never an older one. */}
+              {draft.deadline ? formatDate(draft.deadline) : 'Non définie'}
             </span>
             {draft.deadline && draft.deadline < view.today && (
               <span className="mv-badge mv-badge--neutral">Passée</span>

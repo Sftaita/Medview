@@ -88,7 +88,8 @@ final class PeriodPreparationService
             ],
             'targetGenerationOn' => PreparationCalendar::ymd($preparation?->getTargetGenerationOn()),
             // docs/decisions.md D214: indicative only, and the real generation date once it happened.
-            'declarationDeadlineOn' => PreparationCalendar::ymd($preparation?->getDeclarationDeadlineOn()),
+            // docs/decisions.md D218: one deadline per period — the same value in both fields.
+            'declarationDeadlineOn' => $this->effectiveDeadline($cycle, $preparation),
             'deadlineOn' => $this->effectiveDeadline($cycle, $preparation),
             'generatedAt' => $this->cycleRepository->milestones($cycle)['generatedAt'],
             'collection' => $this->collectionState($cycle),
@@ -133,6 +134,8 @@ final class PeriodPreparationService
             $preparation = $this->preparationRepository->findOneByCycle($cycle);
             if (null === $preparation) {
                 $preparation = new PeriodPreparation($cycle, $by, $now);
+                // docs/decisions.md D218: it starts from the deadline the period already has (planning settings).
+                $preparation->changeDeclarationDeadline(self::dayOrNull($this->latestCollectionDeadline($cycle)));
                 $this->entityManager->persist($preparation);
             }
             $this->apply($preparation, $cycle, $input, $now);
@@ -239,16 +242,23 @@ final class PeriodPreparationService
     }
 
     /**
-     * The deadline the participants are told: the one planned in the
-     * preparation, else the latest of the open collections (set from the
-     * planning settings). Null when there is none.
+     * The deadline the participants are told (docs/decisions.md D218): once
+     * the period has a preparation, its value and nothing else — a deadline
+     * removed there is removed, never replaced by an older one. Without a
+     * preparation, the latest of the open collections (set from the planning
+     * settings). Null when there is none.
      */
     public function effectiveDeadline(PlanningCycle $cycle, ?PeriodPreparation $preparation): ?string
     {
-        $planned = $preparation?->getDeclarationDeadlineOn();
-        if (null !== $planned) {
-            return $planned->format('Y-m-d');
+        if (null !== $preparation) {
+            return PreparationCalendar::ymd($preparation->getDeclarationDeadlineOn());
         }
+
+        return $this->latestCollectionDeadline($cycle);
+    }
+
+    private function latestCollectionDeadline(PlanningCycle $cycle): ?string
+    {
         $latest = null;
         foreach ($this->openCollections($cycle) as $collection) {
             $deadline = $collection->getDeadline()?->format('Y-m-d');
@@ -344,7 +354,8 @@ final class PeriodPreparationService
      * after the announcement, on or before the target date, never past when
      * it changes. It never refuses anything once reached. The open collections
      * of the period take it at once (those the announcement opens take it
-     * then); removing it leaves their own deadline as it is.
+     * then) — removing it removes it from them too (D218), so no older date
+     * comes back; the closed collections keep theirs as history.
      *
      * @param array<string, mixed> $input
      */
@@ -374,11 +385,14 @@ final class PeriodPreparationService
         }
 
         $preparation->changeDeclarationDeadline($deadline);
-        if (null !== $deadline) {
-            foreach ($this->openCollections($cycle) as $collection) {
-                $collection->changeDeadline($deadline, $now);
-            }
+        foreach ($this->openCollections($cycle) as $collection) {
+            $collection->changeDeadline($deadline, $now);
         }
+    }
+
+    private static function dayOrNull(?string $ymd): ?\DateTimeImmutable
+    {
+        return null === $ymd ? null : PreparationCalendar::day($ymd);
     }
 
     /**

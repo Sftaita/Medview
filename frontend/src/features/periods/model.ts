@@ -43,7 +43,8 @@ export function toPeriod(view: PlanningPeriodSummary): Period {
     collecte: {
       state: scheduled ? 'programmee' : c.open > 0 ? 'en-cours' : c.closed > 0 ? 'cloturee' : 'non-ouverte',
       participants: c.participants,
-      closesOn: c.deadline ?? preparation?.declarationDeadlineOn ?? undefined,
+      // docs/decisions.md D218: the server says the one deadline of the period.
+      closesOn: c.deadline ?? undefined,
       announceOn: scheduled ? (preparation?.announceOn ?? undefined) : undefined,
       uncoveredDays: c.uncoveredDays,
     },

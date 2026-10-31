@@ -194,15 +194,92 @@ final class AvailabilityTraceabilityTest extends WebTestCase
         self::assertSame([], $free['impacts'][0]['conflicts']);
         self::assertSame($published, $this->fingerprint(1));
 
-        // A change only warns about the days it adds: shrinking says nothing.
-        $shrunk = $this->move($other, $free['stableId'], '2027-03-20', '2027-03-20 12:00');
-        self::assertSame([], $shrunk['impacts']);
-        // Moving it onto other days of the period does.
-        self::assertCount(1, $this->move($other, $free['stableId'], '2027-03-22', '2027-03-23')['impacts']);
+        // Moving it onto other days of the period: the days added and the days given back are both told.
+        $moved = $this->move($other, $free['stableId'], '2027-03-22', '2027-03-23');
+        self::assertCount(1, $moved['impacts']);
+        self::assertSame(['2027-03-22'], $moved['impacts'][0]['addedDays']);
+        self::assertSame(['2027-03-20'], $moved['impacts'][0]['releasedDays']);
 
         // Each event keeps what it met at that moment.
         $events = array_values(array_filter($this->history($holder), static fn (array $e): bool => 'availability' === $e['kind']));
         self::assertCount(1, end($events)['impacts'][0]['conflicts']);
+    }
+
+    /**
+     * docs/decisions.md D218: shrinking, moving, turning into a preference or deleting an absence on the
+     * days of a planning already generated is told too — the personal calendar changed, the generated
+     * planning did not. Never refused, nothing reassigned, no snapshot touched, journaled; and nothing
+     * said when no generated planning is concerned.
+     */
+    public function testShrinkingMovingOrDeletingAnAbsenceAfterAGenerationIsToldNeverApplied(): void
+    {
+        // Before any generation: nothing to say, whatever the change.
+        $early = $this->declare('alice', '2027-03-01', '2027-03-03');
+        self::assertSame([], $this->move('alice', $early['stableId'], '2027-03-01', '2027-03-02')['impacts']);
+        self::assertSame(['impacts' => []], $this->api($this->client, 'DELETE', "/api/me/calendar/{$early['stableId']}", token: $this->s['alice']));
+        self::assertResponseStatusCodeSame(200);
+
+        $absence = $this->declare('alice', '2027-03-15', '2027-03-18');
+        $kept = $this->declare('alice', '2027-03-25', '2027-03-27');
+        self::nextSecond();
+        $this->generatePeriod(1, self::REST);
+        $this->publishPeriod(1);
+        [$generation] = $this->generationIds();
+        $captured = $this->captured('alice@example.com');
+        self::assertSame(["{$generation}: 2027-03-15→2027-03-18", "{$generation}: 2027-03-25→2027-03-27"], $captured);
+        $assignments = $this->fingerprint(1);
+        self::nextSecond();
+
+        // Shrunk: the day given back is told, with the planning and its generation.
+        $shrunk = $this->move('alice', $absence['stableId'], '2027-03-15', '2027-03-17');
+        self::assertCount(1, $shrunk['impacts']);
+        $impact = $shrunk['impacts'][0];
+        self::assertSame($this->s['planningId'], $impact['planningStableId']);
+        self::assertTrue($impact['published']);
+        self::assertNotNull($impact['generatedAt']);
+        self::assertSame([], $impact['addedDays']);
+        self::assertSame(['2027-03-17'], $impact['releasedDays']);
+        self::assertSame(['2027-03-17', '2027-03-17'], [$impact['from'], $impact['to']]);
+        self::assertSame([], $impact['conflicts'], 'a day given back never clashes with a duty');
+
+        // Moved: both sides.
+        $moved = $this->move('alice', $absence['stableId'], '2027-03-22', '2027-03-24');
+        self::assertSame(['2027-03-22', '2027-03-23'], $moved['impacts'][0]['addedDays']);
+        self::assertSame(['2027-03-15', '2027-03-16'], $moved['impacts'][0]['releasedDays']);
+
+        // Turned into a preference: its days are given back.
+        $preference = $this->move('alice', $kept['stableId'], '2027-03-25', '2027-03-27', 'PREFER_DUTY');
+        self::assertSame(['2027-03-25', '2027-03-26'], $preference['impacts'][0]['releasedDays']);
+        self::assertSame([], $preference['impacts'][0]['addedDays']);
+        // Deleting a preference says nothing.
+        self::assertSame(['impacts' => []], $this->api($this->client, 'DELETE', "/api/me/calendar/{$kept['stableId']}", token: $this->s['alice']));
+
+        // Deleted: never refused, the days given back are told.
+        $deleted = $this->api($this->client, 'DELETE', "/api/me/calendar/{$absence['stableId']}", token: $this->s['alice']);
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(1, $deleted['impacts']);
+        self::assertSame(['2027-03-22', '2027-03-23'], $deleted['impacts'][0]['releasedDays']);
+        self::assertSame([], $deleted['impacts'][0]['addedDays']);
+        self::assertSame([], $this->api($this->client, 'GET', '/api/me/calendar', token: $this->s['alice']));
+
+        // Nothing applied: same assignments, same snapshot, no new generation.
+        self::assertSame($assignments, $this->fingerprint(1));
+        self::assertSame($captured, $this->captured('alice@example.com'));
+        self::assertSame([$generation], $this->generationIds());
+
+        // Outside any generated planning: no false alarm on a deletion either.
+        $june = $this->declare('alice', '2027-06-10', '2027-06-12');
+        self::assertSame([], $this->move('alice', $june['stableId'], '2027-06-10', '2027-06-11')['impacts']);
+        self::assertSame(['impacts' => []], $this->api($this->client, 'DELETE', "/api/me/calendar/{$june['stableId']}", token: $this->s['alice']));
+
+        // Journaled with what each change met; the history keeps it after the deletion.
+        $events = array_values(array_filter($this->history('alice@example.com'), static fn (array $e): bool => 'availability' === $e['kind'] && $e['availabilityStableId'] === $absence['stableId']));
+        self::assertSame(['CREATED', 'RESCHEDULED', 'RESCHEDULED', 'DELETED'], array_column($events, 'action'));
+        self::assertSame([], $events[0]['impacts'], 'created before the generation');
+        self::assertSame(['2027-03-17'], $events[1]['impacts'][0]['releasedDays']);
+        self::assertSame(['2027-03-22', '2027-03-23'], $events[3]['impacts'][0]['releasedDays']);
+        self::assertNotNull($events[3]['afterGeneration']);
+        self::assertSame(1, (int) $this->db()->fetchOne("SELECT COUNT(*) FROM user_availability_events WHERE action = 'DELETED' AND availability_stable_id = ? AND impacts IS NOT NULL", [$absence['stableId']]));
     }
 
     public function testOneAbsenceMeetingTwoGeneratedPlanningsNamesBoth(): void
@@ -230,7 +307,7 @@ final class AvailabilityTraceabilityTest extends WebTestCase
         $this->move('alice', $period['stableId'], '2027-02-10', '2027-02-12');
         $this->move('alice', $period['stableId'], '2027-02-10', '2027-02-14');
         $this->api($this->client, 'DELETE', "/api/me/calendar/{$period['stableId']}", token: $this->s['alice']);
-        self::assertResponseStatusCodeSame(204);
+        self::assertResponseStatusCodeSame(200);
 
         $rows = $this->db()->fetchAllAssociative("SELECT e.action, e.origin, a.email AS actor, e.previous_ends_at IS NOT NULL AS has_previous, e.new_ends_at IS NOT NULL AS has_new
             FROM user_availability_events e JOIN users u ON u.id = e.user_id LEFT JOIN users a ON a.id = e.actor_id WHERE u.email = 'alice@example.com' ORDER BY e.id");

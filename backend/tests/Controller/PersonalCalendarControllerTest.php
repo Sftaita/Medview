@@ -178,7 +178,7 @@ final class PersonalCalendarControllerTest extends WebTestCase
         $stableId = json_decode((string) $client->getResponse()->getContent(), true)['stableId'];
 
         $client->request('DELETE', '/api/me/calendar/'.$stableId, server: $this->authHeader($token));
-        self::assertResponseStatusCodeSame(204);
+        self::assertResponseStatusCodeSame(200);
 
         $client->request('GET', '/api/me/calendar', server: $this->authHeader($token));
         self::assertSame([], json_decode((string) $client->getResponse()->getContent(), true));

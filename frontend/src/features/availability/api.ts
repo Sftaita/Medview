@@ -1,5 +1,6 @@
 import { apiFetch } from '../../lib/apiClient'
 import type {
+  DeletedUserAvailabilityPeriod,
   SavedUserAvailabilityPeriod,
   UpsertUserAvailabilityPeriodInput,
   UserAvailabilityPeriod,
@@ -25,6 +26,6 @@ export function updateCalendarPeriod(
   })
 }
 
-export function deleteCalendarPeriod(stableId: string): Promise<void> {
-  return apiFetch<void>(`/api/me/calendar/${stableId}`, { method: 'DELETE' })
+export function deleteCalendarPeriod(stableId: string): Promise<DeletedUserAvailabilityPeriod> {
+  return apiFetch<DeletedUserAvailabilityPeriod>(`/api/me/calendar/${stableId}`, { method: 'DELETE' })
 }

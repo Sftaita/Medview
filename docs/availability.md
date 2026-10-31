@@ -436,7 +436,7 @@ impact : l'en-tête et le §9 annoncent `EligibilityService`/snapshot comme
 global » ne mentionne pas `ROLE_PLATFORM_ADMIN` (D174, sans droit sur les
 calendriers).
 
-## 13. Journal, avertissement après génération, historique (D214-D217)
+## 13. Journal, avertissement après génération, historique (D214-D218)
 
 - **Toujours modifiable, disponible par défaut** (D214) : aucune date limite,
   génération ou publication ne refuse un changement du calendrier ; sans
@@ -451,7 +451,9 @@ calendriers).
   affectations ni un snapshot. `POST` / `PATCH /api/me/calendar` répondent
   `impacts` — les périodes déjà générées où tombent les jours nouvellement
   indisponibles, et les gardes détenues ces jours-là sur les lignes publiées —
-  que le calendrier affiche sans bloquer.
+  que le calendrier affiche sans bloquer. Depuis D218, aussi les jours rendus
+  disponibles (réduction, déplacement, suppression : `releasedDays`), et
+  `DELETE /api/me/calendar/{id}` répond 200 `{impacts}`.
 - **Historique** (D217) : `GET /api/plannings/{id}/history?period=&member=`,
   réservé à ceux qui gèrent les disponibilités du planning ; limité aux
   participants et aux dates de la période.

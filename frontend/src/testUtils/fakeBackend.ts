@@ -77,8 +77,11 @@ export type FakeBackendOptions = {
   surgicalHub?: SurgicalHubState
   /** What POST /api/me/surgicalhub/sync answers; a SYNCED with no change by default. */
   surgicalHubSyncOutcome?: SurgicalHubSyncOutcome
-  /** What a creation or a change of the calendar meets (docs/decisions.md D216); none by default. */
-  impactsFor?: (input: Pick<UserAvailabilityPeriod, 'type' | 'startsAt' | 'endsAt'>) => CalendarImpact[]
+  /** What a creation, a change or a deletion of the calendar meets (docs/decisions.md D216, D218); none by default. */
+  impactsFor?: (
+    input: Pick<UserAvailabilityPeriod, 'type' | 'startsAt' | 'endsAt'>,
+    action: 'create' | 'update' | 'delete',
+  ) => CalendarImpact[]
 }
 
 export function createFakeBackend(options: FakeBackendOptions = {}) {
@@ -175,21 +178,23 @@ export function createFakeBackend(options: FakeBackendOptions = {}) {
         updatedAt: '',
       }
       periods.push(created)
-      return respond({ ...created, impacts: options.impactsFor?.(input) ?? [] }, 201)
+      return respond({ ...created, impacts: options.impactsFor?.(input, 'create') ?? [] }, 201)
     }
     const calendarItem = path.match(/^\/api\/me\/calendar\/(.+)$/)
     if (calendarItem) {
       const id = calendarItem[1]
       if (method === 'DELETE') {
+        const removed = periods.find((p) => p.stableId === id)
         periods = periods.filter((p) => p.stableId !== id)
-        return respond(null, 204)
+        // docs/decisions.md D218: a deletion answers what the days it gives back meet.
+        return respond({ impacts: removed ? (options.impactsFor?.(removed, 'delete') ?? []) : [] })
       }
       if (method === 'PATCH') {
         const input = body as Pick<UserAvailabilityPeriod, 'type' | 'startsAt' | 'endsAt'>
         periods = periods.map((p) => (p.stableId === id ? { ...p, ...input } : p))
         return respond({
           ...periods.find((p) => p.stableId === id),
-          impacts: options.impactsFor?.(input) ?? [],
+          impacts: options.impactsFor?.(input, 'update') ?? [],
         })
       }
     }

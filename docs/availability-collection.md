@@ -12,7 +12,9 @@ Lot du 2026-09-21 — décisions `docs/decisions.md` D120 à D126.
 > `POST …/reminders/participants`, et programmés, D210) vont à tous les
 > participants. La collecte n'est « ouverte » pour les membres qu'une fois
 > l'annonce de sa période passée (D214). Journal du calendrier : D215 ;
-> avertissement après une génération : D216 ; historique : D217.
+> avertissement après une génération : D216 ; historique : D217. Une seule
+> date limite indicative par période, retirée partout quand on la retire
+> (collectes clôturées exceptées) : D218.
 
 ## 0. Le problème
 
