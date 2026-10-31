@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ApiError } from '../../lib/apiClient'
 import { createCalendarPeriod, deleteCalendarPeriod, fetchMyCalendar, updateCalendarPeriod } from './api'
-import { acknowledgeCollection, fetchMyCollections } from './collectionApi'
-import type { AcknowledgementKind, AvailabilityCollection } from './collectionTypes'
+import { fetchMyCollections } from './collectionApi'
+import type { AvailabilityCollection } from './collectionTypes'
 import { MyAvailabilityContext, type MyAvailabilityContextValue } from './context'
+import { mergeImpacts } from './impacts'
 import {
   blockNewPreferencesOn,
   importedRanges,
@@ -13,7 +14,7 @@ import {
   rangeToInput,
 } from './periodMapping'
 import { sameRanges, type DayRange } from './selection'
-import type { UserAvailabilityPeriod } from './types'
+import type { CalendarImpact, UserAvailabilityPeriod } from './types'
 
 /** A save round re-plans against what the server now holds; it always converges in one or two rounds. */
 const MAX_SYNC_ROUNDS = 10
@@ -31,7 +32,9 @@ function syncErrorMessage(err: unknown): string {
 /**
  * The single source of truth for the user's own calendar and their open
  * availability collections, shared by the dashboard and the calendar page
- * (docs/availability.md §9, docs/decisions.md D126).
+ * (docs/availability.md §9, docs/decisions.md D126). The calendar is always
+ * editable (D214); what a saved edit meets in plannings already generated is
+ * kept in `impacts` (D216), never applied to them.
  *
  * - **Optimistic**: `editRanges` changes what everyone reads immediately, and
  *   the change is saved in the background — one DELETE / PATCH / POST per
@@ -58,6 +61,7 @@ export function MyAvailabilityProvider({ children }: { children: ReactNode }) {
   const [syncError, setSyncError] = useState<string | null>(null)
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
   const [collections, setCollections] = useState<AvailabilityCollection[] | null>(null)
+  const [impacts, setImpacts] = useState<CalendarImpact[]>([])
 
   const rangesRef = useRef<DayRange[] | null>(null)
   const importedRef = useRef<DayRange[]>([])
@@ -129,6 +133,8 @@ export function MyAvailabilityProvider({ children }: { children: ReactNode }) {
     }
     runningRef.current = true
     setSyncing(true)
+    // What this save meets in generated plannings (D216, D218), gathered over its requests.
+    const met: CalendarImpact[] = []
 
     try {
       for (let round = 0; ; round++) {
@@ -143,21 +149,29 @@ export function MyAvailabilityProvider({ children }: { children: ReactNode }) {
         // Deletions first, then in-place edits (shrinks before growths), then creations: the backend
         // refuses two periods of the same nature that overlap or touch, even for an instant.
         for (const period of plan.toDelete) {
-          await deleteCalendarPeriod(period.stableId)
+          const deleted = await deleteCalendarPeriod(period.stableId)
+          met.push(...(deleted?.impacts ?? []))
           serverRef.current = serverRef.current.filter((known) => known.stableId !== period.stableId)
         }
         for (const { period, range } of plan.toUpdate) {
-          const saved = await updateCalendarPeriod(period.stableId, rangeToInput(range))
+          const { impacts: savedImpacts, ...saved } = await updateCalendarPeriod(
+            period.stableId,
+            rangeToInput(range),
+          )
+          met.push(...(savedImpacts ?? []))
           serverRef.current = serverRef.current.map((known) =>
             known.stableId === saved.stableId ? saved : known,
           )
         }
         for (const range of plan.toCreate) {
-          const saved = await createCalendarPeriod(rangeToInput(range))
+          const { impacts: savedImpacts, ...saved } = await createCalendarPeriod(rangeToInput(range))
+          met.push(...(savedImpacts ?? []))
           serverRef.current = [...serverRef.current, saved]
         }
       }
       setLastSavedAt(Date.now())
+      // Said only when relevant: an edit meeting nothing generated clears the previous warning.
+      setImpacts(mergeImpacts(met))
       // Touching the calendar inside a collection's window updates its "last change" server-side.
       void refreshCollections()
     } catch (err) {
@@ -194,20 +208,15 @@ export function MyAvailabilityProvider({ children }: { children: ReactNode }) {
     [adopt, sync],
   )
 
-  const acknowledge = useCallback(async (collectionStableId: string, kind: AcknowledgementKind) => {
-    const updated = await acknowledgeCollection(collectionStableId, kind)
-    setCollections((previous) =>
-      (previous ?? []).map((collection) => (collection.stableId === updated.stableId ? updated : collection)),
-    )
-  }, [])
-
+  const dismissImpacts = useCallback(() => setImpacts([]), [])
   const dismissSyncError = useCallback(() => setSyncError(null), [])
 
   const removeImported = useCallback(
     async (stableId: string) => {
-      await deleteCalendarPeriod(stableId)
+      const deleted = await deleteCalendarPeriod(stableId)
       serverRef.current = serverRef.current.filter((known) => known.stableId !== stableId)
       adoptServer(serverRef.current)
+      setImpacts(mergeImpacts(deleted?.impacts ?? []))
     },
     [adoptServer],
   )
@@ -225,9 +234,10 @@ export function MyAvailabilityProvider({ children }: { children: ReactNode }) {
       editRanges,
       dismissSyncError,
       reload,
+      impacts,
+      dismissImpacts,
       collections,
       refreshCollections,
-      acknowledge,
     }),
     [
       ranges,
@@ -241,9 +251,10 @@ export function MyAvailabilityProvider({ children }: { children: ReactNode }) {
       editRanges,
       dismissSyncError,
       reload,
+      impacts,
+      dismissImpacts,
       collections,
       refreshCollections,
-      acknowledge,
     ],
   )
 

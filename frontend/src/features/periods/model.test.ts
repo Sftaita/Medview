@@ -26,8 +26,7 @@ function summary(overrides: Partial<PlanningPeriodSummary> = {}): PlanningPeriod
     collections: {
       open: 1,
       closed: 0,
-      acknowledged: 4,
-      expected: 9,
+      participants: 9,
       deadline: '2027-01-20',
       uncoveredDays: 0,
     },
@@ -50,14 +49,21 @@ function line(stableId: string, name: string): PlanningLineSummary {
 }
 
 describe('periods model (lot L6)', () => {
-  it('maps a period of the API: the last day included, the server status, the collection progress', () => {
+  it('maps a period of the API: the last day included, the server status, the participants and the dates', () => {
     expect(toPeriod(summary())).toEqual({
       id: 'c2',
       number: 2,
       start: '2027-01-31',
       end: '2027-04-30',
       status: 'collecte',
-      collecte: { state: 'en-cours', responses: 4, expected: 9, closesOn: '2027-01-20', uncoveredDays: 0 },
+      collecte: {
+        state: 'en-cours',
+        participants: 9,
+        closesOn: '2027-01-20',
+        announceOn: undefined,
+        uncoveredDays: 0,
+      },
+      targetGenerationOn: undefined,
       generatedOn: '2027-01-10',
       publishedOn: undefined,
       lastPublishedOn: undefined,
@@ -68,13 +74,45 @@ describe('periods model (lot L6)', () => {
     expect(toPeriod(summary({ status: 'generated' })).status).toBe('generee')
     expect(toPeriod(summary({ status: 'preparation' })).status).toBe('preparation')
     const closed = summary({
-      collections: { open: 0, closed: 2, acknowledged: 0, expected: 0, deadline: null, uncoveredDays: 3 },
+      collections: { open: 0, closed: 2, participants: 0, deadline: null, uncoveredDays: 3 },
     })
     expect(toPeriod(closed).collecte.state).toBe('cloturee')
     const none = summary({
-      collections: { open: 0, closed: 0, acknowledged: 0, expected: 0, deadline: null, uncoveredDays: 89 },
+      collections: { open: 0, closed: 0, participants: 0, deadline: null, uncoveredDays: 89 },
     })
     expect(toPeriod(none).collecte).toMatchObject({ state: 'non-ouverte', uncoveredDays: 89 })
+  })
+
+  it('never reads "collecte ouverte" while the announcement is still scheduled (Trauma Delta, D214)', () => {
+    const scheduled = toPeriod(
+      summary({
+        status: 'preparation',
+        preparation: {
+          announceOn: '2027-01-17',
+          announcementState: 'scheduled',
+          declarationDeadlineOn: '2027-01-22',
+          targetGenerationOn: '2027-01-24',
+        },
+      }),
+    )
+    expect(scheduled.collecte).toMatchObject({
+      state: 'programmee',
+      announceOn: '2027-01-17',
+      closesOn: '2027-01-20',
+    })
+    expect(scheduled.targetGenerationOn).toBe('2027-01-24')
+
+    const announced = toPeriod(
+      summary({
+        preparation: {
+          announceOn: '2027-01-17',
+          announcementState: 'executed',
+          declarationDeadlineOn: null,
+          targetGenerationOn: '2027-01-24',
+        },
+      }),
+    )
+    expect(announced.collecte).toMatchObject({ state: 'en-cours', announceOn: undefined })
   })
 
   it('derives the role from the rights, never from a name', () => {

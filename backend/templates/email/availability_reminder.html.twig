@@ -27,8 +27,8 @@
 {% block content %}
 {{ ui.p('Bonjour ' ~ firstName|e ~ ',', 24) }}
 {{ ui.p('Le planning de garde ' ~ ui.b(planningName) ~ ' pour la période du ' ~ periodLabel|e ~ ' est en préparation.', 18) }}
-{{ ui.p('Merci de vérifier vos indisponibilités et de confirmer, dans MedVue, qu’elles sont à jour — y compris si vous n’en avez aucune.') }}
+{{ ui.p('Pensez à vérifier et à actualiser vos éventuelles indisponibilités dans MedVue. Sans indisponibilité renseignée, vous êtes considéré comme disponible.') }}
 {% if deadlineLabel %}
-{{ ui.p('La date souhaitée pour cette étape est le ' ~ deadlineLabel|e ~ '. Vous pouvez néanmoins encore compléter ou modifier vos disponibilités après cette date.') }}
+{{ ui.p('Date limite indicative : ' ~ deadlineLabel|e ~ '. Votre calendrier reste modifiable après cette date.') }}
 {% endif %}
 {% endblock %}

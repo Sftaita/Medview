@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
 import type { AvailabilityCollection } from '../features/availability/collectionTypes'
-import type { UserAvailabilityPeriod } from '../features/availability/types'
+import type { CalendarImpact, UserAvailabilityPeriod } from '../features/availability/types'
 import type { CalendarFeed } from '../features/duties/calendarFeed'
 import type { SurgicalHubState, SurgicalHubSyncOutcome } from '../features/surgicalhub/types'
 
@@ -56,9 +56,7 @@ export function makeCollection(overrides: Partial<AvailabilityCollection> = {}):
     canManage: false,
     myResponse: {
       stableId: 'resp-1',
-      status: 'PENDING',
-      acknowledgedAt: null,
-      acknowledgementKind: null,
+      status: 'PARTICIPANT',
       lastAvailabilityChangeAt: null,
     },
     ...overrides,
@@ -79,6 +77,11 @@ export type FakeBackendOptions = {
   surgicalHub?: SurgicalHubState
   /** What POST /api/me/surgicalhub/sync answers; a SYNCED with no change by default. */
   surgicalHubSyncOutcome?: SurgicalHubSyncOutcome
+  /** What a creation, a change or a deletion of the calendar meets (docs/decisions.md D216, D218); none by default. */
+  impactsFor?: (
+    input: Pick<UserAvailabilityPeriod, 'type' | 'startsAt' | 'endsAt'>,
+    action: 'create' | 'update' | 'delete',
+  ) => CalendarImpact[]
 }
 
 export function createFakeBackend(options: FakeBackendOptions = {}) {
@@ -97,7 +100,6 @@ export function createFakeBackend(options: FakeBackendOptions = {}) {
   const holds = new Map<string, Deferred>()
   const failures: { key: string; status: number; body: unknown }[] = []
   let nextId = 1
-  let clock = Date.parse('2026-12-14T09:00:00Z')
 
   const key = (method: string, path: string) => `${method} ${path}`
 
@@ -176,43 +178,31 @@ export function createFakeBackend(options: FakeBackendOptions = {}) {
         updatedAt: '',
       }
       periods.push(created)
-      return respond(created, 201)
+      return respond({ ...created, impacts: options.impactsFor?.(input, 'create') ?? [] }, 201)
     }
     const calendarItem = path.match(/^\/api\/me\/calendar\/(.+)$/)
     if (calendarItem) {
       const id = calendarItem[1]
       if (method === 'DELETE') {
+        const removed = periods.find((p) => p.stableId === id)
         periods = periods.filter((p) => p.stableId !== id)
-        return respond(null, 204)
+        // docs/decisions.md D218: a deletion answers what the days it gives back meet.
+        return respond({ impacts: removed ? (options.impactsFor?.(removed, 'delete') ?? []) : [] })
       }
       if (method === 'PATCH') {
         const input = body as Pick<UserAvailabilityPeriod, 'type' | 'startsAt' | 'endsAt'>
         periods = periods.map((p) => (p.stableId === id ? { ...p, ...input } : p))
-        return respond(periods.find((p) => p.stableId === id))
+        return respond({
+          ...periods.find((p) => p.stableId === id),
+          impacts: options.impactsFor?.(input, 'update') ?? [],
+        })
       }
     }
 
     if (path === '/api/me/availability-collections') return respond(collections)
-    const acknowledge = path.match(/^\/api\/availability-collections\/(.+)\/acknowledge$/)
-    if (acknowledge && method === 'POST') {
-      const collection = collections.find((c) => c.stableId === acknowledge[1])
-      if (!collection) return respond({ error: 'not_found' }, 404)
-      const noUnavailability = (body as { noUnavailability?: boolean } | null)?.noUnavailability === true
-      if (noUnavailability && periods.some((p) => p.type === 'UNAVAILABLE')) {
-        return respond({ error: 'unavailability_exists', unavailablePeriodCount: 1 }, 409)
-      }
-      clock += 60_000
-      const updated: AvailabilityCollection = {
-        ...collection,
-        myResponse: {
-          ...(collection.myResponse as NonNullable<AvailabilityCollection['myResponse']>),
-          status: 'ACKNOWLEDGED',
-          acknowledgedAt: new Date(clock).toISOString(),
-          acknowledgementKind: noUnavailability ? 'NO_UNAVAILABILITY' : 'CONFIRMED',
-        },
-      }
-      collections = collections.map((c) => (c.stableId === updated.stableId ? updated : c))
-      return respond(updated)
+    // docs/decisions.md D214: the confirmation is gone (410), whoever still asks.
+    if (/^\/api\/availability-collections\/.+\/acknowledge$/.test(path)) {
+      return respond({ error: 'confirmation_removed' }, 410)
     }
 
     return Promise.reject(new Error(`Unexpected fetch to ${method} ${path}`))

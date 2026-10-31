@@ -1,11 +1,12 @@
 import { useMemo, useRef, useState } from 'react'
 import { Icon } from '../../../components/Icon'
 import { AbsenceExportButton } from './AbsenceExportButton'
-import { remindPendingMembers } from './api'
+import { remindParticipants } from './api'
 import { formatDateOnly, formatLongDate, overdueMessage, plural } from './format'
-import { COLLECTION_STATE_TAG, ROLE_LABEL } from './labels'
+import { ROLE_LABEL } from './labels'
 import { MemberDrawer } from './MemberDrawer'
-import type { CollectionStatus, PendingRemindersResult } from './types'
+import { PlanningHistoryPanel } from './PlanningHistoryPanel'
+import type { CollectionStatus, ParticipantRemindersResult } from './types'
 
 type Props = {
   status: CollectionStatus
@@ -18,13 +19,15 @@ type Props = {
 type Sort = 'name' | 'unavailabilities'
 
 /**
- * The OWNER/ADMIN follow-up of the availability collection
+ * The OWNER/ADMIN follow-up of the availabilities of a period
  * (docs/availability-collection.md §15), laid out as the "Indisponibilités" tab
- * of docs/Design/react_planning_detail: the "X / Y ont confirmé" summary, the
- * (informative) deadline, "Relancer les membres en attente", then one row per
- * participant — searchable, sortable, click a row for the drawer — and
- * "Exporter les absences (PDF)" (docs/decisions.md D181). Nothing here
- * is ever disabled by the deadline: it only ever raises a visual warning.
+ * of docs/Design/react_planning_detail: how many people take part and how many
+ * unavailabilities they declared, the indicative deadline, "Rappeler les
+ * participants", then one row per participant — searchable, sortable, click a
+ * row for the drawer — "Exporter les absences (PDF)" (docs/decisions.md D181)
+ * and the history of the period (D217). docs/decisions.md D214: nobody
+ * confirms anything — without any unavailability, a person is available.
+ * Nothing here is ever disabled by the deadline.
  */
 export function CollectionStatusPanel({ status, onChanged, onEditDeadline }: Props) {
   const { summary, planning } = status
@@ -37,8 +40,7 @@ export function CollectionStatusPanel({ status, onChanged, onEditDeadline }: Pro
   // A ref, not state: two clicks in the same tick both read the state as "idle".
   const bulkInFlight = useRef(false)
 
-  const expected = summary.expectedCount
-  const progressWidth = expected === 0 ? 0 : (summary.confirmedCount / expected) * 100
+  const concerned = summary.concernedCount
   const referenceYear = Number(planning.startsAt.slice(0, 4))
   const maxCount = Math.max(1, ...status.members.map((row) => row.unavailabilityCount))
 
@@ -53,7 +55,7 @@ export function CollectionStatusPanel({ status, onChanged, onEditDeadline }: Pro
       )
   }, [status.members, query, sort])
 
-  async function sendToPending() {
+  async function sendToParticipants() {
     if (bulkInFlight.current) {
       return
     }
@@ -63,7 +65,7 @@ export function CollectionStatusPanel({ status, onChanged, onEditDeadline }: Pro
     try {
       setBulkResult({
         tone: 'success',
-        text: bulkMessage(await remindPendingMembers(planning.stableId, status.period?.stableId)),
+        text: bulkMessage(await remindParticipants(planning.stableId, status.period?.stableId)),
       })
       onChanged()
     } catch {
@@ -76,44 +78,25 @@ export function CollectionStatusPanel({ status, onChanged, onEditDeadline }: Pro
   }
 
   return (
-    <section className="pd-stack" aria-label="Suivi de la collecte des disponibilités">
+    <section className="pd-stack" aria-label="Suivi des indisponibilités">
       <div className="pd-card pd-collecte pd-collecte-open">
         <div className="pd-collecte-head">
-          <strong>Collecte des disponibilités</strong>
-          {expected > 0 && (
-            <span className="pd-collecte-count">
-              {summary.confirmedCount}/{expected} confirmés
-            </span>
-          )}
+          <strong>Indisponibilités des participants</strong>
+          {concerned > 0 && <span className="pd-collecte-count">{plural(concerned, 'participant')}</span>}
         </div>
         <p className="pd-help">
-          {expected === 0
-            ? 'Aucun membre n’est attendu pour cette collecte.'
-            : `${summary.confirmedCount} / ${expected} membres ont confirmé leurs disponibilités.`}
+          {concerned === 0
+            ? 'Aucun participant pour cette période.'
+            : `${plural(summary.unavailabilityCount, 'période d’indisponibilité déclarée', 'périodes d’indisponibilité déclarées')} sur cette période.`}
         </p>
-        {expected > 0 && (
-          <>
-            <div
-              className="pd-progress"
-              role="progressbar"
-              aria-label="Avancement des confirmations"
-              aria-valuemin={0}
-              aria-valuemax={expected}
-              aria-valuenow={summary.confirmedCount}
-            >
-              <span style={{ width: `${progressWidth}%` }} />
-            </div>
-            <p className="pd-muted">
-              {summary.pendingCount === 0
-                ? 'Tout le monde a confirmé.'
-                : `Il reste ${plural(summary.pendingCount, 'membre')} en attente.`}
-            </p>
-          </>
-        )}
+        <p className="pd-muted">
+          Sans indisponibilité renseignée, un participant est considéré comme disponible : personne n’a rien à
+          confirmer, et chacun peut modifier son calendrier à tout moment.
+        </p>
 
         {status.availabilityDeadline && (
           <p className="pd-deadline">
-            Fin souhaitée d’encodage : {formatLongDate(status.availabilityDeadline)}
+            Date limite indicative : {formatLongDate(status.availabilityDeadline)}
           </p>
         )}
         {status.deadlineOverdueDays !== null && (
@@ -128,12 +111,12 @@ export function CollectionStatusPanel({ status, onChanged, onEditDeadline }: Pro
 
         {confirmingBulk ? (
           <div className="pd-confirm" role="group" aria-label="Confirmer la relance">
-            <span>Envoyer un rappel par email à {plural(summary.pendingCount, 'membre')} en attente ?</span>
+            <span>Envoyer un rappel par email à {plural(concerned, 'participant')} ?</span>
             <div className="pd-row-actions">
               <button
                 type="button"
                 className="pd-btn pd-btn-primary"
-                onClick={sendToPending}
+                onClick={sendToParticipants}
                 disabled={bulkSending}
                 aria-busy={bulkSending}
               >
@@ -151,20 +134,22 @@ export function CollectionStatusPanel({ status, onChanged, onEditDeadline }: Pro
           </div>
         ) : (
           <div className="pd-row-actions">
-            {summary.pendingCount > 0 && (
+            {concerned > 0 && status.openCollectionCount > 0 && (
               <button
                 type="button"
                 className="pd-btn pd-btn-secondary"
                 onClick={() => setConfirmingBulk(true)}
               >
                 <Icon name="mail" size={18} strokeWidth={2} />
-                Relancer les membres en attente
+                Rappeler les participants
               </button>
             )}
             {onEditDeadline && (
               <button type="button" className="pd-btn pd-btn-ghost" onClick={onEditDeadline}>
                 <Icon name="calendar" size={18} strokeWidth={2} />
-                {status.availabilityDeadline ? 'Modifier la date souhaitée' : 'Fixer une date souhaitée'}
+                {status.availabilityDeadline
+                  ? 'Modifier la date limite indicative'
+                  : 'Fixer une date limite indicative'}
               </button>
             )}
             <AbsenceExportButton
@@ -212,15 +197,14 @@ export function CollectionStatusPanel({ status, onChanged, onEditDeadline }: Pro
         </div>
       )}
 
-      <ul className="pd-card pd-list" aria-label="Membres attendus">
+      <ul className="pd-card pd-list" aria-label="Participants">
         {rows.map((row) => {
-          const tag = COLLECTION_STATE_TAG[row.collectionState]
           return (
             <li
               key={row.memberStableId}
               className="pd-member"
               data-member-row
-              data-state={row.collectionState}
+              data-participant={row.participant}
               onClick={() => setOpenMember(row.memberStableId)}
             >
               <span className="pd-avatar" aria-hidden>
@@ -239,7 +223,13 @@ export function CollectionStatusPanel({ status, onChanged, onEditDeadline }: Pro
                   {row.firstName} {row.lastName}
                 </button>
                 <span>
-                  {ROLE_LABEL[row.role]} · {row.team.name} · Dernier rappel :{' '}
+                  {ROLE_LABEL[row.role]} · {row.team.name} · Calendrier modifié le{' '}
+                  <span className="tnum">
+                    {row.lastAvailabilityChangeAt
+                      ? formatDateOnly(row.lastAvailabilityChangeAt, planning.timezone)
+                      : '—'}
+                  </span>{' '}
+                  · Dernier rappel :{' '}
                   <span className="tnum">
                     {row.lastReminderAt ? formatDateOnly(row.lastReminderAt, planning.timezone) : '—'}
                   </span>
@@ -254,7 +244,7 @@ export function CollectionStatusPanel({ status, onChanged, onEditDeadline }: Pro
                 </div>
                 <span className="pd-num">{row.unavailabilityCount}</span>
               </div>
-              <span className={`tag ${tag.tone} pd-status`}>{tag.label}</span>
+              {!row.participant && <span className="tag pd-status">Non concerné</span>}
             </li>
           )
         })}
@@ -281,13 +271,19 @@ export function CollectionStatusPanel({ status, onChanged, onEditDeadline }: Pro
           onReminderSent={onChanged}
         />
       )}
+
+      <PlanningHistoryPanel
+        planningStableId={planning.stableId}
+        periodStableId={status.period?.stableId}
+        timezone={planning.timezone}
+      />
     </section>
   )
 }
 
-function bulkMessage(result: PendingRemindersResult): string {
+function bulkMessage(result: ParticipantRemindersResult): string {
   if (result.targetedCount === 0) {
-    return 'Personne n’est en attente : aucun rappel envoyé.'
+    return 'Aucun participant : aucun rappel envoyé.'
   }
   const parts = [`${plural(result.sentCount, 'rappel envoyé', 'rappels envoyés')}`]
   if (result.skippedRecentlyCount > 0) {

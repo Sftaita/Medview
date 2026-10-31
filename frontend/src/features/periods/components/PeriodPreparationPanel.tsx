@@ -22,8 +22,13 @@ interface Props {
 }
 
 type DraftReminder = { key: string; stableId?: string; value: number | ''; unit: ReminderUnit }
-type Draft = { announceOn: ISODate | null; target: ISODate | null; reminders: DraftReminder[] }
-type Picker = 'announce' | 'target' | null
+type Draft = {
+  announceOn: ISODate | null
+  deadline: ISODate | null
+  target: ISODate | null
+  reminders: DraftReminder[]
+}
+type Picker = 'announce' | 'deadline' | 'target' | null
 
 /** What an announcement / reminder that ran or did not run became, for a doctor. */
 const OUTCOMES: Record<string, string> = {
@@ -37,8 +42,11 @@ const OUTCOMES: Record<string, string> = {
   target_passed: 'la date cible était dépassée',
   superseded: 'remplacé par un rappel plus récent',
   no_open_collection: 'aucune collecte ouverte',
-  nobody_pending: 'tout le monde avait confirmé',
-  sent_to_pending: 'envoyé aux personnes sans confirmation',
+  no_participant: 'aucun participant',
+  sent_to_participants: 'envoyé à tous les participants',
+  // Before docs/decisions.md D214 (confirmations removed): kept for the history.
+  nobody_pending: 'tout le monde avait confirmé (ancien fonctionnement)',
+  sent_to_pending: 'envoyé aux personnes sans confirmation (ancien fonctionnement)',
 }
 
 let keySeed = 0
@@ -47,6 +55,7 @@ const newKey = () => `r${++keySeed}`
 function draftFrom(view: PeriodPreparation): Draft {
   return {
     announceOn: view.announcement.on,
+    deadline: view.declarationDeadlineOn,
     target: view.targetGenerationOn,
     reminders: view.reminders
       .filter((r) => r.state === 'scheduled')
@@ -82,9 +91,11 @@ function stateBadge(state: PreparationReminder['state']): { label: string; tone:
 }
 
 /**
- * « Préparer la période » (docs/decisions.md D210): the announcement (the
- * collection opens by itself and the invitations go out), the target date of
- * the manual generation, and the reminders before it — all at 08:00
+ * « Préparer la période » (docs/decisions.md D210, D214): the announcement (the
+ * collection opens by itself and the invitations go out), the indicative
+ * deadline (never blocking), the target date of the manual generation (reaching
+ * it generates nothing) and its real date once done, and the reminders before
+ * it, sent to every participant — all at 08:00
  * Europe/Brussels. What already ran is shown as history; only what has not
  * run yet changes. The calendars say why a day is refused, like the period
  * dates (BoundaryCalendar); the server checks the same rules again.
@@ -92,7 +103,7 @@ function stateBadge(state: PreparationReminder['state']): { label: string; tone:
 export function PeriodPreparationPanel({ planningStableId, periodStableId }: Props) {
   const [view, setView] = useState<PeriodPreparation | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const [draft, setDraft] = useState<Draft>({ announceOn: null, target: null, reminders: [] })
+  const [draft, setDraft] = useState<Draft>({ announceOn: null, deadline: null, target: null, reminders: [] })
   const [picker, setPicker] = useState<Picker>(null)
   const [month, setMonth] = useState<string>('')
   const [saving, setSaving] = useState(false)
@@ -133,6 +144,10 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
           reasons.push({ code: 'preparation_target_not_after_announcement' })
         if (which === 'announce' && draft.target && day >= draft.target)
           reasons.push({ code: 'preparation_announcement_not_before_target' })
+        if (which === 'deadline' && draft.announceOn && day <= draft.announceOn)
+          reasons.push({ code: 'preparation_deadline_not_after_announcement' })
+        if (which === 'deadline' && draft.target && day > draft.target)
+          reasons.push({ code: 'preparation_deadline_after_target' })
         return { date: day, allowed: reasons.length === 0, reasons }
       },
     [view, draft.announceOn, draft.target],
@@ -182,7 +197,17 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
   const problems = draft.reminders
     .map((_, index) => ({ index, message: reminderProblems[index] ?? duplicates[index] }))
     .filter((p): p is { index: number; message: string } => Boolean(p.message))
-  const invalid = problems.length > 0
+  /** docs/decisions.md D214: the indicative deadline sits after the announcement, on or before the target. */
+  const deadlineProblem = !draft.deadline
+    ? null
+    : draft.deadline !== view.declarationDeadlineOn && draft.deadline < view.today
+      ? preparationErrorMessage('deadline_in_past')
+      : draft.announceOn && draft.deadline <= draft.announceOn
+        ? preparationErrorMessage('deadline_before_announcement')
+        : draft.target && draft.deadline > draft.target
+          ? preparationErrorMessage('deadline_after_target')
+          : null
+  const invalid = problems.length > 0 || deadlineProblem !== null
 
   /** What a new reminder would be, or why none can be added (docs/decisions.md D210). */
   const reminderContext = {
@@ -200,14 +225,21 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
       setPicker(null)
       return
     }
-    const current = which === 'announce' ? draft.announceOn : draft.target
+    const current =
+      which === 'announce' ? draft.announceOn : which === 'deadline' ? draft.deadline : draft.target
     setMonth(monthOf(current ?? view?.today ?? ''))
     setPicker(which)
   }
 
   function choose(which: Exclude<Picker, null>, day: ISODate) {
     if (!optionOf(which)(day).allowed) return
-    setDraft((d) => (which === 'announce' ? { ...d, announceOn: day } : { ...d, target: day }))
+    setDraft((d) =>
+      which === 'announce'
+        ? { ...d, announceOn: day }
+        : which === 'deadline'
+          ? { ...d, deadline: day }
+          : { ...d, target: day },
+    )
     setPicker(null)
     setSaved(false)
   }
@@ -224,6 +256,7 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
     try {
       const result = await savePeriodPreparation(planningStableId, periodStableId, {
         announceOn: draft.announceOn,
+        declarationDeadlineOn: draft.deadline,
         targetGenerationOn: draft.target,
         reminders: draft.reminders.map((r) => ({
           ...(r.stableId ? { stableId: r.stableId } : {}),
@@ -332,18 +365,85 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
           )}
         </div>
 
+        {/* --- Date limite indicative (D214) -------------------------------------------------- */}
+        <div className="mv-prep__row">
+          <div className="mv-prep__label">
+            <strong>Date limite indicative de déclaration</strong>
+            <span className="mv-muted mv-small">
+              Indiquée aux participants. Jamais bloquante : chacun peut modifier son calendrier après cette
+              date.
+            </span>
+          </div>
+          <div className="mv-prep__value">
+            <span className="mv-prep__date">
+              {/* docs/decisions.md D218: one deadline per period — removed, it is « Non définie », never an older one. */}
+              {draft.deadline ? formatDate(draft.deadline) : 'Non définie'}
+            </span>
+            {draft.deadline && draft.deadline < view.today && (
+              <span className="mv-badge mv-badge--neutral">Passée</span>
+            )}
+            {editable && (
+              <span className="mv-prep__actions">
+                <button
+                  type="button"
+                  className="mv-btn mv-btn--secondary mv-btn--sm"
+                  aria-expanded={picker === 'deadline'}
+                  onClick={() => openPicker('deadline')}
+                >
+                  {draft.deadline ? 'Changer la date' : 'Choisir la date'}
+                </button>
+                {draft.deadline && (
+                  <button
+                    type="button"
+                    className="mv-btn mv-btn--ghost mv-btn--sm"
+                    onClick={() => {
+                      setDraft((d) => ({ ...d, deadline: null }))
+                      setSaved(false)
+                    }}
+                  >
+                    Retirer
+                  </button>
+                )}
+              </span>
+            )}
+            {deadlineProblem && <span className="mv-field__hint is-error">{deadlineProblem}</span>}
+          </div>
+          {picker === 'deadline' && (
+            <BoundaryCalendar
+              month={month}
+              onMonthChange={setMonth}
+              label="Date limite indicative"
+              selected={draft.deadline ?? ''}
+              current={view.declarationDeadlineOn}
+              optionOf={optionOf('deadline')}
+              onSelect={(day) => choose('deadline', day)}
+            />
+          )}
+        </div>
+
         {/* --- État de la collecte ------------------------------------------------------------- */}
         <div className="mv-prep__row">
           <div className="mv-prep__label">
             <strong>Collecte des indisponibilités</strong>
+            <span className="mv-muted mv-small">
+              Personne n’a rien à confirmer : sans indisponibilité renseignée, un participant est disponible.
+            </span>
           </div>
           <div className="mv-prep__value">
-            {collection.state === 'open' ? (
+            {collection.state === 'open' && a.state === 'scheduled' ? (
+              <>
+                <span className="mv-badge mv-badge--neutral">Pas encore annoncée</span>
+                <span className="mv-muted mv-small">
+                  {a.on
+                    ? `Les participants seront prévenus le ${formatDate(a.on)}.`
+                    : 'Les participants n’ont pas été prévenus.'}
+                </span>
+              </>
+            ) : collection.state === 'open' ? (
               <>
                 <span className="mv-badge mv-badge--warn">Ouverte</span>
                 <span className="mv-muted mv-small">
-                  {collection.responded} / {collection.expected} confirmation
-                  {collection.expected > 1 ? 's' : ''}
+                  {collection.participants} participant{collection.participants > 1 ? 's' : ''}
                 </span>
               </>
             ) : collection.state === 'closed' ? (
@@ -365,6 +465,16 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
           </div>
           <div className="mv-prep__value">
             <span className="mv-prep__date">{draft.target ? formatDate(draft.target) : 'Non définie'}</span>
+            {view.generatedAt ? (
+              <span className="mv-badge mv-badge--ok">
+                Générée le {formatDate(view.generatedAt.slice(0, 10))}
+              </span>
+            ) : (
+              draft.target &&
+              draft.target < view.today && (
+                <span className="mv-badge mv-badge--neutral">Date cible passée</span>
+              )
+            )}
             {editable && (
               <span className="mv-prep__actions">
                 <button
@@ -396,7 +506,7 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
           <div className="mv-prep__label">
             <strong>Rappels</strong>
             <span className="mv-muted mv-small">
-              Envoyés uniquement aux personnes qui n’ont pas encore confirmé.
+              Envoyés à tous les participants : la génération approche, qu’ils vérifient leur calendrier.
             </span>
           </div>
           <ol className="mv-prep__reminders" aria-label="Rappels programmés">
@@ -532,6 +642,7 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
               <div className="mv-prep__invalid">
                 <strong>Enregistrement impossible, à corriger d’abord :</strong>
                 <ul>
+                  {deadlineProblem && <li>Date limite indicative : {deadlineProblem}</li>}
                   {problems.map((p) => (
                     <li key={p.index}>
                       Rappel {p.index + 1}

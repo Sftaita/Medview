@@ -95,7 +95,6 @@ final class PlanningLaunchControllerTest extends WebTestCase
         $client = static::createClient();
         $s = $this->pilotScenario($client);
         $this->prepareGeneration($s['planningId']);
-        $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", ['noUnavailability' => true], $s['alice']);
         $this->declareRange($client, $s['bob'], '2027-02-10', '2027-02-12');
         $this->declareRange($client, $s['bob'], '2027-03-01', '2027-03-02');
         $this->declareRange($client, $s['bob'], '2027-06-01', '2027-06-05');   // outside the period: not counted
@@ -106,34 +105,18 @@ final class PlanningLaunchControllerTest extends WebTestCase
         self::assertSame('2027-01-01', $preflight['planning']['startsAt']);
         self::assertSame('2027-04-30', $preflight['planning']['lastDay']);
         self::assertSame(3, $preflight['participantCount']);
-        self::assertSame(1, $preflight['confirmedCount']);
-        self::assertSame(2, $preflight['pendingCount']);
+        self::assertArrayNotHasKey('confirmedCount', $preflight, 'no confirmation count any more (D214)');
+        self::assertArrayNotHasKey('pendingCount', $preflight);
         self::assertSame(2, $preflight['unavailabilityCount']);
         self::assertSame('2026-12-25', $preflight['availabilityDeadline']);
         self::assertNull($preflight['deadlineOverdueDays']);
         self::assertTrue($preflight['canGenerate']);
         self::assertSame([], $preflight['blockers']);
-        self::assertSame(['PENDING_MEMBERS'], array_column($preflight['warnings'], 'code'));
+        self::assertSame([], $preflight['warnings'], 'people without any unavailability are simply available: nothing to warn about');
         self::assertCount(1, $preflight['lines']);
         self::assertSame(2, $preflight['lines'][0]['dutyCount']);
         self::assertSame(3, $preflight['lines'][0]['memberCount']);
         self::assertTrue($preflight['lines'][0]['hasActiveRuleSet']);
-    }
-
-    public function testEverybodyConfirmedMeansNoWarning(): void
-    {
-        $client = static::createClient();
-        $s = $this->pilotScenario($client);
-        $this->prepareGeneration($s['planningId']);
-        foreach (['admin', 'alice', 'bob'] as $who) {
-            $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", [], $s[$who]);
-        }
-
-        $preflight = $this->preflight($client, $s);
-
-        self::assertSame(3, $preflight['confirmedCount']);
-        self::assertSame(0, $preflight['pendingCount']);
-        self::assertSame([], $preflight['warnings']);
     }
 
     public function testAPassedDeadlineIsAWarningNotABlocker(): void
@@ -190,12 +173,11 @@ final class PlanningLaunchControllerTest extends WebTestCase
         $s = $this->pilotScenario($client);
         $this->prepareGeneration($s['planningId']);
         $this->api($client, 'PATCH', "/api/plannings/{$s['planningId']}/settings", ['availabilityDeadline' => '2026-12-20'], $s['creator']);
-        $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", [], $s['alice']);
         self::mockTime('2027-01-15 09:00:00 Europe/Brussels');
 
-        // bob and the admin never answered, and the deadline passed almost a month ago.
+        // Nobody entered anything, and the deadline passed almost a month ago: everyone is available.
         $status = $this->collectionStatus($client, $s);
-        self::assertSame(2, $status['summary']['pendingCount']);
+        self::assertSame(3, $status['summary']['concernedCount']);
         self::assertGreaterThan(0, $status['deadlineOverdueDays']);
 
         $result = $this->launch($client, $s, $s['admin']);

@@ -67,8 +67,8 @@ describe('dates', () => {
 
 describe('wording', () => {
   it('says how long the informative deadline has been passed', () => {
-    expect(overdueMessage(2)).toBe('Date souhaitée dépassée depuis 2 jours.')
-    expect(overdueMessage(1)).toBe('Date souhaitée dépassée depuis 1 jour.')
+    expect(overdueMessage(2)).toBe('Date limite indicative dépassée depuis 2 jours.')
+    expect(overdueMessage(1)).toBe('Date limite indicative dépassée depuis 1 jour.')
   })
 
   it('pluralizes', () => {

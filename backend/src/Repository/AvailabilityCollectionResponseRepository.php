@@ -61,7 +61,7 @@ class AvailabilityCollectionResponseRepository extends ServiceEntityRepository
             ->join('c.planning', 'p')
             ->andWhere('r.user = :user')
             ->andWhere('c.status = :open')
-            ->andWhere('r.withdrawnAt IS NULL OR r.acknowledgedAt IS NOT NULL')
+            ->andWhere('r.withdrawnAt IS NULL')
             ->setParameter('user', $user)
             ->setParameter('open', AvailabilityCollectionStatus::OPEN)
             ->orderBy('c.startsAt', 'ASC')

@@ -63,14 +63,9 @@ export function DashboardPage() {
         .sort((x, y) => x.a.getTime() - y.a.getTime()),
     [ranges, imported, today],
   )
-  // What is still to do comes first, then what has been confirmed.
+  // Earliest window first (docs/decisions.md D214: nothing to confirm, so nothing is ever "done").
   const openCollections = useMemo(
-    () =>
-      [...(collections ?? [])].sort(
-        (a, b) =>
-          Number(a.myResponse?.status === 'ACKNOWLEDGED') - Number(b.myResponse?.status === 'ACKNOWLEDGED') ||
-          a.startsAt.localeCompare(b.startsAt),
-      ),
+    () => [...(collections ?? [])].sort((a, b) => a.startsAt.localeCompare(b.startsAt)),
     [collections],
   )
 

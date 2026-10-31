@@ -8,16 +8,20 @@ export type ISODate = string
  */
 export type PeriodStatus = 'preparation' | 'collecte' | 'generee' | 'partielle' | 'publiee' | 'archivee'
 
-export type CollecteState = 'non-ouverte' | 'en-cours' | 'cloturee'
+/**
+ * docs/decisions.md D214 : « programmee » tant que l'annonce aux participants est programmée, même si une
+ * collecte existe déjà techniquement ; « en-cours » une fois annoncée. Personne ne confirme rien.
+ */
+export type CollecteState = 'non-ouverte' | 'programmee' | 'en-cours' | 'cloturee'
 
 export interface Collecte {
   state: CollecteState
-  /** Nombre de membres ayant répondu (collectes ouvertes). */
-  responses: number
-  /** Nombre de membres attendus (collectes ouvertes). */
-  expected?: number
-  /** Date de clôture prévue (collecte en cours). */
+  /** Nombre de participants (collectes ouvertes). */
+  participants?: number
+  /** Date limite indicative de déclaration (jamais bloquante). */
   closesOn?: ISODate
+  /** Date d'annonce aux participants, quand elle est programmée. */
+  announceOn?: ISODate
   /** Jours de la période qu'aucune collecte ne couvre encore. */
   uncoveredDays?: number
 }
@@ -32,6 +36,9 @@ export interface Period {
   end: ISODate
   status: PeriodStatus
   collecte: Collecte
+  /** Date cible de la génération (manuelle) : l'atteindre ne génère rien. */
+  targetGenerationOn?: ISODate
+  /** Date réelle de la (dernière) génération. */
   generatedOn?: ISODate
   /** Première publication de la période. */
   publishedOn?: ISODate

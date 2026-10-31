@@ -27,16 +27,17 @@ use Symfony\Component\Security\Core\Authorization\UserAuthorizationCheckerInterf
  *    lock, the period is checked again (not generated, not validated or
  *    published, not over, its manager still allowed); the days of the period
  *    no collection covers get one (an existing collection is never
- *    duplicated); one invitation per person still expected to answer is
- *    queued. All of it commits together, or nothing does and the next run
- *    starts over.
+ *    duplicated) and they take the planned indicative deadline; one
+ *    invitation per participant is queued (docs/decisions.md D214: never
+ *    filtered on a confirmation). All of it commits together, or nothing
+ *    does and the next run starts over.
  * 2. Reminders due: the same checks, plus the target date not passed. When
  *    several reminders of a period are due at once (the server was down),
  *    only the latest one runs; the others are skipped as superseded — never
  *    a burst of stale reminders. Once the generation was launched, every
  *    reminder not sent is cancelled.
  * 3. Emails: each one is claimed (one sender only), checked once more
- *    (account active, person still expected to answer, generation not
+ *    (account active, person still a participant, generation not
  *    launched…) and sent. A refusal of the transport is retried up to
  *    MAX_ATTEMPTS; a row left SENDING by a run that died is retried after
  *    STALE_CLAIM — the only possible duplicate, SMTP's own uncertainty (as
@@ -145,7 +146,12 @@ final class PeriodPreparationRunner
 
             return 'skipped';
         }
-        foreach ($this->preparationService->pendingRecipients($cycle) as ['user' => $user]) {
+        // docs/decisions.md D214/D218: the collections announced take the period's indicative deadline — none if it has none.
+        $deadline = $preparation->getDeclarationDeadlineOn();
+        foreach ($this->preparationService->openCollections($cycle) as $collection) {
+            $collection->changeDeadline($deadline, $now);
+        }
+        foreach ($this->preparationService->participants($cycle) as ['user' => $user]) {
             $this->deliveryRepository->queue($preparation, PreparationDeliveryKind::ANNOUNCEMENT, null, $user, $now);
         }
         $preparation->finishAnnouncement(PreparationActionState::EXECUTED, $opened > 0 ? 'collection_opened' : 'collection_already_open', $now);
@@ -204,11 +210,12 @@ final class PeriodPreparationRunner
 
             return 'skipped';
         }
-        $recipients = $this->preparationService->pendingRecipients($cycle);
+        $recipients = $this->preparationService->participants($cycle);
         foreach ($recipients as ['user' => $user]) {
             $this->deliveryRepository->queue($preparation, PreparationDeliveryKind::REMINDER, $latest, $user, $now);
         }
-        $latest->finish(PreparationActionState::EXECUTED, [] === $recipients ? 'nobody_pending' : 'sent_to_pending', $now);
+        // docs/decisions.md D214: every participant, never filtered on a confirmation.
+        $latest->finish(PreparationActionState::EXECUTED, [] === $recipients ? 'no_participant' : 'sent_to_participants', $now);
 
         return 'executed';
     }
@@ -234,7 +241,7 @@ final class PeriodPreparationRunner
                     continue;
                 }
                 $cycle = $delivery->getCycle();
-                $collection = $this->preparationService->pendingRecipients($cycle)[(int) $delivery->getRecipient()->getId()]['collection'];
+                $collection = $this->preparationService->participants($cycle)[(int) $delivery->getRecipient()->getId()]['collection'];
                 $target = $delivery->getPreparation()->getTargetGenerationOn();
                 $sent = PreparationDeliveryKind::ANNOUNCEMENT === $delivery->getKind()
                     ? $this->mailer->sendAnnouncement($delivery->getRecipient(), $cycle, $collection, $target)
@@ -282,8 +289,8 @@ final class PeriodPreparationRunner
                 return 'target_passed';
             }
         }
-        if (!isset($this->preparationService->pendingRecipients($delivery->getCycle())[(int) $delivery->getRecipient()->getId()])) {
-            return 'already_confirmed';
+        if (!isset($this->preparationService->participants($delivery->getCycle())[(int) $delivery->getRecipient()->getId()])) {
+            return 'not_participant';
         }
 
         return null;

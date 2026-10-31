@@ -67,7 +67,7 @@ export function PlanningSettingsModal({
     >
       <div className="field">
         <label htmlFor="planning-availability-deadline" className="field__label">
-          Fin souhaitée d’encodage des indisponibilités
+          Date limite indicative de déclaration des indisponibilités
         </label>
         <input
           id="planning-availability-deadline"

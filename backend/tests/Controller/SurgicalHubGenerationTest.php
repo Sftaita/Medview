@@ -423,7 +423,7 @@ final class SurgicalHubGenerationTest extends WebTestCase
 
         $requests = \count(FakeSurgicalHub::requests());
         $this->api($client, 'DELETE', "/api/me/calendar/{$kept[0]['stableId']}", token: $s['bob']);
-        self::assertResponseStatusCodeSame(204);
+        self::assertResponseStatusCodeSame(200);
 
         self::assertCount($requests, FakeSurgicalHub::requests(), 'Removing it never calls SurgicalHub.');
         $calendar = $this->api($client, 'GET', '/api/me/calendar', token: $s['bob']);

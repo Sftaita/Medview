@@ -11,6 +11,7 @@ use App\Entity\PlanningLine;
 use App\Entity\PlanningPeriod;
 use App\Entity\PlanningPeriodStatus;
 use App\Repository\AvailabilityCollectionRepository;
+use App\Repository\PeriodPreparationRepository;
 use App\Repository\PlanningCycleRepository;
 
 /**
@@ -25,7 +26,8 @@ use App\Repository\PlanningCycleRepository;
  * | `published`           | every counting line period PUBLISHED (or ARCHIVED)          |
  * | `partially_published` | some counting line periods PUBLISHED, not all               |
  * | `generated`           | every counting line period at least GENERATED               |
- * | `collecting`          | a collection of the period is OPEN                          |
+ * | `collecting`          | a collection of the period is OPEN and its announcement is  |
+ * |                       | not still scheduled (docs/decisions.md D214)                |
  * | `preparation`         | otherwise — also when no line counts at all: a period is    |
  * |                       | never "published" without a line actually published         |
  *
@@ -35,7 +37,7 @@ final class PlanningCyclePresenter
 {
     private const GENERATED_OR_LATER = [PlanningPeriodStatus::GENERATED, PlanningPeriodStatus::VALIDATED, PlanningPeriodStatus::PUBLISHED, PlanningPeriodStatus::ARCHIVED];
     /** What a planning card reads of a period (§7.1, lot L6). */
-    private const SUMMARY_FIELDS = ['stableId', 'number', 'startsAt', 'endsAt', 'lastDay', 'status', 'lineCounts', 'timeState', 'publishedAt', 'lastPublishedAt', 'generatedAt', 'collections'];
+    private const SUMMARY_FIELDS = ['stableId', 'number', 'startsAt', 'endsAt', 'lastDay', 'status', 'lineCounts', 'timeState', 'publishedAt', 'lastPublishedAt', 'generatedAt', 'collections', 'preparation'];
 
     public function __construct(
         private readonly PlanningCycleRepository $cycleRepository,
@@ -45,6 +47,7 @@ final class PlanningCyclePresenter
         private readonly PlanningClock $clock,
         private readonly LineApplicabilityService $applicability,
         private readonly PeriodDateRules $dateRules,
+        private readonly PeriodPreparationRepository $preparationRepository,
     ) {
     }
 
@@ -171,13 +174,10 @@ final class PlanningCyclePresenter
         $own = array_values(array_filter($collections, static fn (AvailabilityCollection $collection): bool => $collection->getCycle() === $cycle));
         $open = array_values(array_filter($own, static fn (AvailabilityCollection $collection): bool => $collection->isOpen()));
 
-        $expected = 0;
-        $acknowledged = 0;
+        $participants = 0;
         $deadline = null;
         foreach ($open as $collection) {
-            $progress = $this->collectionService->progress($collection);
-            $expected += $progress['expected'];
-            $acknowledged += $progress['acknowledged'];
+            $participants += $this->collectionService->progress($collection)['participants'];
             $collectionDeadline = $collection->getDeadline()?->format('Y-m-d');
             if (null !== $collectionDeadline && (null === $deadline || $collectionDeadline > $deadline)) {
                 $deadline = $collectionDeadline;
@@ -193,6 +193,9 @@ final class PlanningCyclePresenter
         }
         $counting = array_values(array_filter($periods, static fn (PlanningPeriod $period): bool => true === ($applicability[(int) $period->getId()] ?? null)?->counts()));
 
+        $preparation = $this->preparationRepository->findOneByCycle($cycle);
+        $announcementScheduled = true === $preparation?->isAnnouncementScheduled();
+
         $isLast = $cycles[\count($cycles) - 1] === $cycle;
         $enabled = $this->cycleService->isCreationEnabled();
         // docs/decisions.md D207/D208: the dates a write accepts, never an older approximation.
@@ -203,7 +206,8 @@ final class PlanningCyclePresenter
             'startsAt' => $cycle->getStartsAt()->format('Y-m-d'),
             'endsAt' => $cycle->getEndsAt()->format('Y-m-d'),
             'lastDay' => $cycle->getEndsAt()->modify('-1 day')->format('Y-m-d'),
-            'status' => $this->status($counting, [] !== $open),
+            // docs/decisions.md D214: an announcement still scheduled means the participants were not told yet.
+            'status' => $this->status($counting, [] !== $open && !$announcementScheduled),
             // docs/decisions.md D194: how many lines count, how many of them are published, how many are neutral.
             'lineCounts' => [
                 'counting' => \count($counting),
@@ -222,10 +226,18 @@ final class PlanningCyclePresenter
             'collections' => [
                 'open' => \count($open),
                 'closed' => \count($own) - \count($open),
-                'acknowledged' => $acknowledged,
-                'expected' => $expected,
-                'deadline' => $deadline,
+                'participants' => $participants,
+                // The indicative deadline (D214/D218): the preparation's once there is one — removed there, removed —
+                // else the latest of the open collections.
+                'deadline' => null !== $preparation ? $preparation->getDeclarationDeadlineOn()?->format('Y-m-d') : $deadline,
                 'uncoveredDays' => $this->cycleService->uncoveredDays($cycle),
+            ],
+            // docs/decisions.md D214: the dates of « Préparer la période », each with its own meaning.
+            'preparation' => null === $preparation ? null : [
+                'announceOn' => $preparation->getAnnounceOn()?->format('Y-m-d'),
+                'announcementState' => null !== $preparation->getAnnouncementState() ? strtolower($preparation->getAnnouncementState()->value) : null,
+                'declarationDeadlineOn' => $preparation->getDeclarationDeadlineOn()?->format('Y-m-d'),
+                'targetGenerationOn' => $preparation->getTargetGenerationOn()?->format('Y-m-d'),
             ],
             'isLast' => $isLast,
             'canEditStart' => $editable['start'],

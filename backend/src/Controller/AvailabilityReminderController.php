@@ -60,9 +60,9 @@ final class AvailabilityReminderController
                 'message' => 'A reminder was already sent to this person a moment ago.',
                 'lastReminderAt' => $outcome->previousSentAt?->format(\DATE_ATOM),
             ], 409),
-            ReminderStatus::NOTHING_PENDING => new JsonResponse([
+            ReminderStatus::NOT_PARTICIPANT => new JsonResponse([
                 'error' => 'nothing_to_remind',
-                'message' => 'This person has no unanswered availability collection: there is nothing to remind.',
+                'message' => 'This person takes part in no open availability collection: there is nothing to remind.',
             ], 409),
             ReminderStatus::EMAIL_FAILED => new JsonResponse([
                 'error' => 'email_not_sent',
@@ -72,18 +72,19 @@ final class AvailabilityReminderController
     }
 
     /**
-     * Everybody still expected to answer, one email each. Always 200 with the
-     * per-status counts: a partial result (some recently reminded, some failed)
-     * is information, not an error.
+     * Every participant, one email each (docs/decisions.md D214: never
+     * filtered on a confirmation). Always 200 with the per-status counts: a
+     * partial result (some recently reminded, some failed) is information, not
+     * an error.
      */
-    #[Route('/api/plannings/{planningStableId}/reminders/pending', name: 'api_planning_reminders_pending', methods: ['POST'])]
-    public function remindPending(string $planningStableId, Request $request, #[CurrentUser] User $user): JsonResponse
+    #[Route('/api/plannings/{planningStableId}/reminders/participants', name: 'api_planning_reminders_participants', methods: ['POST'])]
+    public function remindParticipants(string $planningStableId, Request $request, #[CurrentUser] User $user): JsonResponse
     {
         $planning = $this->resolvePlanning($planningStableId);
         $this->denyUnlessCanManageAvailability($planning);
         $cycle = $this->cycleResolver->fromRequest($planning, $request);
 
-        $outcomes = $this->reminderService->remindPending($planning, $user, $cycle);
+        $outcomes = $this->reminderService->remindParticipants($planning, $user, $cycle);
         $count = static fn (ReminderStatus $status): int => \count(array_filter($outcomes, static fn (ReminderOutcome $o): bool => $o->status === $status));
 
         return new JsonResponse([

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Period } from '../types'
+import type { ISODate, Period } from '../types'
 import { formatDate, formatRange } from '../dates'
 import type { PeriodLineState } from '../model'
 import { Icon } from './Icon'
@@ -29,51 +29,82 @@ interface Step {
 
 const plural = (n: number, word: string) => `${n} ${word}${n > 1 ? 's' : ''}`
 
+function todayISO(): ISODate {
+  const now = new Date()
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
+/** The indicative deadline, never shown as an upcoming step once past (docs/decisions.md D214). */
+function deadlineText(deadline: ISODate | undefined, today: ISODate): string | undefined {
+  if (!deadline) return undefined
+  return deadline >= today
+    ? `Date limite indicative le ${formatDate(deadline, 'dm')}`
+    : `Date limite indicative passée (le ${formatDate(deadline, 'dm')}) · calendriers toujours modifiables`
+}
+
 /** Étapes propres à la période : collecte → génération → publication. Cercles numérotés, jamais une barre. */
 export function PreparationSteps({ period, canOpenCollection, onOpenCollecte, lines = [] }: Props) {
   const [opening, setOpening] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const c = period.collecte
   const uncovered = c.uncoveredDays ?? 0
-  const expected = c.expected ?? 0
+  const today = todayISO()
 
   const dispo: Step =
-    c.state === 'en-cours'
+    c.state === 'programmee'
       ? {
           key: 'dispo',
-          icon: 'partial',
+          icon: 'num',
           num: 1,
           title: 'Disponibilités',
-          badge: 'Collecte en cours',
-          tone: 'warn',
-          sub: `${c.responses} / ${expected} réponses${c.closesOn ? ` · fin souhaitée le ${formatDate(c.closesOn, 'dm')}` : ''}`,
+          badge: 'Annonce programmée',
+          tone: 'neutral',
+          sub: [
+            c.announceOn
+              ? `Annonce aux participants le ${formatDate(c.announceOn)}`
+              : 'Annonce aux participants programmée',
+            deadlineText(c.closesOn, today),
+          ]
+            .filter(Boolean)
+            .join(' · '),
           active: true,
         }
-      : c.state === 'cloturee'
+      : c.state === 'en-cours'
         ? {
             key: 'dispo',
-            icon: 'check',
+            icon: 'partial',
             num: 1,
             title: 'Disponibilités',
-            badge: 'Clôturée',
-            tone: 'neutral',
-            sub:
-              uncovered > 0
-                ? `Collecte clôturée · ${plural(uncovered, 'jour')} sans collecte`
-                : 'Collecte clôturée',
-            cta: canOpenCollection && uncovered > 0 ? 'Ouvrir une collecte' : undefined,
-          }
-        : {
-            key: 'dispo',
-            icon: 'num',
-            num: 1,
-            title: 'Disponibilités',
-            badge: 'À ouvrir',
+            badge: 'Collecte ouverte',
             tone: 'warn',
-            sub: `Pour le ${formatRange(period.start, period.end)}`,
+            sub: deadlineText(c.closesOn, today) ?? 'Sans indisponibilité renseignée, chacun est disponible',
             active: true,
-            cta: canOpenCollection && uncovered > 0 ? 'Ouvrir la collecte' : undefined,
           }
+        : c.state === 'cloturee'
+          ? {
+              key: 'dispo',
+              icon: 'check',
+              num: 1,
+              title: 'Disponibilités',
+              badge: 'Clôturée',
+              tone: 'neutral',
+              sub:
+                uncovered > 0
+                  ? `Collecte clôturée · ${plural(uncovered, 'jour')} sans collecte`
+                  : 'Collecte clôturée',
+              cta: canOpenCollection && uncovered > 0 ? 'Ouvrir une collecte' : undefined,
+            }
+          : {
+              key: 'dispo',
+              icon: 'num',
+              num: 1,
+              title: 'Disponibilités',
+              badge: 'Pas encore ouverte',
+              tone: 'warn',
+              sub: `Pour le ${formatRange(period.start, period.end)}`,
+              active: true,
+              cta: canOpenCollection && uncovered > 0 ? 'Ouvrir la collecte' : undefined,
+            }
 
   const counts = period.lineCounts
   const steps: Step[] = [
@@ -86,16 +117,21 @@ export function PreparationSteps({ period, canOpenCollection, onOpenCollecte, li
           title: 'Génération',
           badge: 'Générée',
           tone: 'info',
-          sub: `Le ${formatDate(period.generatedOn)}`,
+          sub: `Générée le ${formatDate(period.generatedOn)}`,
         }
       : {
           key: 'gen',
           icon: 'num',
           num: 2,
           title: 'Génération',
-          badge: 'En attente',
+          badge: period.targetGenerationOn ? 'Prévue' : 'En attente',
           tone: 'neutral',
-          sub: 'Pas encore lancée',
+          // docs/decisions.md D214: the target date is a plan; reaching it generates nothing.
+          sub: !period.targetGenerationOn
+            ? 'Pas encore lancée'
+            : period.targetGenerationOn >= today
+              ? `Génération prévue le ${formatDate(period.targetGenerationOn)} (manuelle)`
+              : `Date cible passée (le ${formatDate(period.targetGenerationOn)}) · à lancer manuellement`,
         },
     period.status === 'publiee'
       ? {

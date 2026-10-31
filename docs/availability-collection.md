@@ -2,6 +2,20 @@
 
 Lot du 2026-09-21 — décisions `docs/decisions.md` D120 à D126.
 
+> **Depuis le 2026-10-31 (D214), plus personne ne confirme rien.** Sans
+> indisponibilité déclarée, une personne est disponible. Les §3, §4 et les
+> passages sur « Répondu / En attente / X/Y » ci-dessous décrivent l'ancien
+> fonctionnement et ne s'appliquent plus : une réponse de collecte n'indique
+> plus que la participation (`PARTICIPANT` / `WITHDRAWN`) ;
+> `POST …/acknowledge` répond 410 `confirmation_removed` ; les confirmations
+> données avant D214 restent en base comme historique. Les rappels (manuels,
+> `POST …/reminders/participants`, et programmés, D210) vont à tous les
+> participants. La collecte n'est « ouverte » pour les membres qu'une fois
+> l'annonce de sa période passée (D214). Journal du calendrier : D215 ;
+> avertissement après une génération : D216 ; historique : D217. Une seule
+> date limite indicative par période, retirée partout quand on la retire
+> (collectes clôturées exceptées) : D218.
+
 ## 0. Le problème
 
 Un utilisateur qui possède déjà des `UserAvailabilityPeriod` n'a **pas** pour
