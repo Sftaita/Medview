@@ -8,8 +8,9 @@ import {
   type PreparationReminder,
   type ReminderUnit,
 } from '../api'
-import { addDays, formatDate } from '../dates'
+import { formatDate } from '../dates'
 import { preparationErrorMessage, preparationSaveError } from '../errors'
+import { MAXIMUM, dueOf, freeReminderOffset, noFreeReminderReason } from '../preparationRules'
 import type { ISODate } from '../types'
 import { monthOf } from '../useDateOptions'
 import { BoundaryCalendar } from './BoundaryCalendar'
@@ -23,9 +24,6 @@ interface Props {
 type DraftReminder = { key: string; stableId?: string; value: number | ''; unit: ReminderUnit }
 type Draft = { announceOn: ISODate | null; target: ISODate | null; reminders: DraftReminder[] }
 type Picker = 'announce' | 'target' | null
-
-const MAX_REMINDERS = 10
-const MAXIMUM: Record<ReminderUnit, number> = { DAY: 365, WEEK: 52 }
 
 /** What an announcement / reminder that ran or did not run became, for a doctor. */
 const OUTCOMES: Record<string, string> = {
@@ -45,10 +43,6 @@ const OUTCOMES: Record<string, string> = {
 
 let keySeed = 0
 const newKey = () => `r${++keySeed}`
-
-function dueOf(target: ISODate, value: number, unit: ReminderUnit): ISODate {
-  return addDays(target, -(unit === 'WEEK' ? 7 * value : value))
-}
 
 function draftFrom(view: PeriodPreparation): Draft {
   return {
@@ -163,25 +157,43 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
     )
   }
 
+  /** The day each reminder would run on, as soon as its offset and the target date are known. */
+  const dues = draft.reminders.map((r) =>
+    draft.target && r.value !== '' && r.value >= 1 && r.value <= MAXIMUM[r.unit]
+      ? dueOf(draft.target, r.value, r.unit)
+      : null,
+  )
   const scheduledDays = new Map<string, number>()
-  const reminderProblems = draft.reminders.map((r) => {
+  const reminderProblems = draft.reminders.map((r, index) => {
     if (r.value === '' || r.value < 1 || r.value > MAXIMUM[r.unit])
       return r.unit === 'DAY' ? 'Entre 1 et 365 jours.' : 'Entre 1 et 52 semaines.'
     if (!draft.target) return preparationErrorMessage('reminders_need_target')
-    const due = dueOf(draft.target, r.value, r.unit)
+    const due = dues[index] as ISODate
     const unchanged = view.reminders.some((v) => v.stableId === r.stableId && v.dueOn === due)
     if (!unchanged && due < view.today) return preparationErrorMessage('reminder_in_past')
     if (draft.announceOn && due <= draft.announceOn)
-      return preparationErrorMessage('reminder_before_announcement')
+      return `${preparationErrorMessage('reminder_before_announcement')} L’annonce est le ${formatDate(draft.announceOn)}.`
     scheduledDays.set(due, (scheduledDays.get(due) ?? 0) + 1)
     return null
   })
-  const duplicates = draft.reminders.map((r) =>
-    r.value !== '' && draft.target && (scheduledDays.get(dueOf(draft.target, r.value, r.unit)) ?? 0) > 1
-      ? preparationErrorMessage('duplicate_reminder')
-      : null,
+  const duplicates = dues.map((due) =>
+    due && (scheduledDays.get(due) ?? 0) > 1 ? preparationErrorMessage('duplicate_reminder') : null,
   )
-  const invalid = reminderProblems.some(Boolean) || duplicates.some(Boolean)
+  const problems = draft.reminders
+    .map((_, index) => ({ index, message: reminderProblems[index] ?? duplicates[index] }))
+    .filter((p): p is { index: number; message: string } => Boolean(p.message))
+  const invalid = problems.length > 0
+
+  /** What a new reminder would be, or why none can be added (docs/decisions.md D210). */
+  const reminderContext = {
+    today: view.today,
+    target: draft.target,
+    announceOn: draft.announceOn,
+    taken: dues.filter((d): d is ISODate => d !== null),
+    count: draft.reminders.length,
+  }
+  const nextOffset = freeReminderOffset(reminderContext)
+  const noFreeReminder = noFreeReminderReason(reminderContext)
 
   function openPicker(which: Exclude<Picker, null>) {
     if (picker === which) {
@@ -390,8 +402,8 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
           <ol className="mv-prep__reminders" aria-label="Rappels programmés">
             {draft.reminders.map((r, index) => {
               const problem = reminderProblems[index] ?? duplicates[index]
-              const due =
-                draft.target && r.value !== '' && r.value >= 1 ? dueOf(draft.target, r.value, r.unit) : null
+              const due = dues[index]
+              const hintId = `mv-prep-reminder-${r.key}`
               return (
                 <li key={r.key} className="mv-prep__reminder">
                   <span className="mv-prep__reminder-name">Rappel {index + 1}</span>
@@ -404,6 +416,7 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
                     value={r.value}
                     aria-label={`Rappel ${index + 1} : combien avant la date cible`}
                     aria-invalid={problem ? true : undefined}
+                    aria-describedby={hintId}
                     disabled={!editable}
                     onChange={(event) =>
                       updateReminder(r.key, {
@@ -434,29 +447,43 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
                       <Icon name="close" size={16} />
                     </button>
                   )}
-                  <span className={`mv-field__hint mv-prep__due ${problem ? 'is-error' : ''}`}>
-                    {problem ?? (due ? `Le ${formatDate(due)} à 8 h` : '')}
+                  <span id={hintId} className="mv-prep__due">
+                    {due && <span className="mv-field__hint">Le {formatDate(due)} à 8 h</span>}
+                    {problem && <span className="mv-field__hint is-error">{problem}</span>}
                   </span>
                 </li>
               )
             })}
           </ol>
           {editable && (
-            <div>
+            <div className="mv-prep__add">
               <button
                 type="button"
                 className="mv-btn mv-btn--secondary mv-btn--sm"
-                disabled={draft.reminders.length >= MAX_REMINDERS}
+                disabled={nextOffset === null}
+                aria-describedby={noFreeReminder ? 'mv-prep-add-why' : undefined}
                 onClick={() => {
+                  if (nextOffset === null) return
                   setDraft((d) => ({
                     ...d,
-                    reminders: [...d.reminders, { key: newKey(), value: 7, unit: 'DAY' }],
+                    reminders: [...d.reminders, { key: newKey(), value: nextOffset, unit: 'DAY' }],
                   }))
                   setSaved(false)
                 }}
               >
                 <Icon name="plus" size={16} /> Ajouter un rappel
               </button>
+              {noFreeReminder && (
+                <span id="mv-prep-add-why" className="mv-muted mv-small">
+                  {noFreeReminder === 'no_free_reminder_day' && draft.target
+                    ? `Aucun jour libre pour un nouveau rappel : il doit tomber ${
+                        draft.announceOn
+                          ? `après l’annonce (${formatDate(draft.announceOn)})`
+                          : 'à partir d’aujourd’hui'
+                      } et avant la date cible (${formatDate(draft.target)}), sans tomber le même jour qu’un autre rappel.`
+                    : preparationErrorMessage(noFreeReminder)}
+                </span>
+              )}
             </div>
           )}
           {history.length > 0 && (
@@ -496,11 +523,25 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
               {error}
             </p>
           )}
-          {saved && !dirty && (
-            <p role="status" className="mv-prep__saved">
-              Préparation enregistrée.
-            </p>
-          )}
+          <div id="mv-prep-state" aria-live="polite">
+            {saved && !dirty ? (
+              <p className="mv-prep__saved">Préparation enregistrée.</p>
+            ) : !dirty ? (
+              <p className="mv-prep__idle">Aucune modification à enregistrer.</p>
+            ) : invalid ? (
+              <div className="mv-prep__invalid">
+                <strong>Enregistrement impossible, à corriger d’abord :</strong>
+                <ul>
+                  {problems.map((p) => (
+                    <li key={p.index}>
+                      Rappel {p.index + 1}
+                      {dues[p.index] ? ` (le ${formatDate(dues[p.index] as ISODate)})` : ''} : {p.message}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+          </div>
           <div className="mv-prep__buttons">
             <button
               type="button"
@@ -519,6 +560,7 @@ export function PeriodPreparationPanel({ planningStableId, periodStableId }: Pro
               className="mv-btn mv-btn--primary"
               disabled={!dirty || invalid || saving}
               aria-busy={saving}
+              aria-describedby="mv-prep-state"
               onClick={() => void save()}
             >
               {saving ? 'Enregistrement…' : 'Enregistrer la préparation'}

@@ -9695,3 +9695,33 @@ période, et une légende (« Aujourd'hui », « Temps écoulé de la période �
 **Compromis.** La bannière « Nouvelle période » (lignes et membres déjà
 appliqués, aucune garde attribuée) disparaît. Les étapes de préparation
 disent déjà où en est la période.
+
+## D213 — « Préparer la période » : un rappel ajouté tombe toujours sur un jour possible
+
+**Contexte (2026-10-31).** En production, la préparation de la période 2 de
+Trauma Delta (annonce le 17/01/2027, date cible le 24/01, un rappel 2 jours
+avant) n'a jamais pu être modifiée après sa création le 28/10. Aucune erreur
+serveur, période modifiable (aucune génération, lignes en brouillon).
+
+**Cause (reproduite en dev avec les mêmes dates).** « Ajouter un rappel »
+proposait toujours « 7 jours avant ». Avec une annonce 7 jours avant la date
+cible, ce rappel tombait le jour même de l'annonce, ce que la règle de D210
+refuse (un rappel vient après l'annonce). « Enregistrer la préparation » se
+grisait. Le seul indice était une petite ligne rouge sous le rappel, rien près
+du bouton, et l'état grisé ressemblait à « rien à enregistrer ».
+
+**Décision.**
+
+- Un nouveau rappel est proposé sur le premier jour possible et libre : 7 jours
+  avant si ce jour convient, sinon le jour le plus proche sous la semaine (le
+  plus tardif après l'annonce), sinon au-delà d'une semaine. Jamais un jour
+  passé, jamais le jour de l'annonce ou avant, jamais le jour d'un autre rappel
+  (`features/periods/preparationRules.ts`, jumeau client des règles serveur).
+- S'il ne reste aucun jour, ou sans date cible, ou à 10 rappels, « Ajouter un
+  rappel » est désactivé et une phrase dit pourquoi.
+- Chaque rappel affiche toujours sa date réelle ; l'erreur précise reste sous
+  le champ (avec la date de l'annonce).
+- Près du bouton : « Aucune modification à enregistrer. » (discret) se distingue
+  de « Enregistrement impossible, à corriger d'abord » (encadré, la liste des
+  rappels en cause avec leur date).
+- Aucune règle serveur n'est modifiée ; aucun changement backend ni de données.
