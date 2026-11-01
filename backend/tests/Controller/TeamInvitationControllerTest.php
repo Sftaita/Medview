@@ -7,6 +7,7 @@ namespace App\Tests\Controller;
 use App\Repository\UserRepository;
 use App\Tests\InvitationTestHelpers;
 use Doctrine\DBAL\Connection;
+use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 
 /**
@@ -163,9 +164,36 @@ final class TeamInvitationControllerTest extends WebTestCase
         $email = self::getMailerMessage(0);
         self::assertSame('Vous avez été ajouté à une équipe sur MedVue', $email->getSubject());
         self::assertEmailAddressContains($email, 'to', 'inv7.existing@example.com');
+        // D221: the email names the planning and links straight to it.
+        self::assertStringContainsString('/plannings/'.$s['planning'], (string) $email->getTextBody());
+        self::assertStringContainsString('href="http://localhost:5183/plannings/'.$s['planning'].'"', (string) $email->getHtmlBody());
 
         $count = static::getContainer()->get(Connection::class)->fetchOne('SELECT COUNT(*) FROM team_invitations');
         self::assertSame(0, (int) $count, 'No invitation row for an existing user.');
+    }
+
+    public function testInactiveExistingAccountCannotBeAddedOrNotified(): void
+    {
+        $client = static::createClient();
+        $s = $this->scenario($client, 'inv-inactive');
+        $this->userToken($client, 'inv-inactive.existing@example.com');
+
+        $user = static::getContainer()->get(UserRepository::class)->findOneByEmail('inv-inactive.existing@example.com');
+        self::assertNotNull($user);
+        $user->setActive(false);
+        static::getContainer()->get(EntityManagerInterface::class)->flush();
+
+        $data = $this->invite($client, $s['creator'], $s['planning'], $s['team'], 'inv-inactive.existing@example.com');
+
+        self::assertResponseStatusCodeSame(409);
+        self::assertSame('inactive_user', $data['error']);
+        self::assertEmailCount(0);
+
+        $count = static::getContainer()->get(Connection::class)->fetchOne(
+            'SELECT COUNT(*) FROM planning_team_members m JOIN users u ON u.id = m.user_id WHERE u.email = ?',
+            ['inv-inactive.existing@example.com'],
+        );
+        self::assertSame(0, (int) $count);
     }
 
     public function testInvitingAnExistingMemberTwiceIsIdempotent(): void
