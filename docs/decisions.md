@@ -9976,3 +9976,11 @@ leur génération (aucune migration, aucune réécriture d'empreinte). Seuls les
 snapshots pris après le déploiement suivent la nouvelle lecture. Les autres
 requêtes sur des plages portent sur des colonnes de type date (collectes,
 périodes, adhésions) et ne sont pas concernées.
+
+**Avec D215-D217 (intégration des PR #26 et #27).** L'historique d'une période
+lit le journal par `UserAvailabilityEventRepository::findTouching()`, sur les
+mêmes minuits locaux et avec le même défaut : un changement portant sur le
+lendemain de la période y apparaissait, un changement finissant dans les
+premières heures du premier jour en était absent. Même correction ; test
+`AvailabilityEventRangeTest` (avant / après). Le journal lui-même n'est pas
+modifié.
