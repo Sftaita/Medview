@@ -40,7 +40,6 @@ function describeInviteResult(result: InviteResult, email: string, name: string)
  */
 export function TeamInvitePanel({ planningStableId, teamStableId, onMembersChanged }: Props) {
   const [invitations, setInvitations] = useState<TeamInvitation[]>([])
-  const [showForm, setShowForm] = useState(false)
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
   const [email, setEmail] = useState('')
@@ -110,6 +109,58 @@ export function TeamInvitePanel({ planningStableId, teamStableId, onMembersChang
 
   return (
     <div className="team-invite-panel">
+      <h4>Ajouter un membre</h4>
+      <p className="muted">
+        Saisissez son prénom, son nom et son adresse e-mail. Si son compte MedVue est actif,
+        il rejoindra directement l'équipe et recevra une notification. Sinon, une invitation
+        à créer un compte lui sera envoyée.
+      </p>
+      <form onSubmit={handleSubmit} className="form">
+        <div className="form-grid">
+          <Field
+            label="Prénom"
+            type="text"
+            value={firstName}
+            onChange={(e) => setFirstName(e.target.value)}
+            maxLength={100}
+            required
+          />
+          <Field
+            label="Nom"
+            type="text"
+            value={lastName}
+            onChange={(e) => setLastName(e.target.value)}
+            maxLength={100}
+            required
+          />
+        </div>
+        <Field
+          label="Adresse e-mail"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          maxLength={180}
+          required
+        />
+        <button type="submit" className="btn btn--primary btn--full" disabled={isSubmitting}>
+          <Icon name="plus" size={18} strokeWidth={2} />
+          Ajouter
+        </button>
+      </form>
+
+      {feedback && (
+        <p role="status" className="alert alert--success">
+          <Icon name="check" size={18} strokeWidth={2} />
+          <span>{feedback}</span>
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="alert alert--error">
+          <Icon name="alert" size={18} strokeWidth={2} />
+          <span>{error}</span>
+        </p>
+      )}
+
       <h4>Invitations en attente</h4>
       <ul className="list team-invite-panel__list">
         {invitations.map((invitation) => (
@@ -125,75 +176,15 @@ export function TeamInvitePanel({ planningStableId, teamStableId, onMembersChang
         ))}
         {invitations.length === 0 && <li className="muted">Aucune invitation en attente.</li>}
       </ul>
-
-      {feedback && (
-        <p role="status" className="alert alert--success">
-          <Icon name="check" size={18} strokeWidth={2} />
-          <span>{feedback}</span>
-        </p>
-      )}
-      {error && (
-        <p role="alert" className="alert alert--error">
-          <Icon name="alert" size={18} strokeWidth={2} />
-          <span>{error}</span>
-        </p>
-      )}
-
-      {!showForm && (
-        <button type="button" className="btn btn--primary btn--full" onClick={() => setShowForm(true)}>
-          <Icon name="plus" size={18} strokeWidth={2} />
-          Ajouter une personne
-        </button>
-      )}
-      {showForm && (
-        <form onSubmit={handleSubmit} className="form">
-          <div className="form-grid">
-            <Field
-              label="Prénom"
-              type="text"
-              value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
-              maxLength={100}
-              required
-            />
-            <Field
-              label="Nom"
-              type="text"
-              value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
-              maxLength={100}
-              required
-            />
-          </div>
-          <Field
-            label="Email"
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            maxLength={180}
-            required
-          />
-          <div className="form-actions">
-            <button type="submit" className="btn btn--primary" disabled={isSubmitting}>
-              Ajouter
-            </button>
-            <button
-              type="button"
-              className="btn btn--secondary"
-              onClick={() => setShowForm(false)}
-              disabled={isSubmitting}
-            >
-              Fermer
-            </button>
-          </div>
-        </form>
-      )}
     </div>
   )
 }
 
 function messageFor(err: unknown): string {
   if (err instanceof ApiError) {
+    if (err.status === 409 && (err.body as { error?: string } | null)?.error === 'inactive_user') {
+      return "Ce compte MedVue est désactivé : il ne peut pas être ajouté à l'équipe."
+    }
     if (err.status === 409) {
       return "Cette personne vient d'être ajoutée à cette équipe par une autre action."
     }
