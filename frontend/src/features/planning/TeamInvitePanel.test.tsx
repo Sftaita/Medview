@@ -47,10 +47,9 @@ function result(overrides: Partial<InviteResult>): InviteResult {
 }
 
 async function submit(email = 'marie@example.com') {
-  fireEvent.click(await screen.findByRole('button', { name: 'Ajouter une personne' }))
   fireEvent.change(screen.getByLabelText('Prénom'), { target: { value: 'Marie' } })
   fireEvent.change(screen.getByLabelText('Nom'), { target: { value: 'Dupont' } })
-  fireEvent.change(screen.getByLabelText('Email'), { target: { value: email } })
+  fireEvent.change(screen.getByLabelText('Adresse e-mail'), { target: { value: email } })
   fireEvent.click(screen.getByRole('button', { name: 'Ajouter' }))
 }
 
@@ -81,6 +80,17 @@ describe('TeamInvitePanel', () => {
     ).toBeInTheDocument()
     expect(screen.getByText(/Paul Durand \(paul@example\.com\) — Invitation expirée/)).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Invitations en attente' })).toBeInTheDocument()
+  })
+
+  it('offers one visible email form without any technical user identifier', async () => {
+    stubFetch({ list: [] })
+    renderPanel()
+
+    expect(screen.getByRole('heading', { name: 'Ajouter un membre' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Prénom')).toBeInTheDocument()
+    expect(screen.getByLabelText('Nom')).toBeInTheDocument()
+    expect(screen.getByLabelText('Adresse e-mail')).toBeInTheDocument()
+    expect(screen.queryByText(/stableId|Identifiant de l'utilisateur/)).not.toBeInTheDocument()
   })
 
   it('says so when nothing is pending', async () => {
@@ -151,6 +161,17 @@ describe('TeamInvitePanel', () => {
     expect(await screen.findByRole('status')).toHaveTextContent("l'email n'a pas pu être envoyé")
   })
 
+  it('explains that an inactive existing account cannot be added', async () => {
+    stubFetch({ post: () => jsonResponse({ error: 'inactive_user' }, 409) })
+    renderPanel()
+
+    await submit()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Ce compte MedVue est désactivé : il ne peut pas être ajouté à l'équipe.",
+    )
+  })
+
   it('explains a membership conflict in the same team (a concurrent add)', async () => {
     stubFetch({ post: () => jsonResponse({ error: 'membership_conflict' }, 409) })
     renderPanel()
@@ -173,7 +194,7 @@ describe('TeamInvitePanel', () => {
     renderPanel()
 
     await submit()
-    const form = screen.getByLabelText('Email').closest('form') as HTMLFormElement
+    const form = screen.getByLabelText('Adresse e-mail').closest('form') as HTMLFormElement
     fireEvent.submit(form)
     fireEvent.submit(form)
 
