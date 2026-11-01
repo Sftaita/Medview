@@ -9,6 +9,7 @@ use App\Entity\TeamInvitation;
 use App\Entity\TeamInvitationStatus;
 use App\Entity\TeamMemberRole;
 use App\Entity\User;
+use App\Exception\InactiveAccountForTeamException;
 use App\Exception\InvitationEmailMismatchException;
 use App\Exception\InvitationNotUsableException;
 use App\Exception\PlanningTeamMembershipConflictException;
@@ -56,6 +57,10 @@ final class TeamInvitationService
         $existingUser = $this->userRepository->findOneByEmail($email);
 
         if (null !== $existingUser) {
+            if (!$existingUser->isActive()) {
+                throw new InactiveAccountForTeamException();
+            }
+
             return $this->addExistingUser($team, $inviter, $existingUser);
         }
 
