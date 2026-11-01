@@ -9984,3 +9984,79 @@ lendemain de la période y apparaissait, un changement finissant dans les
 premières heures du premier jour en était absent. Même correction ; test
 `AvailabilityEventRangeTest` (avant / après). Le journal lui-même n'est pas
 modifié.
+
+## D221 — Ajouter un membre par prénom, nom et adresse e-mail : l'ancien formulaire par `stableId` est retiré
+
+> ⚠️ **Problème déjà relevé, resté ouvert six semaines.** L'ajout par
+> identifiant technique était connu **depuis le 2026-09-20** :
+> `docs/authentication.md` §15.9 (D111-D113) le classait en dette (« Le
+> formulaire historique "ajout par identifiant" reste »), et
+> `docs/planning.md` §14 annonçait déjà « plus besoin de connaître son
+> `stableId` ». La refonte du détail d'un planning (D140, 2026-09-25) l'a
+> pourtant **reconduit** dans le panneau « Membres » : le formulaire
+> `stableId` + rôle + date d'entrée y était affiché en permanence, alors que
+> l'ajout par e-mail restait caché derrière un bouton « Ajouter une
+> personne ». En pratique, un gestionnaire voyait d'abord un champ
+> « stableId de l'utilisateur » qu'il n'avait aucun moyen de connaître. La
+> documentation décrivait donc le problème comme réglé alors que l'interface
+> le montrait toujours. Leçon : une dette notée dans un document de
+> fonctionnalité doit aussi apparaître dans `CLAUDE.md` (tableau
+> d'avancement) tant qu'elle reste visible pour l'utilisateur.
+
+- **Contexte** : demande produit du 2026-11-01, PR #29 (déjà ouverte, reprise
+  et complétée). L'administrateur ne doit jamais avoir à connaître le
+  `stableId` d'un utilisateur.
+- **Décision** :
+  - **Un seul formulaire**, visible directement : Prénom, Nom, Adresse e-mail
+    (tous obligatoires). Plus de champ `stableId`, rôle ni date d'entrée.
+  - **Aucun système parallèle** : le formulaire appelle
+    `POST /api/plannings/{p}/teams/{t}/invitations` (D111-D113), qui décide à
+    partir de l'e-mail seul. Compte actif → adhésion immédiate `MEMBER` + e-mail
+    (`USER_ADDED`) ; adresse inconnue → `TeamInvitation` + e-mail d'inscription,
+    affichée dans « Invitations en attente », adhésion créée à l'inscription
+    (`INVITATION_CREATED`) ; déjà membre → aucun doublon, message explicite
+    (`ALREADY_MEMBER`, ou `INVITATION_ALREADY_PENDING`) ; **compte désactivé →
+    `409 inactive_user`**, ni adhésion, ni invitation, ni e-mail (nouveau :
+    jusque-là un compte désactivé était ajouté et notifié).
+  - **Date d'entrée = jour de l'ajout dans le fuseau du planning.** Le serveur
+    tourne en UTC et calculait `now()->setTime(0, 0)` : entre minuit et 1 h-2 h à
+    Bruxelles, la date d'entrée était celle de la veille. Corrigé pour l'ajout
+    direct comme pour l'adhésion créée à l'inscription par invitation. Les
+    adhésions existantes ne sont **pas** modifiées.
+  - **L'e-mail au compte existant nomme le planning et y mène** :
+    « X vous a ajouté à l'équipe E du planning P », bouton « Ouvrir le
+    planning » vers `/plannings/{id}` (la page de connexion renvoie ensuite au
+    planning demandé), au lieu de `/login`. L'invitation d'un nouveau compte
+    nomme aussi le planning.
+  - **Rôles** : la promotion ultérieure reste « Rendre gestionnaire » (D147,
+    créateur). `OWNER` n'est plus attribuable depuis l'interface : c'est le rôle
+    de participation du créateur (D123), jamais un rôle à donner à un tiers.
+  - **Autorisations inchangées** : `TEAM_INVITE` (créateur du planning ou
+    OWNER/ADMIN de l'équipe). L'endpoint historique `POST …/members` (créateur
+    seulement, `userStableId` + rôle + date) reste dans l'API — utilisé par
+    « M'inclure dans ce planning » (D123) — mais plus aucun écran ne demande un
+    identifiant.
+- **Alternative écartée** : garder l'ancien formulaire « pour les cas
+  avancés » (rôle, date rétroactive) — c'est exactement ce qui avait laissé le
+  problème visible depuis septembre. Choisir une date d'entrée différente n'est
+  plus possible depuis l'interface ; si le besoin apparaît, il faudra faire
+  évoluer le contrat des invitations, pas réintroduire un formulaire technique.
+- **Conséquences** : `InactiveAccountForTeamException` ; `InvitationMailer`
+  reçoit `planningName`/`planningUrl` ; `TeamInvitationService::today()` prend
+  l'équipe pour son fuseau. Tests : `TeamInvitationServiceTest` (date locale
+  après minuit, inscription par invitation, compte désactivé, e-mail avec lien),
+  `TeamInvitationControllerTest` (409 `inactive_user`, lien dans l'e-mail),
+  `InvitationMailerTest`, `MembersSheet.test.tsx` (aucun champ technique, de
+  rôle ni de date ; liste et planning rafraîchis ; « Rendre gestionnaire »
+  conservé), `TeamInvitePanel.test.tsx`. Détail : `docs/planning.md` §14,
+  `docs/authentication.md` §15.
+- **Recette (2026-11-01, Chrome desktop, backend et frontend du worktree sur la
+  base de dev, Mailpit)** : formulaire limité à Prénom / Nom / Adresse e-mail ;
+  compte actif ajouté (`MEMBER`, entrée le 2026-11-01), liste et compteur
+  « 1 membre » rafraîchis, e-mail reçu avec le nom du planning et le lien
+  `/plannings/{id}` ; même adresse en majuscules → « fait déjà partie de cette
+  équipe », aucun e-mail ; compte désactivé → refus affiché, aucun membre ni
+  e-mail ; adresse inconnue → « Invitations en attente » + e-mail d'inscription.
+  Exactement deux e-mails dans Mailpit. Non vérifié dans le navigateur :
+  l'affichage à 390 px et l'inscription par le lien (couverte par
+  `InvitationRegistrationTest`).

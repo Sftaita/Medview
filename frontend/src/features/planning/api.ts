@@ -103,7 +103,7 @@ export function fetchTeamInvitations(
   return apiFetch<TeamInvitation[]>(`/api/plannings/${planningStableId}/teams/${teamStableId}/invitations`)
 }
 
-/** "Ajouter une personne": adds an existing user at once, or creates an invitation for a new email. */
+/** "Ajouter un membre": adds an existing active user at once, or creates an invitation for a new email. */
 export function inviteToTeam(
   planningStableId: string,
   teamStableId: string,

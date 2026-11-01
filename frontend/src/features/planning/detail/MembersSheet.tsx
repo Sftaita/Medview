@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Field } from '../../../components/Field'
 import { Icon } from '../../../components/Icon'
-import { ApiError } from '../../../lib/apiClient'
-import { addTeamMember, changeTeamMemberRole, endTeamMembership, fetchTeamMembers } from '../api'
+import { changeTeamMemberRole, endTeamMembership, fetchTeamMembers } from '../api'
 import { TeamInvitePanel } from '../TeamInvitePanel'
 import type { PlanningLineSummary, PlanningTeamMember } from '../types'
 import { Sheet } from './Sheet'
@@ -12,7 +10,7 @@ type Role = 'OWNER' | 'ADMIN' | 'MEMBER'
 type Props = {
   planningStableId: string
   line: PlanningLineSummary
-  /** May end memberships and add an existing user (creator of the planning). */
+  /** May end memberships and grant the management right (creator of the planning). */
   canManage: boolean
   onClose: () => void
   /** Membership added, ended or invitation accepted: the page refreshes its counts and the follow-up. */
@@ -27,16 +25,17 @@ const ROLE_TAG: Record<Role, { label: string; tone: string }> = {
   MEMBER: { label: 'Membre', tone: '' },
 }
 
-/** "Membres" of a line: who is in its team, invitations, and (creator) memberships. */
+/**
+ * "Membres" of a line: who is in its team, the add form and the pending invitations, and (creator)
+ * memberships. People are added by first name, last name and email only (docs/decisions.md D221):
+ * never by a technical identifier, the role is MEMBER and the entry date the day of the addition.
+ */
 export function MembersSheet({ planningStableId, line, canManage, onClose, onChanged }: Props) {
   const teamStableId = line.team.stableId
   const [members, setMembers] = useState<PlanningTeamMember[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [userStableId, setUserStableId] = useState('')
-  const [role, setRole] = useState<Role>('MEMBER')
-  const [start, setStart] = useState('')
 
   function load() {
     setError(null)
@@ -77,29 +76,6 @@ export function MembersSheet({ planningStableId, line, canManage, onClose, onCha
       changed()
     } catch {
       setError('Impossible de modifier le droit de gestion de ce membre.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function handleAdd() {
-    if (!userStableId || !start) return
-    setSaving(true)
-    setError(null)
-    try {
-      await addTeamMember(planningStableId, teamStableId, { userStableId, role, membershipStart: start })
-      setUserStableId('')
-      setStart('')
-      setRole('MEMBER')
-      changed()
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) {
-        setError('Utilisateur introuvable — vérifiez son identifiant.')
-      } else if (err instanceof ApiError && err.status === 409) {
-        setError('Cet utilisateur fait déjà partie de cette équipe.')
-      } else {
-        setError("Impossible d'ajouter ce membre.")
-      }
     } finally {
       setSaving(false)
     }
@@ -169,50 +145,6 @@ export function MembersSheet({ planningStableId, line, canManage, onClose, onCha
           teamStableId={teamStableId}
           onMembersChanged={changed}
         />
-      )}
-
-      {canManage && (
-        <div className="planning-members__existing form">
-          <p className="muted">
-            Utilisateur existant (identifiant connu) — permet aussi de choisir le rôle et la date d'entrée.
-          </p>
-          <Field
-            label="Identifiant de l'utilisateur"
-            type="text"
-            value={userStableId}
-            onChange={(event) => setUserStableId(event.target.value)}
-            placeholder="stableId de l'utilisateur"
-          />
-          <div className="field">
-            <label htmlFor="member-role" className="field__label">
-              Rôle
-            </label>
-            <select
-              id="member-role"
-              className="field__input"
-              value={role}
-              onChange={(event) => setRole(event.target.value as Role)}
-            >
-              <option value="MEMBER">Membre</option>
-              <option value="ADMIN">Gestionnaire</option>
-              <option value="OWNER">Propriétaire</option>
-            </select>
-          </div>
-          <Field
-            label="Date d'entrée"
-            type="date"
-            value={start}
-            onChange={(event) => setStart(event.target.value)}
-          />
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={handleAdd}
-            disabled={saving || !userStableId || !start}
-          >
-            Ajouter
-          </button>
-        </div>
       )}
     </Sheet>
   )

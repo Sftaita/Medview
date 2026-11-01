@@ -78,6 +78,7 @@ final class InvitationMailerTest extends KernelTestCase
             self::assertStringContainsString('Marie', $body);
             self::assertStringContainsString('Alice Martin', $body);
             self::assertStringContainsString('Cardio', $body);
+            self::assertStringContainsString('Gardes 2027', $body, 'The invitation names the planning (D221).');
             self::assertStringContainsString('Vous ne possédez pas encore de compte MedVue', str_replace('&nbsp;', ' ', $body));
             self::assertStringContainsString('ne doit pas être transmis à une autre personne', $body);
         }
@@ -161,11 +162,21 @@ final class InvitationMailerTest extends KernelTestCase
         $email = self::getMailerMessage(0);
         self::assertSame('Vous avez été ajouté à une équipe sur MedVue', $email->getSubject());
         $html = (string) $email->getHtmlBody();
+        $text = (string) $email->getTextBody();
         self::assertStringContainsString('Bonjour Bob,', $html);
         self::assertStringContainsString('Alice Martin', $html);
-        self::assertStringContainsString('Cardio', $html);
-        self::assertStringContainsString('Cette équipe est désormais accessible directement depuis votre compte MedVue.', $html);
-        self::assertStringContainsString('href="https://medvue.example/login"', $html);
+        // D221: the planning is named and the button opens it directly (the
+        // login page brings a signed-out reader back to it), never /login.
+        $link = 'https://medvue.example/plannings/'.$team->getPlanning()->getStableId();
+        foreach ([$html, $text] as $body) {
+            self::assertStringContainsString('Cardio', $body);
+            self::assertStringContainsString('Gardes 2027', $body);
+            self::assertStringContainsString($link, $body);
+            self::assertStringNotContainsString('https://medvue.example/login', $body);
+        }
+        self::assertStringContainsString('Ce planning est désormais accessible directement depuis votre compte MedVue.', $html);
+        self::assertStringContainsString('href="'.$link.'"', $html);
+        self::assertStringContainsString('Ouvrir le planning', $html);
         self::assertStringContainsString('#42A882', $html, 'The green accent of the reference design.');
     }
 
@@ -240,7 +251,7 @@ final class InvitationMailerTest extends KernelTestCase
     public function testUserSuppliedNamesAreEscaped(): void
     {
         $mailer = $this->mailer();
-        $team = $this->team('<b>Team</b> & "co"');
+        $team = $this->team('<b>Team</b> & "co"', '<s>Plan</s>');
         $invitation = $this->invitation($team, first: '<script>alert(1)</script>');
 
         $mailer->sendInvitation($invitation, self::TOKEN);
@@ -250,7 +261,7 @@ final class InvitationMailerTest extends KernelTestCase
         self::assertEmailCount(3);
         foreach ([0, 1, 2] as $i) {
             $html = (string) self::getMailerMessage($i)->getHtmlBody();
-            foreach (['<script', '<img src=x', '<b>Team', '<i>Eve', '<u>Mar', '<em>T'] as $needle) {
+            foreach (['<script', '<img src=x', '<b>Team', '<s>Plan', '<i>Eve', '<u>Mar', '<em>T'] as $needle) {
                 self::assertStringNotContainsString($needle, $html, "Email #{$i} must not contain raw {$needle}");
             }
         }

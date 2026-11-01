@@ -9,6 +9,7 @@ use App\Entity\TeamInvitation;
 use App\Entity\TeamInvitationStatus;
 use App\Entity\TeamMemberRole;
 use App\Entity\User;
+use App\Exception\InactiveAccountForTeamException;
 use App\Exception\InvitationEmailMismatchException;
 use App\Exception\InvitationNotUsableException;
 use App\Exception\PlanningTeamMembershipConflictException;
@@ -56,6 +57,10 @@ final class TeamInvitationService
         $existingUser = $this->userRepository->findOneByEmail($email);
 
         if (null !== $existingUser) {
+            if (!$existingUser->isActive()) {
+                throw new InactiveAccountForTeamException();
+            }
+
             return $this->addExistingUser($team, $inviter, $existingUser);
         }
 
@@ -159,7 +164,7 @@ final class TeamInvitationService
 
             if (null === $member) {
                 try {
-                    $member = $this->membershipService->addMember($team, $user, $invitation->getRole(), $this->today());
+                    $member = $this->membershipService->addMember($team, $user, $invitation->getRole(), $this->today($team));
                 } catch (PlanningTeamMembershipConflictException) {
                     $this->logger->notice('Invitation {id} left pending: an open membership in this team was opened concurrently.', ['id' => (string) $invitation->getStableId()]);
                     continue;
@@ -183,7 +188,7 @@ final class TeamInvitationService
         }
 
         try {
-            $member = $this->membershipService->addMember($team, $user, TeamMemberRole::MEMBER, $this->today());
+            $member = $this->membershipService->addMember($team, $user, TeamMemberRole::MEMBER, $this->today($team));
         } catch (UniqueConstraintViolationException) {
             // Lost a race against another request adding the same user to
             // this team: the partial unique index on (planning_team_id,
@@ -259,8 +264,15 @@ final class TeamInvitationService
         };
     }
 
-    private function today(): \DateTimeImmutable
+    /**
+     * The day of the addition as the planning's people live it: the server
+     * runs in UTC, so between midnight and 1-2 am in Brussels the UTC date
+     * is still the day before (docs/decisions.md D221).
+     */
+    private function today(PlanningTeam $team): \DateTimeImmutable
     {
-        return $this->clock->now()->setTime(0, 0);
+        $day = $this->clock->now()->setTimezone(new \DateTimeZone($team->getTimezone()))->format('Y-m-d');
+
+        return new \DateTimeImmutable($day);
     }
 }

@@ -557,10 +557,14 @@ compte créé entre-temps), D114 (emails). Côté équipes/planning :
   accès à ses équipes — seule la possession du lien reçu par email prouve
   l'accès à la boîte).
 - **Flux B — invitation** (`/invitations/:token`) : le créateur du planning ou un
-  OWNER/ADMIN de l'équipe fait « Ajouter une personne » (email, prénom, nom).
-  - **B1** l'email correspond à un `User` → membership immédiat (mécanisme
-    normal `PlanningTeamMembershipService::addMember`, rôle `MEMBER`, début =
-    aujourd'hui), email « Vous avez été ajouté à une équipe ». Pas d'acceptation.
+  OWNER/ADMIN de l'équipe fait « Ajouter un membre » (prénom, nom, adresse
+  e-mail — **le seul formulaire d'ajout depuis D221**).
+  - **B1** l'email correspond à un `User` **actif** → membership immédiat
+    (mécanisme normal `PlanningTeamMembershipService::addMember`, rôle `MEMBER`,
+    début = aujourd'hui **dans le fuseau du planning**, D221), email « Vous avez
+    été ajouté à une équipe » qui nomme le planning et mène à lui. Pas
+    d'acceptation. Compte **désactivé** → `409 inactive_user`, rien n'est créé
+    ni envoyé (D221).
   - **B2** aucun `User` → `TeamInvitation` (jamais de `User` incomplet) + email
     « Vous êtes invité… » avec le lien personnel.
 
@@ -615,7 +619,7 @@ compte ». Un seul email « Bienvenue » liste les équipes rejointes.
 | `GET` | `/api/invitations/{token}` | Non (le token est le secret) | `200` (email, noms proposés, équipe, planning, invitant, `accountExists`), `404` `invitation_not_found`, `410` `invitation_expired`/`_revoked`/`_already_used`, `429` |
 | `POST` | `/api/invitations/{token}/accept` | JWT | `200`, `403` email ≠ compte, `404`/`410`, `429` |
 | `POST` | `/api/register` | Non | voir §12 ; `invitationToken` optionnel |
-| `GET`/`POST` | `/api/plannings/{p}/teams/{t}/invitations` | JWT, créateur du planning ou OWNER/ADMIN de l'équipe | liste des invitations en attente / « Ajouter une personne » → `201` `USER_ADDED` ou `INVITATION_CREATED`, `200` `ALREADY_MEMBER` ou `INVITATION_ALREADY_PENDING`, `409` `membership_conflict`, `403`, `404`, `422`, `429` |
+| `GET`/`POST` | `/api/plannings/{p}/teams/{t}/invitations` | JWT, créateur du planning ou OWNER/ADMIN de l'équipe | liste des invitations en attente / « Ajouter une personne » → `201` `USER_ADDED` ou `INVITATION_CREATED`, `200` `ALREADY_MEMBER` ou `INVITATION_ALREADY_PENDING`, `409` `membership_conflict` ou `inactive_user` (compte désactivé, D221), `403`, `404`, `422`, `429` |
 | `POST` | `…/invitations/{id}/revoke` | idem | `200`, `409` si non `PENDING`, `404` |
 
 **Corps JSON** : `POST /api/register` et `POST …/invitations` rejettent tout champ
@@ -653,6 +657,9 @@ volontaires : (1) les noms saisis par un tiers passent par `|e` avant
 `ui.p()` — les maquettes le rendent tel quel (`|raw`), ce qui aurait permis
 d'injecter du HTML dans la boîte d'un tiers ; (2) l'email « Bienvenue » accepte
 une **liste** d'équipes. Une version texte `.txt.twig` accompagne chaque email.
+Depuis D221, les deux emails d'ajout nomment aussi le **planning**, et celui
+envoyé à un compte existant mène à `/plannings/{id}` (« Ouvrir le planning »)
+au lieu de `/login`.
 Configuration : `MAILER_DSN`, `MAILER_FROM`, `SUPPORT_EMAIL`, `APP_FRONTEND_URL`,
 `INVITATION_TTL_HOURS`, `DEFAULT_PHONE_REGION` — **toutes** requises dans le
 `.env` de production (`.env.prod.example`, garde `ProdComposeTest`) : sans
@@ -694,8 +701,12 @@ ne dépend d'aucune table de référence.
 - Statut `EXPIRED` jamais écrit par une tâche planifiée (paresseux).
 - Pas d'email lors d'un `accept` par un compte déjà existant.
 - Rôle d'invitation fixé à `MEMBER` (le champ existe en base).
-- Le formulaire historique « ajout par identifiant » reste (seul moyen de
-  donner `ADMIN`/`OWNER`, créateur uniquement).
+- ~~Le formulaire historique « ajout par identifiant » reste (seul moyen de
+  donner `ADMIN`/`OWNER`, créateur uniquement).~~ **⚠️ Dette relevée ici dès le
+  2026-09-20, restée visible dans l'interface jusqu'au 2026-11-01** (reconduite
+  par la refonte D140) — **soldée par D221** : formulaire retiré, ajout
+  uniquement par prénom, nom et e-mail ; `ADMIN` par « Rendre gestionnaire »
+  (D147) ; `OWNER` reste le rôle de participation du créateur (D123).
 - Téléphone : pas de vérification par SMS.
 
 ### 15.10 L'établissement n'est pas une donnée du profil (D115)

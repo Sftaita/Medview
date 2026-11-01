@@ -314,7 +314,9 @@ identifiant technique). `/plannings/{stableId}` (détail : lignes avec
 nom d'équipe/effectif/période/rôle PRIMARY-SECONDARY, actions
 creator-only : renommer, ajouter une ligne par **nom**, supprimer une
 ligne secondaire ; panneau "Gérer les membres" par ligne — liste, ajout
-par `userStableId` + rôle + date d'entrée, fin d'adhésion). Aucune UI de
+par `userStableId` + rôle + date d'entrée, fin d'adhésion). *Historique :
+l'ajout par `userStableId` est **retiré de l'interface** le 2026-11-01
+(D221) — voir l'encadré du §14.* Aucune UI de
 génération/éligibilité — hors périmètre (déjà couvert par l'API d'audit
 `GET /api/planning-generations/{stableId}/eligibility` du Lot 4, non
 exposée dans cette UI).
@@ -348,6 +350,22 @@ UI de non-participation administrative (endpoint existant, plus de point
 
 ## 14. « Ajouter une personne » : invitations d'équipe (2026-09-20, D111-D113)
 
+> ⚠️ **Problème déjà relevé — corrigé seulement le 2026-11-01 (D221).** La
+> phrase ci-dessous (« plus besoin de connaître son `stableId` ») était vraie
+> pour l'API dès le 2026-09-20, **pas pour l'interface** : l'ancien formulaire
+> `stableId` + rôle + date d'entrée est resté affiché dans le panneau
+> « Membres » (dette notée dans `docs/authentication.md` §15.9, puis reconduite
+> par la refonte D140), l'ajout par e-mail restant caché derrière un bouton.
+> **Depuis D221**, le panneau « Membres » n'a plus qu'un formulaire visible
+> d'emblée — **Prénom, Nom, Adresse e-mail** — branché sur
+> `POST …/invitations` : compte actif → membre immédiatement (`MEMBER`, entrée
+> le jour même dans le fuseau du planning) + e-mail nommant le planning avec un
+> lien vers lui ; adresse inconnue → invitation (« Invitations en attente »),
+> adhésion à l'inscription ; déjà membre → aucun doublon, message explicite ;
+> compte désactivé → refus `409 inactive_user`, sans adhésion ni e-mail. La
+> promotion se fait ensuite par « Rendre gestionnaire » (D147). Aucun écran ne
+> demande plus d'identifiant technique, de rôle ni de date d'entrée.
+
 Ajouter quelqu'un à une `PlanningTeam` se fait maintenant **par email** (plus
 besoin de connaître son `stableId`). Le détail complet — modèle, token,
 atomicité, concurrence, emails — est dans `docs/authentication.md` §15 ; ici,
@@ -359,8 +377,9 @@ forcément membre d'une équipe) et pour un **OWNER/ADMIN courant de cette
 équipe**. Faux pour un `MEMBER`, pour un OWNER/ADMIN d'une *autre* équipe du
 même Planning et pour tout étranger. C'est le premier chemin d'écriture
 « membres » ouvert à un rôle d'équipe ; les endpoints historiques
-(`POST …/members`, `…/end`) restent réservés au créateur (§10) — c'est aussi
-eux qui permettent de choisir `ADMIN`/`OWNER` et la date d'entrée.
+(`POST …/members`, `…/end`) restent réservés au créateur (§10) — `POST
+…/members` (rôle et date au choix) n'est plus appelé par aucun formulaire
+depuis D221, seulement par « M'inclure dans ce planning » (D123).
 `canInvite` est exposé par `GET /api/plannings/{id}` (`lines[].team.canInvite`)
 car le frontend ne peut pas le déduire.
 

@@ -42,10 +42,13 @@ final class InvitationMailer
     }
 
     /**
-     * Email 1 — an existing user was added to a team.
+     * Email 1 — an existing user was added to a team. It names the planning
+     * and links straight to it (docs/decisions.md D221): the login page
+     * sends a signed-out reader back to that planning afterwards.
      */
     public function sendAddedToTeam(User $recipient, User $inviter, PlanningTeam $team): bool
     {
+        $planning = $team->getPlanning();
         $email = $this->baseEmail($recipient->getEmail(), 'Vous avez été ajouté à une équipe sur MedVue')
             ->htmlTemplate('email/team_invitation_existing_account.html.twig')
             ->textTemplate('email/team_invitation_existing_account.txt.twig')
@@ -53,7 +56,8 @@ final class InvitationMailer
                 'firstName' => $recipient->getFirstName(),
                 'inviterName' => self::fullName($inviter),
                 'teamName' => $team->getName(),
-                'loginUrl' => $this->url('/login'),
+                'planningName' => $planning->getName(),
+                'planningUrl' => $this->url('/plannings/'.$planning->getStableId()),
             ]);
 
         return $this->send($email, 'added_to_team');
@@ -71,6 +75,7 @@ final class InvitationMailer
                 'firstName' => $invitation->getProposedFirstName(),
                 'inviterName' => self::fullName($invitation->getInvitedBy()),
                 'teamName' => $invitation->getPlanningTeam()->getName(),
+                'planningName' => $invitation->getPlanningTeam()->getPlanning()->getName(),
                 'signupUrl' => $this->url('/invitations/'.rawurlencode($rawToken)),
             ]);
 
