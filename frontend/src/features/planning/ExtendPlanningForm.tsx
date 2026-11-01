@@ -104,8 +104,8 @@ export function ExtendPlanningForm({ planning, onExtended, onCancel }: Props) {
       )}
       {!embedded && !open && !notice && (
         <p className="muted">
-          Ajoutez de nouvelles dates : seules celles-ci seront demandées aux membres, jamais celles déjà
-          confirmées.
+          Ajoutez de nouvelles dates : une collecte s’ouvre pour elles seules. Les indisponibilités déjà
+          enregistrées dans les calendriers restent valables.
         </p>
       )}
       {open && (

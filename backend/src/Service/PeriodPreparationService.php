@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Entity\AvailabilityCollection;
-use App\Entity\AvailabilityResponseStatus;
 use App\Entity\PeriodPreparation;
 use App\Entity\PeriodPreparationReminder;
 use App\Entity\PlanningCycle;
@@ -25,10 +24,12 @@ use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Clock\ClockInterface;
 
 /**
- * « Préparer la période » (docs/decisions.md D210): what a manager plans
+ * « Préparer la période » (docs/decisions.md D210, D214): what a manager plans
  * ahead for one period — the announcement (the collection opens by itself and
- * the invitations go out), the target date of the manual generation and the
- * reminders N days or weeks before it.
+ * the invitations go out), the indicative deadline for the participants to
+ * update their calendar (never blocking), the target date of the manual
+ * generation (reaching it generates nothing) and the reminders N days or
+ * weeks before it, sent to every participant.
  *
  * This class plans; PeriodPreparationRunner executes, every 10 minutes, and
  * checks everything again at that moment. Planning never sends anything and
@@ -86,6 +87,11 @@ final class PeriodPreparationService
                 'emails' => $counts['announcement'] ?? self::noEmails(),
             ],
             'targetGenerationOn' => PreparationCalendar::ymd($preparation?->getTargetGenerationOn()),
+            // docs/decisions.md D214: indicative only, and the real generation date once it happened.
+            // docs/decisions.md D218: one deadline per period — the same value in both fields.
+            'declarationDeadlineOn' => $this->effectiveDeadline($cycle, $preparation),
+            'deadlineOn' => $this->effectiveDeadline($cycle, $preparation),
+            'generatedAt' => $this->cycleRepository->milestones($cycle)['generatedAt'],
             'collection' => $this->collectionState($cycle),
             'reminders' => null === $preparation ? [] : array_map(fn (PeriodPreparationReminder $reminder): array => [
                 'stableId' => (string) $reminder->getStableId(),
@@ -102,12 +108,13 @@ final class PeriodPreparationService
 
     /**
      * Replaces what is planned: the announcement date (null: none, or cancel
-     * the one not run yet), the target date, and the list of reminders not
+     * the one not run yet), the indicative deadline (`declarationDeadlineOn`,
+     * left as it is when absent), the target date, and the list of reminders not
      * sent yet — a listed stableId changes that reminder, a new entry adds
      * one, a scheduled reminder left out is removed. What already ran is
      * history: it is shown, never changed.
      *
-     * @param array{announceOn: ?string, targetGenerationOn: ?string, reminders: list<array{stableId?: ?string, value: mixed, unit: mixed}>} $input
+     * @param array{announceOn: ?string, targetGenerationOn: ?string, declarationDeadlineOn?: ?string, reminders: list<array{stableId?: ?string, value: mixed, unit: mixed}>} $input
      *
      * @throws PlanningCycleException
      */
@@ -127,6 +134,8 @@ final class PeriodPreparationService
             $preparation = $this->preparationRepository->findOneByCycle($cycle);
             if (null === $preparation) {
                 $preparation = new PeriodPreparation($cycle, $by, $now);
+                // docs/decisions.md D218: it starts from the deadline the period already has (planning settings).
+                $preparation->changeDeclarationDeadline(self::dayOrNull($this->latestCollectionDeadline($cycle)));
                 $this->entityManager->persist($preparation);
             }
             $this->apply($preparation, $cycle, $input, $now);
@@ -208,27 +217,57 @@ final class PeriodPreparationService
     }
 
     /**
-     * The people still expected to confirm in an open collection of $cycle,
-     * with the collection their link points to (the first one they have not
-     * answered). CONFIRMED and NO_UNAVAILABILITY both count as answered.
+     * The participants of the open collections of $cycle (docs/decisions.md
+     * D214: everyone concerned, never filtered on a confirmation nor on the
+     * absences already entered), active accounts only, with the collection
+     * their link points to (the earliest one they take part in).
      *
      * @return array<int, array{user: User, collection: AvailabilityCollection}> by user id
      */
-    public function pendingRecipients(PlanningCycle $cycle): array
+    public function participants(PlanningCycle $cycle): array
     {
         $collections = $this->openCollections($cycle);
         usort($collections, static fn (AvailabilityCollection $a, AvailabilityCollection $b): int => $a->getStartsAt() <=> $b->getStartsAt());
-        $pending = [];
+        $participants = [];
         foreach ($collections as $collection) {
             foreach ($this->responseRepository->findByCollection($collection) as $response) {
                 $user = $response->getUser();
-                if (AvailabilityResponseStatus::PENDING === $response->getStatus() && $user->isActive()) {
-                    $pending[(int) $user->getId()] ??= ['user' => $user, 'collection' => $collection];
+                if ($response->isParticipant() && $user->isActive()) {
+                    $participants[(int) $user->getId()] ??= ['user' => $user, 'collection' => $collection];
                 }
             }
         }
 
-        return $pending;
+        return $participants;
+    }
+
+    /**
+     * The deadline the participants are told (docs/decisions.md D218): once
+     * the period has a preparation, its value and nothing else — a deadline
+     * removed there is removed, never replaced by an older one. Without a
+     * preparation, the latest of the open collections (set from the planning
+     * settings). Null when there is none.
+     */
+    public function effectiveDeadline(PlanningCycle $cycle, ?PeriodPreparation $preparation): ?string
+    {
+        if (null !== $preparation) {
+            return PreparationCalendar::ymd($preparation->getDeclarationDeadlineOn());
+        }
+
+        return $this->latestCollectionDeadline($cycle);
+    }
+
+    private function latestCollectionDeadline(PlanningCycle $cycle): ?string
+    {
+        $latest = null;
+        foreach ($this->openCollections($cycle) as $collection) {
+            $deadline = $collection->getDeadline()?->format('Y-m-d');
+            if (null !== $deadline && (null === $latest || $deadline > $latest)) {
+                $latest = $deadline;
+            }
+        }
+
+        return $latest;
     }
 
     /**
@@ -305,7 +344,55 @@ final class PeriodPreparationService
         }
         $preparation->changeTarget($target);
 
+        $this->applyDeadline($preparation, $cycle, $input, $target, $effectiveAnnounce, $today, $lastDay, $now);
+
         $this->applyReminders($preparation, $input['reminders'] ?? [], $target, $effectiveAnnounce, $today, $now);
+    }
+
+    /**
+     * docs/decisions.md D214 — the indicative deadline: on or after the day
+     * after the announcement, on or before the target date, never past when
+     * it changes. It never refuses anything once reached. The open collections
+     * of the period take it at once (those the announcement opens take it
+     * then) — removing it removes it from them too (D218), so no older date
+     * comes back; the closed collections keep theirs as history.
+     *
+     * @param array<string, mixed> $input
+     */
+    private function applyDeadline(PeriodPreparation $preparation, PlanningCycle $cycle, array $input, ?\DateTimeImmutable $target, ?\DateTimeImmutable $announceOn, \DateTimeImmutable $today, \DateTimeImmutable $lastDay, \DateTimeImmutable $now): void
+    {
+        $deadline = \array_key_exists('declarationDeadlineOn', $input)
+            ? self::date($input['declarationDeadlineOn'], 'declarationDeadlineOn')
+            : $preparation->getDeclarationDeadlineOn();
+        $changed = PreparationCalendar::ymd($deadline) !== PreparationCalendar::ymd($preparation->getDeclarationDeadlineOn());
+
+        if (null !== $deadline) {
+            if ($changed && $deadline < $today) {
+                throw PlanningCycleException::invalid('deadline_in_past', 'The indicative deadline is already past.');
+            }
+            if ($deadline > $lastDay) {
+                throw PlanningCycleException::invalid('deadline_after_period_end', 'The indicative deadline is after the end of the period.');
+            }
+            if (null !== $announceOn && $deadline <= $announceOn) {
+                throw PlanningCycleException::invalid('deadline_before_announcement', 'The indicative deadline must come after the announcement.');
+            }
+            if (null !== $target && $deadline > $target) {
+                throw PlanningCycleException::invalid('deadline_after_target', 'The indicative deadline must come on or before the target generation date.');
+            }
+        }
+        if (!$changed) {
+            return;
+        }
+
+        $preparation->changeDeclarationDeadline($deadline);
+        foreach ($this->openCollections($cycle) as $collection) {
+            $collection->changeDeadline($deadline, $now);
+        }
+    }
+
+    private static function dayOrNull(?string $ymd): ?\DateTimeImmutable
+    {
+        return null === $ymd ? null : PreparationCalendar::day($ymd);
     }
 
     /**
@@ -410,7 +497,10 @@ final class PeriodPreparationService
     // --- helpers -------------------------------------------------------------------------------------
 
     /**
-     * @return array{state: string, responded: int, expected: int}
+     * The technical state of the collections of $cycle and how many people
+     * they concern — never a count of confirmations (docs/decisions.md D214).
+     *
+     * @return array{state: string, participants: int}
      */
     private function collectionState(PlanningCycle $cycle): array
     {
@@ -418,21 +508,10 @@ final class PeriodPreparationService
         if ([] === $open) {
             $any = array_filter($this->collectionRepository->findByPlanning($cycle->getPlanning()), static fn (AvailabilityCollection $c): bool => $c->getCycle() === $cycle);
 
-            return ['state' => [] === $any ? 'not_open' : 'closed', 'responded' => 0, 'expected' => 0];
-        }
-        $expected = [];
-        $responded = [];
-        foreach ($open as $collection) {
-            foreach ($this->responseRepository->findByCollection($collection) as $response) {
-                $id = (int) $response->getUser()->getId();
-                if (AvailabilityResponseStatus::WITHDRAWN !== $response->getStatus()) {
-                    $expected[$id] = true;
-                    $responded[$id] = ($responded[$id] ?? true) && AvailabilityResponseStatus::ACKNOWLEDGED === $response->getStatus();
-                }
-            }
+            return ['state' => [] === $any ? 'not_open' : 'closed', 'participants' => 0];
         }
 
-        return ['state' => 'open', 'responded' => \count(array_filter($responded)), 'expected' => \count($expected)];
+        return ['state' => 'open', 'participants' => \count($this->participants($cycle))];
     }
 
     private static function date(mixed $value, string $field): ?\DateTimeImmutable

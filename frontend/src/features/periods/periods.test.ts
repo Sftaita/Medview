@@ -17,7 +17,7 @@ const period = (number: number, start: string, end: string): Period => ({
   start,
   end,
   status: 'publiee',
-  collecte: { state: 'cloturee', responses: 1 },
+  collecte: { state: 'cloturee' },
 })
 
 describe('dates', () => {
@@ -106,7 +106,7 @@ describe('periods', () => {
       start: '2027-05-01',
       end: '2027-08-31',
       status: 'preparation',
-      collecte: { state: 'non-ouverte', responses: 0 },
+      collecte: { state: 'non-ouverte' },
     })
     expect(JSON.stringify(periods)).toBe(before)
   })

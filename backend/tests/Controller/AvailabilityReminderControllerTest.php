@@ -47,7 +47,7 @@ final class AvailabilityReminderControllerTest extends WebTestCase
         self::assertResponseStatusCodeSame(403);
         $this->remind($client, $s, 'bob@example.com', $s['outsider']);
         self::assertResponseStatusCodeSame(403);
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/reminders/pending", [], $s['alice']);
+        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/reminders/participants", [], $s['alice']);
         self::assertResponseStatusCodeSame(403);
         $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/members/{$this->memberIdOf($client, $s, 'bob@example.com')}/reminders");
         self::assertResponseStatusCodeSame(401);
@@ -144,11 +144,27 @@ final class AvailabilityReminderControllerTest extends WebTestCase
         self::assertCount(1, $reminders);
     }
 
-    public function testNobodyIsRemindedOnceTheyConfirmed(): void
+    public function testSomeoneWhoAlreadyEnteredAbsencesIsStillReminded(): void
     {
         $client = static::createClient();
         $s = $this->pilotScenario($client);
-        $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", ['noUnavailability' => true], $s['alice']);
+        // docs/decisions.md D214: absences entered never mean "done" — they may still add some.
+        $this->api($client, 'POST', '/api/me/calendar', ['type' => 'UNAVAILABLE', 'startsAt' => '2027-02-01T00:00:00+01:00', 'endsAt' => '2027-02-04T00:00:00+01:00'], $s['alice']);
+
+        $this->remind($client, $s, 'alice@example.com', $s['creator']);
+
+        self::assertResponseStatusCodeSame(201);
+        self::assertEmailCount(1);
+        $text = (string) self::getMailerMessage(0)->getTextBody();
+        self::assertStringContainsString('Sans indisponibilité renseignée, vous êtes considéré comme disponible.', $text);
+        self::assertStringNotContainsString('confirmer', $text);
+    }
+
+    public function testSomeoneWhoTakesPartInNoOpenCollectionHasNothingToBeRemindedOf(): void
+    {
+        $client = static::createClient();
+        $s = $this->pilotScenario($client);
+        $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/close", token: $s['creator']);
 
         $result = $this->remind($client, $s, 'alice@example.com', $s['creator']);
 
@@ -176,30 +192,34 @@ final class AvailabilityReminderControllerTest extends WebTestCase
         self::assertEmailCount(0);
     }
 
-    // --- "Relancer les membres en attente" ---------------------------------
+    // --- "Rappeler les participants" (D214) ---------------------------------
 
-    public function testRemindingPendingMembersTargetsOnlyThoseWhoDidNotConfirm(): void
+    public function testRemindingTheParticipantsReachesEveryoneWhateverTheirCalendar(): void
     {
         $client = static::createClient();
         $s = $this->pilotScenario($client);
-        $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", ['noUnavailability' => true], $s['alice']);
+        // Alice entered an absence, Bob and the ADMIN nothing: all three are reminded (no confirmation filter).
+        $this->api($client, 'POST', '/api/me/calendar', ['type' => 'UNAVAILABLE', 'startsAt' => '2027-02-01T00:00:00+01:00', 'endsAt' => '2027-02-04T00:00:00+01:00'], $s['alice']);
 
-        $result = $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/reminders/pending", [], $s['admin']);
+        $result = $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/reminders/participants", [], $s['admin']);
 
         self::assertResponseIsSuccessful();
-        // admin + bob are still pending; alice confirmed.
-        self::assertSame(2, $result['targetedCount']);
-        self::assertSame(2, $result['sentCount']);
+        self::assertSame(3, $result['targetedCount']);
+        self::assertSame(3, $result['sentCount']);
         self::assertSame(0, $result['skippedRecentlyCount']);
         self::assertSame(0, $result['failedCount']);
-        self::assertEmailCount(2);
-        $recipients = array_map(static fn ($message): string => $message->getTo()[0]->getAddress(), [self::getMailerMessage(0), self::getMailerMessage(1)]);
+        self::assertEmailCount(3);
+        $recipients = array_map(static fn ($message): string => $message->getTo()[0]->getAddress(), [self::getMailerMessage(0), self::getMailerMessage(1), self::getMailerMessage(2)]);
         sort($recipients);
-        self::assertSame(['admin@example.com', 'bob@example.com'], $recipients);
+        self::assertSame(['admin@example.com', 'alice@example.com', 'bob@example.com'], $recipients);
 
         $status = $this->collectionStatus($client, $s);
-        self::assertNull($this->rowOf($status, 'alice@example.com')['lastReminderAt']);
+        self::assertNotNull($this->rowOf($status, 'alice@example.com')['lastReminderAt']);
         self::assertNotNull($this->rowOf($status, 'bob@example.com')['lastReminderAt']);
+
+        // The old route is gone.
+        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/reminders/pending", [], $s['admin']);
+        self::assertSame(404, $client->getResponse()->getStatusCode());
     }
 
     public function testRemindingPendingMembersTwiceInARowDoesNotDoubleSend(): void
@@ -207,11 +227,11 @@ final class AvailabilityReminderControllerTest extends WebTestCase
         $client = static::createClient();
         $s = $this->pilotScenario($client);
 
-        $first = $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/reminders/pending", [], $s['creator']);
+        $first = $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/reminders/participants", [], $s['creator']);
         self::assertSame(3, $first['sentCount']);
 
         self::mockTime('2026-12-10 09:00:30 UTC');
-        $second = $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/reminders/pending", [], $s['creator']);
+        $second = $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/reminders/participants", [], $s['creator']);
         self::assertResponseIsSuccessful();
         self::assertSame(3, $second['targetedCount']);
         self::assertSame(0, $second['sentCount']);
@@ -220,7 +240,7 @@ final class AvailabilityReminderControllerTest extends WebTestCase
 
         // Later, they are reminded again — bulk rows are flagged as such.
         self::mockTime('2026-12-11 09:00:00 UTC');
-        $third = $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/reminders/pending", [], $s['creator']);
+        $third = $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/reminders/participants", [], $s['creator']);
         self::assertSame(3, $third['sentCount']);
         self::assertTrue($third['sent'][0]['bulk']);
     }
@@ -249,11 +269,12 @@ final class AvailabilityReminderControllerTest extends WebTestCase
         }
     }
 
-    public function testTheReminderOfAnExtendedPlanningTargetsOnlyTheUnansweredWindow(): void
+    public function testTheReminderOfAnExtendedPlanningPointsToTheEarliestOpenWindow(): void
     {
         $client = static::createClient();
         $s = $this->pilotScenario($client);
-        $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", ['noUnavailability' => true], $s['alice']);
+        // The first window is closed (its period is done with); the extension's is open.
+        $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/close", token: $s['creator']);
         $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/extensions", ['endsAt' => '2027-07-01'], $s['creator']);
         self::assertResponseIsSuccessful();
         $collections = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/availability-collections", token: $s['creator']);
@@ -263,7 +284,7 @@ final class AvailabilityReminderControllerTest extends WebTestCase
 
         self::assertResponseStatusCodeSame(201);
         $html = (string) self::getMailerMessage(0)->getHtmlBody();
-        self::assertStringContainsString('1er mai 2027 au 30 juin 2027', $html, 'Alice already answered January–April: only the new window is asked.');
+        self::assertStringContainsString('1er mai 2027 au 30 juin 2027', $html, 'January–April is closed: only the open window is mentioned.');
         self::assertStringContainsString('/my-availability?collection='.$newWindow['stableId'], $html);
     }
 }

@@ -213,7 +213,8 @@ final class PlanningCycleControllerTest extends WebTestCase
         self::assertResponseStatusCodeSame(201);
         self::assertSame([2, '2027-05-01', '2027-08-01', '2027-07-31'], [$period2['number'], $period2['startsAt'], $period2['endsAt'], $period2['lastDay']]);
         self::assertSame('preparation', $period2['status'], 'no collection is opened on creation (A)');
-        self::assertSame(['open' => 0, 'closed' => 0, 'acknowledged' => 0, 'expected' => 0, 'deadline' => null, 'uncoveredDays' => 92], $period2['collections']);
+        self::assertSame(['open' => 0, 'closed' => 0, 'participants' => 0, 'deadline' => null, 'uncoveredDays' => 92], $period2['collections']);
+        self::assertNull($period2['preparation']);
         self::assertCount(2, $period2['lines']);
         self::assertSame(['DRAFT', 'DRAFT'], array_column($period2['lines'], 'status'));
         self::assertEmailCount(0);
@@ -376,13 +377,13 @@ final class PlanningCycleControllerTest extends WebTestCase
     // --- end of the last period (B) ---------------------------------------------------------------
 
     /**
-     * A collection someone already answered keeps its dates (docs/decisions.md D207: only an untouched collection of
+     * A collection someone already touched (a calendar change inside it) keeps its dates (docs/decisions.md D207: only an untouched collection of
      * a blank period follows it — PlanningPeriodDatesTest).
      */
     public function testTheEndOfTheLastPeriodGrowsKeepingItsCollectionsAndShrinksWhileNothingIsBeyond(): void
     {
         $period1 = $this->lastPeriodId();
-        $this->api($this->client, 'POST', "/api/availability-collections/{$this->s['collectionId']}/acknowledge", ['kind' => 'NO_UNAVAILABILITY'], $this->s['alice']);
+        $this->api($this->client, 'POST', '/api/me/calendar', ['type' => 'UNAVAILABLE', 'startsAt' => '2027-02-10T00:00:00+01:00', 'endsAt' => '2027-02-12T00:00:00+01:00'], $this->s['alice']);
         self::assertResponseIsSuccessful();
 
         $grown = $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period1}", ['endsAt' => '2027-06-01', 'expectedEndsAt' => '2027-05-01'], $this->s['creator']);
@@ -538,7 +539,7 @@ final class PlanningCycleControllerTest extends WebTestCase
 
     // --- collections of a period (A, §5.9) --------------------------------------------------------
 
-    public function testAFollowingPeriodHasItsOwnCollectionsAndConfirmations(): void
+    public function testAFollowingPeriodHasItsOwnCollectionsAndParticipants(): void
     {
         $period1 = $this->lastPeriodId();
         $before = $this->fingerprint($period1);
@@ -558,29 +559,33 @@ final class PlanningCycleControllerTest extends WebTestCase
         $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/availability-collections", ['startsAt' => '2027-04-20', 'endsAt' => '2027-05-20'], $this->s['creator']);
         $this->assertError(422, 'window_outside_period');
 
-        // Alice answers period 2 only: period 1's answer is not given for her, and period 1 is unchanged.
-        $this->api($this->client, 'POST', "/api/availability-collections/{$opened['stableId']}/acknowledge", ['kind' => 'NO_UNAVAILABILITY'], $this->s['alice']);
+        // Alice changes her calendar in period 2 only: period 1 is unchanged.
+        $this->api($this->client, 'POST', '/api/me/calendar', ['type' => 'UNAVAILABLE', 'startsAt' => '2027-06-10T00:00:00+01:00', 'endsAt' => '2027-06-12T00:00:00+01:00'], $this->s['alice']);
         self::assertResponseIsSuccessful();
         self::assertSame($before, $this->fingerprint($period1));
 
         $status1 = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/collection-status?period={$period1}", token: $this->s['creator']);
         $status2 = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/collection-status?period={$period2}", token: $this->s['creator']);
         self::assertSame([1, 2], [$status1['period']['number'], $status2['period']['number']]);
-        self::assertSame(0, $status1['summary']['confirmedCount']);
-        self::assertSame(1, $status2['summary']['confirmedCount']);
+        self::assertSame([3, 3], [$status1['summary']['concernedCount'], $status2['summary']['concernedCount']]);
+        $aliceId = $this->api($this->client, 'GET', '/api/me', token: $this->s['alice'])['stableId'];
+        $alice = static fn (array $status): array => array_values(array_filter($status['members'], static fn (array $m): bool => $aliceId === $m['userStableId']))[0];
+        self::assertNull($alice($status1)['lastAvailabilityChangeAt'], 'a change in period 2 says nothing of period 1');
+        self::assertNotNull($alice($status2)['lastAvailabilityChangeAt']);
+        self::assertSame([0, 1], [$alice($status1)['unavailabilityCount'], $alice($status2)['unavailabilityCount']]);
         self::assertSame('2027-04-15', $status2['availabilityDeadline']);
         self::assertNull($status1['availabilityDeadline']);
 
         $list = $this->periods();
         self::assertSame(['collecting', 'collecting'], array_column($list['periods'], 'status'));
-        self::assertSame(1, $list['periods'][1]['collections']['acknowledged']);
+        self::assertSame(3, $list['periods'][1]['collections']['participants']);
         self::assertSame(0, $list['periods'][1]['collections']['uncoveredDays']);
 
         // Reminders and the deadline of one period only.
-        $reminded = $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/reminders/pending?period={$period2}", [], $this->s['creator']);
+        $reminded = $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/reminders/participants?period={$period2}", [], $this->s['creator']);
         self::assertResponseIsSuccessful();
         self::assertSame(2, $reminded['period']['number']);
-        self::assertSame(2, $reminded['targetedCount'], 'admin and bob: alice answered period 2');
+        self::assertSame(3, $reminded['targetedCount'], 'every participant of period 2, Alice included (D214)');
         $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/settings?period={$period1}", ['availabilityDeadline' => '2027-03-01'], $this->s['creator']);
         self::assertResponseIsSuccessful();
         self::assertSame(['2027-03-01', '2027-04-15'], $this->db()->fetchFirstColumn('SELECT deadline FROM availability_collections ORDER BY starts_at'));
@@ -595,8 +600,6 @@ final class PlanningCycleControllerTest extends WebTestCase
 
         $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/periods/{$period2}/availability-collections", [], $this->s['creator']);
         $this->assertError(409, 'period_fully_collected');
-        $this->api($this->client, 'POST', "/api/availability-collections/{$opened['stableId']}/acknowledge", ['kind' => 'NO_UNAVAILABILITY'], $this->s['alice']);
-        self::assertResponseStatusCodeSame(409);
     }
 
     // --- the flows not period-aware yet refuse (D187) --------------------------------------------

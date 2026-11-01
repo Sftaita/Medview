@@ -26,14 +26,6 @@ type Props = {
   periodStableId?: string
 }
 
-type Filter = 'ALL' | 'ACKNOWLEDGED' | 'PENDING'
-
-const FILTER_LABEL: Record<Filter, string> = {
-  ALL: 'Tous',
-  ACKNOWLEDGED: 'Répondu',
-  PENDING: 'À renseigner',
-}
-
 /** "10/12/2026" for an open date, "Ouverte le …". */
 function openedLabel(collection: AvailabilityCollection): string {
   return `Ouverte le ${formatMomentFull(collection.openedAt)}`
@@ -120,7 +112,6 @@ function CollectionItem({
 }) {
   const [expanded, setExpanded] = useState(initiallyOpen)
   const [rows, setRows] = useState<CollectionResponseRow[] | null>(null)
-  const [filter, setFilter] = useState<Filter>('ALL')
   const [rowsError, setRowsError] = useState<string | null>(null)
   const [editingDeadline, setEditingDeadline] = useState(false)
   const [deadline, setDeadline] = useState(collection.deadline ?? '')
@@ -141,13 +132,13 @@ function CollectionItem({
         if (!cancelled) setRows(result)
       })
       .catch(() => {
-        if (!cancelled) setRowsError('Impossible de charger les réponses.')
+        if (!cancelled) setRowsError('Impossible de charger les participants.')
       })
     return () => {
       cancelled = true
     }
-    // Reload the list when the counters change (someone answered, the collection was closed…).
-  }, [expanded, collection.stableId, collection.canManage, progress?.acknowledged, collection.status])
+    // Reload the list when the count changes (someone joined or left, the collection was closed…).
+  }, [expanded, collection.stableId, collection.canManage, progress?.participants, collection.status])
 
   async function saveDeadline() {
     setBusy(true)
@@ -158,8 +149,8 @@ function CollectionItem({
     } catch (err) {
       setActionError(
         err instanceof ApiError && err.status === 422
-          ? 'Cette échéance est invalide (elle ne peut pas être dans le passé).'
-          : "Impossible de modifier l'échéance.",
+          ? 'Cette date limite est invalide (elle ne peut pas être dans le passé).'
+          : 'Impossible de modifier la date limite indicative.',
       )
     } finally {
       setBusy(false)
@@ -178,16 +169,7 @@ function CollectionItem({
     }
   }
 
-  const visibleRows = (rows ?? []).filter((row) => {
-    if (filter === 'ALL') return true
-    if (filter === 'ACKNOWLEDGED') return row.status === 'ACKNOWLEDGED'
-    return row.status === 'PENDING'
-  })
-  const counts: Record<Filter, number> = {
-    ALL: rows?.length ?? 0,
-    ACKNOWLEDGED: (rows ?? []).filter((row) => row.status === 'ACKNOWLEDGED').length,
-    PENDING: (rows ?? []).filter((row) => row.status === 'PENDING').length,
-  }
+  const visibleRows = rows ?? []
   const mine = collection.myResponse
 
   return (
@@ -200,61 +182,31 @@ function CollectionItem({
           </h3>
           <p className="muted collection__meta">
             {openedLabel(collection)}
-            {collection.deadline && <> · Échéance {formatDateFull(collection.deadline)}</>}
+            {collection.deadline && <> · Date limite indicative {formatDateFull(collection.deadline)}</>}
             {collection.closedAt && <> · Clôturée le {formatMomentFull(collection.closedAt)}</>}
           </p>
         </div>
         {progress && (
-          <div className="collection__count" aria-label="Réponses">
-            <span className="tnum collection__count-value">
-              {progress.acknowledged}/{progress.expected}
-            </span>
-            <span className="muted"> réponses</span>
+          <div className="collection__count" aria-label="Participants">
+            <span className="tnum collection__count-value">{progress.participants}</span>
+            <span className="muted"> participant{progress.participants > 1 ? 's' : ''}</span>
           </div>
         )}
       </div>
 
-      {progress && (
-        <div
-          className="progress"
-          role="progressbar"
-          aria-label="Avancement des réponses"
-          aria-valuemin={0}
-          aria-valuemax={progress.expected}
-          aria-valuenow={progress.acknowledged}
-        >
-          <span
-            className="progress__bar"
-            style={{
-              width: `${progress.expected === 0 ? 0 : (progress.acknowledged / progress.expected) * 100}%`,
-            }}
-          />
-        </div>
-      )}
-
-      {open && collection.deadline && progress && (
+      {open && collection.deadline && (
         <p className="collection__deadline">
-          Échéance : {formatDeadline(collection.deadline)}
-          {progress.pending > 0 && ` · ${progress.pending} en attente`}
+          Date limite indicative : {formatDeadline(collection.deadline)} — le calendrier reste modifiable
+          après.
         </p>
       )}
 
-      {/* A plain member: only their own answer. */}
-      {!collection.canManage && mine && (
+      {/* A plain member: only their own participation (D214: nothing to confirm). */}
+      {!collection.canManage && mine && open && mine.status === 'PARTICIPANT' && (
         <p className="collection__mine">
-          {mine.status === 'ACKNOWLEDGED' && mine.acknowledgedAt ? (
-            <>Vous avez confirmé vos disponibilités le {formatMoment(mine.acknowledgedAt)}.</>
-          ) : open ? (
-            <>
-              Vos disponibilités sont à renseigner
-              {collection.deadline && <> avant le {formatDeadline(collection.deadline)}</>}.{' '}
-              <Link to={`/my-availability?collection=${collection.stableId}`}>
-                Renseigner mes disponibilités
-              </Link>
-            </>
-          ) : (
-            <>Vous n&apos;avez pas répondu à cette collecte.</>
-          )}
+          Indiquez vos éventuelles indisponibilités ; sans indisponibilité renseignée, vous êtes considéré
+          comme disponible.{' '}
+          <Link to={`/my-availability?collection=${collection.stableId}`}>Ouvrir mon calendrier</Link>
         </p>
       )}
 
@@ -267,11 +219,13 @@ function CollectionItem({
             onClick={() => setExpanded((value) => !value)}
           >
             <Icon name={expanded ? 'down' : 'users'} size={16} strokeWidth={2} />
-            {expanded ? 'Masquer les réponses' : 'Voir les réponses'}
+            {expanded ? 'Masquer les participants' : 'Voir les participants'}
           </button>
           {open && !editingDeadline && (
             <button type="button" className="btn btn--ghost btn--sm" onClick={() => setEditingDeadline(true)}>
-              {collection.deadline ? "Modifier l'échéance" : 'Fixer une échéance'}
+              {collection.deadline
+                ? 'Modifier la date limite indicative'
+                : 'Fixer une date limite indicative'}
             </button>
           )}
           {open && (
@@ -285,7 +239,7 @@ function CollectionItem({
       {editingDeadline && (
         <div className="collection__deadline-form">
           <label className="field__label" htmlFor={`deadline-${collection.stableId}`}>
-            Échéance de réponse
+            Date limite indicative
           </label>
           <input
             id={`deadline-${collection.stableId}`}
@@ -296,7 +250,7 @@ function CollectionItem({
           />
           <div className="form-actions">
             <button type="button" className="btn btn--primary btn--sm" onClick={saveDeadline} disabled={busy}>
-              Enregistrer l&apos;échéance
+              Enregistrer la date
             </button>
             <button
               type="button"
@@ -318,47 +272,26 @@ function CollectionItem({
       )}
 
       {collection.canManage && expanded && (
-        <div className="responses" aria-label={`Réponses ${label}`}>
-          <div role="group" aria-label="Filtrer les réponses" className="segmented">
-            {(Object.keys(FILTER_LABEL) as Filter[]).map((key) => (
-              <button
-                key={key}
-                type="button"
-                className="segmented__option"
-                aria-pressed={filter === key}
-                onClick={() => setFilter(key)}
-              >
-                {FILTER_LABEL[key]} <span className="tnum">({counts[key]})</span>
-              </button>
-            ))}
-          </div>
-          {rows === null && !rowsError && <p className="muted">Chargement des réponses…</p>}
+        <div className="responses" aria-label={`Participants ${label}`}>
+          {rows === null && !rowsError && <p className="muted">Chargement des participants…</p>}
           {rowsError && (
             <p role="alert" className="alert alert--error">
               <Icon name="alert" size={18} strokeWidth={2} />
               <span>{rowsError}</span>
             </p>
           )}
-          {rows !== null && visibleRows.length === 0 && (
-            <p className="muted">Personne dans cette catégorie.</p>
-          )}
+          {rows !== null && visibleRows.length === 0 && <p className="muted">Aucun participant.</p>}
           <ul className="list responses__list">
             {visibleRows.map((row) => (
               <li key={row.stableId} className={`response response--${row.status.toLowerCase()}`}>
                 <span className="response__mark" aria-hidden="true">
-                  {row.status === 'ACKNOWLEDGED' ? '✓' : row.status === 'PENDING' ? '⏳' : '–'}
+                  {row.status === 'WITHDRAWN' ? '–' : '•'}
                 </span>
                 <span className="response__name">
                   {row.user.lastName} {row.user.firstName}
                 </span>
                 <span className="response__status">
-                  {row.status === 'ACKNOWLEDGED' && row.acknowledgedAt
-                    ? `répondu le ${formatMoment(row.acknowledgedAt)}${
-                        row.acknowledgementKind === 'NO_UNAVAILABILITY' ? ' · aucune indisponibilité' : ''
-                      }`
-                    : row.status === 'PENDING'
-                      ? 'à renseigner'
-                      : 'a quitté le planning'}
+                  {row.status === 'WITHDRAWN' ? 'a quitté le planning' : 'participant'}
                   {row.lastAvailabilityChangeAt && row.status !== 'WITHDRAWN' && (
                     <span className="muted">
                       {' '}

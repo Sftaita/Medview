@@ -170,7 +170,7 @@ final class PlanningTeamMembershipServiceTest extends KernelTestCase
         // Leaves the main line before the window starts, but stays on the secondary line.
         $service->endMembership($stintA, $this->date('2027-02-01'));
 
-        self::assertSame(AvailabilityResponseStatus::PENDING, $responses->findOneForUser($collection, $user)?->getStatus());
+        self::assertSame(AvailabilityResponseStatus::PARTICIPANT, $responses->findOneForUser($collection, $user)?->getStatus());
     }
 
     /**
@@ -197,12 +197,12 @@ final class PlanningTeamMembershipServiceTest extends KernelTestCase
 
         // The secondary stint is closed first, in the middle of the window: still expected for their part.
         $service->endMembership($stintB, $this->date('2027-04-15'));
-        self::assertSame(AvailabilityResponseStatus::PENDING, $responses->findOneForUser($collection, $user)?->getStatus());
+        self::assertSame(AvailabilityResponseStatus::PARTICIPANT, $responses->findOneForUser($collection, $user)?->getStatus());
 
         // The main-line stint then ends before the window — but the secondary one lasted until 2027-04-15,
         // so the person still took part in the window and stays expected.
         $service->endMembership($stintA, $this->date('2027-02-01'));
-        self::assertSame(AvailabilityResponseStatus::PENDING, $responses->findOneForUser($collection, $user)?->getStatus());
+        self::assertSame(AvailabilityResponseStatus::PARTICIPANT, $responses->findOneForUser($collection, $user)?->getStatus());
     }
 
     /**

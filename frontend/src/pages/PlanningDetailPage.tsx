@@ -413,7 +413,7 @@ export function PlanningDetailPage() {
       label: 'Indisponibilités',
       short: 'Indisponibilités',
       narrow: 'Indispos',
-      count: pilot.status?.summary.expectedCount,
+      count: pilot.status?.summary.concernedCount,
     },
     { id: 'planning', label: single ? 'Planning' : `Gardes · période ${selectedNumber}`, short: 'Gardes' },
   ]

@@ -16,13 +16,15 @@ use Symfony\Component\Mime\Address;
 /**
  * The two emails of a period's preparation (docs/decisions.md D210):
  * the announcement (the collection of availabilities is open) and a
- * scheduled reminder (still not confirmed). Same charte as the manual
+ * scheduled reminder (the generation is near: check your calendar — sent to
+ * every participant, docs/decisions.md D214). Same charte as the manual
  * reminder (AvailabilityReminderMailer, D114); the link is the stable page
  * `/my-availability?collection=<stableId>`, built from APP_FRONTEND_URL.
  *
- * Never a word about anyone's unavailabilities, and no deadline: the target
- * date of the generation is mentioned as such, and answering later stays
- * possible. Returns whether the transport accepted the message.
+ * Never a word about anyone's unavailabilities. The deadline is said to be
+ * indicative and the target date of the generation is mentioned as such:
+ * the calendar stays editable. Returns whether the transport accepted the
+ * message.
  */
 final class PeriodPreparationMailer
 {
@@ -47,7 +49,7 @@ final class PeriodPreparationMailer
 
     public function sendReminder(User $recipient, PlanningCycle $cycle, AvailabilityCollection $collection, ?\DateTimeImmutable $target): bool
     {
-        return $this->send('period_reminder', 'Rappel : merci de confirmer vos disponibilités — '.$cycle->getPlanning()->getName(), $recipient, $cycle, $collection, $target);
+        return $this->send('period_reminder', 'La génération des gardes approche — '.$cycle->getPlanning()->getName(), $recipient, $cycle, $collection, $target);
     }
 
     private function send(string $template, string $subject, User $recipient, PlanningCycle $cycle, AvailabilityCollection $collection, ?\DateTimeImmutable $target): bool
@@ -64,6 +66,7 @@ final class PeriodPreparationMailer
                 'periodNumber' => $cycle->getNumber(),
                 'periodLabel' => self::formatDate($cycle->getStartsAt()).' au '.self::formatDate($cycle->getEndsAt()->modify('-1 day')),
                 'targetLabel' => null !== $target ? self::formatDate($target) : null,
+                'deadlineLabel' => null !== $collection->getDeadline() ? self::formatDate($collection->getDeadline()) : null,
                 'availabilityUrl' => rtrim($this->frontendUrl, '/').'/my-availability?collection='.$collection->getStableId(),
                 'supportEmail' => $this->supportEmail,
                 'supportUrl' => 'mailto:'.$this->supportEmail,

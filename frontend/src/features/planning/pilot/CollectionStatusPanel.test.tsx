@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CONFIRMED, makeDetail, makeRow, makeStatus } from '../../../testUtils/pilotFixtures'
+import { makeDetail, makeRow, makeStatus } from '../../../testUtils/pilotFixtures'
 import { status as httpStatus, stubApi } from '../../../testUtils/stubApi'
 import { CollectionStatusPanel } from './CollectionStatusPanel'
 import type { PilotMemberRow } from './types'
@@ -22,8 +22,19 @@ function renderPanel(overrides = {}, onChanged = vi.fn()) {
 /** The row of the members table for a last name. */
 const rowOf = (lastName: string) => screen.getByRole('button', { name: new RegExp(lastName) }).closest('li')!
 
+const EMPTY_HISTORY = () => ({
+  period: { stableId: 'c1', number: 1 },
+  timezone: 'Europe/Brussels',
+  member: null,
+  entries: [],
+})
+
 function detailRoutes(members: PilotMemberRow[], extra: Record<string, () => unknown> = {}) {
-  const routes: Record<string, () => unknown> = { ...extra }
+  // The drawer reads the member's history of the period (D217).
+  const routes: Record<string, () => unknown> = {
+    'GET /api/plannings/plan-1/history': EMPTY_HISTORY,
+    ...extra,
+  }
   for (const member of members) {
     routes[`GET /api/plannings/plan-1/members/${member.memberStableId}/availability-status`] = () =>
       makeDetail(member)
@@ -32,52 +43,41 @@ function detailRoutes(members: PilotMemberRow[], extra: Record<string, () => unk
 }
 
 describe('CollectionStatusPanel — summary and list', () => {
-  it('shows "X / Y membres ont confirmé", what is left, and a progress bar', () => {
+  it('says how many take part and what they declared, never a count of confirmations (D214)', () => {
     renderPanel()
 
-    expect(screen.getByText('1 / 3 membres ont confirmé leurs disponibilités.')).toBeInTheDocument()
-    expect(screen.getByText('Il reste 2 membres en attente.')).toBeInTheDocument()
-    const bar = screen.getByRole('progressbar', { name: 'Avancement des confirmations' })
-    expect(bar).toHaveAttribute('aria-valuenow', '1')
-    expect(bar).toHaveAttribute('aria-valuemax', '3')
+    expect(screen.getByText('3 participants')).toBeInTheDocument()
+    expect(screen.getByText('6 périodes d’indisponibilité déclarées sur cette période.')).toBeInTheDocument()
+    expect(
+      screen.getByText(/Sans indisponibilité renseignée, un participant est considéré comme disponible/),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+    expect(screen.queryByText(/confirmé|en attente/i)).not.toBeInTheDocument()
   })
 
-  it('says so when everybody confirmed', () => {
-    renderPanel({
-      members: [makeRow('1', 'Dupont', CONFIRMED)],
-      summary: {
-        ...STATUS.summary,
-        participantCount: 1,
-        expectedCount: 1,
-        confirmedCount: 1,
-        pendingCount: 0,
-      },
-    })
-
-    expect(screen.getByText('1 / 1 membres ont confirmé leurs disponibilités.')).toBeInTheDocument()
-    expect(screen.getByText('Tout le monde a confirmé.')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Relancer les membres en attente' })).not.toBeInTheDocument()
-  })
-
-  it('lists each member with Confirmé / En attente, the unavailability count and the last reminder', () => {
+  it('lists each member with the unavailability count, the last change and the last reminder — no status', () => {
     renderPanel()
 
     const dupont = within(rowOf('Dupont'))
-    expect(dupont.getByText('Confirmé')).toBeInTheDocument()
     expect(dupont.getByText('4')).toBeInTheDocument()
-    expect(dupont.getByText('—')).toBeInTheDocument()
+    expect(dupont.getByText('21/09/2026')).toBeInTheDocument() // calendar changed
+    expect(dupont.queryByText('Confirmé')).not.toBeInTheDocument()
 
     const martin = within(rowOf('Martin'))
-    expect(martin.getByText('En attente')).toBeInTheDocument()
     expect(martin.getByText('2')).toBeInTheDocument()
     expect(martin.getByText('20/09/2026')).toBeInTheDocument()
 
-    // No unavailability recorded is NOT a confirmation: still pending.
+    // No unavailability recorded: simply available, nothing pending.
     const leroy = within(rowOf('Leroy'))
-    expect(leroy.getByText('En attente')).toBeInTheDocument()
-    expect(leroy.queryByText('Confirmé')).not.toBeInTheDocument()
+    expect(leroy.queryByText('En attente')).not.toBeInTheDocument()
     expect(leroy.getByText('0')).toBeInTheDocument()
     expect(leroy.getByText('18/09/2026')).toBeInTheDocument()
+  })
+
+  it('marks someone no longer concerned (left before the period)', () => {
+    renderPanel({ members: [makeRow('1', 'Dupont', { participant: false })] })
+
+    expect(within(rowOf('Dupont')).getByText('Non concerné')).toBeInTheDocument()
   })
 })
 
@@ -114,7 +114,7 @@ describe('CollectionStatusPanel — search and sort', () => {
     const { unmount } = render(
       <CollectionStatusPanel status={makeStatus()} onChanged={vi.fn()} onEditDeadline={onEditDeadline} />,
     )
-    fireEvent.click(screen.getByRole('button', { name: 'Fixer une date souhaitée' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Fixer une date limite indicative' }))
     expect(onEditDeadline).toHaveBeenCalledTimes(1)
     unmount()
 
@@ -125,11 +125,11 @@ describe('CollectionStatusPanel — search and sort', () => {
         onEditDeadline={onEditDeadline}
       />,
     )
-    expect(screen.getByRole('button', { name: 'Modifier la date souhaitée' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Modifier la date limite indicative' })).toBeInTheDocument()
     cleanup()
 
     renderPanel()
-    expect(screen.queryByRole('button', { name: /date souhaitée/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /date limite indicative/ })).not.toBeInTheDocument()
   })
 })
 
@@ -137,17 +137,17 @@ describe('CollectionStatusPanel — the deadline is only a warning', () => {
   it('shows the informative deadline, and no warning while it is not passed', () => {
     renderPanel({ availabilityDeadline: '2026-09-25', deadlineOverdueDays: null })
 
-    expect(screen.getByText('Fin souhaitée d’encodage : 25 septembre 2026')).toBeInTheDocument()
+    expect(screen.getByText('Date limite indicative : 25 septembre 2026')).toBeInTheDocument()
     expect(screen.queryByText(/dépassée/)).not.toBeInTheDocument()
   })
 
   it('warns "dépassée depuis 2 jours" but disables nothing', () => {
     renderPanel({ availabilityDeadline: '2026-09-25', deadlineOverdueDays: 2 })
 
-    expect(screen.getByText(/Date souhaitée dépassée depuis 2 jours\./)).toBeInTheDocument()
+    expect(screen.getByText(/Date limite indicative dépassée depuis 2 jours\./)).toBeInTheDocument()
     expect(screen.getByText(/Cette date reste indicative/)).toBeInTheDocument()
     // Every action of the panel is still available.
-    expect(screen.getByRole('button', { name: 'Relancer les membres en attente' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Rappeler les participants' })).toBeEnabled()
     for (const button of screen.getAllByRole('button')) {
       expect(button).toBeEnabled()
     }
@@ -155,7 +155,7 @@ describe('CollectionStatusPanel — the deadline is only a warning', () => {
 })
 
 describe('CollectionStatusPanel — member drawer', () => {
-  it('opens on a click, shows identity, collection state and the period unavailabilities, and closes', async () => {
+  it('opens on a click, shows identity, participation and the period unavailabilities, and closes', async () => {
     stubApi(detailRoutes(STATUS.members))
     renderPanel()
 
@@ -165,8 +165,11 @@ describe('CollectionStatusPanel — member drawer', () => {
     await within(drawer).findByText('Indisponibilités (3)')
     expect(within(drawer).getByText('Membre')).toBeInTheDocument() // role
     expect(within(drawer).getByText('Seniors')).toBeInTheDocument() // team
-    expect(within(drawer).getByText('Confirmé')).toBeInTheDocument()
-    expect(within(drawer).getByText(/Dernière confirmation : 21\/09\/2026 à 10:14/)).toBeInTheDocument()
+    expect(
+      within(drawer).getByText('Participe à la période : reçoit l’annonce et les rappels.'),
+    ).toBeInTheDocument()
+    expect(within(drawer).getByText(/Calendrier modifié le 21\/09\/2026 à 10:14/)).toBeInTheDocument()
+    expect(within(drawer).queryByText(/confirmation reçue|Dernière confirmation/)).not.toBeInTheDocument()
     expect(within(drawer).getByText('3–7 janvier')).toBeInTheDocument()
     expect(within(drawer).getByText('21 janvier')).toBeInTheDocument()
     expect(within(drawer).getByText('14 février 08:00 → 15 février 12:00')).toBeInTheDocument()
@@ -190,7 +193,7 @@ describe('CollectionStatusPanel — member drawer', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
-  it('shows a pending member as "En attente" with no confirmation, even without any unavailability', async () => {
+  it('shows a member without any unavailability as available, with nothing to confirm', async () => {
     const leroy = STATUS.members[2]
     stubApi({
       ...detailRoutes(STATUS.members),
@@ -203,9 +206,8 @@ describe('CollectionStatusPanel — member drawer', () => {
 
     const drawer = await screen.findByRole('dialog', { name: 'Camille Leroy' })
     await within(drawer).findByText('Aucune indisponibilité enregistrée sur cette période.')
-    expect(within(drawer).getByText('En attente')).toBeInTheDocument()
-    expect(within(drawer).getByText('Aucune confirmation reçue.')).toBeInTheDocument()
-    expect(within(drawer).getByText(/ne vaut pas confirmation/)).toBeInTheDocument()
+    expect(within(drawer).getByText(/considéré comme disponible\. Rien à confirmer\./)).toBeInTheDocument()
+    expect(within(drawer).queryByText('En attente')).not.toBeInTheDocument()
     expect(within(drawer).getByText('Dernier rappel : 18/09/2026 à 11:00')).toBeInTheDocument()
   })
 
@@ -238,9 +240,10 @@ describe('CollectionStatusPanel — member drawer', () => {
     expect(within(unavailabilities).queryByText('2–3 mars')).not.toBeInTheDocument()
   })
 
-  it('has no reminder button for a member who already confirmed', async () => {
-    stubApi(detailRoutes(STATUS.members))
-    renderPanel()
+  it('has no reminder button for someone no longer concerned', async () => {
+    const gone = makeRow('9', 'Dupont', { participant: false })
+    stubApi(detailRoutes([gone]))
+    renderPanel({ members: [gone] })
 
     fireEvent.click(screen.getByRole('button', { name: /Dupont/ }))
 
@@ -379,8 +382,8 @@ describe('CollectionStatusPanel — individual reminder', () => {
   })
 })
 
-describe('CollectionStatusPanel — remind everybody still pending', () => {
-  const bulkUrl = 'POST /api/plannings/plan-1/reminders/pending'
+describe('CollectionStatusPanel — remind every participant (D214)', () => {
+  const bulkUrl = 'POST /api/plannings/plan-1/reminders/participants'
 
   it('asks for a confirmation, then sends once even on a double click', async () => {
     const api = stubApi({
@@ -394,16 +397,16 @@ describe('CollectionStatusPanel — remind everybody still pending', () => {
     })
     const onChanged = renderPanel()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Relancer les membres en attente' }))
-    expect(api.requests('POST', '/api/plannings/plan-1/reminders/pending')).toHaveLength(0)
-    expect(screen.getByText('Envoyer un rappel par email à 2 membres en attente ?')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Rappeler les participants' }))
+    expect(api.requests('POST', '/api/plannings/plan-1/reminders/participants')).toHaveLength(0)
+    expect(screen.getByText('Envoyer un rappel par email à 3 participants ?')).toBeInTheDocument()
 
     const send = screen.getByRole('button', { name: 'Envoyer les rappels' })
     fireEvent.click(send)
     fireEvent.click(send)
 
     expect(await screen.findByText('2 rappels envoyés.')).toBeInTheDocument()
-    expect(api.requests('POST', '/api/plannings/plan-1/reminders/pending')).toHaveLength(1)
+    expect(api.requests('POST', '/api/plannings/plan-1/reminders/participants')).toHaveLength(1)
     expect(onChanged).toHaveBeenCalledTimes(1)
   })
 
@@ -419,7 +422,7 @@ describe('CollectionStatusPanel — remind everybody still pending', () => {
     })
     renderPanel()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Relancer les membres en attente' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Rappeler les participants' }))
     fireEvent.click(screen.getByRole('button', { name: 'Envoyer les rappels' }))
 
     expect(
@@ -431,10 +434,10 @@ describe('CollectionStatusPanel — remind everybody still pending', () => {
     const api = stubApi({})
     renderPanel()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Relancer les membres en attente' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Rappeler les participants' }))
     fireEvent.click(screen.getByRole('button', { name: 'Annuler' }))
 
-    expect(screen.getByRole('button', { name: 'Relancer les membres en attente' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Rappeler les participants' })).toBeInTheDocument()
     expect(api.calls).toHaveLength(0)
   })
 })

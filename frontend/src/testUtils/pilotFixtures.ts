@@ -5,7 +5,7 @@ import type {
   PilotMemberRow,
 } from '../features/planning/pilot/types'
 
-/** A participant row; `overrides` win. Pending by default, no unavailability, never reminded. */
+/** A participant row; `overrides` win. A participant, no unavailability, never reminded. */
 export function makeRow(
   id: string,
   lastName: string,
@@ -19,28 +19,23 @@ export function makeRow(
     role: 'MEMBER',
     team: { stableId: 'team-1', name: 'Seniors' },
     membershipEnd: null,
-    collectionState: 'PENDING',
-    acknowledgedAt: null,
-    acknowledgementKind: null,
+    participant: true,
     lastAvailabilityChangeAt: null,
-    pendingCollectionCount: 1,
     unavailabilityCount: 0,
     lastReminderAt: null,
     ...overrides,
   }
 }
 
-export const CONFIRMED: Partial<PilotMemberRow> = {
-  collectionState: 'ACKNOWLEDGED',
-  acknowledgedAt: '2026-09-21T08:14:00+00:00',
-  acknowledgementKind: 'CONFIRMED',
-  pendingCollectionCount: 0,
+/** A row whose calendar was changed on 21 September (docs/decisions.md D215). */
+export const CHANGED: Partial<PilotMemberRow> = {
+  lastAvailabilityChangeAt: '2026-09-21T08:14:00+00:00',
 }
 
-/** dupont: confirmed, 4 unavailabilities · martin: pending, 2, reminded 20/09 · leroy: pending, 0, reminded 18/09. */
+/** dupont: 4 unavailabilities, calendar changed 21/09 · martin: 2, reminded 20/09 · leroy: 0, reminded 18/09. */
 export function makeStatus(overrides: Partial<CollectionStatus> = {}): CollectionStatus {
   const members = [
-    makeRow('1', 'Dupont', { ...CONFIRMED, unavailabilityCount: 4 }),
+    makeRow('1', 'Dupont', { ...CHANGED, unavailabilityCount: 4 }),
     makeRow('2', 'Martin', { unavailabilityCount: 2, lastReminderAt: '2026-09-20T09:00:00+00:00' }),
     makeRow('3', 'Leroy', { unavailabilityCount: 0, lastReminderAt: '2026-09-18T09:00:00+00:00' }),
   ]
@@ -58,10 +53,7 @@ export function makeStatus(overrides: Partial<CollectionStatus> = {}): Collectio
     openCollectionCount: 1,
     summary: {
       participantCount: 3,
-      expectedCount: 3,
-      confirmedCount: 1,
-      pendingCount: 2,
-      notExpectedCount: 0,
+      concernedCount: 3,
       unavailabilityCount: 6,
     },
     members,
@@ -87,9 +79,7 @@ export function makeDetail(
         startsAt: '2027-01-01',
         lastDay: '2027-03-31',
         collectionStatus: 'OPEN',
-        status: member.collectionState === 'ACKNOWLEDGED' ? 'ACKNOWLEDGED' : 'PENDING',
-        acknowledgedAt: member.acknowledgedAt,
-        acknowledgementKind: member.acknowledgementKind,
+        status: member.participant ? 'PARTICIPANT' : 'WITHDRAWN',
       },
     ],
     // 3–7 janvier, 21 janvier, 14 février 08:00 → 15 février 12:00 (Brussels).
@@ -130,9 +120,6 @@ export function makePreflight(overrides: Partial<GenerationPreflight> = {}): Gen
       timezone: 'Europe/Brussels',
     },
     participantCount: 16,
-    confirmedCount: 13,
-    pendingCount: 3,
-    notExpectedCount: 0,
     unavailabilityCount: 42,
     availabilityDeadline: null,
     deadlineOverdueDays: null,
@@ -150,7 +137,7 @@ export function makePreflight(overrides: Partial<GenerationPreflight> = {}): Gen
       },
     ],
     blockers: [],
-    warnings: [{ code: 'PENDING_MEMBERS', lineStableId: null, lineName: null }],
+    warnings: [],
     canGenerate: true,
     ...overrides,
   }

@@ -112,9 +112,8 @@ final class PlanningCollectionStatusController
                 'startsAt' => $response->getCollection()->getStartsAt()->format('Y-m-d'),
                 'lastDay' => $response->getCollection()->getEndsAt()->modify('-1 day')->format('Y-m-d'),
                 'collectionStatus' => $response->getCollection()->getStatus()->value,
+                // PARTICIPANT | WITHDRAWN (docs/decisions.md D214).
                 'status' => $response->getStatus()->value,
-                'acknowledgedAt' => $response->getAcknowledgedAt()?->format(\DATE_ATOM),
-                'acknowledgementKind' => $response->getAcknowledgementKind()?->value,
             ], $detail->responses),
             // Read live from the person's own calendar, limited to the planning period — never copied per planning.
             'unavailabilities' => array_map($this->periodToArray(...), $detail->unavailabilities),
@@ -258,11 +257,9 @@ final class PlanningCollectionStatusController
     private function summaryToArray(PlanningCollectionStatus $status): array
     {
         return [
+            // docs/decisions.md D214: who takes part, never who "confirmed".
             'participantCount' => $status->participantCount(),
-            'expectedCount' => $status->expectedCount(),
-            'confirmedCount' => $status->confirmedCount(),
-            'pendingCount' => $status->pendingCount(),
-            'notExpectedCount' => $status->notExpectedCount(),
+            'concernedCount' => $status->concernedCount(),
             'unavailabilityCount' => $status->unavailabilityCount(),
         ];
     }
@@ -283,12 +280,9 @@ final class PlanningCollectionStatusController
             'role' => $member->getRole()->value,
             'team' => ['stableId' => (string) $member->getPlanningTeam()->getStableId(), 'name' => $member->getPlanningTeam()->getName()],
             'membershipEnd' => $member->getMembershipEnd()?->format('Y-m-d'),
-            // PENDING / ACKNOWLEDGED (shown "Confirmé") / NOT_EXPECTED — from explicit answers only (D120, D128).
-            'collectionState' => $row->state->value,
-            'acknowledgedAt' => $row->acknowledgedAt?->format(\DATE_ATOM),
-            'acknowledgementKind' => $row->acknowledgementKind?->value,
+            // Told by the announcement and the reminders (false: left before, or an inactive account).
+            'participant' => $row->participant,
             'lastAvailabilityChangeAt' => $row->lastAvailabilityChangeAt?->format(\DATE_ATOM),
-            'pendingCollectionCount' => $row->pendingCollectionCount,
             'unavailabilityCount' => $row->unavailabilityCount,
             'lastReminderAt' => $row->lastReminderAt?->format(\DATE_ATOM),
         ];

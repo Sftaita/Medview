@@ -1055,3 +1055,81 @@
     transition: none !important;
   }
 }
+
+/* docs/decisions.md D217 : historique d'une période (déclarations, générations, réattributions). */
+.history {
+  display: grid;
+  gap: 10px;
+}
+
+.history__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.history__head h3 {
+  margin: 0;
+}
+
+.history__list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.history__item {
+  display: grid;
+  grid-template-columns: minmax(150px, 210px) 1fr;
+  gap: 4px 14px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.history__item:first-child {
+  border-top: 0;
+}
+
+.history__when {
+  display: grid;
+  gap: 2px;
+  font-size: var(--text-sm);
+  color: var(--gray-600);
+}
+
+.history__kind {
+  font-weight: 600;
+  color: var(--gray-800);
+}
+
+.history__item--generation .history__kind {
+  color: var(--green-700);
+}
+
+.history__item--assignment .history__kind {
+  color: var(--amber-700);
+}
+
+.history__what p {
+  margin: 0;
+}
+
+.history__note {
+  margin-top: 2px !important;
+  font-size: var(--text-sm);
+  color: var(--gray-600);
+}
+
+.history__note--warn {
+  color: var(--amber-700);
+}
+
+@media (max-width: 640px) {
+  .history__item {
+    grid-template-columns: 1fr;
+  }
+}

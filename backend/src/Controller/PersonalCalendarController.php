@@ -14,7 +14,6 @@ use App\Repository\UserAvailabilityPeriodRepository;
 use App\Service\UserAvailabilityService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\CurrentUser;
@@ -26,6 +25,14 @@ use Symfony\Component\Validator\Validator\ValidatorInterface;
  * parameter: every action here is implicitly scoped to #[CurrentUser], so
  * this endpoint needs no Voter — a user can only ever reach their own rows
  * (D057, see also PlanningTeamRoleVoter's docblock).
+ *
+ * Never refused because of a planning (docs/decisions.md D214): a deadline,
+ * a generation or a publication does not stop an edit. A creation, a change
+ * and a deletion answer `impacts` (docs/decisions.md D216, D218): the
+ * already-generated periods whose days the change makes unavailable
+ * (`addedDays`) or available again (`releasedDays`), and the duties held on
+ * the days added — told, never applied to a planning. Empty when there is
+ * nothing to say.
  */
 final class PersonalCalendarController
 {
@@ -60,12 +67,12 @@ final class PersonalCalendarController
         }
 
         try {
-            $period = $this->service->create($user, $dto->typeEnum(), $startsAt, $endsAt);
+            $change = $this->service->createAs($user, $user, $dto->typeEnum(), $startsAt, $endsAt);
         } catch (OverlappingUserAvailabilityPeriodException $exception) {
             return new JsonResponse(['error' => 'overlapping_period', 'message' => $exception->getMessage()], 409);
         }
 
-        return new JsonResponse($this->toArray($period, []), 201);
+        return new JsonResponse($this->toArray($change->period, []) + ['impacts' => $change->impacts], 201);
     }
 
     #[Route('/api/me/calendar/{stableId}', name: 'api_me_calendar_update', methods: ['PATCH'])]
@@ -84,28 +91,29 @@ final class PersonalCalendarController
         }
 
         try {
-            $this->service->reschedule($period, $dto->typeEnum(), $startsAt, $endsAt);
+            $change = $this->service->reschedule($period, $dto->typeEnum(), $startsAt, $endsAt, $user);
         } catch (OverlappingUserAvailabilityPeriodException $exception) {
             return new JsonResponse(['error' => 'overlapping_period', 'message' => $exception->getMessage()], 409);
         } catch (ImportedAvailabilityPeriodException) {
             return self::importedReadOnly();
         }
 
-        return new JsonResponse($this->toArray($period, []));
+        return new JsonResponse($this->toArray($period, []) + ['impacts' => $change->impacts]);
     }
 
     #[Route('/api/me/calendar/{stableId}', name: 'api_me_calendar_delete', methods: ['DELETE'])]
-    public function delete(string $stableId, #[CurrentUser] User $user): Response
+    public function delete(string $stableId, #[CurrentUser] User $user): JsonResponse
     {
         $period = $this->findOwnPeriod($stableId, $user);
 
         try {
-            $this->service->delete($period);
+            $change = $this->service->delete($period, $user);
         } catch (ImportedAvailabilityPeriodException) {
             return self::importedReadOnly();
         }
 
-        return new Response(status: 204);
+        // docs/decisions.md D218: a deletion says what it gives back in a generated planning, too.
+        return new JsonResponse(['impacts' => $change->impacts]);
     }
 
     private static function importedReadOnly(): JsonResponse
