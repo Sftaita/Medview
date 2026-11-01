@@ -1,6 +1,5 @@
 import { apiFetch } from '../../lib/apiClient'
 import type {
-  AcknowledgementKind,
   AvailabilityCollection,
   CollectionResponseRow,
   ExtendPlanningInput,
@@ -8,20 +7,9 @@ import type {
   ResponseStatus,
 } from './collectionTypes'
 
-/** The open collections the current user has to answer (or has answered). */
+/** The open collections the current user takes part in, once announced (docs/decisions.md D214). */
 export function fetchMyCollections(): Promise<AvailabilityCollection[]> {
   return apiFetch<AvailabilityCollection[]>('/api/me/availability-collections')
-}
-
-/** The current user's own confirmation — never anybody else's. */
-export function acknowledgeCollection(
-  collectionStableId: string,
-  kind: AcknowledgementKind,
-): Promise<AvailabilityCollection> {
-  return apiFetch<AvailabilityCollection>(`/api/availability-collections/${collectionStableId}/acknowledge`, {
-    method: 'POST',
-    body: kind === 'NO_UNAVAILABILITY' ? { noUnavailability: true } : {},
-  })
 }
 
 export function fetchPlanningCollections(planningStableId: string): Promise<AvailabilityCollection[]> {

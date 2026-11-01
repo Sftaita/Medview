@@ -5,14 +5,14 @@ declare(strict_types=1);
 namespace App\Entity;
 
 /**
- * Derived from AvailabilityCollectionResponse's own columns, never stored:
- * ACKNOWLEDGED once acknowledgedAt is set (it wins over everything else),
- * WITHDRAWN when the person left the planning before answering (no longer
- * expected, excluded from the X/Y counters), PENDING otherwise.
+ * Derived from AvailabilityCollectionResponse's own columns, never stored
+ * (docs/decisions.md D214): PARTICIPANT while the person takes part in the
+ * window, WITHDRAWN once they left the planning before it. There is no
+ * "answered" state any more: nobody is asked to confirm, and a person without
+ * any unavailability is simply available.
  */
 enum AvailabilityResponseStatus: string
 {
-    case PENDING = 'PENDING';
-    case ACKNOWLEDGED = 'ACKNOWLEDGED';
+    case PARTICIPANT = 'PARTICIPANT';
     case WITHDRAWN = 'WITHDRAWN';
 }

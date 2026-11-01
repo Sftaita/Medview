@@ -9,6 +9,7 @@ use App\Entity\UserAvailabilityPeriod;
 use App\Entity\UserAvailabilitySource;
 use App\Entity\UserAvailabilityType;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
+use Doctrine\DBAL\Types\Types;
 use Doctrine\Persistence\ManagerRegistry;
 use Symfony\Component\Uid\Uuid;
 
@@ -60,6 +61,14 @@ class UserAvailabilityPeriodRepository extends ServiceEntityRepository
      * SurgicalHub may overlap anything (docs/surgicalhub-integration.md §6.1),
      * exactly like the partial database constraint.
      *
+     * The bounds are compared as instants, whatever offset they carry
+     * (D219): normalised to UTC and bound as TIMESTAMPTZ. Left to Doctrine's
+     * inference, a DateTimeImmutable is bound as a plain TIMESTAMP whose
+     * offset is dropped ("2027-01-13 00:00:00" for 00:00+01:00) and that the
+     * UTC session then reads as UTC, shifted by the offset: the check missed
+     * a real overlap (the exclusion constraint then answered 500) or saw a
+     * false one.
+     *
      * @return list<UserAvailabilityPeriod>
      */
     public function findOverlappingOrTouchingForUser(
@@ -78,8 +87,8 @@ class UserAvailabilityPeriodRepository extends ServiceEntityRepository
             ->andWhere('p.endsAt >= :startsAt')
             ->setParameter('user', $user)
             ->setParameter('type', $type)
-            ->setParameter('startsAt', $startsAt)
-            ->setParameter('endsAt', $endsAt);
+            ->setParameter('startsAt', self::utc($startsAt), Types::DATETIMETZ_IMMUTABLE)
+            ->setParameter('endsAt', self::utc($endsAt), Types::DATETIMETZ_IMMUTABLE);
 
         if (null !== $excluding) {
             $qb->andWhere('p.id != :excludingId')->setParameter('excludingId', $excluding->getId());
@@ -94,6 +103,8 @@ class UserAvailabilityPeriodRepository extends ServiceEntityRepository
      * [startsAt, endsAt] intersects [$from, $to] — what
      * PlanningSnapshotService copies into PlanningSnapshotAvailabilityPeriod
      * rows (docs/planning-generation.md §Indisponibilités et préférences).
+     * $from/$to are instants, usually local midnights of the planning's
+     * timezone: compared as such, never shifted by their offset (D220).
      *
      * @return list<UserAvailabilityPeriod>
      */
@@ -104,8 +115,8 @@ class UserAvailabilityPeriodRepository extends ServiceEntityRepository
             ->andWhere('p.startsAt < :to')
             ->andWhere('p.endsAt > :from')
             ->setParameter('user', $user)
-            ->setParameter('from', $from)
-            ->setParameter('to', $to)
+            ->setParameter('from', self::utc($from), Types::DATETIMETZ_IMMUTABLE)
+            ->setParameter('to', self::utc($to), Types::DATETIMETZ_IMMUTABLE)
             ->orderBy('p.startsAt', 'ASC')
             ->getQuery()
             ->getResult();
@@ -133,11 +144,17 @@ class UserAvailabilityPeriodRepository extends ServiceEntityRepository
             ->andWhere('p.endsAt > :from')
             ->setParameter('users', $users)
             ->setParameter('type', $type)
-            ->setParameter('from', $from)
-            ->setParameter('to', $to)
+            ->setParameter('from', self::utc($from), Types::DATETIMETZ_IMMUTABLE)
+            ->setParameter('to', self::utc($to), Types::DATETIMETZ_IMMUTABLE)
             ->orderBy('p.startsAt', 'ASC')
             ->addOrderBy('p.id', 'ASC')
             ->getQuery()
             ->getResult();
+    }
+
+    /** The same instant in UTC — no range query here depends on the offset its bounds carry (D219, D220). */
+    public static function utc(\DateTimeImmutable $instant): \DateTimeImmutable
+    {
+        return $instant->setTimezone(new \DateTimeZone('UTC'));
     }
 }

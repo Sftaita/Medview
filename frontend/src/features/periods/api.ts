@@ -143,11 +143,19 @@ export type PeriodPreparation = {
     emails: PreparationEmails
   }
   targetGenerationOn: string | null
-  collection: { state: 'not_open' | 'open' | 'closed'; responded: number; expected: number }
+  /** docs/decisions.md D214: the indicative deadline planned here (never blocking). */
+  declarationDeadlineOn: string | null
+  /** The deadline the participants are told: the one above, else the latest of the open collections. */
+  deadlineOn: string | null
+  /** The real date of the last completed generation of the period, once it happened. */
+  generatedAt: string | null
+  /** How many people the open collections concern — never a count of confirmations (D214). */
+  collection: { state: 'not_open' | 'open' | 'closed'; participants: number }
   reminders: PreparationReminder[]
 }
 export type PreparationInput = {
   announceOn: string | null
+  declarationDeadlineOn: string | null
   targetGenerationOn: string | null
   reminders: { stableId?: string; value: number; unit: ReminderUnit }[]
 }

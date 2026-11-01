@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { makeCollection } from '../../testUtils/fakeBackend'
@@ -20,32 +20,24 @@ function row(
 ): CollectionResponseRow {
   return {
     stableId: `r-${id}`,
-    status: 'PENDING',
-    acknowledgedAt: null,
-    acknowledgementKind: null,
+    status: 'PARTICIPANT',
     lastAvailabilityChangeAt: null,
     user: { stableId: `u-${id}`, firstName: 'Camille', lastName },
     ...overrides,
   }
 }
 
-const answered = (at: string): Partial<CollectionResponseRow> => ({
-  status: 'ACKNOWLEDGED',
-  acknowledgedAt: at,
-  acknowledgementKind: 'CONFIRMED',
-})
-
 const RESPONSES = [
-  row('1', 'Dupont', answered('2026-12-12T08:00:00+00:00')),
-  row('2', 'Martin', answered('2026-12-14T08:00:00+00:00')),
-  row('3', 'Durand'),
+  row('1', 'Dupont'),
+  row('2', 'Martin'),
+  row('3', 'Durand', { status: 'WITHDRAWN' }),
   row('4', 'Lambert', { lastAvailabilityChangeAt: '2026-12-15T08:00:00+00:00' }),
 ]
 
 const MANAGER_COLLECTION = makeCollection({
   canManage: true,
   myResponse: null,
-  progress: { expected: 4, acknowledged: 2, pending: 2 },
+  progress: { participants: 3 },
 })
 
 function renderPanel() {
@@ -56,8 +48,8 @@ function renderPanel() {
   )
 }
 
-describe('AvailabilityCollectionsPanel — for someone who manages it', () => {
-  it('shows the X/Y counter, the deadline, and who has answered or is late', async () => {
+describe('AvailabilityCollectionsPanel — for someone who manages it (D214: nothing to confirm)', () => {
+  it('shows how many people take part, the indicative deadline, and never a confirmation', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-12-16T09:00:00Z'))
     stubApi({
@@ -68,40 +60,19 @@ describe('AvailabilityCollectionsPanel — for someone who manages it', () => {
     renderPanel()
 
     expect(await screen.findByText('Janvier–mars 2027')).toBeInTheDocument()
-    expect(screen.getByText('2/4')).toBeInTheDocument()
-    expect(screen.getByText(/Échéance : 20 décembre · 2 en attente/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Participants')).toHaveTextContent('3 participants')
+    expect(
+      screen.getByText(/Date limite indicative : 20 décembre — le calendrier reste modifiable après/),
+    ).toBeInTheDocument()
     expect(await screen.findByText(/Dupont Camille/)).toBeInTheDocument()
-    expect(screen.getByText(/répondu le 12\/12/)).toBeInTheDocument()
-    expect(screen.getByText(/répondu le 14\/12/)).toBeInTheDocument()
-    expect(screen.getAllByText(/à renseigner/)).toHaveLength(2)
-    // A late person who touched their calendar is visible as such.
+    expect(screen.getAllByText('participant')).toHaveLength(3)
+    expect(screen.getByText('a quitté le planning')).toBeInTheDocument()
     expect(screen.getByText(/calendrier modifié le 15\/12/)).toBeInTheDocument()
+    expect(screen.queryByText(/répondu|à renseigner|confirm/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
   })
 
-  it('filters the list: Tous, Répondu, À renseigner', async () => {
-    stubApi({
-      'GET /api/plannings/plan-1/availability-collections': () => [MANAGER_COLLECTION],
-      'GET /api/availability-collections/col-1/responses': () => RESPONSES,
-    })
-    renderPanel()
-    await screen.findByText(/Dupont Camille/)
-
-    fireEvent.click(screen.getByRole('button', { name: /À renseigner \(2\)/ }))
-    expect(screen.queryByText(/Dupont Camille/)).not.toBeInTheDocument()
-    expect(screen.getByText(/Durand Camille/)).toBeInTheDocument()
-    expect(screen.getByText(/Lambert Camille/)).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: /Répondu \(2\)/ }))
-    expect(screen.getByText(/Dupont Camille/)).toBeInTheDocument()
-    expect(screen.getByText(/Martin Camille/)).toBeInTheDocument()
-    expect(screen.queryByText(/Durand Camille/)).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: /Tous \(4\)/ }))
-    expect(screen.getByText(/Durand Camille/)).toBeInTheDocument()
-    expect(screen.getByText(/Dupont Camille/)).toBeInTheDocument()
-  })
-
-  it('keeps the history: closed collections stay listed with their frozen counter', async () => {
+  it('keeps the history: closed collections stay listed with their participants', async () => {
     const old = makeCollection({
       stableId: 'col-0',
       startsAt: '2026-09-01',
@@ -113,7 +84,7 @@ describe('AvailabilityCollectionsPanel — for someone who manages it', () => {
       closedAt: '2026-12-10T09:00:00+00:00',
       canManage: true,
       myResponse: null,
-      progress: { expected: 9, acknowledged: 9, pending: 0 },
+      progress: { participants: 9 },
     })
     stubApi({
       'GET /api/plannings/plan-1/availability-collections': () => [MANAGER_COLLECTION, old],
@@ -122,14 +93,14 @@ describe('AvailabilityCollectionsPanel — for someone who manages it', () => {
     renderPanel()
 
     await screen.findByText('Septembre–décembre 2026')
-    expect(screen.getByText('9/9')).toBeInTheDocument()
+    expect(screen.getByText('9')).toBeInTheDocument()
     expect(screen.getByText(/Ouverte le 25\/08\/2026/)).toBeInTheDocument()
     expect(screen.getByText('Clôturée')).toBeInTheDocument()
     // Only the open one offers actions.
     expect(screen.getAllByRole('button', { name: 'Clôturer' })).toHaveLength(1)
   })
 
-  it('changes the deadline and closes a collection', async () => {
+  it('changes the indicative deadline and closes a collection', async () => {
     const patches: unknown[] = []
     const api = stubApi({
       'GET /api/plannings/plan-1/availability-collections': () => [MANAGER_COLLECTION],
@@ -147,11 +118,11 @@ describe('AvailabilityCollectionsPanel — for someone who manages it', () => {
     renderPanel()
     await screen.findByText(/Dupont Camille/)
 
-    fireEvent.click(screen.getByRole('button', { name: "Modifier l'échéance" }))
-    fireEvent.change(screen.getByLabelText('Échéance de réponse'), { target: { value: '2026-12-31' } })
-    fireEvent.click(screen.getByRole('button', { name: "Enregistrer l'échéance" }))
+    fireEvent.click(screen.getByRole('button', { name: 'Modifier la date limite indicative' }))
+    fireEvent.change(screen.getByLabelText('Date limite indicative'), { target: { value: '2026-12-31' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer la date' }))
     await waitFor(() => expect(patches).toEqual([{ deadline: '2026-12-31' }]))
-    expect(await screen.findByText(/Échéance 31\/12\/2026/)).toBeInTheDocument()
+    expect(await screen.findByText(/Date limite indicative 31\/12\/2026/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Clôturer' }))
     expect(await screen.findByText('Clôturée')).toBeInTheDocument()
@@ -168,9 +139,9 @@ describe('AvailabilityCollectionsPanel — for someone who manages it', () => {
     renderPanel()
     await screen.findByText(/Dupont Camille/)
 
-    fireEvent.click(screen.getByRole('button', { name: "Modifier l'échéance" }))
-    fireEvent.change(screen.getByLabelText('Échéance de réponse'), { target: { value: '2020-01-01' } })
-    fireEvent.click(screen.getByRole('button', { name: "Enregistrer l'échéance" }))
+    fireEvent.click(screen.getByRole('button', { name: 'Modifier la date limite indicative' }))
+    fireEvent.change(screen.getByLabelText('Date limite indicative'), { target: { value: '2020-01-01' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer la date' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('dans le passé')
   })
@@ -184,44 +155,23 @@ describe('AvailabilityCollectionsPanel — for someone who manages it', () => {
 })
 
 describe('AvailabilityCollectionsPanel — for a plain member', () => {
-  it('shows only their own status: no counter, no list of others', async () => {
+  it('shows only their own participation: no count, no list of others, nothing to confirm', async () => {
     const api = stubApi({
       'GET /api/plannings/plan-1/availability-collections': () => [makeCollection()],
     })
 
     renderPanel()
 
-    expect(await screen.findByText(/Vos disponibilités sont à renseigner avant le/)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Renseigner mes disponibilités' })).toHaveAttribute(
+    expect(
+      await screen.findByText(/sans indisponibilité renseignée, vous êtes considéré comme disponible/),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Ouvrir mon calendrier' })).toHaveAttribute(
       'href',
       '/my-availability?collection=col-1',
     )
-    expect(screen.queryByText(/réponses/)).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Voir les réponses/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Participants')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Voir les participants/ })).not.toBeInTheDocument()
+    expect(screen.queryByText(/confirm/i)).not.toBeInTheDocument()
     expect(api.calls.some((c) => c.path.endsWith('/responses'))).toBe(false)
-  })
-
-  it('shows their confirmation', async () => {
-    stubApi({
-      'GET /api/plannings/plan-1/availability-collections': () => [
-        makeCollection({
-          myResponse: {
-            stableId: 'r',
-            status: 'ACKNOWLEDGED',
-            acknowledgedAt: '2026-12-12T08:00:00+00:00',
-            acknowledgementKind: 'CONFIRMED',
-            lastAvailabilityChangeAt: null,
-          },
-        }),
-      ],
-    })
-
-    renderPanel()
-
-    const item = (await screen.findByText(/Vous avez confirmé vos disponibilités le/)).closest(
-      'li',
-    ) as HTMLElement
-    expect(within(item).getByText(/12\/12/)).toBeInTheDocument()
   })
 })

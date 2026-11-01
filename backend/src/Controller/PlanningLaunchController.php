@@ -196,10 +196,8 @@ final class PlanningLaunchController
                 'lastDay' => $planning->getEndsAt()->modify('-1 day')->format('Y-m-d'),
                 'timezone' => $planning->getTimezone(),
             ],
+            // docs/decisions.md D214: no confirmation counts — the snapshot takes the calendars as they are.
             'participantCount' => $collection->participantCount(),
-            'confirmedCount' => $collection->confirmedCount(),
-            'pendingCount' => $collection->pendingCount(),
-            'notExpectedCount' => $collection->notExpectedCount(),
             'unavailabilityCount' => $collection->unavailabilityCount(),
             'availabilityDeadline' => $collection->availabilityDeadline?->format('Y-m-d'),
             'deadlineOverdueDays' => $collection->deadlineOverdueDays,

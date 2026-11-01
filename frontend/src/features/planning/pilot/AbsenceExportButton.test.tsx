@@ -42,11 +42,11 @@ describe('Exporter les absences (PDF)', () => {
     expect(screen.getByRole('button', { name: 'Exporter les absences (PDF)' })).toBeInTheDocument()
   })
 
-  it('is offered even when nobody is pending and no deadline can be set', () => {
+  it('is offered even when nobody takes part and no deadline can be set', () => {
     const base = makeStatus()
     render(
       <CollectionStatusPanel
-        status={makeStatus({ summary: { ...base.summary, pendingCount: 0 } })}
+        status={makeStatus({ summary: { ...base.summary, concernedCount: 0 } })}
         onChanged={vi.fn()}
       />,
     )

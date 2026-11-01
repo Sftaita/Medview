@@ -127,7 +127,9 @@ dates pures (`DATE`, mêmes bornes que `PlanningPeriod`) ; `UserAvailabilityPeri
 et `TeamMemberNonParticipationPeriod` sont `TIMESTAMPTZ`, donc les bornes de
 la période sont résolues en instants absolus via le fuseau de l'équipe
 avant comparaison (même technique que
-`DutyMaterializationService::resolveInstant()`).
+`DutyMaterializationService::resolveInstant()`). Ces instants sont liés à la
+requête comme des instants (`datetimetz_immutable`, en UTC) : avant D220, leur
+décalage était perdu et la fenêtre lue était décalée d'une ou deux heures.
 
 **Précondition** : un `PlanningRuleSet` `ACTIVE` doit exister pour
 l'équipe, sinon `NoActivePlanningRuleSetException` (409) — rien à figer

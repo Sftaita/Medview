@@ -6,7 +6,6 @@ namespace App\Controller;
 
 use App\Dto\CreateAvailabilityCollectionRequest;
 use App\Dto\UpdateAvailabilityCollectionRequest;
-use App\Entity\AvailabilityAcknowledgementKind;
 use App\Entity\AvailabilityCollection;
 use App\Entity\AvailabilityCollectionResponse;
 use App\Entity\AvailabilityResponseStatus;
@@ -15,11 +14,10 @@ use App\Entity\User;
 use App\Exception\AvailabilityCollectionClosedException;
 use App\Exception\AvailabilityCollectionOutsidePlanningException;
 use App\Exception\AvailabilityCollectionOverlapException;
-use App\Exception\ConflictingUnavailabilityException;
 use App\Exception\InvalidAvailabilityDeadlineException;
-use App\Exception\NotAnAvailabilityRespondentException;
 use App\Repository\AvailabilityCollectionRepository;
 use App\Repository\AvailabilityCollectionResponseRepository;
+use App\Repository\PeriodPreparationRepository;
 use App\Repository\PlanningRepository;
 use App\Security\Voter\PlanningVoter;
 use App\Service\AvailabilityCollectionService;
@@ -54,6 +52,7 @@ final class AvailabilityCollectionController
         private readonly AvailabilityCollectionService $service,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
         private readonly ValidatorInterface $validator,
+        private readonly PeriodPreparationRepository $preparationRepository,
     ) {
     }
 
@@ -167,8 +166,8 @@ final class AvailabilityCollectionController
     }
 
     /**
-     * Everybody's answer — managers only. `?status=PENDING` returns exactly
-     * the people still expected to answer: the audience of a future reminder.
+     * The people a collection concerns — managers only. `?status=PARTICIPANT`
+     * returns exactly the audience of a reminder (docs/decisions.md D214).
      */
     #[Route('/api/availability-collections/{stableId}/responses', name: 'api_availability_collection_responses', methods: ['GET'])]
     public function responses(string $stableId, Request $request): JsonResponse
@@ -181,7 +180,7 @@ final class AvailabilityCollectionController
         if (null !== $rawStatus && '' !== $rawStatus) {
             $status = AvailabilityResponseStatus::tryFrom((string) $rawStatus);
             if (null === $status) {
-                return new JsonResponse(['error' => 'validation_failed', 'violations' => ['status' => 'Must be one of PENDING, ACKNOWLEDGED, WITHDRAWN.']], 422);
+                return new JsonResponse(['error' => 'validation_failed', 'violations' => ['status' => 'Must be one of PARTICIPANT, WITHDRAWN.']], 422);
             }
         }
 
@@ -197,52 +196,37 @@ final class AvailabilityCollectionController
     }
 
     /**
-     * The current user's own confirmation, nobody else's. Body (optional):
-     * `{"noUnavailability": true}` for "I have no unavailability on this
-     * period". Idempotent: a second call returns the first confirmation.
+     * docs/decisions.md D214: nobody confirms anything any more — a person
+     * without any unavailability is available. Kept as 410 Gone so that a
+     * client still offering the old button learns why, instead of a 404.
      */
     #[Route('/api/availability-collections/{stableId}/acknowledge', name: 'api_availability_collection_acknowledge', methods: ['POST'])]
-    public function acknowledge(string $stableId, Request $request, #[CurrentUser] User $user): JsonResponse
+    public function acknowledge(): JsonResponse
     {
-        $collection = $this->resolveCollection($stableId);
-        $this->denyUnlessCanView($collection->getPlanning());
-
-        $raw = '' === $request->getContent() ? [] : $this->decodeBody($request);
-        if ($raw instanceof JsonResponse) {
-            return $raw;
-        }
-        $kind = true === ($raw['noUnavailability'] ?? false)
-            ? AvailabilityAcknowledgementKind::NO_UNAVAILABILITY
-            : AvailabilityAcknowledgementKind::CONFIRMED;
-
-        try {
-            $this->service->acknowledge($collection, $user, $kind);
-        } catch (NotAnAvailabilityRespondentException $exception) {
-            return new JsonResponse(['error' => 'not_a_respondent', 'message' => $exception->getMessage()], 403);
-        } catch (AvailabilityCollectionClosedException $exception) {
-            return new JsonResponse(['error' => 'collection_closed', 'message' => $exception->getMessage()], 409);
-        } catch (ConflictingUnavailabilityException $exception) {
-            return new JsonResponse([
-                'error' => 'unavailability_exists',
-                'message' => $exception->getMessage(),
-                'unavailablePeriodCount' => $exception->unavailablePeriodCount,
-            ], 409);
-        }
-
-        return new JsonResponse($this->collectionToArray($collection, $user));
+        return new JsonResponse([
+            'error' => 'confirmation_removed',
+            'message' => 'Availabilities are no longer confirmed: without any unavailability, a person is available.',
+        ], 410);
     }
 
     /**
-     * The OPEN collections the current user is expected to answer (or has
-     * answered) — what the dashboard shows. Never someone else's.
+     * The OPEN collections the current user takes part in — what the
+     * dashboard shows. Never someone else's. docs/decisions.md D214: a
+     * collection whose period announcement is still scheduled is not shown —
+     * its participants have not been told yet, and their calendar is open to
+     * them anyway.
      */
     #[Route('/api/me/availability-collections', name: 'api_me_availability_collections', methods: ['GET'])]
     public function mine(#[CurrentUser] User $user): JsonResponse
     {
-        $collections = array_map(
-            static fn (AvailabilityCollectionResponse $response): AvailabilityCollection => $response->getCollection(),
-            $this->responseRepository->findActiveInOpenCollectionsForUser($user),
-        );
+        $collections = array_values(array_filter(
+            array_map(
+                static fn (AvailabilityCollectionResponse $response): AvailabilityCollection => $response->getCollection(),
+                $this->responseRepository->findActiveInOpenCollectionsForUser($user),
+            ),
+            fn (AvailabilityCollection $collection): bool => null === $collection->getCycle()
+                || true !== $this->preparationRepository->findOneByCycle($collection->getCycle())?->isAnnouncementScheduled(),
+        ));
 
         return new JsonResponse(array_map(
             fn (AvailabilityCollection $collection): array => $this->collectionToArray($collection, $user, withProgress: false),
@@ -341,8 +325,8 @@ final class AvailabilityCollectionController
     }
 
     /**
-     * $withProgress: the X/Y counters are a manager's view; a member never
-     * gets them (D124). The caller's own answer is always included.
+     * $withProgress: the number of participants is a manager's view; a member
+     * never gets it (D124). The caller's own participation is always included.
      *
      * @return array<string, mixed>
      */
@@ -385,9 +369,8 @@ final class AvailabilityCollectionController
     {
         $data = [
             'stableId' => (string) $response->getStableId(),
+            // PARTICIPANT | WITHDRAWN — never a confirmation (docs/decisions.md D214).
             'status' => $response->getStatus()->value,
-            'acknowledgedAt' => $response->getAcknowledgedAt()?->format(\DATE_ATOM),
-            'acknowledgementKind' => $response->getAcknowledgementKind()?->value,
             'lastAvailabilityChangeAt' => $response->getLastAvailabilityChangeAt()?->format(\DATE_ATOM),
         ];
 

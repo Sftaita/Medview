@@ -16,7 +16,7 @@ const P1: Period = {
   start: '2026-10-01',
   end: '2027-01-30',
   status: 'publiee',
-  collecte: { state: 'cloturee', responses: 0 },
+  collecte: { state: 'cloturee' },
 }
 const P2: Period = {
   id: 'c2',
@@ -24,7 +24,7 @@ const P2: Period = {
   start: '2027-01-31',
   end: '2027-05-02',
   status: 'preparation',
-  collecte: { state: 'non-ouverte', responses: 0 },
+  collecte: { state: 'non-ouverte' },
 }
 
 const WEEKEND_CUT: DateReason = {

@@ -41,8 +41,9 @@ use Doctrine\ORM\EntityManagerInterface;
  * this run is part of it. The availability deadline plays no role at all —
  * it is a signal for people, not an input of the engine.
  *
- * Nothing organisational blocks a launch (members who have not confirmed,
- * passed deadline): the preflight reports them as warnings. Only technical
+ * Nothing organisational blocks a launch (a passed deadline is a warning;
+ * nobody confirms anything since docs/decisions.md D214 — the snapshot takes
+ * every calendar as it is). Only technical
  * impossibilities do, and they are checked for *every* line before anything
  * is created, so a refusal never leaves an orphan DRAFT generation behind.
  *
@@ -253,9 +254,6 @@ final class PlanningGenerationLauncher
         }
         $requiredScope = null === $scope && [] !== $kept && [] !== $generated ? self::SCOPE_UNLOCKED_LINES : null;
 
-        if ($collection->pendingCount() > 0) {
-            $warnings[] = new PreflightIssue(PreflightIssueCode::PENDING_MEMBERS);
-        }
         if (null !== $collection->deadlineOverdueDays) {
             $warnings[] = new PreflightIssue(PreflightIssueCode::DEADLINE_PASSED);
         }

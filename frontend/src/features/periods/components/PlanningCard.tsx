@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import type { ISODate, Period, PlanningRole } from '../types'
-import { formatRange, timeState } from '../dates'
+import { formatDate, formatRange, timeState } from '../dates'
 import { StatusPill } from './StatusPill'
 import { TimeBar } from './TimeBar'
 import { Icon } from './Icon'
@@ -101,11 +101,17 @@ function NextBlock({ period, today }: { period: Period; today: ISODate }) {
         ? 'Certaines lignes sont publiées.'
         : period.status === 'generee'
           ? 'Gardes générées, pas encore publiées.'
-          : c.state === 'en-cours'
-            ? `${c.responses} / ${c.expected ?? 0} réponses à la collecte des disponibilités.`
-            : c.state === 'cloturee'
-              ? 'Collecte clôturée.'
-              : 'Prochaine étape : ouvrir la collecte des disponibilités.'
+          : c.state === 'programmee'
+            ? c.announceOn
+              ? `Annonce aux participants prévue le ${formatDate(c.announceOn)}.`
+              : 'Annonce aux participants programmée.'
+            : c.state === 'en-cours'
+              ? c.closesOn && c.closesOn >= today
+                ? `Indisponibilités attendues · date limite indicative le ${formatDate(c.closesOn)}.`
+                : 'Collecte des indisponibilités ouverte.'
+              : c.state === 'cloturee'
+                ? 'Collecte clôturée.'
+                : 'Prochaine étape : ouvrir la collecte des disponibilités.'
   return (
     <section className="mv-period-block mv-period-block--next">
       <div className="mv-period-block__top">
