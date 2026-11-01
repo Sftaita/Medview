@@ -15,6 +15,7 @@ use App\Exception\ImportedAvailabilityPeriodException;
 use App\Exception\OverlappingUserAvailabilityPeriodException;
 use App\Repository\SurgicalHubImportedLeaveRepository;
 use App\Repository\UserAvailabilityPeriodRepository;
+use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Clock\ClockInterface;
 
@@ -82,7 +83,7 @@ final class UserAvailabilityService
 
         $period = new UserAvailabilityPeriod($user, $type, $startsAt, $endsAt);
 
-        return $this->entityManager->wrapInTransaction(function () use ($period, $user, $actor, $startsAt, $endsAt): CalendarChange {
+        return self::overlapFromDatabase(fn (): CalendarChange => $this->entityManager->wrapInTransaction(function () use ($period, $user, $actor, $startsAt, $endsAt): CalendarChange {
             $this->entityManager->persist($period);
             $impacts = $this->impactsOf($user, null, [$period->getType(), $startsAt, $endsAt]);
             $this->record($period, $actor, UserAvailabilityEventAction::CREATED, null, $impacts);
@@ -90,7 +91,7 @@ final class UserAvailabilityService
             $this->collectionService->recordAvailabilityChange($user, [[$startsAt, $endsAt]]);
 
             return new CalendarChange($period, $impacts);
-        });
+        }));
     }
 
     /**
@@ -125,6 +126,34 @@ final class UserAvailabilityService
         }
 
         return $this->change($period, $type, $startsAt, $endsAt, $actor ?? $period->getUser());
+    }
+
+    /**
+     * The exclusion constraint (SQLSTATE 23P01) refusing a write the check
+     * above let through — a concurrent request inserted the overlapping
+     * period in between — is the same business conflict, never a 500 (D219).
+     * The transaction is rolled back: nothing of the write remains, journal
+     * event included (D215).
+     *
+     * @template T
+     *
+     * @param callable(): T $write
+     *
+     * @return T
+     *
+     * @throws OverlappingUserAvailabilityPeriodException
+     */
+    private static function overlapFromDatabase(callable $write): mixed
+    {
+        try {
+            return $write();
+        } catch (DriverException $exception) {
+            if ('23P01' === $exception->getSQLState()) {
+                throw new OverlappingUserAvailabilityPeriodException();
+            }
+
+            throw $exception;
+        }
     }
 
     /**
@@ -203,7 +232,7 @@ final class UserAvailabilityService
     {
         $previous = [$period->getType(), $period->getStartsAt(), $period->getEndsAt()];
 
-        return $this->entityManager->wrapInTransaction(function () use ($period, $type, $startsAt, $endsAt, $previous, $actor): CalendarChange {
+        return self::overlapFromDatabase(fn (): CalendarChange => $this->entityManager->wrapInTransaction(function () use ($period, $type, $startsAt, $endsAt, $previous, $actor): CalendarChange {
             $period->reschedule($type, $startsAt, $endsAt);
             $impacts = $this->impactsOf($period->getUser(), $previous, [$type, $startsAt, $endsAt]);
             $this->record($period, $actor, UserAvailabilityEventAction::RESCHEDULED, $previous, $impacts);
@@ -212,7 +241,7 @@ final class UserAvailabilityService
             $this->collectionService->recordAvailabilityChange($period->getUser(), [[$previous[1], $previous[2]], [$startsAt, $endsAt]]);
 
             return new CalendarChange($period, $impacts);
-        });
+        }));
     }
 
     private function remove(UserAvailabilityPeriod $period, ?User $actor): CalendarChange

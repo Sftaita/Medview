@@ -7,6 +7,7 @@ namespace App\Repository;
 use App\Entity\User;
 use App\Entity\UserAvailabilityEvent;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
+use Doctrine\DBAL\Types\Types;
 use Doctrine\Persistence\ManagerRegistry;
 
 /**
@@ -21,6 +22,8 @@ class UserAvailabilityEventRepository extends ServiceEntityRepository
 
     /**
      * The events of these people whose previous or new dates meet [$from, $to), oldest first.
+     * $from/$to are instants (local midnights of the planning): compared as
+     * such, never shifted by their offset (docs/decisions.md D220).
      *
      * @param list<User> $users
      *
@@ -37,8 +40,8 @@ class UserAvailabilityEventRepository extends ServiceEntityRepository
             ->andWhere('e.user IN (:users)')
             ->andWhere('(e.previousStartsAt < :to AND e.previousEndsAt > :from) OR (e.newStartsAt < :to AND e.newEndsAt > :from)')
             ->setParameter('users', $users)
-            ->setParameter('from', $from)
-            ->setParameter('to', $to)
+            ->setParameter('from', UserAvailabilityPeriodRepository::utc($from), Types::DATETIMETZ_IMMUTABLE)
+            ->setParameter('to', UserAvailabilityPeriodRepository::utc($to), Types::DATETIMETZ_IMMUTABLE)
             ->orderBy('e.occurredAt', 'ASC')
             ->addOrderBy('e.id', 'ASC')
             ->getQuery()
