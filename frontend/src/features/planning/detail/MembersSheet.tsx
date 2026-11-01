@@ -142,8 +142,6 @@ export function MembersSheet({ planningStableId, line, canManage, onClose, onCha
           onMembersChanged={changed}
         />
       )}
-
-
     </Sheet>
   )
 }
