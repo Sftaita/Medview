@@ -10050,3 +10050,13 @@ modifié.
   rôle ni de date ; liste et planning rafraîchis ; « Rendre gestionnaire »
   conservé), `TeamInvitePanel.test.tsx`. Détail : `docs/planning.md` §14,
   `docs/authentication.md` §15.
+- **Recette (2026-11-01, Chrome desktop, backend et frontend du worktree sur la
+  base de dev, Mailpit)** : formulaire limité à Prénom / Nom / Adresse e-mail ;
+  compte actif ajouté (`MEMBER`, entrée le 2026-11-01), liste et compteur
+  « 1 membre » rafraîchis, e-mail reçu avec le nom du planning et le lien
+  `/plannings/{id}` ; même adresse en majuscules → « fait déjà partie de cette
+  équipe », aucun e-mail ; compte désactivé → refus affiché, aucun membre ni
+  e-mail ; adresse inconnue → « Invitations en attente » + e-mail d'inscription.
+  Exactement deux e-mails dans Mailpit. Non vérifié dans le navigateur :
+  l'affichage à 390 px et l'inscription par le lien (couverte par
+  `InvitationRegistrationTest`).
