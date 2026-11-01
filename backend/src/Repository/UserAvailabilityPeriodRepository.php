@@ -103,6 +103,8 @@ class UserAvailabilityPeriodRepository extends ServiceEntityRepository
      * [startsAt, endsAt] intersects [$from, $to] — what
      * PlanningSnapshotService copies into PlanningSnapshotAvailabilityPeriod
      * rows (docs/planning-generation.md §Indisponibilités et préférences).
+     * $from/$to are instants, usually local midnights of the planning's
+     * timezone: compared as such, never shifted by their offset (D220).
      *
      * @return list<UserAvailabilityPeriod>
      */
@@ -113,8 +115,8 @@ class UserAvailabilityPeriodRepository extends ServiceEntityRepository
             ->andWhere('p.startsAt < :to')
             ->andWhere('p.endsAt > :from')
             ->setParameter('user', $user)
-            ->setParameter('from', $from)
-            ->setParameter('to', $to)
+            ->setParameter('from', self::utc($from), Types::DATETIMETZ_IMMUTABLE)
+            ->setParameter('to', self::utc($to), Types::DATETIMETZ_IMMUTABLE)
             ->orderBy('p.startsAt', 'ASC')
             ->getQuery()
             ->getResult();
@@ -142,15 +144,15 @@ class UserAvailabilityPeriodRepository extends ServiceEntityRepository
             ->andWhere('p.endsAt > :from')
             ->setParameter('users', $users)
             ->setParameter('type', $type)
-            ->setParameter('from', $from)
-            ->setParameter('to', $to)
+            ->setParameter('from', self::utc($from), Types::DATETIMETZ_IMMUTABLE)
+            ->setParameter('to', self::utc($to), Types::DATETIMETZ_IMMUTABLE)
             ->orderBy('p.startsAt', 'ASC')
             ->addOrderBy('p.id', 'ASC')
             ->getQuery()
             ->getResult();
     }
 
-    /** The same instant in UTC — the overlap checks never depend on the offset a client sent. */
+    /** The same instant in UTC — no range query here depends on the offset its bounds carry (D219, D220). */
     public static function utc(\DateTimeImmutable $instant): \DateTimeImmutable
     {
         return $instant->setTimezone(new \DateTimeZone('UTC'));

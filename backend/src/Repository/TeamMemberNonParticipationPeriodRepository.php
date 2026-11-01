@@ -89,8 +89,8 @@ class TeamMemberNonParticipationPeriodRepository extends ServiceEntityRepository
             ->andWhere('p.startsAt < :to')
             ->andWhere('p.endsAt > :from')
             ->setParameter('teamMember', $teamMember)
-            ->setParameter('from', $from)
-            ->setParameter('to', $to)
+            ->setParameter('from', UserAvailabilityPeriodRepository::utc($from), Types::DATETIMETZ_IMMUTABLE)
+            ->setParameter('to', UserAvailabilityPeriodRepository::utc($to), Types::DATETIMETZ_IMMUTABLE)
             ->orderBy('p.startsAt', 'ASC')
             ->getQuery()
             ->getResult();

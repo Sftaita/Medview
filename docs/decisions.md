@@ -9762,9 +9762,44 @@ contrainte `EXCLUDE … tstzrange(starts_at, ends_at, '[]')` refusait l'écritur
 - Rien d'autre ne change : les instants enregistrés et renvoyés sont les
   mêmes, la base et ses contraintes sont inchangées, aucune migration.
 
-**Hors périmètre, à traiter à part si besoin.** Les autres lectures par plage
-(`findIntersecting()`, `findByTypeIntersectingForUsers()` et leurs équivalents)
-lient aussi leurs bornes sans type. Leurs appelants construisent leurs bornes
-en interne (instants du planning) et non depuis l'API ; les corriger changerait
-la composition des snapshots, donc leur `snapshotHash`. Elles sont laissées en
-l'état volontairement.
+**Lectures par plage.** Elles avaient le même défaut, traité à part en D220.
+
+## D220 — Snapshots et lectures par plage : des instants, jamais une plage décalée
+
+**Contexte (audit avant fusion des PR #26 et #27, 2026-11-01).**
+`findIntersecting()` (indisponibilités et non-participation) et
+`findByTypeIntersectingForUsers()` liaient elles aussi leurs bornes sans type.
+Leurs appelants passent des minuits locaux du planning (Europe/Brussels) :
+`PlanningSnapshotService` (le snapshot d'une génération), le statut de collecte
+et ses compteurs, l'export des absences, les candidats de réaffectation. La
+fenêtre lue était donc décalée d'une heure en hiver, de deux en été.
+
+**Constat, démontré par des tests avant / après** (`SnapshotBoundaryInstantsTest`,
+`IntersectingInstantsTest`) :
+
+- une absence ou une non-participation qui **se termine dans la première ou les
+  deux premières heures** du premier jour d'une période n'entrait pas dans le
+  snapshot : la garde de ce premier jour (journée entière, minuit à minuit)
+  restait éligible alors que la personne était indisponible. Hiver, été, et les
+  deux jours de changement d'heure (23 h et 25 h) ;
+- une absence qui **commence le jour suivant la fin** de la période (même une
+  journée entière) entrait dans le snapshot. Elle ne recouvre aucune garde de la
+  période, donc sans effet sur l'éligibilité, mais elle gonflait le nombre
+  d'indisponibilités affiché et figurait dans le snapshot et son empreinte ;
+- même décalage sur le statut de collecte (absence du lendemain listée et
+  comptée).
+
+**Exposition réelle (production, lecture seule, 2026-11-01).** Les 208
+indisponibilités et 0 non-participation commencent et finissent toutes à minuit,
+heure de Bruxelles (calendrier en journées entières, congés SurgicalHub par
+jour) : le premier cas n'a jamais pu se produire. Le second : 12 des 564 lignes
+d'indisponibilité des 4 snapshots existants sont hors de leur période, sans
+effet sur les gardes générées.
+
+**Décision.** Les trois lectures normalisent leurs bornes en UTC et les lient en
+`datetimetz_immutable`, comme les contrôles de chevauchement (D219). Les
+snapshots historiques **ne sont pas modifiés** : ils restent ce qui a servi à
+leur génération (aucune migration, aucune réécriture d'empreinte). Seuls les
+snapshots pris après le déploiement suivent la nouvelle lecture. Les autres
+requêtes sur des plages portent sur des colonnes de type date (collectes,
+périodes, adhésions) et ne sont pas concernées.
