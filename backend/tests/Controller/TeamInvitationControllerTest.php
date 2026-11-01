@@ -164,6 +164,9 @@ final class TeamInvitationControllerTest extends WebTestCase
         $email = self::getMailerMessage(0);
         self::assertSame('Vous avez été ajouté à une équipe sur MedVue', $email->getSubject());
         self::assertEmailAddressContains($email, 'to', 'inv7.existing@example.com');
+        // D221: the email names the planning and links straight to it.
+        self::assertStringContainsString('/plannings/'.$s['planning'], (string) $email->getTextBody());
+        self::assertStringContainsString('href="http://localhost:5183/plannings/'.$s['planning'].'"', (string) $email->getHtmlBody());
 
         $count = static::getContainer()->get(Connection::class)->fetchOne('SELECT COUNT(*) FROM team_invitations');
         self::assertSame(0, (int) $count, 'No invitation row for an existing user.');

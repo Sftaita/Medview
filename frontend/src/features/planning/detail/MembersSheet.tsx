@@ -10,7 +10,7 @@ type Role = 'OWNER' | 'ADMIN' | 'MEMBER'
 type Props = {
   planningStableId: string
   line: PlanningLineSummary
-  /** May end memberships and add an existing user (creator of the planning). */
+  /** May end memberships and grant the management right (creator of the planning). */
   canManage: boolean
   onClose: () => void
   /** Membership added, ended or invitation accepted: the page refreshes its counts and the follow-up. */
@@ -25,7 +25,11 @@ const ROLE_TAG: Record<Role, { label: string; tone: string }> = {
   MEMBER: { label: 'Membre', tone: '' },
 }
 
-/** "Membres" of a line: who is in its team, invitations, and (creator) memberships. */
+/**
+ * "Membres" of a line: who is in its team, the add form and the pending invitations, and (creator)
+ * memberships. People are added by first name, last name and email only (docs/decisions.md D221):
+ * never by a technical identifier, the role is MEMBER and the entry date the day of the addition.
+ */
 export function MembersSheet({ planningStableId, line, canManage, onClose, onChanged }: Props) {
   const teamStableId = line.team.stableId
   const [members, setMembers] = useState<PlanningTeamMember[]>([])

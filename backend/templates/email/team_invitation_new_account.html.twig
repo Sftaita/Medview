@@ -1,7 +1,7 @@
 {# ------------------------------------------------------------------
    MedVue — 2. Invitation (le destinataire n'a pas encore de compte)
    Objet : Vous êtes invité à rejoindre une équipe sur MedVue
-   Contexte : firstName, inviterName, teamName, signupUrl
+   Contexte : firstName, inviterName, teamName, planningName, signupUrl
    signupUrl : lien personnel à usage unique (token en base sous forme
    hashée, expiration vérifiée côté serveur).
    Repris de docs/Design/emails_medvue ; seule modification : les noms
@@ -27,7 +27,7 @@
 
 {% block content %}
 {{ ui.p('Bonjour ' ~ firstName|e ~ ',', 24) }}
-{{ ui.p(ui.b(inviterName) ~ ' vous invite à rejoindre l’équipe ' ~ ui.b(teamName) ~ ' sur MedVue.', 18) }}
+{{ ui.p(ui.b(inviterName) ~ ' vous invite à rejoindre l’équipe ' ~ ui.b(teamName) ~ ' du planning ' ~ ui.b(planningName) ~ ' sur MedVue.', 18) }}
 {{ ui.p('MedVue est une plateforme permettant aux équipes médicales d’organiser et de gérer leurs plannings.') }}
 {{ ui.p('Vous ne possédez pas encore de compte MedVue. Pour rejoindre cette équipe, créez votre compte à l’aide du lien ci-dessous :') }}
 {% endblock %}

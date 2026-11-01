@@ -91,6 +91,7 @@ describe('TeamInvitePanel', () => {
     expect(screen.getByLabelText('Nom')).toBeInTheDocument()
     expect(screen.getByLabelText('Adresse e-mail')).toBeInTheDocument()
     expect(screen.queryByText(/stableId|Identifiant de l'utilisateur/)).not.toBeInTheDocument()
+    expect(await screen.findByText('Aucune invitation en attente.')).toBeInTheDocument()
   })
 
   it('says so when nothing is pending', async () => {
@@ -178,9 +179,7 @@ describe('TeamInvitePanel', () => {
 
     await submit()
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      "ajoutée à cette équipe par une autre action",
-    )
+    expect(await screen.findByRole('alert')).toHaveTextContent('ajoutée à cette équipe par une autre action')
   })
 
   it('sends a double submit only once', async () => {

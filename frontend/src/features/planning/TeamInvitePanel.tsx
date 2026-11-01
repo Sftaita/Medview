@@ -34,7 +34,7 @@ function describeInviteResult(result: InviteResult, email: string, name: string)
 }
 
 /**
- * "Ajouter une personne" for one team, plus the pending invitations shown
+ * "Ajouter un membre" for one team, plus the pending invitations shown
  * as such — distinct from the member list, never as TeamMembers. Only
  * rendered for someone the API said may invite (creator, OWNER, ADMIN).
  */
@@ -111,9 +111,8 @@ export function TeamInvitePanel({ planningStableId, teamStableId, onMembersChang
     <div className="team-invite-panel">
       <h4>Ajouter un membre</h4>
       <p className="muted">
-        Saisissez son prénom, son nom et son adresse e-mail. Un compte MedVue actif
-        rejoint directement l'équipe et reçoit un e-mail. Si aucun compte n'existe,
-        une invitation à s'inscrire est envoyée.
+        Saisissez son prénom, son nom et son adresse e-mail. Un compte MedVue actif rejoint directement
+        l'équipe et reçoit un e-mail. Si aucun compte n'existe, une invitation à s'inscrire est envoyée.
       </p>
       <form onSubmit={handleSubmit} className="form">
         <div className="form-grid">
