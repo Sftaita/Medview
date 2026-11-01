@@ -9898,3 +9898,81 @@ réglage, pas un historique : la date annoncée reste dans les emails déjà
 envoyés, et les collectes clôturées ne bougent pas. Plusieurs collectes
 ouvertes d'une même période aux dates différentes (cas ancien) sont alignées
 sur la date de la période au premier changement.
+
+## D219 — Chevauchement d'indisponibilités : comparer des instants, quel que soit le décalage envoyé
+
+**Contexte (recette de la PR #26, 2026-10-31).** Sur une copie de la base de
+production, une indisponibilité envoyée à l'API avec des heures `+01:00`, et
+qui touchait une indisponibilité existante, a reçu une erreur **500** au lieu
+du refus métier **409**. Défaut préexistant en production, indépendant de la
+PR #26. L'interface n'est pas concernée : elle envoie toujours de l'UTC
+(`toISOString`).
+
+**Cause.** `findOverlappingOrTouchingForUser()` (et
+`findOverlappingOrTouchingForTeamMember()`, même construction) liait ses bornes
+sans type. Doctrine infère alors `datetime_immutable`, formaté `Y-m-d H:i:s` :
+le décalage disparaît (`2027-01-13 00:00:00` pour `00:00+01:00`), et
+PostgreSQL, dont la session est en UTC, relit cette valeur comme de l'UTC,
+décalée d'autant. Le contrôle applicatif voyait donc une autre plage que celle
+enregistrée : un contact ou un chevauchement réel passait inaperçu, puis la
+contrainte `EXCLUDE … tstzrange(starts_at, ends_at, '[]')` refusait l'écriture
+(500) ; à l'inverse, un décalage négatif pouvait produire un faux 409.
+
+**Décision.**
+
+- Les deux contrôles de chevauchement normalisent leurs bornes en UTC et les
+  lient explicitement en `datetimetz_immutable` (`Y-m-d H:i:sO`) : la
+  comparaison porte sur des instants, quelle que soit la forme reçue (`Z`,
+  `+01:00`, `+02:00`, négatif, de part et d'autre d'un changement d'heure).
+- La règle ne change pas : intervalles semi-ouverts `[startsAt, endsAt[`,
+  deux périodes du même type qui se chevauchent **ou se touchent** sont
+  refusées, comme la contrainte en base (`'[]'`).
+- Course entre deux requêtes : si la contrainte d'exclusion refuse malgré
+  tout l'écriture (SQLSTATE `23P01`, une requête concurrente a inséré la
+  période entre le contrôle et l'écriture), le service lève la même exception
+  métier (409). La transaction est annulée : ni la période, ni la trace dans
+  les collectes ne restent.
+- Rien d'autre ne change : les instants enregistrés et renvoyés sont les
+  mêmes, la base et ses contraintes sont inchangées, aucune migration.
+
+**Lectures par plage.** Elles avaient le même défaut, traité à part en D220.
+
+## D220 — Snapshots et lectures par plage : des instants, jamais une plage décalée
+
+**Contexte (audit avant fusion des PR #26 et #27, 2026-11-01).**
+`findIntersecting()` (indisponibilités et non-participation) et
+`findByTypeIntersectingForUsers()` liaient elles aussi leurs bornes sans type.
+Leurs appelants passent des minuits locaux du planning (Europe/Brussels) :
+`PlanningSnapshotService` (le snapshot d'une génération), le statut de collecte
+et ses compteurs, l'export des absences, les candidats de réaffectation. La
+fenêtre lue était donc décalée d'une heure en hiver, de deux en été.
+
+**Constat, démontré par des tests avant / après** (`SnapshotBoundaryInstantsTest`,
+`IntersectingInstantsTest`) :
+
+- une absence ou une non-participation qui **se termine dans la première ou les
+  deux premières heures** du premier jour d'une période n'entrait pas dans le
+  snapshot : la garde de ce premier jour (journée entière, minuit à minuit)
+  restait éligible alors que la personne était indisponible. Hiver, été, et les
+  deux jours de changement d'heure (23 h et 25 h) ;
+- une absence qui **commence le jour suivant la fin** de la période (même une
+  journée entière) entrait dans le snapshot. Elle ne recouvre aucune garde de la
+  période, donc sans effet sur l'éligibilité, mais elle gonflait le nombre
+  d'indisponibilités affiché et figurait dans le snapshot et son empreinte ;
+- même décalage sur le statut de collecte (absence du lendemain listée et
+  comptée).
+
+**Exposition réelle (production, lecture seule, 2026-11-01).** Les 208
+indisponibilités et 0 non-participation commencent et finissent toutes à minuit,
+heure de Bruxelles (calendrier en journées entières, congés SurgicalHub par
+jour) : le premier cas n'a jamais pu se produire. Le second : 12 des 564 lignes
+d'indisponibilité des 4 snapshots existants sont hors de leur période, sans
+effet sur les gardes générées.
+
+**Décision.** Les trois lectures normalisent leurs bornes en UTC et les lient en
+`datetimetz_immutable`, comme les contrôles de chevauchement (D219). Les
+snapshots historiques **ne sont pas modifiés** : ils restent ce qui a servi à
+leur génération (aucune migration, aucune réécriture d'empreinte). Seuls les
+snapshots pris après le déploiement suivent la nouvelle lecture. Les autres
+requêtes sur des plages portent sur des colonnes de type date (collectes,
+périodes, adhésions) et ne sont pas concernées.

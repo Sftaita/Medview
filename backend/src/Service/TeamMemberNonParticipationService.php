@@ -8,6 +8,7 @@ use App\Entity\PlanningTeamMember;
 use App\Entity\TeamMemberNonParticipationPeriod;
 use App\Exception\OverlappingNonParticipationPeriodException;
 use App\Repository\TeamMemberNonParticipationPeriodRepository;
+use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
@@ -34,7 +35,7 @@ final class TeamMemberNonParticipationService
 
         $period = new TeamMemberNonParticipationPeriod($teamMember, $startsAt, $endsAt);
         $this->entityManager->persist($period);
-        $this->entityManager->flush();
+        $this->flushOrOverlap();
 
         return $period;
     }
@@ -56,7 +57,27 @@ final class TeamMemberNonParticipationService
         }
 
         $period->reschedule($startsAt, $endsAt);
-        $this->entityManager->flush();
+        $this->flushOrOverlap();
+    }
+
+    /**
+     * The exclusion constraint (SQLSTATE 23P01) refusing what a concurrent
+     * request made overlapping is the same business conflict, never a 500
+     * (D219).
+     *
+     * @throws OverlappingNonParticipationPeriodException
+     */
+    private function flushOrOverlap(): void
+    {
+        try {
+            $this->entityManager->flush();
+        } catch (DriverException $exception) {
+            if ('23P01' === $exception->getSQLState()) {
+                throw new OverlappingNonParticipationPeriodException();
+            }
+
+            throw $exception;
+        }
     }
 
     public function delete(TeamMemberNonParticipationPeriod $period): void
