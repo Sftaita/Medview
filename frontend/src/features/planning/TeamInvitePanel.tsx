@@ -111,9 +111,9 @@ export function TeamInvitePanel({ planningStableId, teamStableId, onMembersChang
     <div className="team-invite-panel">
       <h4>Ajouter un membre</h4>
       <p className="muted">
-        Saisissez son prénom, son nom et son adresse e-mail. Si son compte MedVue est actif,
-        il rejoindra directement l'équipe et recevra une notification. Sinon, une invitation
-        à créer un compte lui sera envoyée.
+        Saisissez son prénom, son nom et son adresse e-mail. Un compte MedVue actif
+        rejoint directement l'équipe et reçoit un e-mail. Si aucun compte n'existe,
+        une invitation à s'inscrire est envoyée.
       </p>
       <form onSubmit={handleSubmit} className="form">
         <div className="form-grid">
