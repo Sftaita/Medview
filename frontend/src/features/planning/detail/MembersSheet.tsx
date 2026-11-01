@@ -1,8 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Field } from '../../../components/Field'
 import { Icon } from '../../../components/Icon'
-import { ApiError } from '../../../lib/apiClient'
-import { addTeamMember, changeTeamMemberRole, endTeamMembership, fetchTeamMembers } from '../api'
+import { changeTeamMemberRole, endTeamMembership, fetchTeamMembers } from '../api'
 import { TeamInvitePanel } from '../TeamInvitePanel'
 import type { PlanningLineSummary, PlanningTeamMember } from '../types'
 import { Sheet } from './Sheet'
@@ -34,9 +32,6 @@ export function MembersSheet({ planningStableId, line, canManage, onClose, onCha
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [userStableId, setUserStableId] = useState('')
-  const [role, setRole] = useState<Role>('MEMBER')
-  const [start, setStart] = useState('')
 
   function load() {
     setError(null)
@@ -77,29 +72,6 @@ export function MembersSheet({ planningStableId, line, canManage, onClose, onCha
       changed()
     } catch {
       setError('Impossible de modifier le droit de gestion de ce membre.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function handleAdd() {
-    if (!userStableId || !start) return
-    setSaving(true)
-    setError(null)
-    try {
-      await addTeamMember(planningStableId, teamStableId, { userStableId, role, membershipStart: start })
-      setUserStableId('')
-      setStart('')
-      setRole('MEMBER')
-      changed()
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) {
-        setError('Utilisateur introuvable — vérifiez son identifiant.')
-      } else if (err instanceof ApiError && err.status === 409) {
-        setError('Cet utilisateur fait déjà partie de cette équipe.')
-      } else {
-        setError("Impossible d'ajouter ce membre.")
-      }
     } finally {
       setSaving(false)
     }
@@ -171,49 +143,7 @@ export function MembersSheet({ planningStableId, line, canManage, onClose, onCha
         />
       )}
 
-      {canManage && (
-        <div className="planning-members__existing form">
-          <p className="muted">
-            Utilisateur existant (identifiant connu) — permet aussi de choisir le rôle et la date d'entrée.
-          </p>
-          <Field
-            label="Identifiant de l'utilisateur"
-            type="text"
-            value={userStableId}
-            onChange={(event) => setUserStableId(event.target.value)}
-            placeholder="stableId de l'utilisateur"
-          />
-          <div className="field">
-            <label htmlFor="member-role" className="field__label">
-              Rôle
-            </label>
-            <select
-              id="member-role"
-              className="field__input"
-              value={role}
-              onChange={(event) => setRole(event.target.value as Role)}
-            >
-              <option value="MEMBER">Membre</option>
-              <option value="ADMIN">Gestionnaire</option>
-              <option value="OWNER">Propriétaire</option>
-            </select>
-          </div>
-          <Field
-            label="Date d'entrée"
-            type="date"
-            value={start}
-            onChange={(event) => setStart(event.target.value)}
-          />
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={handleAdd}
-            disabled={saving || !userStableId || !start}
-          >
-            Ajouter
-          </button>
-        </div>
-      )}
+
     </Sheet>
   )
 }
