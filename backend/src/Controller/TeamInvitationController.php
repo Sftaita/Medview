@@ -9,6 +9,7 @@ use App\Entity\PlanningTeam;
 use App\Entity\PlanningTeamMember;
 use App\Entity\TeamInvitation;
 use App\Entity\User;
+use App\Exception\InactiveAccountForTeamException;
 use App\Exception\PlanningTeamMembershipConflictException;
 use App\Repository\PlanningRepository;
 use App\Repository\PlanningTeamRepository;
@@ -107,6 +108,8 @@ final class TeamInvitationController
 
         try {
             $outcome = $this->invitationService->invite($team, $user, $dto->email, $dto->firstName, $dto->lastName);
+        } catch (InactiveAccountForTeamException $exception) {
+            return new JsonResponse(['error' => 'inactive_user', 'message' => $exception->getMessage()], 409);
         } catch (PlanningTeamMembershipConflictException $exception) {
             return new JsonResponse(['error' => 'membership_conflict', 'message' => $exception->getMessage()], 409);
         }
