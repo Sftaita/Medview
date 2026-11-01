@@ -6,7 +6,6 @@ namespace App\Service;
 
 use App\Entity\AvailabilityCollection;
 use App\Entity\AvailabilityCollectionResponse;
-use App\Entity\AvailabilityResponseStatus;
 use App\Entity\Planning;
 use App\Entity\PlanningCycle;
 use App\Entity\PlanningTeamMember;
@@ -18,20 +17,21 @@ use App\Repository\PlanningAvailabilityReminderRepository;
 use App\Repository\PlanningTeamMemberRepository;
 use App\Repository\TeamMemberNonParticipationPeriodRepository;
 use App\Repository\TeamMemberParticipationPeriodRepository;
+use App\Repository\UserAvailabilityEventRepository;
 use App\Repository\UserAvailabilityPeriodRepository;
 use Symfony\Component\Clock\ClockInterface;
 
 /**
- * The OWNER/ADMIN view of a planning's availability collection
- * (docs/availability-collection.md §15, docs/decisions.md D127-D128).
+ * The OWNER/ADMIN view of a planning's availabilities
+ * (docs/availability-collection.md §15, docs/decisions.md D127-D128, D214).
  *
  * Pure read side: it aggregates what already exists — the
- * AvailabilityCollectionResponse rows for "who confirmed", the personal
- * UserAvailabilityPeriod calendar for "what they declared" — and never
- * writes. It introduces no state of its own: a member is CONFIRMED only if
- * an explicit answer exists (absence of unavailabilities proves nothing,
- * D120), and unavailabilities are read from the person's calendar limited to
- * the planning period, never copied into a planning-owned table.
+ * AvailabilityCollectionResponse rows for "who takes part", the personal
+ * UserAvailabilityPeriod calendar for "what they declared", the calendar
+ * journal (D215) for "when they last changed it" — and never writes.
+ * docs/decisions.md D214: nobody confirms anything; a person without any
+ * unavailability is available. Unavailabilities are read from the person's
+ * calendar limited to the period, never copied into a planning-owned table.
  *
  * "Relevant" collections: the OPEN ones — those still waiting for answers.
  * When none is open (all closed) the closed ones are used, so a finished
@@ -48,6 +48,7 @@ final class PlanningCollectionStatusService
         private readonly TeamMemberNonParticipationPeriodRepository $nonParticipationPeriodRepository,
         private readonly PlanningAvailabilityReminderRepository $reminderRepository,
         private readonly ClockInterface $clock,
+        private readonly UserAvailabilityEventRepository $eventRepository,
     ) {
     }
 
@@ -63,10 +64,12 @@ final class PlanningCollectionStatusService
 
         $responsesByUser = $this->responsesByUser($relevant);
         $lastReminders = $this->reminderRepository->lastSentAtByRecipient($planning);
+        $members = $this->participants($planning, $range);
+        $lastChanges = $this->lastChanges($planning, $range, $members);
 
         $rows = [];
-        foreach ($this->participants($planning, $range) as $member) {
-            $rows[] = $this->buildRow($planning, $range, $member, $responsesByUser[$member->getUser()->getId()] ?? [], $lastReminders);
+        foreach ($members as $member) {
+            $rows[] = $this->buildRow($planning, $range, $member, $responsesByUser[$member->getUser()->getId()] ?? [], $lastReminders, $lastChanges);
         }
 
         $deadline = $this->latestDeadline($open);
@@ -82,7 +85,7 @@ final class PlanningCollectionStatusService
         $user = $member->getUser();
         $responses = $this->responsesByUser($relevant)[$user->getId()] ?? [];
         $lastReminders = $this->reminderRepository->lastSentAtByRecipient($planning);
-        $row = $this->buildRow($planning, $range, $member, $responses, $lastReminders);
+        $row = $this->buildRow($planning, $range, $member, $responses, $lastReminders, $this->lastChanges($planning, $range, [$member]));
 
         [$from, $to] = $this->periodInstants($planning, $range);
         $unavailabilities = [];
@@ -211,27 +214,17 @@ final class PlanningCollectionStatusService
     /**
      * @param list<AvailabilityCollectionResponse>                $responses
      * @param array<int, \DateTimeImmutable>                      $lastReminders
+     * @param array<int, \DateTimeImmutable>                      $lastChanges   by user id
      * @param array{0: \DateTimeImmutable, 1: \DateTimeImmutable} $range
      */
-    private function buildRow(Planning $planning, array $range, PlanningTeamMember $member, array $responses, array $lastReminders): MemberCollectionRow
+    private function buildRow(Planning $planning, array $range, PlanningTeamMember $member, array $responses, array $lastReminders, array $lastChanges): MemberCollectionRow
     {
         $user = $member->getUser();
-        $expected = array_values(array_filter($responses, static fn (AvailabilityCollectionResponse $r): bool => AvailabilityResponseStatus::WITHDRAWN !== $r->getStatus()));
-        $pending = array_filter($expected, static fn (AvailabilityCollectionResponse $r): bool => AvailabilityResponseStatus::PENDING === $r->getStatus());
+        $participant = $user->isActive() && [] !== array_filter($responses, static fn (AvailabilityCollectionResponse $r): bool => $r->isParticipant());
 
-        $state = match (true) {
-            [] === $expected || !$user->isActive() => MemberCollectionState::NOT_EXPECTED,
-            [] !== $pending => MemberCollectionState::PENDING,
-            default => MemberCollectionState::ACKNOWLEDGED,
-        };
-
-        $latest = null;
-        $lastChange = null;
-        foreach ($expected as $response) {
-            $acknowledgedAt = $response->getAcknowledgedAt();
-            if (null !== $acknowledgedAt && (null === $latest || $acknowledgedAt > $latest->getAcknowledgedAt())) {
-                $latest = $response;
-            }
+        // The journal (D215) first; a note an open collection kept before it existed otherwise.
+        $lastChange = $lastChanges[$user->getId()] ?? null;
+        foreach ($responses as $response) {
             $change = $response->getLastAvailabilityChangeAt();
             if (null !== $change && (null === $lastChange || $change > $lastChange)) {
                 $lastChange = $change;
@@ -240,14 +233,30 @@ final class PlanningCollectionStatusService
 
         return new MemberCollectionRow(
             $member,
-            $state,
-            $latest?->getAcknowledgedAt(),
-            $latest?->getAcknowledgementKind(),
+            $participant,
             $lastChange,
             $this->countUnavailabilities($planning, $range, $user),
             $lastReminders[$user->getId()] ?? null,
-            \count($pending),
         );
+    }
+
+    /**
+     * When each person last changed their calendar on the dates read.
+     *
+     * @param array{0: \DateTimeImmutable, 1: \DateTimeImmutable} $range
+     * @param list<PlanningTeamMember>                            $members
+     *
+     * @return array<int, \DateTimeImmutable> by user id
+     */
+    private function lastChanges(Planning $planning, array $range, array $members): array
+    {
+        [$from, $to] = $this->periodInstants($planning, $range);
+        $last = [];
+        foreach ($this->eventRepository->findTouching(array_map(static fn (PlanningTeamMember $m): User => $m->getUser(), $members), $from, $to) as $event) {
+            $last[(int) $event->getUser()->getId()] = $event->getOccurredAt();
+        }
+
+        return $last;
     }
 
     /**

@@ -12,7 +12,7 @@ const period = (number: number, start: string, end: string, status: Period['stat
   start,
   end,
   status,
-  collecte: { state: 'cloturee', responses: 0 },
+  collecte: { state: 'cloturee' },
 })
 
 const PERIODS = [

@@ -93,9 +93,6 @@ enum PreflightIssueCode: string
      */
     case PERIOD_END_CUTS_BLOCK = 'PERIOD_END_CUTS_BLOCK';
 
-    /** Some participants have not confirmed their availabilities. */
-    case PENDING_MEMBERS = 'PENDING_MEMBERS';
-
     /** The informative availability deadline is passed. */
     case DEADLINE_PASSED = 'DEADLINE_PASSED';
 

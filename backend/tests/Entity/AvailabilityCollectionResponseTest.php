@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Tests\Entity;
 
-use App\Entity\AvailabilityAcknowledgementKind;
 use App\Entity\AvailabilityCollection;
 use App\Entity\AvailabilityCollectionResponse;
 use App\Entity\AvailabilityCollectionStatus;
@@ -14,8 +13,8 @@ use App\Entity\User;
 use PHPUnit\Framework\TestCase;
 
 /**
- * Pure entity tests (no kernel): "answered" is an explicit event, never
- * derived from anything else (docs/availability-collection.md §3).
+ * Pure entity tests (no kernel). docs/decisions.md D214: a response only
+ * says that a person takes part in a collection; nobody confirms anything.
  */
 final class AvailabilityCollectionResponseTest extends TestCase
 {
@@ -28,57 +27,26 @@ final class AvailabilityCollectionResponseTest extends TestCase
         return new AvailabilityCollectionResponse($collection, $user, new \DateTimeImmutable('2026-12-10 09:00:00'));
     }
 
-    public function testANewResponseIsPendingAndCarriesNoEvent(): void
+    public function testANewResponseIsAParticipantAndAsksForNothing(): void
     {
         $response = $this->response();
 
-        self::assertSame(AvailabilityResponseStatus::PENDING, $response->getStatus());
+        // docs/decisions.md D214: no "answered" state — a participant is told, never asked to confirm.
+        self::assertSame(AvailabilityResponseStatus::PARTICIPANT, $response->getStatus());
+        self::assertTrue($response->isParticipant());
         self::assertNull($response->getAcknowledgedAt());
-        self::assertNull($response->getAcknowledgementKind());
         self::assertNull($response->getLastAvailabilityChangeAt());
+        self::assertFalse(method_exists($response, 'acknowledge'), 'Nothing can confirm a collection any more.');
     }
 
-    public function testAcknowledgingRecordsTheKindAndTheMoment(): void
+    public function testAChangeOnlyRecordsWhenTheCalendarWasTouched(): void
     {
         $response = $this->response();
-        $at = new \DateTimeImmutable('2026-12-14 10:00:00');
-
-        $response->acknowledge(AvailabilityAcknowledgementKind::NO_UNAVAILABILITY, $at);
-
-        self::assertSame(AvailabilityResponseStatus::ACKNOWLEDGED, $response->getStatus());
-        self::assertSame($at, $response->getAcknowledgedAt());
-        self::assertSame(AvailabilityAcknowledgementKind::NO_UNAVAILABILITY, $response->getAcknowledgementKind());
-    }
-
-    public function testAcknowledgingTwiceIsRefusedAtTheEntityLevel(): void
-    {
-        $response = $this->response();
-        $response->acknowledge(AvailabilityAcknowledgementKind::CONFIRMED, new \DateTimeImmutable('2026-12-14'));
-
-        $this->expectException(\LogicException::class);
-
-        $response->acknowledge(AvailabilityAcknowledgementKind::CONFIRMED, new \DateTimeImmutable('2026-12-15'));
-    }
-
-    public function testAChangeNeverReopensAnAcknowledgedResponse(): void
-    {
-        $response = $this->response();
-        $response->acknowledge(AvailabilityAcknowledgementKind::CONFIRMED, new \DateTimeImmutable('2026-12-14 10:00:00'));
 
         $response->recordAvailabilityChange(new \DateTimeImmutable('2026-12-16 08:00:00'));
 
-        self::assertSame(AvailabilityResponseStatus::ACKNOWLEDGED, $response->getStatus());
-        self::assertEquals(new \DateTimeImmutable('2026-12-14 10:00:00'), $response->getAcknowledgedAt());
+        self::assertSame(AvailabilityResponseStatus::PARTICIPANT, $response->getStatus());
         self::assertEquals(new \DateTimeImmutable('2026-12-16 08:00:00'), $response->getLastAvailabilityChangeAt());
-    }
-
-    public function testAChangeAloneNeverMakesAResponseAnswered(): void
-    {
-        $response = $this->response();
-
-        $response->recordAvailabilityChange(new \DateTimeImmutable('2026-12-16 08:00:00'));
-
-        self::assertSame(AvailabilityResponseStatus::PENDING, $response->getStatus());
     }
 
     public function testWithdrawnThenReinstated(): void
@@ -87,20 +55,10 @@ final class AvailabilityCollectionResponseTest extends TestCase
 
         $response->withdraw(new \DateTimeImmutable('2026-12-12'));
         self::assertSame(AvailabilityResponseStatus::WITHDRAWN, $response->getStatus());
+        self::assertFalse($response->isParticipant());
 
         $response->reinstate(new \DateTimeImmutable('2026-12-13'));
-        self::assertSame(AvailabilityResponseStatus::PENDING, $response->getStatus());
-    }
-
-    public function testAnAcknowledgedResponseCannotBeWithdrawn(): void
-    {
-        $response = $this->response();
-        $response->acknowledge(AvailabilityAcknowledgementKind::CONFIRMED, new \DateTimeImmutable('2026-12-14'));
-
-        $response->withdraw(new \DateTimeImmutable('2026-12-20'));
-
-        self::assertSame(AvailabilityResponseStatus::ACKNOWLEDGED, $response->getStatus());
-        self::assertNull($response->getWithdrawnAt());
+        self::assertSame(AvailabilityResponseStatus::PARTICIPANT, $response->getStatus());
     }
 
     public function testClosingACollectionIsOneWayAndKeepsTheFirstClosingDate(): void

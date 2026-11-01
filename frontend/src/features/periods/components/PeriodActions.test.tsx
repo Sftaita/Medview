@@ -12,7 +12,7 @@ const period = (start: string, end: string, status: Period['status'] = 'publiee'
   start,
   end,
   status,
-  collecte: { state: 'cloturee', responses: 0 },
+  collecte: { state: 'cloturee' },
 })
 
 function renderActions(p: Period, actions: { onEditDates?: () => void; onRectifyEnd?: () => void } = {}) {

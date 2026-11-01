@@ -14,6 +14,7 @@ use App\Entity\PlanningTeamMember;
 use App\Entity\User;
 use App\Exception\OverlappingFairnessPeriodException;
 use App\Repository\AvailabilityCollectionRepository;
+use App\Repository\PeriodPreparationRepository;
 use App\Repository\PlanningLineRepository;
 use App\Repository\PlanningRepository;
 use App\Repository\PlanningTeamMemberRepository;
@@ -52,6 +53,7 @@ final class PlanningController
         private readonly AvailabilityCollectionRepository $collectionRepository,
         private readonly PlanningCyclePresenter $cyclePresenter,
         private readonly PlanningCycleService $cycleService,
+        private readonly PeriodPreparationRepository $preparationRepository,
     ) {
     }
 
@@ -252,7 +254,12 @@ final class PlanningController
             )),
             // Plannings list: its active lines, and whether an availability collection is open (D169).
             'lineCount' => \count(array_filter($lines, static fn (PlanningLine $line) => $line->isActive())),
-            'collecting' => [] !== $this->collectionRepository->findOpenByPlanning($planning),
+            // docs/decisions.md D214: a collection whose announcement is still scheduled is not open to anyone yet.
+            'collecting' => [] !== array_filter(
+                $this->collectionRepository->findOpenByPlanning($planning),
+                fn ($collection): bool => null === $collection->getCycle()
+                    || true !== $this->preparationRepository->findOneByCycle($collection->getCycle())?->isAnnouncementScheduled(),
+            ),
             'canManageAvailability' => $this->authorizationChecker->isGranted(PlanningVoter::MANAGE_AVAILABILITY, $planning),
             'canGenerate' => $this->authorizationChecker->isGranted(PlanningVoter::GENERATE, $planning),
             'canManageCalendar' => $this->authorizationChecker->isGranted(PlanningVoter::MANAGE_CALENDAR, $planning),

@@ -18,11 +18,11 @@ use Symfony\Component\Uid\Uuid;
  * personal, and a member who leaves and rejoins is still one respondent
  * (same reasoning as fairness candidates, docs/decisions.md D082).
  *
- * "Answered" is exactly $acknowledgedAt !== null — an explicit event
- * (AvailabilityAcknowledgementKind), never the presence of absences in the
- * window. $lastAvailabilityChangeAt only records that the person touched
- * their calendar inside the window; it never reopens a confirmed answer
- * (docs/decisions.md D121).
+ * docs/decisions.md D214: a row only says that the person takes part in the
+ * window (a participant, until withdrawn). Nobody confirms anything any more:
+ * $acknowledgedAt / $acknowledgementKind keep the confirmations given before
+ * D214 as history and are never written again. $lastAvailabilityChangeAt
+ * records that the person touched their calendar inside the window.
  */
 #[ORM\Entity(repositoryClass: AvailabilityCollectionResponseRepository::class)]
 #[ORM\Table(name: 'availability_collection_responses')]
@@ -95,29 +95,22 @@ class AvailabilityCollectionResponse
         return $this->user;
     }
 
+    /** PARTICIPANT or WITHDRAWN (docs/decisions.md D214). */
     public function getStatus(): AvailabilityResponseStatus
     {
-        return match (true) {
-            null !== $this->acknowledgedAt => AvailabilityResponseStatus::ACKNOWLEDGED,
-            null !== $this->withdrawnAt => AvailabilityResponseStatus::WITHDRAWN,
-            default => AvailabilityResponseStatus::PENDING,
-        };
+        return null !== $this->withdrawnAt ? AvailabilityResponseStatus::WITHDRAWN : AvailabilityResponseStatus::PARTICIPANT;
     }
 
+    /** docs/decisions.md D214: concerned by the collection — announced to and reminded, never asked to confirm. */
+    public function isParticipant(): bool
+    {
+        return null === $this->withdrawnAt;
+    }
+
+    /** A confirmation given before docs/decisions.md D214 — history only. */
     public function isAcknowledged(): bool
     {
         return null !== $this->acknowledgedAt;
-    }
-
-    public function acknowledge(AvailabilityAcknowledgementKind $kind, \DateTimeImmutable $now): void
-    {
-        if ($this->isAcknowledged()) {
-            throw new \LogicException('This response is already acknowledged.');
-        }
-
-        $this->acknowledgedAt = $now;
-        $this->acknowledgementKind = $kind;
-        $this->updatedAt = $now;
     }
 
     public function getAcknowledgedAt(): ?\DateTimeImmutable
@@ -141,10 +134,10 @@ class AvailabilityCollectionResponse
         return $this->lastAvailabilityChangeAt;
     }
 
-    /** Only ever meaningful for an unanswered response: an acknowledged one stays acknowledged. */
+    /** The person left the planning before the window: no longer a participant (a confirmation given before D214 stays recorded). */
     public function withdraw(\DateTimeImmutable $now): void
     {
-        if ($this->isAcknowledged() || null !== $this->withdrawnAt) {
+        if (null !== $this->withdrawnAt) {
             return;
         }
 

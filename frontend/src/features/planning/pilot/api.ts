@@ -6,7 +6,8 @@ import type {
   PlanningJob,
   PlanningJobResponse,
   MemberStatusDetail,
-  PendingRemindersResult,
+  ParticipantRemindersResult,
+  PlanningHistory,
   PlanningSettingsResult,
   ReminderSent,
   RestPolicyChoice,
@@ -62,12 +63,13 @@ export function remindMember(
   )
 }
 
-export function remindPendingMembers(
+/** docs/decisions.md D214: every participant, never filtered on a confirmation. */
+export function remindParticipants(
   planningStableId: string,
   periodStableId?: string,
-): Promise<PendingRemindersResult> {
-  return apiFetch<PendingRemindersResult>(
-    withPeriod(`/api/plannings/${planningStableId}/reminders/pending`, periodStableId),
+): Promise<ParticipantRemindersResult> {
+  return apiFetch<ParticipantRemindersResult>(
+    withPeriod(`/api/plannings/${planningStableId}/reminders/participants`, periodStableId),
     { method: 'POST', body: {} },
   )
 }
@@ -139,4 +141,17 @@ export function downloadAbsencesPdf(
 ): Promise<DownloadedFile> {
   const query = periodStableId ? `?period=${encodeURIComponent(periodStableId)}` : ''
   return apiDownloadGet(`/api/plannings/${planningStableId}/availability-export.pdf${query}`)
+}
+
+/** docs/decisions.md D217 — the history of one period, optionally narrowed to one participant. */
+export function fetchPlanningHistory(
+  planningStableId: string,
+  periodStableId?: string,
+  memberStableId?: string,
+): Promise<PlanningHistory> {
+  const base = withPeriod(`/api/plannings/${planningStableId}/history`, periodStableId)
+  const member = memberStableId
+    ? `${base.includes('?') ? '&' : '?'}member=${encodeURIComponent(memberStableId)}`
+    : ''
+  return apiFetch<PlanningHistory>(`${base}${member}`)
 }

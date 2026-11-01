@@ -878,3 +878,29 @@
     color-mix(in srgb, var(--unavailable-edge) 35%, transparent) 3px 5px
   );
 }
+
+/* docs/decisions.md D216 : une indisponibilité ajoutée sur un planning déjà généré — dite, jamais appliquée. */
+.impact-notice {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.impact-notice__body {
+  display: grid;
+  flex: 1 1 220px;
+  gap: 10px;
+  min-width: 0;
+}
+
+.impact-notice__item {
+  display: grid;
+  gap: 4px;
+}
+
+.impact-notice__item p {
+  margin: 0;
+}
+
+.impact-notice__duty {
+  color: var(--red-700);
+}

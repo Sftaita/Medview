@@ -32,12 +32,12 @@ function renderActions(
 }
 
 /**
- * The confirm button is rendered — disabled — while the preflight loads: find it,
+ * The confirm button ("Générer" — "Générer quand même" only with a warning) is rendered — disabled — while the preflight loads: find it,
  * then wait until it is enabled. Clicking it at once raced the preflight and was
  * silently ignored on slower runners (the CI), leaving the test waiting forever.
  */
 async function enabledConfirm(scope: Pick<typeof screen, 'findByRole'> = screen) {
-  const button = await scope.findByRole('button', { name: 'Générer quand même' })
+  const button = await scope.findByRole('button', { name: 'Générer' })
   await waitFor(() => expect(button).toBeEnabled())
   return button
 }
@@ -56,7 +56,7 @@ describe('PilotHeaderActions — buttons and menu', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Plus d’actions' }))
     expect(screen.getByRole('menuitem', { name: 'Paramètres' })).toBeEnabled()
     // The deadline is shown by the availability follow-up, not by the header.
-    expect(screen.queryByText(/Fin souhaitée/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Date limite indicative/)).not.toBeInTheDocument()
   })
 
   it('keeps everything enabled once the deadline is passed', () => {
@@ -169,7 +169,9 @@ describe('PlanningSettingsModal', () => {
     chooseMenu('Paramètres')
 
     const dialog = screen.getByRole('dialog', { name: 'Paramètres du planning' })
-    expect(within(dialog).getByLabelText('Fin souhaitée d’encodage des indisponibilités')).toBeInTheDocument()
+    expect(
+      within(dialog).getByLabelText('Date limite indicative de déclaration des indisponibilités'),
+    ).toBeInTheDocument()
     expect(within(dialog).getByText(/ne bloque jamais rien/)).toBeInTheDocument()
     expect(
       within(dialog).getByText(/chacun peut encore ajouter ou modifier ses indisponibilités/),
@@ -189,7 +191,7 @@ describe('PlanningSettingsModal', () => {
 
     chooseMenu('Paramètres')
     const dialog = screen.getByRole('dialog')
-    const input = within(dialog).getByLabelText('Fin souhaitée d’encodage des indisponibilités')
+    const input = within(dialog).getByLabelText('Date limite indicative de déclaration des indisponibilités')
     expect(input).toHaveValue('2026-09-25')
     // Nothing to save until it changes.
     expect(within(dialog).getByRole('button', { name: 'Enregistrer' })).toBeDisabled()
@@ -229,9 +231,12 @@ describe('PlanningSettingsModal', () => {
 
     chooseMenu('Paramètres')
     const dialog = screen.getByRole('dialog')
-    fireEvent.change(within(dialog).getByLabelText('Fin souhaitée d’encodage des indisponibilités'), {
-      target: { value: '2020-01-01' },
-    })
+    fireEvent.change(
+      within(dialog).getByLabelText('Date limite indicative de déclaration des indisponibilités'),
+      {
+        target: { value: '2020-01-01' },
+      },
+    )
     fireEvent.click(within(dialog).getByRole('button', { name: 'Enregistrer' }))
 
     expect(await within(dialog).findByRole('alert')).toHaveTextContent(/déjà passée/)
@@ -317,7 +322,7 @@ describe('GenerationModal', () => {
     expect(within(dialog).queryByText(/30 gardes/)).not.toBeInTheDocument()
   })
 
-  it('shows the preflight: period, participants, who confirmed, who did not, unavailabilities', async () => {
+  it('shows the preflight: period, participants, unavailabilities — never a count of confirmations (D214)', async () => {
     stubApi({ [preflightUrl]: () => makePreflight() })
     renderActions()
 
@@ -326,73 +331,28 @@ describe('GenerationModal', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Générer le planning ?' })
     await within(dialog).findByText('16 membres participent')
     expect(within(dialog).getByText('1 janvier 2027 → 31 mars 2027')).toBeInTheDocument()
-    expect(within(dialog).getByText('13 ont confirmé leurs disponibilités')).toBeInTheDocument()
-    expect(within(dialog).getByText('3 n’ont pas encore répondu')).toBeInTheDocument()
+    expect(
+      within(dialog).getByText(
+        /Les calendriers sont pris tels qu’ils sont au lancement : sans indisponibilité, un membre est disponible/,
+      ),
+    ).toBeInTheDocument()
     expect(within(dialog).getByText('42 indisponibilités sont enregistrées')).toBeInTheDocument()
+    expect(within(dialog).queryByText(/confirmé|répondu/)).not.toBeInTheDocument()
     expect(
       within(dialog).getByText('Cette génération utilisera l’état actuel des données.'),
     ).toBeInTheDocument()
   })
 
-  it('warns about pending members but still lets the admin generate anyway', async () => {
-    stubApi({ [preflightUrl]: () => makePreflight() })
+  it('has nothing to warn about when nobody declared anything: everyone is available', async () => {
+    stubApi({ [preflightUrl]: () => makePreflight({ unavailabilityCount: 0 }) })
     renderActions()
 
     fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
 
     const dialog = await screen.findByRole('dialog')
-    const warnings = await within(dialog).findByRole('list', { name: 'Avertissements' })
-    expect(
-      within(warnings).getByText(/3 membres n’ont pas confirmé leurs disponibilités/),
-    ).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: 'Générer quand même' })).toBeEnabled()
-    expect(within(dialog).getByRole('button', { name: 'Annuler' })).toBeEnabled()
-  })
-
-  it('uses a simpler wording when everybody confirmed and nothing warrants a warning', async () => {
-    stubApi({
-      [preflightUrl]: () => makePreflight({ confirmedCount: 16, pendingCount: 0, warnings: [] }),
-    })
-    renderActions()
-
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
-
-    const dialog = await screen.findByRole('dialog')
-    await within(dialog).findByText('Tous ont confirmé leurs disponibilités')
-    expect(within(dialog).getByRole('button', { name: 'Générer' })).toBeEnabled()
+    await within(dialog).findByText('16 membres participent')
     expect(within(dialog).queryByRole('list', { name: 'Avertissements' })).not.toBeInTheDocument()
-  })
-
-  it('never says everybody confirmed for a period over which no collection was opened (lot L7)', async () => {
-    stubApi({
-      [preflightUrl]: () =>
-        makePreflight({ confirmedCount: 0, pendingCount: 0, notExpectedCount: 16, warnings: [] }),
-    })
-    render(
-      <PilotHeaderActions
-        planningStableId="plan-1"
-        timezone="Europe/Brussels"
-        status={makeStatus()}
-        period={{
-          stableId: 'c3',
-          number: 3,
-          startsAt: '2027-01-01',
-          lastDay: '2027-01-31',
-          named: true,
-          hasCollection: false,
-        }}
-        generateLabel="Générer la période 3"
-        onChanged={vi.fn()}
-        onLaunched={vi.fn()}
-      />,
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 3' }))
-    const dialog = await screen.findByRole('dialog')
-    await within(dialog).findByText('Aucune collecte des disponibilités n’a été ouverte pour ces dates')
-    expect(within(dialog).queryByText('Tous ont confirmé leurs disponibilités')).not.toBeInTheDocument()
-    // Generating stays possible (never blocked by a collection, D127), said as such.
-    expect(within(dialog).getByRole('button', { name: 'Générer quand même' })).toBeEnabled()
+    expect(await enabledConfirm(within(dialog))).toBeInTheDocument()
   })
 
   it('a passed deadline is one more warning, never a blocker', async () => {
@@ -401,10 +361,7 @@ describe('GenerationModal', () => {
         makePreflight({
           availabilityDeadline: '2026-09-25',
           deadlineOverdueDays: 2,
-          warnings: [
-            { code: 'PENDING_MEMBERS', lineStableId: null, lineName: null },
-            { code: 'DEADLINE_PASSED', lineStableId: null, lineName: null },
-          ],
+          warnings: [{ code: 'DEADLINE_PASSED', lineStableId: null, lineName: null }],
         }),
     })
     renderActions()
@@ -412,9 +369,9 @@ describe('GenerationModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
 
     const dialog = await screen.findByRole('dialog')
-    await within(dialog).findByText('Fin souhaitée d’encodage : 25 septembre 2026')
+    await within(dialog).findByText('Date limite indicative : 25 septembre 2026')
     expect(
-      within(dialog).getByText(/Date souhaitée dépassée depuis 2 jours\. Elle reste indicative/),
+      within(dialog).getByText(/Date limite indicative dépassée depuis 2 jours\. Elle reste indicative/),
     ).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: 'Générer quand même' })).toBeEnabled()
   })
@@ -492,7 +449,7 @@ describe('GenerationModal', () => {
     const choose = await within(dialog).findByRole('button', {
       name: 'Générer uniquement les lignes non publiées',
     })
-    expect(within(dialog).getByRole('button', { name: 'Générer quand même' })).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: 'Générer' })).toBeDisabled()
     expect(within(dialog).getByText(/déjà publiée : jamais régénérée/)).toBeInTheDocument()
     fireEvent.click(choose)
 
@@ -617,7 +574,7 @@ describe('GenerationModal', () => {
     expect(
       within(blockers).getByText('Ligne « Seniors » : aucune règle de planning n’est active.'),
     ).toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: 'Générer quand même' })).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: 'Générer' })).toBeDisabled()
   })
 
   it('explains the blockers of lot L4b in words (docs/decisions.md D195)', async () => {
@@ -646,7 +603,7 @@ describe('GenerationModal', () => {
     expect(within(blockers).getByText(/déclenche les renforts d’une ligne déjà publiée/)).toBeInTheDocument()
     expect(within(blockers).getByText(/^Aucune ligne à générer/)).toBeInTheDocument()
     expect(within(blockers).queryByText(/génération impossible/)).not.toBeInTheDocument()
-    expect(within(dialog).getByRole('button', { name: 'Générer quand même' })).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: 'Générer' })).toBeDisabled()
   })
 
   it('explains the conditional-line states in words, never by their raw code (docs/decisions.md D163)', async () => {
@@ -710,7 +667,7 @@ describe('GenerationModal', () => {
     fireEvent.click(await enabledConfirm())
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/déjà en cours/)
-    expect(screen.getByRole('button', { name: 'Générer quand même' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Générer' })).toBeEnabled()
   })
 
   it('reports a preflight that could not load', async () => {
@@ -766,7 +723,7 @@ describe('GenerationModal', () => {
     fireEvent.change(within(dialog).getByLabelText('Repos minimum d’équipe, en heures'), {
       target: { value: '36' },
     })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Générer quand même' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Générer' }))
 
     await waitFor(() => expect(api.requests('POST', '/api/plannings/plan-1/generations')).toHaveLength(1))
     expect(api.requests('POST', '/api/plannings/plan-1/generations')[0].body).toEqual({

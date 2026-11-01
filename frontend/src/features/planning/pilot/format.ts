@@ -99,11 +99,26 @@ function withYear(
   return force || parts.year !== referenceYear ? `${base} ${parts.year}` : base
 }
 
-/** "Date souhaitée dépassée depuis 2 jours." — a visual warning only. */
+/** "Date limite indicative dépassée depuis 2 jours." — a visual warning only. */
 export function overdueMessage(days: number): string {
-  return `Date souhaitée dépassée depuis ${days} ${days > 1 ? 'jours' : 'jour'}.`
+  return `Date limite indicative dépassée depuis ${days} ${days > 1 ? 'jours' : 'jour'}.`
 }
 
 export function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
   return `${count} ${count > 1 ? pluralForm : singular}`
+}
+
+/** "10 janvier 2027 à 14 h 32", in the planning's timezone (Europe/Brussels). */
+export function formatMoment(iso: string, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat('fr-BE', {
+    timeZone,
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(iso))
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? ''
+  return `${get('day')} ${get('month')} ${get('year')} à ${get('hour')} h ${get('minute')}`
 }

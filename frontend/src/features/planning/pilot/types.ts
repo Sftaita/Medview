@@ -1,6 +1,3 @@
-/** "PENDING" ("En attente"), "ACKNOWLEDGED" (shown "Confirmé"), "NOT_EXPECTED" (not counted). Never inferred from the number of unavailabilities. */
-export type MemberCollectionState = 'PENDING' | 'ACKNOWLEDGED' | 'NOT_EXPECTED'
-
 export type MemberRole = 'OWNER' | 'ADMIN' | 'MEMBER'
 
 export type PilotMemberRow = {
@@ -11,12 +8,14 @@ export type PilotMemberRow = {
   role: MemberRole
   team: { stableId: string; name: string }
   membershipEnd: string | null
-  collectionState: MemberCollectionState
-  /** Latest confirmation among the relevant collections. */
-  acknowledgedAt: string | null
-  acknowledgementKind: 'CONFIRMED' | 'NO_UNAVAILABILITY' | null
+  /**
+   * docs/decisions.md D214: told by the announcement and the reminders (false:
+   * left before the window, or an inactive account). Never a confirmation —
+   * without any unavailability, a person is available.
+   */
+  participant: boolean
+  /** The last change of their calendar on the period's dates (the journal, D215). */
   lastAvailabilityChangeAt: string | null
-  pendingCollectionCount: number
   /** UNAVAILABLE periods intersecting the planning period. */
   unavailabilityCount: number
   lastReminderAt: string | null
@@ -24,10 +23,8 @@ export type PilotMemberRow = {
 
 export type PilotSummary = {
   participantCount: number
-  expectedCount: number
-  confirmedCount: number
-  pendingCount: number
-  notExpectedCount: number
+  /** Those an announcement or a reminder reaches. */
+  concernedCount: number
   unavailabilityCount: number
 }
 
@@ -43,7 +40,7 @@ export type CollectionStatus = {
     lastDay: string
     timezone: string
   }
-  /** Informative "date souhaitée de fin d'encodage" — gates nothing. */
+  /** The indicative deadline for updating the calendars — gates nothing (D214). */
   availabilityDeadline: string | null
   /** Whole days since the deadline; null when there is none or it is not passed. */
   deadlineOverdueDays: number | null
@@ -66,9 +63,7 @@ export type MemberCollectionResponse = {
   startsAt: string
   lastDay: string
   collectionStatus: 'OPEN' | 'CLOSED'
-  status: 'PENDING' | 'ACKNOWLEDGED' | 'WITHDRAWN'
-  acknowledgedAt: string | null
-  acknowledgementKind: 'CONFIRMED' | 'NO_UNAVAILABILITY' | null
+  status: 'PARTICIPANT' | 'WITHDRAWN'
 }
 
 export type ReminderEntry = {
@@ -102,7 +97,7 @@ export type ReminderSent = {
   bulk: boolean | null
 }
 
-export type PendingRemindersResult = {
+export type ParticipantRemindersResult = {
   targetedCount: number
   sentCount: number
   skippedRecentlyCount: number
@@ -121,7 +116,6 @@ export type PreflightIssueCode =
   | 'NO_DUTIES'
   | 'PERIOD_LOCKED'
   | 'NO_SOLVER_PARAMETER_SET'
-  | 'PENDING_MEMBERS'
   | 'DEADLINE_PASSED'
   | 'VALIDATION_WILL_BE_INVALIDATED'
   | 'LINE_WITHOUT_MEMBERS'
@@ -154,9 +148,6 @@ export type GenerationPreflight = {
     timezone: string
   }
   participantCount: number
-  confirmedCount: number
-  pendingCount: number
-  notExpectedCount: number
   unavailabilityCount: number
   availabilityDeadline: string | null
   deadlineOverdueDays: number | null
@@ -320,4 +311,75 @@ export type RuleSetStatus = {
   active: boolean
   activatedAt?: string
   effectiveFrom?: string
+}
+
+/** docs/decisions.md D217 — one person, as the history names them. */
+export type HistoryPerson = { stableId: string; firstName: string; lastName: string }
+
+export type HistoryGenerationRef = {
+  generationStableId: string
+  lineName: string | null
+  capturedAt: string | null
+}
+
+/** A change of a personal calendar (the journal, D215). */
+export type HistoryAvailabilityEntry = {
+  kind: 'availability'
+  at: string
+  eventStableId: string
+  action: 'CREATED' | 'RESCHEDULED' | 'DELETED'
+  origin: 'USER' | 'SURGICAL_HUB_SYNC'
+  source: 'MANUAL' | 'SURGICAL_HUB'
+  user: HistoryPerson
+  actor: HistoryPerson | null
+  availabilityStableId: string
+  previous: { type: 'UNAVAILABLE' | 'PREFER_DUTY'; startsAt: string; endsAt: string } | null
+  new: { type: 'UNAVAILABLE' | 'PREFER_DUTY'; startsAt: string; endsAt: string } | null
+  /** Made after this generation read the calendars: it did not change it. */
+  afterGeneration: HistoryGenerationRef | null
+  /** Later generations whose snapshot holds this very entry with these very dates. */
+  usedBy: HistoryGenerationRef[]
+  /** What it met when it was made (D216). */
+  impacts: { conflicts: unknown[] }[]
+}
+
+/** A generation of one line of the period, from its snapshot (D129). */
+export type HistoryGenerationEntry = {
+  kind: 'generation'
+  at: string
+  generationStableId: string
+  line: { stableId: string; name: string } | null
+  launchedBy: HistoryPerson | null
+  requestedAt: string
+  capturedAt: string | null
+  finishedAt: string | null
+  status: string
+  coverage: string | null
+  failureReason: string | null
+  capturedUnavailabilityCount: number
+  /** Only when the history is narrowed to one participant. */
+  capturedUnavailabilities?: { stableId: string; startsAt: string; endsAt: string; source: string }[]
+}
+
+/** A change of a duty's holder (DutyAssignmentEvent): a reassignment or a swap — never a declaration. */
+export type HistoryAssignmentEntry = {
+  kind: 'assignment'
+  at: string
+  eventStableId: string
+  author: HistoryPerson
+  swap: boolean
+  wasPublished: boolean
+  duty: { stableId: string; date: string; lineName: string | null }
+  from: HistoryPerson | null
+  to: HistoryPerson | null
+}
+
+export type HistoryEntry = HistoryAvailabilityEntry | HistoryGenerationEntry | HistoryAssignmentEntry
+
+/** GET /api/plannings/{id}/history — managers only. */
+export type PlanningHistory = {
+  period: { stableId: string; number: number }
+  timezone: string
+  member: { memberStableId: string; userStableId: string; firstName: string; lastName: string } | null
+  entries: HistoryEntry[]
 }

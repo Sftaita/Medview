@@ -105,8 +105,8 @@ final class AvailabilityCollectionControllerTest extends WebTestCase
         self::assertSame(1, $detail['lines'][0]['memberCount']);
 
         $collections = $this->api($client, 'GET', "/api/plannings/{$created['stableId']}/availability-collections", token: $creator);
-        self::assertSame(['expected' => 1, 'acknowledged' => 0, 'pending' => 1], $collections[0]['progress']);
-        self::assertSame('PENDING', $collections[0]['myResponse']['status']);
+        self::assertSame(['participants' => 1], $collections[0]['progress']);
+        self::assertSame('PARTICIPANT', $collections[0]['myResponse']['status']);
     }
 
     public function testByDefaultTheCreatorIsNotAParticipant(): void
@@ -126,7 +126,7 @@ final class AvailabilityCollectionControllerTest extends WebTestCase
         self::assertTrue($created['canManage']);
 
         $collections = $this->api($client, 'GET', "/api/plannings/{$created['stableId']}/availability-collections", token: $creator);
-        self::assertSame(['expected' => 0, 'acknowledged' => 0, 'pending' => 0], $collections[0]['progress']);
+        self::assertSame(['participants' => 0], $collections[0]['progress']);
         self::assertNull($collections[0]['myResponse']);
     }
 
@@ -169,8 +169,9 @@ final class AvailabilityCollectionControllerTest extends WebTestCase
 
         self::assertSame(200, $this->httpStatus($client));
         self::assertFalse($view['canManage']);
-        self::assertArrayNotHasKey('progress', $view, 'the X/Y counters are a manager view');
-        self::assertSame('PENDING', $view['myResponse']['status']);
+        self::assertArrayNotHasKey('progress', $view, 'the number of participants is a manager view');
+        self::assertSame('PARTICIPANT', $view['myResponse']['status']);
+        self::assertArrayNotHasKey('acknowledgedAt', $view['myResponse'], 'no confirmation is exposed any more (D214)');
 
         $this->api($client, 'GET', "/api/availability-collections/{$s['collectionId']}/responses", token: $s['alice']);
         self::assertSame(403, $this->httpStatus($client), 'MEMBER never reads the detailed answers of others');
@@ -202,7 +203,7 @@ final class AvailabilityCollectionControllerTest extends WebTestCase
         foreach (['creator', 'admin'] as $who) {
             $view = $this->api($client, 'GET', "/api/availability-collections/{$s['collectionId']}", token: $s[$who]);
             self::assertTrue($view['canManage'], $who);
-            self::assertSame(['expected' => 3, 'acknowledged' => 0, 'pending' => 3], $view['progress'], 'the ADMIN is a participant too');
+            self::assertSame(['participants' => 3], $view['progress'], 'the ADMIN is a participant too');
         }
 
         $this->api($client, 'PATCH', "/api/availability-collections/{$s['collectionId']}", ['deadline' => '2026-12-20'], $s['admin']);
@@ -248,97 +249,27 @@ final class AvailabilityCollectionControllerTest extends WebTestCase
         self::assertSame(422, $this->httpStatus($client), 'the field must be explicit');
     }
 
-    /* -------------------------------------------------------------- answering */
+    /* ------------------------------------------- no confirmation any more (D214) */
 
-    public function testOnlyTheCurrentUserCanAnswerAndNeverForSomeoneElse(): void
+    public function testConfirmingIsGoneAndAnswersWithAnExplanationWhoeverAsks(): void
     {
         $client = static::createClient();
         $s = $this->scenario($client);
-        $bobId = $this->api($client, 'GET', '/api/me', token: $s['bob'])['stableId'];
 
-        // Alice tries to smuggle Bob's identity into the request: it is not a parameter of this endpoint.
-        $answer = $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", ['userStableId' => $bobId, 'user' => $bobId], $s['alice']);
-
-        self::assertSame(200, $this->httpStatus($client));
-        self::assertSame('ACKNOWLEDGED', $answer['myResponse']['status']);
-        $rows = $this->responsesOf($client, $s);
-        $statuses = array_map(static fn (array $r): string => $r['status'], $rows);
-        sort($statuses);
-        self::assertSame(['ACKNOWLEDGED', 'PENDING', 'PENDING'], $statuses);
-        $bob = array_values(array_filter($rows, static fn (array $r): bool => $r['user']['stableId'] === $bobId))[0];
-        self::assertSame('PENDING', $bob['status'], 'Bob has not answered: nobody can confirm in his place');
-    }
-
-    public function testAnswerWithNoUnavailabilityAndWithConfirmationAreBothExplicitEvents(): void
-    {
-        $client = static::createClient();
-        $s = $this->scenario($client);
-        $this->api($client, 'POST', '/api/me/calendar', ['type' => 'UNAVAILABLE', 'startsAt' => '2027-02-01T00:00:00+01:00', 'endsAt' => '2027-02-04T00:00:00+01:00'], $s['alice']);
-        self::assertResponseStatusCodeSame(201);
-
-        // Alice: absences entered, then "my availabilities are up to date".
-        $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", token: $s['alice']);
-        self::assertSame(200, $this->httpStatus($client));
-        // Bob: nothing to declare, and says so.
-        $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", ['noUnavailability' => true], $s['bob']);
-        self::assertSame(200, $this->httpStatus($client));
-
-        $rows = $this->responsesOf($client, $s, '?status=ACKNOWLEDGED');
-        $kinds = array_map(static fn (array $r): ?string => $r['acknowledgementKind'], $rows);
-        sort($kinds);
-        self::assertSame(['CONFIRMED', 'NO_UNAVAILABILITY'], $kinds);
-        foreach ($rows as $row) {
-            self::assertSame('ACKNOWLEDGED', $row['status']);
-            self::assertNotNull($row['acknowledgedAt']);
+        foreach (['alice', 'creator', 'outsider'] as $who) {
+            $error = $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", ['noUnavailability' => true], $s[$who]);
+            self::assertSame(410, $this->httpStatus($client), $who);
+            self::assertSame('confirmation_removed', $error['error']);
         }
-        $view = $this->api($client, 'GET', "/api/availability-collections/{$s['collectionId']}", token: $s['creator']);
-        self::assertSame(['expected' => 3, 'acknowledged' => 2, 'pending' => 1], $view['progress']);
+
+        // Nothing was recorded: nobody's state changed.
+        foreach ($this->responsesOf($client, $s) as $row) {
+            self::assertSame('PARTICIPANT', $row['status']);
+        }
+        self::assertSame(0, (int) static::getContainer()->get(EntityManagerInterface::class)->getConnection()->fetchOne('SELECT COUNT(*) FROM availability_collection_responses WHERE acknowledged_at IS NOT NULL'));
     }
 
-    public function testClaimingNoUnavailabilityIsRefusedWhenAbsencesExist(): void
-    {
-        $client = static::createClient();
-        $s = $this->scenario($client);
-        $this->api($client, 'POST', '/api/me/calendar', ['type' => 'UNAVAILABLE', 'startsAt' => '2027-02-01T00:00:00+01:00', 'endsAt' => '2027-02-04T00:00:00+01:00'], $s['alice']);
-
-        $error = $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", ['noUnavailability' => true], $s['alice']);
-
-        self::assertSame(409, $this->httpStatus($client));
-        self::assertSame('unavailability_exists', $error['error']);
-        self::assertSame(1, $error['unavailablePeriodCount']);
-        $mine = $this->api($client, 'GET', "/api/availability-collections/{$s['collectionId']}", token: $s['alice']);
-        self::assertSame('PENDING', $mine['myResponse']['status']);
-    }
-
-    public function testDoubleClickAndSecondTabAreIdempotent(): void
-    {
-        $client = static::createClient();
-        $s = $this->scenario($client);
-
-        $first = $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", token: $s['alice']);
-        self::mockTime('2026-12-11 09:00:00 Europe/Brussels');
-        $second = $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", token: $s['alice']);
-
-        self::assertSame(200, $this->httpStatus($client));
-        self::assertSame($first['myResponse']['acknowledgedAt'], $second['myResponse']['acknowledgedAt']);
-        $view = $this->api($client, 'GET', "/api/availability-collections/{$s['collectionId']}", token: $s['creator']);
-        self::assertSame(1, $view['progress']['acknowledged']);
-    }
-
-    public function testNonRespondentsAndOutsidersCannotAnswer(): void
-    {
-        $client = static::createClient();
-        $s = $this->scenario($client);
-
-        // The creator can view the planning but is not a participant: no row to answer.
-        $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", token: $s['creator']);
-        self::assertSame(403, $this->httpStatus($client));
-
-        $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", token: $s['outsider']);
-        self::assertSame(403, $this->httpStatus($client));
-    }
-
-    public function testAnAnswerIsRefusedOnceTheCollectionIsClosed(): void
+    public function testClosingACollectionStillWorksAndFreezesItsDeadline(): void
     {
         $client = static::createClient();
         $s = $this->scenario($client);
@@ -347,48 +278,39 @@ final class AvailabilityCollectionControllerTest extends WebTestCase
         self::assertSame('CLOSED', $closed['status']);
         self::assertNotNull($closed['closedAt']);
 
-        $error = $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", token: $s['alice']);
-        self::assertSame(409, $this->httpStatus($client));
-        self::assertSame('collection_closed', $error['error']);
-
         // Closing again is harmless.
         $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/close", token: $s['admin']);
         self::assertSame(200, $this->httpStatus($client));
 
         $this->api($client, 'PATCH', "/api/availability-collections/{$s['collectionId']}", ['deadline' => '2026-12-30'], $s['admin']);
         self::assertSame(409, $this->httpStatus($client));
+
+        // The calendar itself is never closed (D214).
+        $this->api($client, 'POST', '/api/me/calendar', ['type' => 'UNAVAILABLE', 'startsAt' => '2027-02-01T00:00:00+01:00', 'endsAt' => '2027-02-04T00:00:00+01:00'], $s['alice']);
+        self::assertResponseStatusCodeSame(201);
     }
 
     /* ------------------------------------------------------- the manager's list */
 
-    public function testTheManagerIdentifiesLateRespondentsAndFiltersThem(): void
+    public function testTheManagerListsTheParticipantsAndFiltersThem(): void
     {
         $client = static::createClient();
         $s = $this->scenario($client);
-        $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", token: $s['alice']);
-        // Bob edits his calendar but never confirms.
+        // Bob edits his calendar; Alice and the ADMIN do nothing: all three are concerned alike.
         $this->api($client, 'POST', '/api/me/calendar', ['type' => 'UNAVAILABLE', 'startsAt' => '2027-03-01T00:00:00+01:00', 'endsAt' => '2027-03-03T00:00:00+01:00'], $s['bob']);
 
-        $pending = $this->api($client, 'GET', "/api/availability-collections/{$s['collectionId']}/responses?status=PENDING", token: $s['admin']);
+        $participants = $this->api($client, 'GET', "/api/availability-collections/{$s['collectionId']}/responses?status=PARTICIPANT", token: $s['admin']);
         self::assertSame(200, $this->httpStatus($client));
-        // The ADMIN (a participant who did nothing) and Bob (who touched his calendar) are late; Alice is not.
-        self::assertCount(2, $pending);
-        foreach ($pending as $row) {
-            self::assertSame('PENDING', $row['status']);
-            self::assertNull($row['acknowledgedAt']);
+        self::assertCount(3, $participants);
+        $touched = array_values(array_filter($participants, static fn (array $r): bool => null !== $r['lastAvailabilityChangeAt']));
+        self::assertCount(1, $touched, 'the admin sees that Bob changed his calendar — nothing more');
+
+        self::assertSame([], $this->api($client, 'GET', "/api/availability-collections/{$s['collectionId']}/responses?status=WITHDRAWN", token: $s['admin']));
+
+        foreach (['PENDING', 'ACKNOWLEDGED', 'WHATEVER'] as $gone) {
+            $this->api($client, 'GET', "/api/availability-collections/{$s['collectionId']}/responses?status={$gone}", token: $s['admin']);
+            self::assertSame(422, $this->httpStatus($client), $gone);
         }
-        $touched = array_values(array_filter($pending, static fn (array $r): bool => null !== $r['lastAvailabilityChangeAt']));
-        self::assertCount(1, $touched, 'the admin sees that Bob touched his calendar without confirming');
-
-        $done = $this->api($client, 'GET', "/api/availability-collections/{$s['collectionId']}/responses?status=ACKNOWLEDGED", token: $s['admin']);
-        self::assertCount(1, $done);
-        self::assertNull($done[0]['lastAvailabilityChangeAt']);
-
-        $all = $this->api($client, 'GET', "/api/availability-collections/{$s['collectionId']}/responses", token: $s['admin']);
-        self::assertCount(3, $all);
-
-        $this->api($client, 'GET', "/api/availability-collections/{$s['collectionId']}/responses?status=WHATEVER", token: $s['admin']);
-        self::assertSame(422, $this->httpStatus($client));
     }
 
     public function testMyCollectionsListsOnlyMyOpenOnesAndTheirStatus(): void
@@ -399,16 +321,16 @@ final class AvailabilityCollectionControllerTest extends WebTestCase
         $mine = $this->api($client, 'GET', '/api/me/availability-collections', token: $s['alice']);
         self::assertCount(1, $mine);
         self::assertSame($s['collectionId'], $mine[0]['stableId']);
-        self::assertSame('PENDING', $mine[0]['myResponse']['status']);
+        self::assertSame('PARTICIPANT', $mine[0]['myResponse']['status']);
         self::assertArrayNotHasKey('progress', $mine[0]);
         self::assertSame('2027-04-30', $mine[0]['lastDay'], 'endsAt is exclusive, lastDay is the inclusive day for display');
 
         self::assertSame([], $this->api($client, 'GET', '/api/me/availability-collections', token: $s['outsider']));
         self::assertSame([], $this->api($client, 'GET', '/api/me/availability-collections', token: $s['creator']), 'the creator is not a participant here');
 
-        $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", token: $s['alice']);
+        $this->api($client, 'POST', '/api/me/calendar', ['type' => 'UNAVAILABLE', 'startsAt' => '2027-02-01T00:00:00+01:00', 'endsAt' => '2027-02-04T00:00:00+01:00'], $s['alice']);
         $after = $this->api($client, 'GET', '/api/me/availability-collections', token: $s['alice']);
-        self::assertSame('ACKNOWLEDGED', $after[0]['myResponse']['status'], 'an answered open collection stays listed so the dashboard can say "confirmed on …"');
+        self::assertCount(1, $after, 'having entered absences never takes a collection off the dashboard (D214)');
 
         $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/close", token: $s['admin']);
         self::assertSame([], $this->api($client, 'GET', '/api/me/availability-collections', token: $s['alice']), 'closed collections are history, not a to-do');
@@ -426,7 +348,7 @@ final class AvailabilityCollectionControllerTest extends WebTestCase
         // Alice belongs to the first planning only.
         $this->api($client, 'GET', "/api/plannings/{$otherPlanning}/availability-collections", token: $s['alice']);
         self::assertSame(403, $this->httpStatus($client));
-        $this->api($client, 'POST', "/api/availability-collections/{$otherList[0]['stableId']}/acknowledge", token: $s['alice']);
+        $this->api($client, 'GET', "/api/availability-collections/{$otherList[0]['stableId']}", token: $s['alice']);
         self::assertSame(403, $this->httpStatus($client));
     }
 
@@ -454,15 +376,14 @@ final class AvailabilityCollectionControllerTest extends WebTestCase
         $list = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/availability-collections", token: $s['creator']);
         self::assertCount(2, $list);
         self::assertSame('2027-05-01', $list[0]['startsAt'], 'newest window first');
-        self::assertSame(['expected' => 3, 'acknowledged' => 0, 'pending' => 3], $list[0]['progress']);
+        self::assertSame(['participants' => 3], $list[0]['progress']);
         self::assertSame('2027-01-01', $list[1]['startsAt']);
     }
 
-    public function testMembersAnsweredTheFirstWindowButMustAnswerTheExtension(): void
+    public function testAnExtensionConcernsTheSameMembersWithoutAnythingToConfirm(): void
     {
         $client = static::createClient();
         $s = $this->scenario($client);
-        $this->api($client, 'POST', "/api/availability-collections/{$s['collectionId']}/acknowledge", token: $s['alice']);
 
         $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/extensions", ['endsAt' => '2027-08-01'], $s['creator']);
 
@@ -472,7 +393,7 @@ final class AvailabilityCollectionControllerTest extends WebTestCase
         foreach ($mine as $collection) {
             $byStart[$collection['startsAt']] = $collection['myResponse']['status'];
         }
-        self::assertSame(['2027-01-01' => 'ACKNOWLEDGED', '2027-05-01' => 'PENDING'], $byStart);
+        self::assertSame(['2027-01-01' => 'PARTICIPANT', '2027-05-01' => 'PARTICIPANT'], $byStart);
     }
 
     public function testExtensionValidation(): void
