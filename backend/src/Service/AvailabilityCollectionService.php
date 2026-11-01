@@ -4,40 +4,40 @@ declare(strict_types=1);
 
 namespace App\Service;
 
-use App\Entity\AvailabilityAcknowledgementKind;
 use App\Entity\AvailabilityCollection;
 use App\Entity\AvailabilityCollectionResponse;
-use App\Entity\AvailabilityResponseStatus;
 use App\Entity\Planning;
 use App\Entity\PlanningCycle;
 use App\Entity\User;
-use App\Entity\UserAvailabilityType;
 use App\Exception\AvailabilityCollectionClosedException;
 use App\Exception\AvailabilityCollectionOutsidePeriodException;
 use App\Exception\AvailabilityCollectionOutsidePlanningException;
 use App\Exception\AvailabilityCollectionOverlapException;
-use App\Exception\ConflictingUnavailabilityException;
 use App\Exception\InvalidAvailabilityDeadlineException;
 use App\Exception\NoOpenAvailabilityCollectionException;
-use App\Exception\NotAnAvailabilityRespondentException;
 use App\Repository\AvailabilityCollectionRepository;
 use App\Repository\AvailabilityCollectionResponseRepository;
+use App\Repository\PeriodPreparationRepository;
 use App\Repository\PlanningCycleRepository;
 use App\Repository\PlanningTeamMemberRepository;
-use App\Repository\UserAvailabilityPeriodRepository;
-use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Component\Clock\ClockInterface;
 
 /**
- * Owns the "have you reviewed your availabilities for this slice of the
- * planning?" workflow (docs/availability-collection.md, D120-D124).
+ * Owns the availability collections: the windows of a planning whose
+ * participants are invited to keep their calendar up to date
+ * (docs/availability-collection.md, D120-D124, D214).
  *
- * Strictly separate from UserAvailabilityService: this class records that a
- * person *answered*, never what their availability is, and nothing here
- * ever reads or writes eligibility. The only bridge is one-way and
- * informational — UserAvailabilityService tells this class that a calendar
- * period changed so lastAvailabilityChangeAt can be updated.
+ * docs/decisions.md D214: nobody confirms anything any more. A person
+ * without any unavailability is available; a collection only says who is
+ * concerned (its participants), until when an update is wished (an
+ * informative deadline) and when it was opened. The confirmations given
+ * before D214 stay recorded as history, never asked for nor counted.
+ *
+ * Strictly separate from UserAvailabilityService: nothing here reads or
+ * writes eligibility. The only bridge is one-way and informational —
+ * UserAvailabilityService tells this class that a calendar period changed so
+ * lastAvailabilityChangeAt can be updated.
  */
 final class AvailabilityCollectionService
 {
@@ -45,16 +45,16 @@ final class AvailabilityCollectionService
         private readonly AvailabilityCollectionRepository $collectionRepository,
         private readonly AvailabilityCollectionResponseRepository $responseRepository,
         private readonly PlanningTeamMemberRepository $teamMemberRepository,
-        private readonly UserAvailabilityPeriodRepository $availabilityPeriodRepository,
         private readonly EntityManagerInterface $entityManager,
         private readonly ClockInterface $clock,
         private readonly PlanningCycleRepository $cycleRepository,
+        private readonly PeriodPreparationRepository $preparationRepository,
     ) {
     }
 
     /**
-     * Opens a collection over $window and one PENDING response per person
-     * expected to answer (memberships intersecting the window). Never
+     * Opens a collection over $window and one response (a participant row)
+     * per person concerned (memberships intersecting the window). Never
      * called for an empty window: DateWindow itself rejects that.
      *
      * A collection belongs to exactly one period (docs/planning-cycles.md I12,
@@ -127,7 +127,7 @@ final class AvailabilityCollectionService
         foreach ($this->responseRepository->findByCollection($collection) as $response) {
             if (isset($expected[$response->getUser()->getId()])) {
                 unset($expected[$response->getUser()->getId()]);
-            } elseif (AvailabilityResponseStatus::PENDING === $response->getStatus()) {
+            } elseif ($response->isParticipant() && !$response->isAcknowledged()) {
                 $this->entityManager->remove($response);
             }
         }
@@ -146,6 +146,15 @@ final class AvailabilityCollectionService
             throw new AvailabilityCollectionClosedException();
         }
         $this->assertDeadlineNotPast($collection->getPlanning(), $deadline);
+
+        // docs/decisions.md D218: once the period has a preparation, it has one deadline — the
+        // preparation and every open collection of the period say the same.
+        $cycle = $collection->getCycle();
+        if (null !== $cycle && null !== $this->preparationRepository->findOneByCycle($cycle)) {
+            $this->changePlanningDeadline($collection->getPlanning(), $deadline, $cycle);
+
+            return;
+        }
 
         $collection->changeDeadline($deadline, $this->now());
         $this->entityManager->flush();
@@ -175,8 +184,16 @@ final class AvailabilityCollectionService
         $this->assertDeadlineNotPast($planning, $deadline);
 
         $now = $this->now();
+        $cycles = [];
         foreach ($open as $collection) {
             $collection->changeDeadline($deadline, $now);
+            if (null !== $collection->getCycle()) {
+                $cycles[(int) $collection->getCycle()->getId()] = $collection->getCycle();
+            }
+        }
+        // docs/decisions.md D214: one deadline per period — the preparation of the period says the same.
+        foreach ($cycles as $collectionCycle) {
+            $this->preparationRepository->findOneByCycle($collectionCycle)?->changeDeclarationDeadline($deadline);
         }
         $this->entityManager->flush();
 
@@ -187,60 +204,6 @@ final class AvailabilityCollectionService
     {
         $collection->close($this->now());
         $this->entityManager->flush();
-    }
-
-    /**
-     * The explicit answer. Idempotent (double click, two tabs): the first
-     * confirmation wins and any later call returns it untouched. The
-     * response row is locked for the duration of the (short) transaction so
-     * two concurrent calls cannot both write.
-     *
-     * @throws NotAnAvailabilityRespondentException  when $user is not an expected respondent
-     * @throws AvailabilityCollectionClosedException
-     * @throws ConflictingUnavailabilityException    when NO_UNAVAILABILITY is claimed but UNAVAILABLE periods exist in the window
-     */
-    public function acknowledge(AvailabilityCollection $collection, User $user, AvailabilityAcknowledgementKind $kind): AvailabilityCollectionResponse
-    {
-        // Domain refusals are *returned* out of the transaction and thrown
-        // afterwards: throwing inside wrapInTransaction() would close the
-        // EntityManager, and nothing has been written on those paths anyway.
-        $outcome = $this->entityManager->wrapInTransaction(function () use ($collection, $user, $kind): AvailabilityCollectionResponse|\RuntimeException {
-            $found = $this->responseRepository->findOneForUser($collection, $user);
-            if (null === $found) {
-                return new NotAnAvailabilityRespondentException();
-            }
-
-            // Re-read under a write lock: a concurrent acknowledge that committed first is seen here.
-            $this->entityManager->refresh($found, LockMode::PESSIMISTIC_WRITE);
-
-            if ($found->isAcknowledged()) {
-                return $found;
-            }
-            if (AvailabilityResponseStatus::WITHDRAWN === $found->getStatus()) {
-                return new NotAnAvailabilityRespondentException();
-            }
-            if (!$collection->isOpen()) {
-                return new AvailabilityCollectionClosedException();
-            }
-
-            if (AvailabilityAcknowledgementKind::NO_UNAVAILABILITY === $kind) {
-                $unavailable = $this->countUnavailablePeriods($collection, $user);
-                if ($unavailable > 0) {
-                    return new ConflictingUnavailabilityException($unavailable);
-                }
-            }
-
-            $found->acknowledge($kind, $this->now());
-            $this->entityManager->flush();
-
-            return $found;
-        });
-
-        if ($outcome instanceof \RuntimeException) {
-            throw $outcome;
-        }
-
-        return $outcome;
     }
 
     /**
@@ -274,10 +237,9 @@ final class AvailabilityCollectionService
     }
 
     /**
-     * Called when $user's membership in $planning ends: they stop being
-     * expected in every OPEN collection that starts on or after that date
-     * and that they have not answered. A window they partly took part in,
-     * and any answer already given, are left untouched.
+     * Called when $user's membership in $planning ends: they stop being a
+     * participant of every OPEN collection that starts on or after that date.
+     * A window they partly took part in is left untouched.
      */
     public function withdrawMember(Planning $planning, User $user, \DateTimeImmutable $membershipEnd): void
     {
@@ -323,44 +285,29 @@ final class AvailabilityCollectionService
     }
 
     /**
-     * @return array{expected: int, acknowledged: int, pending: int}
+     * How many people the collection concerns (its participants, those who
+     * left before it started excluded). docs/decisions.md D214: nobody is
+     * asked to confirm anything, so there is nothing else to count.
+     *
+     * @return array{participants: int}
      */
     public function progress(AvailabilityCollection $collection): array
     {
-        $acknowledged = 0;
-        $pending = 0;
-        foreach ($this->responseRepository->findByCollection($collection) as $response) {
-            match ($response->getStatus()) {
-                AvailabilityResponseStatus::ACKNOWLEDGED => ++$acknowledged,
-                AvailabilityResponseStatus::PENDING => ++$pending,
-                AvailabilityResponseStatus::WITHDRAWN => null,
-            };
-        }
-
-        return ['expected' => $acknowledged + $pending, 'acknowledged' => $acknowledged, 'pending' => $pending];
+        return ['participants' => \count($this->participantResponses($collection))];
     }
 
     /**
-     * Exactly the people still expected to answer — the list a future
-     * "send a reminder" action would address (docs/availability-collection.md §9).
+     * The participants of a collection — the people an announcement or a
+     * reminder addresses (docs/availability-collection.md §9), whether or not
+     * they already entered absences: their calendar stays open to them.
      *
      * @return list<AvailabilityCollectionResponse>
      */
-    public function pendingResponses(AvailabilityCollection $collection): array
+    public function participantResponses(AvailabilityCollection $collection): array
     {
         return array_values(array_filter(
             $this->responseRepository->findByCollection($collection),
-            static fn (AvailabilityCollectionResponse $response): bool => AvailabilityResponseStatus::PENDING === $response->getStatus(),
-        ));
-    }
-
-    private function countUnavailablePeriods(AvailabilityCollection $collection, User $user): int
-    {
-        $periods = $this->availabilityPeriodRepository->findIntersecting($user, $collection->getStartsAtInstant(), $collection->getEndsAtInstant());
-
-        return \count(array_filter(
-            $periods,
-            static fn ($period): bool => UserAvailabilityType::UNAVAILABLE === $period->getType(),
+            static fn (AvailabilityCollectionResponse $response): bool => $response->isParticipant(),
         ));
     }
 

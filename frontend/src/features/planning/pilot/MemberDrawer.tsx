@@ -3,8 +3,9 @@ import { Icon } from '../../../components/Icon'
 import { Overlay } from '../../../components/Overlay'
 import { ApiError } from '../../../lib/apiClient'
 import { fetchMemberStatus, remindMember } from './api'
-import { formatDateOnly, formatDateTime, formatPeriod } from './format'
-import { COLLECTION_STATE_TAG, ROLE_LABEL } from './labels'
+import { formatDateTime, formatPeriod } from './format'
+import { ROLE_LABEL } from './labels'
+import { PlanningHistoryPanel } from './PlanningHistoryPanel'
 import type { MemberPeriod, MemberStatusDetail } from './types'
 
 type Props = {
@@ -24,10 +25,11 @@ type Feedback = { tone: 'success' | 'error'; text: string }
 
 /**
  * The side panel of one participant (docs/availability-collection.md §15):
- * identity and participation, where they stand in the collection, their
+ * identity and participation, whether announcements and reminders reach them, their
  * unavailabilities *limited to the planning period* — read from their own
  * calendar, never copied per planning — their preferences kept apart, and
- * the reminder history with "Envoyer un rappel".
+ * the reminder history with "Envoyer un rappel", and their own history of the
+ * period (docs/decisions.md D217).
  */
 export function MemberDrawer({
   planningStableId,
@@ -83,7 +85,8 @@ export function MemberDrawer({
 
   const member = detail?.member
   const title = member ? `${member.firstName} ${member.lastName}` : 'Membre'
-  const canRemind = member?.collectionState === 'PENDING'
+  // docs/decisions.md D214: every participant may be reminded, whatever their calendar holds.
+  const canRemind = member?.participant === true
 
   return (
     <Overlay title={title} variant="drawer" onClose={onClose}>
@@ -140,47 +143,22 @@ export function MemberDrawer({
 
           <section aria-labelledby="drawer-collection">
             <h3 id="drawer-collection" className="drawer-section__title">
-              État de la collecte
+              Calendrier
             </h3>
-            <p>
-              <span className={`tag ${COLLECTION_STATE_TAG[member.collectionState].tone}`}>
-                {COLLECTION_STATE_TAG[member.collectionState].label}
-              </span>
-            </p>
-            {member.collectionState === 'ACKNOWLEDGED' && member.acknowledgedAt && (
+            {member.participant ? (
+              <p>Participe à la période : reçoit l’annonce et les rappels.</p>
+            ) : (
               <p>
-                Dernière confirmation : {formatDateTime(member.acknowledgedAt, timezone)}
-                {member.acknowledgementKind === 'NO_UNAVAILABILITY' &&
-                  ' — « Je n’ai aucune indisponibilité »'}
+                <span className="tag">Non concerné</span> — ne reçoit ni l’annonce ni les rappels.
               </p>
             )}
-            {member.collectionState === 'PENDING' && (
-              <>
-                <p>Aucune confirmation reçue.</p>
-                <p className="muted drawer-note">
-                  Une absence d’indisponibilité enregistrée ne vaut pas confirmation : seul le membre peut
-                  confirmer que ses disponibilités sont à jour.
-                </p>
-              </>
-            )}
+            <p className="muted drawer-note">
+              Sans indisponibilité renseignée, ce membre est considéré comme disponible. Rien à confirmer.
+            </p>
             {member.lastAvailabilityChangeAt && (
               <p className="muted drawer-note">
                 Calendrier modifié le {formatDateTime(member.lastAvailabilityChangeAt, timezone)}.
               </p>
-            )}
-            {detail.collections.length > 1 && (
-              <ul className="drawer-list">
-                {detail.collections.map((response) => (
-                  <li key={response.collectionStableId}>
-                    {response.startsAt} → {response.lastDay} :{' '}
-                    {response.status === 'ACKNOWLEDGED' && response.acknowledgedAt
-                      ? `confirmé le ${formatDateOnly(response.acknowledgedAt, timezone)}`
-                      : response.status === 'WITHDRAWN'
-                        ? 'a quitté le planning'
-                        : 'en attente'}
-                  </li>
-                ))}
-              </ul>
             )}
           </section>
 
@@ -254,6 +232,14 @@ export function MemberDrawer({
               </details>
             )}
           </section>
+
+          <PlanningHistoryPanel
+            planningStableId={planningStableId}
+            periodStableId={periodStableId}
+            memberStableId={memberStableId}
+            timezone={timezone}
+            compact
+          />
         </div>
       )}
     </Overlay>

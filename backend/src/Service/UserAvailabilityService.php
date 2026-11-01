@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Entity\User;
+use App\Entity\UserAvailabilityEvent;
+use App\Entity\UserAvailabilityEventAction;
+use App\Entity\UserAvailabilityEventOrigin;
 use App\Entity\UserAvailabilityPeriod;
 use App\Entity\UserAvailabilitySource;
 use App\Entity\UserAvailabilityType;
@@ -13,6 +16,7 @@ use App\Exception\OverlappingUserAvailabilityPeriodException;
 use App\Repository\SurgicalHubImportedLeaveRepository;
 use App\Repository\UserAvailabilityPeriodRepository;
 use Doctrine\ORM\EntityManagerInterface;
+use Symfony\Component\Clock\ClockInterface;
 
 /**
  * Owns the overlap invariant for a User's personal calendar
@@ -26,11 +30,17 @@ use Doctrine\ORM\EntityManagerInterface;
  * own create/reschedule/delete refuse to touch them, and the import*()
  * methods refuse to touch a manual one.
  *
- * Every write also tells AvailabilityCollectionService which dates changed
- * (in the same transaction), so an open collection can note that the person
- * touched their calendar inside its window (docs/availability-collection.md
- * §6). That is the only link between the two: the calendar remains the
- * business truth, the collection only records workflow.
+ * The calendar is editable at any time, whatever the state of a planning
+ * (docs/decisions.md D214): no deadline, generation or publication refuses a
+ * change, and a change never touches an assignment — a generation uses what
+ * its snapshot captured, a later one what is there then.
+ *
+ * Every write, in the same transaction:
+ * - records one UserAvailabilityEvent (docs/decisions.md D215) — a change
+ *   that changes nothing records nothing;
+ * - tells AvailabilityCollectionService which dates changed, so an open
+ *   collection notes when the person last touched their calendar inside its
+ *   window (docs/availability-collection.md §6).
  */
 final class UserAvailabilityService
 {
@@ -39,6 +49,8 @@ final class UserAvailabilityService
         private readonly EntityManagerInterface $entityManager,
         private readonly AvailabilityCollectionService $collectionService,
         private readonly SurgicalHubImportedLeaveRepository $importRepository,
+        private readonly AvailabilityImpactService $impactService,
+        private readonly ClockInterface $clock,
     ) {
     }
 
@@ -51,19 +63,34 @@ final class UserAvailabilityService
         \DateTimeImmutable $startsAt,
         \DateTimeImmutable $endsAt,
     ): UserAvailabilityPeriod {
+        return $this->createAs($user, $user, $type, $startsAt, $endsAt)->period;
+    }
+
+    /**
+     * @throws OverlappingUserAvailabilityPeriodException
+     */
+    public function createAs(
+        User $user,
+        User $actor,
+        UserAvailabilityType $type,
+        \DateTimeImmutable $startsAt,
+        \DateTimeImmutable $endsAt,
+    ): CalendarChange {
         if ([] !== $this->repository->findOverlappingOrTouchingForUser($user, $type, $startsAt, $endsAt)) {
             throw new OverlappingUserAvailabilityPeriodException();
         }
 
         $period = new UserAvailabilityPeriod($user, $type, $startsAt, $endsAt);
 
-        $this->entityManager->wrapInTransaction(function () use ($period, $user, $startsAt, $endsAt): void {
+        return $this->entityManager->wrapInTransaction(function () use ($period, $user, $actor, $startsAt, $endsAt): CalendarChange {
             $this->entityManager->persist($period);
+            $impacts = $this->impactsOf($user, null, [$period->getType(), $startsAt, $endsAt]);
+            $this->record($period, $actor, UserAvailabilityEventAction::CREATED, null, $impacts);
             $this->entityManager->flush();
             $this->collectionService->recordAvailabilityChange($user, [[$startsAt, $endsAt]]);
-        });
 
-        return $period;
+            return new CalendarChange($period, $impacts);
+        });
     }
 
     /**
@@ -75,9 +102,15 @@ final class UserAvailabilityService
         UserAvailabilityType $type,
         \DateTimeImmutable $startsAt,
         \DateTimeImmutable $endsAt,
-    ): void {
+        ?User $actor = null,
+    ): CalendarChange {
         if ($period->isImported()) {
             throw new ImportedAvailabilityPeriodException();
+        }
+
+        if ($type === $period->getType() && $startsAt == $period->getStartsAt() && $endsAt == $period->getEndsAt()) {
+            // Nothing changes: no write, no event (a retried or repeated request).
+            return new CalendarChange($period, []);
         }
 
         $overlapping = $this->repository->findOverlappingOrTouchingForUser(
@@ -91,14 +124,7 @@ final class UserAvailabilityService
             throw new OverlappingUserAvailabilityPeriodException();
         }
 
-        $previous = [$period->getStartsAt(), $period->getEndsAt()];
-
-        $this->entityManager->wrapInTransaction(function () use ($period, $type, $startsAt, $endsAt, $previous): void {
-            $period->reschedule($type, $startsAt, $endsAt);
-            $this->entityManager->flush();
-            // Both the dates left and the dates taken count as "touched".
-            $this->collectionService->recordAvailabilityChange($period->getUser(), [$previous, [$startsAt, $endsAt]]);
-        });
+        return $this->change($period, $type, $startsAt, $endsAt, $actor ?? $period->getUser());
     }
 
     /**
@@ -109,7 +135,7 @@ final class UserAvailabilityService
      *
      * @throws ImportedAvailabilityPeriodException $period is still synchronised from SurgicalHub
      */
-    public function delete(UserAvailabilityPeriod $period): void
+    public function delete(UserAvailabilityPeriod $period, ?User $actor = null): CalendarChange
     {
         if ($period->isImported()) {
             if ($this->isSynchronised($period)) {
@@ -122,7 +148,7 @@ final class UserAvailabilityService
             }
         }
 
-        $this->remove($period);
+        return $this->remove($period, $actor ?? $period->getUser());
     }
 
     /** Whether an imported period is still kept up to date by a current (ACTIVE or SUSPENDED) association. */
@@ -136,7 +162,7 @@ final class UserAvailabilityService
      * A SurgicalHub absence entering the calendar (docs/surgicalhub-integration.md
      * §7.3). Always UNAVAILABLE, never checked against other periods (an
      * imported period may overlap anything), and noted by open collections
-     * exactly like a manual entry — never as an answer to them.
+     * exactly like a manual entry. Journaled with no human actor.
      */
     public function importCreate(User $user, \DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt): UserAvailabilityPeriod
     {
@@ -144,6 +170,7 @@ final class UserAvailabilityService
 
         $this->entityManager->wrapInTransaction(function () use ($period, $user, $startsAt, $endsAt): void {
             $this->entityManager->persist($period);
+            $this->record($period, null, UserAvailabilityEventAction::CREATED, null, $this->impactsOf($user, null, [$period->getType(), $startsAt, $endsAt]));
             $this->entityManager->flush();
             $this->collectionService->recordAvailabilityChange($user, [[$startsAt, $endsAt]]);
         });
@@ -156,14 +183,11 @@ final class UserAvailabilityService
         if (!$period->isImported()) {
             throw new \LogicException('The synchronisation never changes a manual period.');
         }
+        if ($startsAt == $period->getStartsAt() && $endsAt == $period->getEndsAt()) {
+            return;
+        }
 
-        $previous = [$period->getStartsAt(), $period->getEndsAt()];
-
-        $this->entityManager->wrapInTransaction(function () use ($period, $startsAt, $endsAt, $previous): void {
-            $period->reschedule(UserAvailabilityType::UNAVAILABLE, $startsAt, $endsAt);
-            $this->entityManager->flush();
-            $this->collectionService->recordAvailabilityChange($period->getUser(), [$previous, [$startsAt, $endsAt]]);
-        });
+        $this->change($period, UserAvailabilityType::UNAVAILABLE, $startsAt, $endsAt, null);
     }
 
     public function importDelete(UserAvailabilityPeriod $period): void
@@ -172,18 +196,81 @@ final class UserAvailabilityService
             throw new \LogicException('The synchronisation never deletes a manual period.');
         }
 
-        $this->remove($period);
+        $this->remove($period, null);
     }
 
-    private function remove(UserAvailabilityPeriod $period): void
+    private function change(UserAvailabilityPeriod $period, UserAvailabilityType $type, \DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt, ?User $actor): CalendarChange
+    {
+        $previous = [$period->getType(), $period->getStartsAt(), $period->getEndsAt()];
+
+        return $this->entityManager->wrapInTransaction(function () use ($period, $type, $startsAt, $endsAt, $previous, $actor): CalendarChange {
+            $period->reschedule($type, $startsAt, $endsAt);
+            $impacts = $this->impactsOf($period->getUser(), $previous, [$type, $startsAt, $endsAt]);
+            $this->record($period, $actor, UserAvailabilityEventAction::RESCHEDULED, $previous, $impacts);
+            $this->entityManager->flush();
+            // Both the dates left and the dates taken count as "touched".
+            $this->collectionService->recordAvailabilityChange($period->getUser(), [[$previous[1], $previous[2]], [$startsAt, $endsAt]]);
+
+            return new CalendarChange($period, $impacts);
+        });
+    }
+
+    private function remove(UserAvailabilityPeriod $period, ?User $actor): CalendarChange
     {
         $user = $period->getUser();
         $range = [$period->getStartsAt(), $period->getEndsAt()];
+        $previous = [$period->getType(), $period->getStartsAt(), $period->getEndsAt()];
 
-        $this->entityManager->wrapInTransaction(function () use ($period, $user, $range): void {
+        return $this->entityManager->wrapInTransaction(function () use ($period, $user, $range, $previous, $actor): CalendarChange {
+            $impacts = $this->impactsOf($user, $previous, null);
+            $this->record($period, $actor, UserAvailabilityEventAction::DELETED, $previous, $impacts);
             $this->entityManager->remove($period);
             $this->entityManager->flush();
             $this->collectionService->recordAvailabilityChange($user, [$range]);
+
+            return new CalendarChange($period, $impacts);
         });
+    }
+
+    /**
+     * What a change meets in plannings already generated (docs/decisions.md
+     * D216, D218): the days it makes unavailable and the days it gives back.
+     * A preference never warns; days unavailable before and after say nothing.
+     *
+     * @param array{0: UserAvailabilityType, 1: \DateTimeImmutable, 2: \DateTimeImmutable}|null $previous null for a creation
+     * @param array{0: UserAvailabilityType, 1: \DateTimeImmutable, 2: \DateTimeImmutable}|null $next     null for a deletion
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function impactsOf(User $user, ?array $previous, ?array $next): array
+    {
+        $before = null !== $previous && UserAvailabilityType::UNAVAILABLE === $previous[0] ? [$previous[1], $previous[2]] : null;
+        $after = null !== $next && UserAvailabilityType::UNAVAILABLE === $next[0] ? [$next[1], $next[2]] : null;
+
+        return $this->impactService->impacts(
+            $user,
+            null === $after ? [] : AvailabilityImpactService::addedRanges($before, $after),
+            null === $before ? [] : AvailabilityImpactService::releasedRanges($before, $after),
+        );
+    }
+
+    /**
+     * @param array{0: UserAvailabilityType, 1: \DateTimeImmutable, 2: \DateTimeImmutable}|null $previous
+     * @param list<array<string, mixed>>|null                                                   $impacts
+     */
+    private function record(UserAvailabilityPeriod $period, ?User $actor, UserAvailabilityEventAction $action, ?array $previous, ?array $impacts): void
+    {
+        $this->entityManager->persist(new UserAvailabilityEvent(
+            $period->getUser(),
+            $actor,
+            null === $actor ? UserAvailabilityEventOrigin::SURGICAL_HUB_SYNC : UserAvailabilityEventOrigin::USER,
+            $action,
+            $period->getStableId(),
+            $period->getSource(),
+            $previous,
+            UserAvailabilityEventAction::DELETED === $action ? null : [$period->getType(), $period->getStartsAt(), $period->getEndsAt()],
+            [] === $impacts ? null : $impacts,
+            $this->clock->now(),
+        ));
     }
 }

@@ -491,22 +491,44 @@ describe('DashboardPage — availability collections', () => {
     vi.unstubAllGlobals()
   })
 
-  it('shows a pending collection with its window, deadline and the way to answer', async () => {
+  it('shows an announced collection with its window, its indicative deadline and the calendar — nothing to confirm (D214)', async () => {
     frozenDecember()
-    createFakeBackend({ collections: [makeCollection()] }).install()
+    const backend = createFakeBackend({ collections: [makeCollection()] })
+    backend.install()
 
     renderDashboard()
 
-    const callout = await screen.findByRole('region', { name: /Disponibilités janvier–mars 2027/ })
+    const callout = await screen.findByRole('region', { name: /Indisponibilités janvier–mars 2027/ })
     expect(
-      within(callout).getByText('Vos disponibilités sont attendues pour janvier–mars 2027'),
+      within(callout).getByText('Indisponibilités à indiquer pour janvier–mars 2027'),
     ).toBeInTheDocument()
-    expect(within(callout).getByText('À renseigner avant le 20 décembre')).toBeInTheDocument()
+    expect(within(callout).getByText('Date limite indicative : le 20 décembre.')).toBeInTheDocument()
+    expect(
+      within(callout).getByText(/Sans indisponibilité renseignée, vous êtes considéré comme disponible/),
+    ).toBeInTheDocument()
     expect(within(callout).getByText('Gardes 2026-2027')).toBeInTheDocument()
-    expect(within(callout).getByRole('link', { name: 'Renseigner mes disponibilités' })).toHaveAttribute(
+    expect(within(callout).getByRole('link', { name: 'Ouvrir mon calendrier' })).toHaveAttribute(
       'href',
       '/my-availability?collection=col-1',
     )
+    expect(screen.queryByRole('button', { name: /aucune indisponibilité|Confirmer/ })).not.toBeInTheDocument()
+    expect(screen.queryByText(/confirmées? le/)).not.toBeInTheDocument()
+    expect(backend.requests('POST', '/api/availability-collections/col-1/acknowledge')).toHaveLength(0)
+  })
+
+  it('never shows a past deadline as the next step: the calendar stays open', async () => {
+    frozenDecember()
+    createFakeBackend({ collections: [makeCollection({ deadline: '2026-12-01' })] }).install()
+
+    renderDashboard()
+
+    const callout = await screen.findByRole('region', { name: /Indisponibilités janvier–mars 2027/ })
+    expect(
+      within(callout).getByText(
+        'La date limite indicative (le 1 décembre) est passée : votre calendrier reste modifiable.',
+      ),
+    ).toBeInTheDocument()
+    expect(within(callout).queryByText(/^Date limite indicative : le/)).not.toBeInTheDocument()
   })
 
   it('shows nothing when no collection is open', async () => {
@@ -515,89 +537,34 @@ describe('DashboardPage — availability collections', () => {
     renderDashboard()
 
     await screen.findByRole('heading', { name: /Bonjour, Alice/ })
-    expect(screen.queryByLabelText('Disponibilités attendues')).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: /^Indisponibilités / })).not.toBeInTheDocument()
   })
 
-  it('lets someone with nothing to declare say so, and shows the confirmation at once', async () => {
-    frozenDecember()
-    const backend = createFakeBackend({ collections: [makeCollection()] })
-    backend.install()
-    renderDashboard()
-
-    fireEvent.click(
-      await screen.findByRole('button', { name: "Je n'ai aucune indisponibilité sur cette période" }),
-    )
-
-    expect(await screen.findByText(/Disponibilités confirmées le/)).toHaveTextContent('14/12')
-    expect(screen.queryByText(/Vos disponibilités sont attendues/)).not.toBeInTheDocument()
-    expect(screen.queryByRole('link', { name: 'Renseigner mes disponibilités' })).not.toBeInTheDocument()
-    expect(backend.requests('POST', '/api/availability-collections/col-1/acknowledge')).toHaveLength(1)
-  })
-
-  it('does not offer "no unavailability" when absences already sit in the window', async () => {
+  it('keeps a collection listed even once absences were entered: nothing is ever "done"', async () => {
     frozenDecember()
     createFakeBackend({
-      collections: [makeCollection()],
+      collections: [
+        makeCollection({
+          stableId: 'later',
+          startsAt: '2027-04-01',
+          endsAt: '2027-07-01',
+          lastDay: '2027-06-30',
+        }),
+        makeCollection({
+          myResponse: {
+            stableId: 'r1',
+            status: 'PARTICIPANT',
+            lastAvailabilityChangeAt: '2026-12-13T08:00:00+00:00',
+          },
+        }),
+      ],
       periods: [period('a1', 'UNAVAILABLE', new Date(2027, 0, 15), new Date(2027, 0, 18))],
     }).install()
 
     renderDashboard()
 
-    await screen.findByRole('link', { name: 'Renseigner mes disponibilités' })
-    expect(
-      screen.queryByRole('button', { name: /aucune indisponibilité sur cette période/ }),
-    ).not.toBeInTheDocument()
-  })
-
-  it('lists what is still to do before what has been confirmed', async () => {
-    frozenDecember()
-    createFakeBackend({
-      collections: [
-        makeCollection({
-          stableId: 'done',
-          startsAt: '2026-09-01',
-          endsAt: '2027-01-01',
-          lastDay: '2026-12-31',
-          myResponse: {
-            stableId: 'r0',
-            status: 'ACKNOWLEDGED',
-            acknowledgedAt: '2026-08-26T08:00:00+00:00',
-            acknowledgementKind: 'CONFIRMED',
-            lastAvailabilityChangeAt: null,
-          },
-        }),
-        makeCollection(),
-      ],
-    }).install()
-
-    renderDashboard()
-
-    const regions = await screen.findAllByRole('region', { name: /^Disponibilités / })
-    expect(regions.map((region) => region.getAttribute('data-collection'))).toEqual(['col-1', 'done'])
-    expect(within(regions[1]).getByText(/Disponibilités confirmées le/)).toHaveTextContent('26/08')
-  })
-
-  it('says when the calendar was modified after the confirmation, without reopening it', async () => {
-    frozenDecember()
-    createFakeBackend({
-      collections: [
-        makeCollection({
-          myResponse: {
-            stableId: 'r1',
-            status: 'ACKNOWLEDGED',
-            acknowledgedAt: '2026-12-12T08:00:00+00:00',
-            acknowledgementKind: 'CONFIRMED',
-            lastAvailabilityChangeAt: '2026-12-13T08:00:00+00:00',
-          },
-        }),
-      ],
-    }).install()
-
-    renderDashboard()
-
-    const callout = await screen.findByRole('region', { name: /Disponibilités janvier–mars 2027/ })
-    expect(within(callout).getByText(/Disponibilités confirmées le/)).toHaveTextContent('12/12')
-    expect(within(callout).getByText(/calendrier modifié depuis le/)).toHaveTextContent('13/12')
-    expect(within(callout).queryByRole('button', { name: /Confirmer/ })).not.toBeInTheDocument()
+    const regions = await screen.findAllByRole('region', { name: /^Indisponibilités / })
+    expect(regions.map((region) => region.getAttribute('data-collection'))).toEqual(['col-1', 'later'])
+    expect(within(regions[0]).getByRole('link', { name: 'Ouvrir mon calendrier' })).toBeInTheDocument()
   })
 })

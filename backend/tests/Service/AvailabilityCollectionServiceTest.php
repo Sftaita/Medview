@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Tests\Service;
 
-use App\Entity\AvailabilityAcknowledgementKind;
 use App\Entity\AvailabilityCollection;
 use App\Entity\AvailabilityCollectionResponse;
 use App\Entity\AvailabilityCollectionStatus;
@@ -20,10 +19,8 @@ use App\Entity\UserAvailabilityType;
 use App\Exception\AvailabilityCollectionClosedException;
 use App\Exception\AvailabilityCollectionOutsidePlanningException;
 use App\Exception\AvailabilityCollectionOverlapException;
-use App\Exception\ConflictingUnavailabilityException;
 use App\Exception\InvalidAvailabilityDeadlineException;
 use App\Exception\NoNewPlanningRangeException;
-use App\Exception\NotAnAvailabilityRespondentException;
 use App\Exception\PlanningPeriodLockedException;
 use App\Exception\PlanningRangeShrinkException;
 use App\Repository\AvailabilityCollectionRepository;
@@ -176,7 +173,7 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
         self::assertSame('2026-08-25', $membership->getMembershipStart()->format('Y-m-d'));
         self::assertSame(1.0, $membership->getParticipationPeriods()->first()->toFloat(), 'no favour and no penalty: participation factor 1.0');
         // …and, being a participant, they are expected to answer the availability collection.
-        self::assertSame(AvailabilityResponseStatus::PENDING, $this->statusOf($this->firstCollection($planning), $creator));
+        self::assertSame(AvailabilityResponseStatus::PARTICIPANT, $this->statusOf($this->firstCollection($planning), $creator));
     }
 
     public function testAnIncludedCreatorIsInTheSnapshotLikeAnyMemberAndAnExcludedOneIsNot(): void
@@ -208,173 +205,40 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
         self::assertSame([], $userStableIds[1]);
     }
 
-    /* ---------------------------------------------- 4/7. the flagship scenario */
+    /* ------------------------------------- 4/7. available by default (D214) */
 
-    public function testAnOldUnavailabilityNeverCountsAsAnswerForALaterExtension(): void
+    public function testAPersonWithoutAnyUnavailabilityIsSimplyAParticipantAndNothingIsAskedOfThem(): void
+    {
+        $planning = $this->planning();
+        $x = $this->join($planning);
+        $collection = $this->firstCollection($planning);
+
+        // docs/decisions.md D214: no confirmation exists — X is told, never asked to confirm, and is available.
+        self::assertSame(AvailabilityResponseStatus::PARTICIPANT, $this->statusOf($collection, $x));
+        self::assertSame([$x->getId()], array_map(static fn (AvailabilityCollectionResponse $r): int => $r->getUser()->getId(), $this->collectionService->participantResponses($collection)));
+        self::assertSame(['participants' => 1], $this->collectionService->progress($collection));
+        self::assertFalse(method_exists($this->collectionService, 'acknowledge'));
+        self::assertSame([], self::getContainer()->get(UserAvailabilityPeriodRepository::class)->findByUser($x));
+    }
+
+    public function testAnOldUnavailabilityStaysInTheCalendarAndAnExtensionStillConcernsThePerson(): void
     {
         // 07/08 — X fills in unavailabilities, including some in January (before any collection exists).
         self::mockTime('2026-08-07 10:00:00 Europe/Brussels');
         $x = $this->createUser($this->em);
         $this->availabilityService->create($x, UserAvailabilityType::UNAVAILABLE, $this->brussels('2027-01-15 00:00'), $this->brussels('2027-01-20 00:00'));
-        $this->availabilityService->create($x, UserAvailabilityType::UNAVAILABLE, $this->brussels('2026-10-05 00:00'), $this->brussels('2026-10-08 00:00'));
 
-        // 25/08 — the planning is created for 01/09 → 31/12. X is a member, and answers it.
         self::mockTime('2026-08-25 09:00:00 Europe/Brussels');
         $planning = $this->planning('2026-09-01', '2027-01-01');
         $this->join($planning, $x);
-        $initial = $this->firstCollection($planning);
-        self::assertSame(AvailabilityResponseStatus::PENDING, $this->statusOf($initial, $x), 'having saved absences beforehand is not an answer');
-        self::mockTime('2026-08-26 09:00:00 Europe/Brussels');
-        $this->collectionService->acknowledge($initial, $x, AvailabilityAcknowledgementKind::CONFIRMED);
 
-        // 10/12 — the planning is extended by three months, deadline 20/12.
+        // 10/12 — the planning is extended by three months.
         self::mockTime('2026-12-10 09:00:00 Europe/Brussels');
-        $collections = $this->extensionService->extend($planning, null, $this->date('2027-04-01'), $planning->getCreator(), $this->date('2026-12-20'));
+        $extension = $this->extensionService->extend($planning, null, $this->date('2027-04-01'), $planning->getCreator(), $this->date('2026-12-20'))[0];
 
-        self::assertCount(1, $collections);
-        $extension = $collections[0];
-        self::assertSame('2027-01-01', $extension->getStartsAt()->format('Y-m-d'));
-        self::assertSame('2027-04-01', $extension->getEndsAt()->format('Y-m-d'));
-        self::assertSame('2026-12-20', $extension->getDeadline()->format('Y-m-d'));
-        self::assertSame(
-            AvailabilityResponseStatus::PENDING,
-            $this->statusOf($extension, $x),
-            'X has unavailabilities inside January–March, saved long before: that proves nothing about having reviewed the new window',
-        );
-        // …while the answer to the first window is untouched.
-        self::assertSame(AvailabilityResponseStatus::ACKNOWLEDGED, $this->statusOf($initial, $x));
-    }
-
-    /* --------------------------------------------------------- 5/6. answering */
-
-    public function testAnswerWithNoUnavailabilityAtAll(): void
-    {
-        $planning = $this->planning();
-        $x = $this->join($planning);
-        $collection = $this->firstCollection($planning);
-        self::mockTime('2026-08-28 12:00:00 Europe/Brussels');
-
-        $response = $this->collectionService->acknowledge($collection, $x, AvailabilityAcknowledgementKind::NO_UNAVAILABILITY);
-
-        self::assertSame(AvailabilityResponseStatus::ACKNOWLEDGED, $response->getStatus());
-        self::assertSame(AvailabilityAcknowledgementKind::NO_UNAVAILABILITY, $response->getAcknowledgementKind());
-        self::assertSame('2026-08-28 10:00:00', $response->getAcknowledgedAt()->format('Y-m-d H:i:s'));
-        self::assertSame([], self::getContainer()->get(UserAvailabilityPeriodRepository::class)->findByUser($x), 'answering never writes to the calendar');
-    }
-
-    public function testAnswerAfterHavingEnteredUnavailabilities(): void
-    {
-        $planning = $this->planning();
-        $x = $this->join($planning);
-        $collection = $this->firstCollection($planning);
-        $this->availabilityService->create($x, UserAvailabilityType::UNAVAILABLE, $this->brussels('2026-10-05 00:00'), $this->brussels('2026-10-08 00:00'));
-
-        $response = $this->collectionService->acknowledge($collection, $x, AvailabilityAcknowledgementKind::CONFIRMED);
-
-        self::assertSame(AvailabilityResponseStatus::ACKNOWLEDGED, $response->getStatus());
-        self::assertSame(AvailabilityAcknowledgementKind::CONFIRMED, $response->getAcknowledgementKind());
-        self::assertCount(1, self::getContainer()->get(UserAvailabilityPeriodRepository::class)->findByUser($x), 'the calendar is untouched by the answer');
-    }
-
-    public function testConfirmingWithZeroAbsencesIsAlsoAValidExplicitAnswer(): void
-    {
-        $planning = $this->planning();
-        $x = $this->join($planning);
-
-        $response = $this->collectionService->acknowledge($this->firstCollection($planning), $x, AvailabilityAcknowledgementKind::CONFIRMED);
-
-        self::assertSame(AvailabilityResponseStatus::ACKNOWLEDGED, $response->getStatus());
-    }
-
-    public function testClaimingNoUnavailabilityIsRefusedWhileAnUnavailablePeriodExistsInTheWindow(): void
-    {
-        $planning = $this->planning();
-        $x = $this->join($planning);
-        $collection = $this->firstCollection($planning);
-        $this->availabilityService->create($x, UserAvailabilityType::UNAVAILABLE, $this->brussels('2026-10-05 00:00'), $this->brussels('2026-10-08 00:00'));
-
-        try {
-            $this->collectionService->acknowledge($collection, $x, AvailabilityAcknowledgementKind::NO_UNAVAILABILITY);
-            self::fail('expected a ConflictingUnavailabilityException');
-        } catch (ConflictingUnavailabilityException $exception) {
-            self::assertSame(1, $exception->unavailablePeriodCount);
-        }
-
-        self::assertSame(AvailabilityResponseStatus::PENDING, $this->statusOf($collection, $x), 'a refused answer records nothing');
-    }
-
-    public function testNoUnavailabilityIgnoresPeriodsOutsideTheWindowAndPreferences(): void
-    {
-        $planning = $this->planning('2027-01-01', '2027-04-01');
-        $x = $this->join($planning);
-        $collection = $this->firstCollection($planning);
-        // An absence in 2026 (outside the window) and a preference inside it: neither contradicts "no unavailability".
-        $this->availabilityService->create($x, UserAvailabilityType::UNAVAILABLE, $this->brussels('2026-10-05 00:00'), $this->brussels('2026-10-08 00:00'));
-        $this->availabilityService->create($x, UserAvailabilityType::PREFER_DUTY, $this->brussels('2027-02-01 00:00'), $this->brussels('2027-02-04 00:00'));
-
-        $response = $this->collectionService->acknowledge($collection, $x, AvailabilityAcknowledgementKind::NO_UNAVAILABILITY);
-
-        self::assertSame(AvailabilityResponseStatus::ACKNOWLEDGED, $response->getStatus());
-    }
-
-    public function testAcknowledgingTwiceIsIdempotentAndKeepsTheFirstConfirmation(): void
-    {
-        $planning = $this->planning();
-        $x = $this->join($planning);
-        $collection = $this->firstCollection($planning);
-        self::mockTime('2026-08-28 12:00:00 Europe/Brussels');
-        $first = $this->collectionService->acknowledge($collection, $x, AvailabilityAcknowledgementKind::CONFIRMED);
-        $firstAt = $first->getAcknowledgedAt();
-
-        self::mockTime('2026-09-02 08:00:00 Europe/Brussels');
-        $second = $this->collectionService->acknowledge($collection, $x, AvailabilityAcknowledgementKind::NO_UNAVAILABILITY);
-
-        self::assertSame($first->getId(), $second->getId());
-        self::assertEquals($firstAt, $second->getAcknowledgedAt(), 'a double click / second tab must not move the first confirmation');
-        self::assertSame(AvailabilityAcknowledgementKind::CONFIRMED, $second->getAcknowledgementKind());
-        self::assertCount(1, array_filter(
-            $this->responseRepository->findByCollection($collection),
-            static fn (AvailabilityCollectionResponse $r): bool => $r->isAcknowledged(),
-        ), 'still exactly one response row');
-    }
-
-    public function testSomeoneWhoIsNotARespondentCannotAnswer(): void
-    {
-        $planning = $this->planning();
-        $this->join($planning);
-        $outsider = $this->createUser($this->em);
-
-        $this->expectException(NotAnAvailabilityRespondentException::class);
-
-        $this->collectionService->acknowledge($this->firstCollection($planning), $outsider, AvailabilityAcknowledgementKind::CONFIRMED);
-    }
-
-    public function testACollectionThatIsClosedNoLongerAcceptsAnswers(): void
-    {
-        $planning = $this->planning();
-        $x = $this->join($planning);
-        $collection = $this->firstCollection($planning);
-        $this->collectionService->close($collection);
-
-        try {
-            $this->collectionService->acknowledge($collection, $x, AvailabilityAcknowledgementKind::CONFIRMED);
-            self::fail('expected AvailabilityCollectionClosedException');
-        } catch (AvailabilityCollectionClosedException) {
-            self::assertSame(AvailabilityResponseStatus::PENDING, $this->statusOf($collection, $x));
-        }
-    }
-
-    public function testAnAnswerGivenBeforeClosingStaysReadableAfterClosingWithoutError(): void
-    {
-        $planning = $this->planning();
-        $x = $this->join($planning);
-        $collection = $this->firstCollection($planning);
-        $this->collectionService->acknowledge($collection, $x, AvailabilityAcknowledgementKind::CONFIRMED);
-        $this->collectionService->close($collection);
-
-        $again = $this->collectionService->acknowledge($collection, $x, AvailabilityAcknowledgementKind::CONFIRMED);
-
-        self::assertSame(AvailabilityResponseStatus::ACKNOWLEDGED, $again->getStatus());
+        // Having entered absences never means "done": X is a participant of the new window like anyone else.
+        self::assertSame(AvailabilityResponseStatus::PARTICIPANT, $this->statusOf($extension, $x));
+        self::assertCount(1, self::getContainer()->get(UserAvailabilityPeriodRepository::class)->findByUser($x), 'the old entry is still there, and counts for January');
     }
 
     /* -------------------------------------------------- 6/18. availability changes */
@@ -390,23 +254,18 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
 
         $response = $this->responseOf($collection, $x);
         self::assertSame('2026-09-03 13:00:00', $response->getLastAvailabilityChangeAt()->format('Y-m-d H:i:s'));
-        self::assertSame(AvailabilityResponseStatus::PENDING, $response->getStatus(), 'entering absences is not answering');
+        self::assertSame(AvailabilityResponseStatus::PARTICIPANT, $response->getStatus(), 'still a participant: entering absences never closes anything');
     }
 
-    public function testAChangeAfterTheConfirmationKeepsTheAnswerAndOnlyMovesLastChange(): void
+    public function testEveryLaterChangeMovesTheLastChangeAndTheCalendarStaysOpen(): void
     {
         $planning = $this->planning();
         $x = $this->join($planning);
         $collection = $this->firstCollection($planning);
-        self::mockTime('2026-09-03 09:00:00 Europe/Brussels');
-        $this->collectionService->acknowledge($collection, $x, AvailabilityAcknowledgementKind::CONFIRMED);
 
         self::mockTime('2026-09-10 09:00:00 Europe/Brussels');
         $period = $this->availabilityService->create($x, UserAvailabilityType::UNAVAILABLE, $this->brussels('2026-10-05 00:00'), $this->brussels('2026-10-08 00:00'));
-        $response = $this->responseOf($collection, $x);
-        self::assertSame(AvailabilityResponseStatus::ACKNOWLEDGED, $response->getStatus());
-        self::assertSame('2026-09-03 07:00:00', $response->getAcknowledgedAt()->format('Y-m-d H:i:s'));
-        self::assertSame('2026-09-10 07:00:00', $response->getLastAvailabilityChangeAt()->format('Y-m-d H:i:s'));
+        self::assertSame('2026-09-10 07:00:00', $this->responseOf($collection, $x)->getLastAvailabilityChangeAt()->format('Y-m-d H:i:s'));
 
         self::mockTime('2026-09-11 09:00:00 Europe/Brussels');
         $this->availabilityService->reschedule($period, UserAvailabilityType::UNAVAILABLE, $this->brussels('2026-10-06 00:00'), $this->brussels('2026-10-09 00:00'));
@@ -416,7 +275,7 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
         $this->availabilityService->delete($period);
         $response = $this->responseOf($collection, $x);
         self::assertSame('2026-09-12 07:00:00', $response->getLastAvailabilityChangeAt()->format('Y-m-d H:i:s'));
-        self::assertSame(AvailabilityResponseStatus::ACKNOWLEDGED, $response->getStatus(), 'still answered: the change never reopens it (D121)');
+        self::assertSame(AvailabilityResponseStatus::PARTICIPANT, $response->getStatus());
     }
 
     public function testAChangeOutsideTheWindowLeavesTheResponseUntouched(): void
@@ -464,7 +323,6 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
         $x = $this->join($planning);
         $collection = $this->firstCollection($planning);
         self::mockTime('2026-09-03 09:00:00 Europe/Brussels');
-        $this->collectionService->acknowledge($collection, $x, AvailabilityAcknowledgementKind::CONFIRMED);
         $this->collectionService->close($collection);
         $before = $this->collectionService->progress($collection);
 
@@ -480,41 +338,20 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
 
     /* ------------------------------------------------------------ 8. late ones */
 
-    public function testPendingResponsesAreExactlyThePeopleWhoDidNotAnswer(): void
+    public function testParticipantsAreEveryoneConcernedWhateverTheirCalendar(): void
     {
         $planning = $this->planning();
         $dupont = $this->join($planning);
         $martin = $this->join($planning);
         $durand = $this->join($planning);
-        $lambert = $this->join($planning);
         $collection = $this->firstCollection($planning);
-        $this->collectionService->acknowledge($collection, $dupont, AvailabilityAcknowledgementKind::CONFIRMED);
-        $this->collectionService->acknowledge($collection, $martin, AvailabilityAcknowledgementKind::NO_UNAVAILABILITY);
-        // Durand touches his calendar but never confirms: still late.
+        // Durand entered absences, Dupont and Martin none: all three stay concerned (D214).
         $this->availabilityService->create($durand, UserAvailabilityType::UNAVAILABLE, $this->brussels('2026-10-05 00:00'), $this->brussels('2026-10-08 00:00'));
 
-        $pending = array_map(static fn (AvailabilityCollectionResponse $r): int => $r->getUser()->getId(), $this->collectionService->pendingResponses($collection));
+        $participants = array_map(static fn (AvailabilityCollectionResponse $r): int => $r->getUser()->getId(), $this->collectionService->participantResponses($collection));
 
-        self::assertEqualsCanonicalizing([$durand->getId(), $lambert->getId()], $pending);
-        self::assertSame(['expected' => 4, 'acknowledged' => 2, 'pending' => 2], $this->collectionService->progress($collection));
-    }
-
-    /* ------------------------------------------------------------- 14. isolation */
-
-    public function testTwoPlanningsNeverShareAnswers(): void
-    {
-        $planningA = $this->planning();
-        $planningB = $this->planning();
-        $x = $this->join($planningA);
-        $this->join($planningB, $x);
-        $collectionA = $this->firstCollection($planningA);
-        $collectionB = $this->firstCollection($planningB);
-
-        $this->collectionService->acknowledge($collectionA, $x, AvailabilityAcknowledgementKind::CONFIRMED);
-
-        self::assertSame(AvailabilityResponseStatus::ACKNOWLEDGED, $this->statusOf($collectionA, $x));
-        self::assertSame(AvailabilityResponseStatus::PENDING, $this->statusOf($collectionB, $x), 'answering planning A says nothing about planning B');
-        self::assertSame(['expected' => 1, 'acknowledged' => 0, 'pending' => 1], $this->collectionService->progress($collectionB));
+        self::assertEqualsCanonicalizing([$dupont->getId(), $martin->getId(), $durand->getId()], $participants);
+        self::assertSame(['participants' => 3], $this->collectionService->progress($collection));
     }
 
     public function testACalendarChangeTouchesEveryOpenPlanningItOverlaps(): void
@@ -538,13 +375,13 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
         $planning = $this->planning();
         $this->join($planning);
         $collection = $this->firstCollection($planning);
-        self::assertSame(1, $this->collectionService->progress($collection)['expected']);
+        self::assertSame(1, $this->collectionService->progress($collection)['participants']);
 
         self::mockTime('2026-09-15 09:00:00 Europe/Brussels');
         $late = $this->join($planning, start: '2026-09-15');
 
-        self::assertSame(AvailabilityResponseStatus::PENDING, $this->statusOf($collection, $late));
-        self::assertSame(2, $this->collectionService->progress($collection)['expected']);
+        self::assertSame(AvailabilityResponseStatus::PARTICIPANT, $this->statusOf($collection, $late));
+        self::assertSame(2, $this->collectionService->progress($collection)['participants']);
     }
 
     public function testSomeoneWhoLeavesBeforeAnsweringIsNoLongerExpectedButKeepsTheirRow(): void
@@ -559,8 +396,8 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
         $this->membershipService->endMembership($membership, $this->date('2026-08-30'));
 
         self::assertSame(AvailabilityResponseStatus::WITHDRAWN, $this->statusOf($collection, $leaver));
-        self::assertSame(['expected' => 1, 'acknowledged' => 0, 'pending' => 1], $this->collectionService->progress($collection));
-        self::assertSame([$stayer->getId()], array_map(static fn (AvailabilityCollectionResponse $r): int => $r->getUser()->getId(), $this->collectionService->pendingResponses($collection)));
+        self::assertSame(['participants' => 1], $this->collectionService->progress($collection));
+        self::assertSame([$stayer->getId()], array_map(static fn (AvailabilityCollectionResponse $r): int => $r->getUser()->getId(), $this->collectionService->participantResponses($collection)));
     }
 
     public function testSomeoneWhoLeavesInTheMiddleOfTheWindowIsStillExpectedForTheirPart(): void
@@ -572,21 +409,29 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
 
         $this->membershipService->endMembership($membership, $this->date('2026-10-15'));
 
-        self::assertSame(AvailabilityResponseStatus::PENDING, $this->statusOf($collection, $leaver));
+        self::assertSame(AvailabilityResponseStatus::PARTICIPANT, $this->statusOf($collection, $leaver));
     }
 
-    public function testAnAnswerGivenBeforeLeavingIsNeverErased(): void
+    public function testAConfirmationGivenBeforeD214StaysRecordedWhenThePersonLeaves(): void
     {
         $planning = $this->planning();
         $leaver = $this->join($planning);
         $collection = $this->firstCollection($planning);
-        $this->collectionService->acknowledge($collection, $leaver, AvailabilityAcknowledgementKind::CONFIRMED);
+        $response = $this->responseOf($collection, $leaver);
+        // A confirmation recorded before D214 (no code writes one any more).
+        $this->em->getConnection()->executeStatement(
+            "UPDATE availability_collection_responses SET acknowledged_at = '2026-08-20 10:00:00', acknowledgement_kind = 'CONFIRMED' WHERE id = ?",
+            [$response->getId()],
+        );
+        $this->em->refresh($response);
         $membership = self::getContainer()->get(PlanningTeamMemberRepository::class)->findOpenMembershipsForUserInPlanning($planning, $leaver)[0];
 
         $this->membershipService->endMembership($membership, $this->date('2026-08-30'));
 
-        self::assertSame(AvailabilityResponseStatus::ACKNOWLEDGED, $this->statusOf($collection, $leaver));
-        self::assertSame(1, $this->collectionService->progress($collection)['acknowledged']);
+        $response = $this->responseOf($collection, $leaver);
+        self::assertSame(AvailabilityResponseStatus::WITHDRAWN, $response->getStatus(), 'no longer concerned: never reminded');
+        self::assertSame('2026-08-20 10:00:00', $response->getAcknowledgedAt()?->format('Y-m-d H:i:s'), 'the old confirmation is history, kept');
+        self::assertSame(['participants' => 0], $this->collectionService->progress($collection));
     }
 
     public function testRejoiningReinstatesTheWithdrawnResponse(): void
@@ -600,7 +445,7 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
 
         $this->join($planning, $x, start: '2026-09-05');
 
-        self::assertSame(AvailabilityResponseStatus::PENDING, $this->statusOf($collection, $x));
+        self::assertSame(AvailabilityResponseStatus::PARTICIPANT, $this->statusOf($collection, $x));
         self::assertCount(1, array_filter(
             $this->responseRepository->findByCollection($collection),
             static fn (AvailabilityCollectionResponse $r): bool => $r->getUser() === $x,
@@ -616,7 +461,7 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
         $late = $this->join($planning, start: '2027-02-01');
 
         self::assertNull($this->responseRepository->findOneForUser($collection, $late));
-        self::assertSame(0, $this->collectionService->progress($collection)['expected']);
+        self::assertSame(0, $this->collectionService->progress($collection)['participants']);
     }
 
     /* ------------------------------------------------------ 11. extension flow */
@@ -693,7 +538,7 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
         self::mockTime('2026-12-10 09:00:00 Europe/Brussels');
         $extension = $this->extensionService->extend($planning, null, $this->date('2027-04-01'), $planning->getCreator())[0];
 
-        self::assertSame(AvailabilityResponseStatus::PENDING, $this->statusOf($extension, $stays));
+        self::assertSame(AvailabilityResponseStatus::PARTICIPANT, $this->statusOf($extension, $stays));
         self::assertNull($this->responseRepository->findOneForUser($extension, $left), 'someone who left before the new window is never asked about it');
     }
 
@@ -838,7 +683,11 @@ final class AvailabilityCollectionServiceTest extends KernelTestCase
         $collection = $this->firstCollection($planning);
         $this->availabilityService->create($answered, UserAvailabilityType::UNAVAILABLE, $this->brussels('2027-02-01 00:00'), $this->brussels('2027-02-05 00:00'));
         $this->availabilityService->create($silent, UserAvailabilityType::UNAVAILABLE, $this->brussels('2027-03-01 00:00'), $this->brussels('2027-03-05 00:00'));
-        $this->collectionService->acknowledge($collection, $answered, AvailabilityAcknowledgementKind::CONFIRMED);
+        // One of them confirmed before D214: it never had any say in eligibility.
+        $this->em->getConnection()->executeStatement(
+            "UPDATE availability_collection_responses SET acknowledged_at = NOW(), acknowledgement_kind = 'CONFIRMED' WHERE id = ?",
+            [$this->responseOf($collection, $answered)->getId()],
+        );
 
         $period = self::getContainer()->get(PlanningLineRepository::class)->findByPlanning($planning)[0]->requireSingleCyclePeriod();
         $this->activateRuleSet(self::getContainer()->get(PlanningRuleSetService::class), $period->getTeam());
