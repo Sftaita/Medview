@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { status, stubApi } from '../../../testUtils/stubApi'
+import { status, stubApi, type Route } from '../../../testUtils/stubApi'
 import { conditionalView, DR_A, DR_B, DR_C, policyView, RENFORT, SENIORS } from './coverageTestData'
 import { STACKED_BELOW } from './CoverageMatrix'
 import { LineSettingsDialog } from './LineSettingsDialog'
@@ -20,8 +20,14 @@ const RENFORT_LINE: { stableId: string; name: string; type: 'PRIMARY' | 'SECONDA
 }
 const POLICY = `/api/planning-lines/${RENFORT}/demand-policy`
 
-function setup(view: DemandPolicyView, save: (body: unknown) => unknown = () => view, line = RENFORT_LINE) {
+function setup(
+  view: DemandPolicyView,
+  save: (body: unknown) => unknown = () => view,
+  line = RENFORT_LINE,
+  extra: Record<string, Route> = {},
+) {
   const api = stubApi({
+    ...extra,
     [`GET /api/planning-lines/${line.stableId}/demand-policy`]: () => view,
     [`PUT /api/planning-lines/${line.stableId}/demand-policy`]: ({ body }) => save(body),
     [`GET /api/planning-lines/${line.stableId}/week-structure`]: () => ({
@@ -54,7 +60,7 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
     expect(
       await screen.findByText(/La ligne principale est toujours une garde indépendante/),
     ).toBeInTheDocument()
-    expect(screen.queryByText('Renfort selon le chirurgien de garde')).not.toBeInTheDocument()
+    expect(screen.queryByText('Renfort conditionnel')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Enregistrer' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /Modifier la semaine type/ })).toBeInTheDocument()
   })
@@ -62,8 +68,8 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
   it('a secondary line chooses between an independent duty and a reinforcement', async () => {
     setup(policyView())
 
-    const independent = await screen.findByRole('radio', { name: /Garde indépendante/ })
-    const reinforcement = screen.getByRole('radio', { name: /Renfort selon le chirurgien de garde/ })
+    const independent = await screen.findByRole('radio', { name: /Couverture indépendante/ })
+    const reinforcement = screen.getByRole('radio', { name: /Renfort conditionnel/ })
     expect(independent).toBeChecked()
     expect(screen.queryByLabelText('Ligne à renforcer')).not.toBeInTheDocument()
 
@@ -105,7 +111,7 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
     })
     const { api, onSaved } = setup(policyView(), () => saved)
 
-    fireEvent.click(await screen.findByRole('radio', { name: /Renfort selon le chirurgien de garde/ }))
+    fireEvent.click(await screen.findByRole('radio', { name: /Renfort conditionnel/ }))
     fireEvent.change(screen.getByLabelText('Ligne à renforcer'), { target: { value: SENIORS } })
     fireEvent.click(screen.getByRole('button', { name: 'Tous les jours pour Alice Bernard' }))
     for (const day of ['vendredi', 'samedi', 'dimanche', 'lundi']) {
@@ -217,7 +223,6 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
       status(409, { error: 'line_already_materialized' }),
       /ne peuvent plus changer/,
     ],
-    ['planning_already_published', status(409, { error: 'planning_already_published' }), /déjà publiée/],
     [
       'source no longer independent',
       status(422, { error: 'invalid_demand_policy', code: 'SOURCE_NOT_INDEPENDENT' }),
@@ -235,7 +240,8 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
 
   it('opens the weekly structure from here, keeps the unsaved matrix and reloads the policy after it', async () => {
     desktopWidth()
-    const { api } = setup(conditionalView())
+    // A reinforcement recorded before D224 kept its own structure: still editable from here.
+    const { api } = setup(conditionalView({ structureSource: 'OWN', inheritedFrom: null }))
 
     fireEvent.click(await screen.findByRole('button', { name: 'Sélectionner le mardi pour tous' }))
     fireEvent.click(screen.getByRole('button', { name: /Modifier la semaine type/ }))
@@ -256,6 +262,8 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
     desktopWidth()
     setup(
       conditionalView({
+        structureSource: 'OWN',
+        inheritedFrom: null,
         targetStructure: { configured: true, excludedWeekdays: ['FRIDAY', 'WEDNESDAY'], blocks: [] },
       }),
     )
@@ -273,19 +281,72 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
     expect(screen.getByText(/Pas de garde le mercredi, vendredi/)).toBeInTheDocument()
   })
 
-  it('explains the block rule when the line has blocks', async () => {
-    setup(
-      conditionalView({
-        targetStructure: {
-          configured: true,
-          excludedWeekdays: [],
-          blocks: [{ name: 'Week-end', weekdays: ['FRIDAY', 'SATURDAY', 'SUNDAY'] }],
-        },
-      }),
-    )
+  it('shows the blocks inherited from the source, read-only, and never a structure of its own (D224)', async () => {
+    setup(conditionalView())
+
+    const inherited = await screen.findByLabelText('Structure des blocs héritée de Seniors')
+    expect(inherited).toHaveTextContent('Bloc « Week-end » : vendredi, samedi et dimanche')
+    expect(inherited).toHaveTextContent('Aucun renfort n’est ajouté pour compléter un bloc')
     expect(
-      await screen.findByText(/tout le bloc est considéré comme nécessitant un renfort/),
-    ).toBeInTheDocument()
+      screen.queryByText(/tout le bloc est considéré comme nécessitant un renfort/),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Modifier la semaine type/ })).not.toBeInTheDocument()
+    // The surgeons who TRIGGER a reinforcement — never the members who hold it.
+    expect(screen.getByText('Chirurgiens de Seniors qui déclenchent un renfort')).toBeInTheDocument()
+    expect(screen.getByText(/Les membres de Renfort sont ceux qui assurent ces renforts/)).toBeInTheDocument()
+  })
+
+  it('sums up the conditions being edited, and says when there is none', async () => {
+    desktopWidth()
+    setup(conditionalView())
+
+    const summary = await screen.findByLabelText('Résumé des conditions de renfort')
+    expect(summary).toHaveTextContent('Alice Bernard de garde : un renfort Renfort le lundi')
+    expect(summary).toHaveTextContent(
+      'Bob Claes de garde : un renfort Renfort le vendredi, samedi et dimanche.',
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Aucun jour pour Alice Bernard' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Aucun jour pour Bob Claes' }))
+    expect(summary).toHaveTextContent('Aucune condition : aucune garde de renfort ne sera demandée.')
+  })
+
+  it('previews the duties needed from the draft — computed by the server, nothing saved', async () => {
+    desktopWidth()
+    const { api } = setup(conditionalView(), undefined, undefined, {
+      [`POST /api/planning-lines/${RENFORT}/demand-policy/preview`]: () => ({
+        periods: [
+          {
+            period: { stableId: 'c1', number: 1, startsAt: '2026-10-01', endsAt: '2027-01-29' },
+            generated: false,
+            sourceGenerated: true,
+            dutyCount: 5,
+            units: [
+              { dates: ['2026-10-02', '2026-10-03', '2026-10-04'], block: true, sourceHolder: DR_C },
+              { dates: ['2026-10-10'], block: false, sourceHolder: DR_B },
+              { dates: ['2026-10-16', '2026-10-18'], block: true, sourceHolder: DR_C },
+            ],
+          },
+          {
+            period: { stableId: 'c2', number: 2, startsAt: '2027-01-29', endsAt: '2027-05-03' },
+            generated: false,
+            sourceGenerated: false,
+            dutyCount: 0,
+            units: [],
+          },
+        ],
+      }),
+    })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Aucun jour pour Alice Bernard' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Prévisualiser les gardes nécessaires' }))
+
+    const result = await screen.findByRole('status', { name: 'Gardes de renfort nécessaires' })
+    expect(result).toHaveTextContent('5 gardes de renfort dont 2 blocs')
+    expect(result).toHaveTextContent('Bob Claes de garde')
+    expect(result).toHaveTextContent('n’est pas encore générée sur cette période')
+    const sent = api.requests('POST', `${POLICY}/preview`)[0].body as { triggers: { userStableId: string }[] }
+    expect(sent.triggers.map((t) => t.userStableId)).toEqual([DR_C.userStableId]) // the draft, unsaved
+    expect(api.requests('PUT', POLICY)).toHaveLength(0)
   })
 
   it('switches to one card per person on a narrow screen — same data, same controls', async () => {

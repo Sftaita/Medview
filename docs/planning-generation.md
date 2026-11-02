@@ -1266,3 +1266,29 @@ dans `PlanningCompletionService` lui-même.
 - Les modifications manuelles après publication (réaffecter, retirer,
   échanger) sont inchangées, tracées (`wasPublished`) et republiées
   explicitement.
+
+## 39. Lignes de renfort à blocs hérités (docs/decisions.md D224)
+
+| Titulaire de la garde source | Jours déclenchés d'un bloc ven–sam–dim | Gardes de renfort créées |
+|---|---|---|
+| déclenche les trois jours | ven, sam, dim | un bloc de 3 jours, une seule personne |
+| déclenche samedi seulement | sam | une garde isolée le samedi |
+| déclenche vendredi et dimanche | ven, dim | un bloc de 2 jours (jamais le samedi) |
+| ne déclenche aucun jour | — | aucune garde |
+
+- Horaires : ceux de la garde renforcée, exactement. Jamais le titulaire de
+  la garde source (SELF_COVERAGE, conflit d'horaires).
+- Quand : au lancement (`launch()`), juste avant le snapshot de la ligne ;
+  à la complétion pour les jours devenus déclenchés depuis. Jamais dans un
+  aperçu (préflight, `fill-preview`, `demand-policy/preview` : projection en
+  mémoire).
+- Après une modification de la source : jour devenu nécessaire → créé à la
+  prochaine complétion, non pourvu si son bloc est déjà tenu (titulaire du
+  bloc proposé en premier) ; jour devenu inutile → titulaire conservé,
+  signalé superflu.
+- API : `GET/PUT /api/planning-lines/{id}/demand-policy` (`structureSource`,
+  `inheritedFrom`, `sourceOptions[].structure`), `POST …/demand-policy/preview`
+  (`periods[] {period, generated, sourceGenerated, dutyCount, units[] {dates,
+  block, sourceHolder}}`), `PUT …/week-structure` → 409 `structure_inherited`
+  pour une ligne qui hérite ; `GET /api/plannings/{id}` → `lines[].coverage` ;
+  candidats de réaffectation → `holdsRestOfBlock`.

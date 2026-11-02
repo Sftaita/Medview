@@ -6,7 +6,15 @@ import { WEEKDAYS } from './weekdays'
 describe('coverageModel (docs/decisions.md D167)', () => {
   it('maps the screen days to the API days explicitly, Monday first', () => {
     expect(WEEKDAYS.map((d) => d.short)).toEqual(['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'])
-    expect(WEEKDAYS.map((d) => d.api)).toEqual(['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'])
+    expect(WEEKDAYS.map((d) => d.api)).toEqual([
+      'MONDAY',
+      'TUESDAY',
+      'WEDNESDAY',
+      'THURSDAY',
+      'FRIDAY',
+      'SATURDAY',
+      'SUNDAY',
+    ])
   })
 
   it('starts from exactly the server state', () => {
@@ -18,7 +26,10 @@ describe('coverageModel (docs/decisions.md D167)', () => {
   })
 
   it('never offers the conditional mode for the primary line', () => {
-    const primary = policyView({ line: { stableId: SENIORS, name: 'Seniors', type: 'PRIMARY' }, mode: 'CONDITIONAL_ON_SOURCE_ASSIGNMENT' })
+    const primary = policyView({
+      line: { stableId: SENIORS, name: 'Seniors', type: 'PRIMARY' },
+      mode: 'CONDITIONAL_ON_SOURCE_ASSIGNMENT',
+    })
     expect(draftFromView(primary).mode).toBe('INDEPENDENT')
   })
 
@@ -45,7 +56,12 @@ describe('coverageModel (docs/decisions.md D167)', () => {
     expect(selection[DR_A.userStableId]).toEqual(['TUESDAY'])
     selection = setDays(selection, DR_B.userStableId, ['SUNDAY', 'MONDAY'])
     expect(selection[DR_B.userStableId]).toEqual(['MONDAY', 'SUNDAY'])
-    selection = setColumn(selection, [DR_A.userStableId, DR_B.userStableId, DR_C.userStableId], 'FRIDAY', true)
+    selection = setColumn(
+      selection,
+      [DR_A.userStableId, DR_B.userStableId, DR_C.userStableId],
+      'FRIDAY',
+      true,
+    )
     expect(selection[DR_C.userStableId]).toEqual(['FRIDAY'])
     selection = setColumn(selection, [DR_A.userStableId, DR_B.userStableId], 'FRIDAY', false)
     expect(selection[DR_A.userStableId]).toEqual(['TUESDAY'])
@@ -64,7 +80,9 @@ describe('coverageModel (docs/decisions.md D167)', () => {
       schemaVersion: 1,
       mode: 'CONDITIONAL_ON_SOURCE_ASSIGNMENT',
       source: { lineStableId: SENIORS },
-      triggers: [{ userStableId: DR_C.userStableId, weekdays: ['FRIDAY', 'SATURDAY', 'SUNDAY'], increment: 1 }],
+      triggers: [
+        { userStableId: DR_C.userStableId, weekdays: ['FRIDAY', 'SATURDAY', 'SUNDAY'], increment: 1 },
+      ],
     })
   })
 

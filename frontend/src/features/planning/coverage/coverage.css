@@ -188,3 +188,41 @@
   flex-direction: column;
   gap: var(--space-2);
 }
+
+/* docs/decisions.md D224 — inherited blocks, the trigger summary, the preview of the duties needed. */
+.cov-inherited,
+.cov-summary,
+.cov-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+.cov-inherited__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.cov-inherited__list,
+.cov-summary ul,
+.cov-preview__units {
+  margin: 0;
+  padding-left: 20px;
+}
+.cov-summary h4,
+.cov-preview__period h4,
+.cov-matrix-title {
+  margin: 12px 0 4px;
+  font-size: var(--text-sm);
+}
+.cov-preview {
+  align-items: flex-start;
+}
+.cov-preview > div {
+  width: 100%;
+}

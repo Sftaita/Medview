@@ -1134,3 +1134,11 @@
   margin: var(--space-4) 0 var(--space-2);
   font-size: var(--text-md);
 }
+
+/* docs/decisions.md D224: the holder of the rest of a reinforcement block, offered first. */
+.reassignment-candidate__hint {
+  display: block;
+  color: var(--text-muted);
+  font-size: var(--text-xs, 12px);
+  font-weight: normal;
+}

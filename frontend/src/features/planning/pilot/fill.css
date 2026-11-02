@@ -198,3 +198,21 @@
     opacity: 0.6;
   }
 }
+
+/* "Lignes de garde": when a line's duties are needed (docs/decisions.md D224). */
+.pd-line-coverage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.pd-line-coverage--todo {
+  color: var(--amber-800, var(--text-body));
+  font-weight: var(--weight-semibold);
+}
+.pd-line-coverage svg {
+  vertical-align: -2px;
+}

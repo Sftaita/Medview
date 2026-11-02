@@ -83,8 +83,11 @@ export function RuleSetModal({ lineStableId, lineName, timezone, onClose, onActi
             <p className="alert alert--success">
               <Icon name="check" size={18} strokeWidth={2} />
               <span>
-                Des règles de génération sont actives pour cette ligne
-                {status.activatedAt && <> depuis le {formatDateTime(status.activatedAt, timezone)}</>}.
+                Règles de génération actives
+                {status.activatedAt && <> depuis le {formatDateTime(status.activatedAt, timezone)}</>} : elles
+                décident comment les gardes sont réparties entre les membres de cette ligne. Elles ne disent
+                pas quand une garde est nécessaire — c’est le rôle des règles de couverture (« Paramètres de
+                la ligne »), et pour une ligne de renfort, de ses conditions de renfort.
               </span>
             </p>
           ) : (

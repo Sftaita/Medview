@@ -125,6 +125,15 @@ export type PlanningLineSummary = {
   active: boolean
   team: PlanningLineTeam
   memberCount?: number
+  /** docs/decisions.md D224 — when this line's duties are needed (never a recomputation of the demand). */
+  coverage?:
+    | { mode: 'INDEPENDENT'; hasWeekStructure: boolean }
+    | {
+        mode: 'CONDITIONAL_ON_SOURCE_ASSIGNMENT'
+        structureSource: 'OWN' | 'INHERITED'
+        source: { lineStableId: string; name: string } | null
+        triggerCount: number
+      }
   planningPeriodStableId: string
   /** Lifecycle of the line's period: DRAFT, GENERATED, VALIDATED, PUBLISHED, ARCHIVED. */
   periodStatus?: PlanningPeriodStatus

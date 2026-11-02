@@ -80,7 +80,12 @@ export function setDays(selection: Selection, userStableId: string, days: ApiWee
 }
 
 /** One day for everybody listed: on for all, or off for all. */
-export function setColumn(selection: Selection, userStableIds: string[], day: ApiWeekday, on: boolean): Selection {
+export function setColumn(
+  selection: Selection,
+  userStableIds: string[],
+  day: ApiWeekday,
+  on: boolean,
+): Selection {
   const next = { ...selection }
   for (const userStableId of userStableIds) {
     const days = new Set(next[userStableId] ?? [])
