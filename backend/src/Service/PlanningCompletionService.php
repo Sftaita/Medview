@@ -123,13 +123,21 @@ final class PlanningCompletionService
      * again under the calendar lock at write time. Omitted: the planning's
      * only period (refused when it has several).
      *
-     * @return list<CompletionLineResult> one per active line of $cycle
+     * $onlyLines (docs/decisions.md D222): only these lines are completed —
+     * "Générer cette ligne", or one line at a time by "Générer les postes non
+     * pourvus" (PlanningLineFillService). The others are not read for holes;
+     * their current calendar constrains the holes like any other calendar
+     * (assignabilityError, live).
+     *
+     * @param list<PlanningLine>|null $onlyLines
+     *
+     * @return list<CompletionLineResult> one per active line of $cycle (of $onlyLines, when given)
      *
      * @throws PlanningGenerationInProgressException a generation or another completion is running on this Planning
      * @throws NoSolverParameterSetException
      * @throws PlanningCompletionStaleException      nothing was written
      */
-    public function complete(Planning $planning, User $author, ?PlanningCycle $cycle = null): array
+    public function complete(Planning $planning, User $author, ?PlanningCycle $cycle = null, ?array $onlyLines = null): array
     {
         $cycle ??= $planning->getOnlyCycle();
         if (!$this->tryLock($planning)) {
@@ -154,6 +162,9 @@ final class PlanningCompletionService
             $liveDemand = $this->demandViewFactory->forPlanning($planning);
             $virtualHoldings = [];
             foreach ($this->lineOrder->activeInCycle($cycle) as $line) {
+                if (null !== $onlyLines && !\in_array($line, $onlyLines, true)) {
+                    continue;
+                }
                 $plan = $this->solveLine($line, $cycle, $parameterSet, $virtualCommitments, $liveDemand->withSourceHoldings($virtualHoldings));
                 if ($plan instanceof CompletionLineResult) {
                     $results[] = $plan;

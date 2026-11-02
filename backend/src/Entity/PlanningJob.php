@@ -80,6 +80,10 @@ class PlanningJob
     #[ORM\Column(name: 'generation_scope', length: 20, nullable: true)]
     private ?string $scope = null;
 
+    /** FILL only (docs/decisions.md D222): the stable ids of the lines asked for. */
+    #[ORM\Column(name: 'target_line_stable_ids', type: 'json', nullable: true)]
+    private ?array $targetLineStableIds = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -104,10 +108,12 @@ class PlanningJob
 
     /**
      * @param array<string, mixed>|null $restPolicy
+     * @param list<string>|null         $targetLineStableIds FILL only
      */
-    public function __construct(Planning $planning, PlanningJobKind $kind, User $requestedBy, ?array $restPolicy = null, ?string $scope = null)
+    public function __construct(Planning $planning, PlanningJobKind $kind, User $requestedBy, ?array $restPolicy = null, ?string $scope = null, ?array $targetLineStableIds = null)
     {
         $this->scope = $scope;
+        $this->targetLineStableIds = $targetLineStableIds;
         $this->stableId = Uuid::v7();
         $this->planning = $planning;
         $this->kind = $kind;
@@ -179,6 +185,14 @@ class PlanningJob
     public function getScope(): ?string
     {
         return $this->scope;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function getTargetLineStableIds(): array
+    {
+        return $this->targetLineStableIds ?? [];
     }
 
     public function getCreatedAt(): \DateTimeImmutable

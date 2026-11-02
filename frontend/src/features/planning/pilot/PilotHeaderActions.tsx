@@ -2,12 +2,13 @@ import { useState } from 'react'
 import { Icon } from '../../../components/Icon'
 import { WeekStructureModal } from '../../week-structure'
 import { ActionMenu, type ActionMenuItem } from '../detail/ActionMenu'
+import { FillModal } from './FillModal'
 import { GenerationModal, type GenerationPeriod } from './GenerationModal'
 import { PlanningSettingsModal } from './PlanningSettingsModal'
 import { RuleSetModal } from './RuleSetModal'
 import type { CollectionStatus, PlanningJob } from './types'
 
-export type PilotDialog = 'settings' | 'generate' | 'week-structure' | 'rule-set'
+export type PilotDialog = 'settings' | 'generate' | 'fill' | 'week-structure' | 'rule-set'
 
 type Props = {
   planningStableId: string
@@ -98,6 +99,16 @@ export function PilotHeaderActions({
           <Icon name="arrow" size={18} strokeWidth={2.2} />
         </button>
       )}
+      {/* docs/decisions.md D222: complete what is missing, line by line, never touching what is assigned. */}
+      <button
+        type="button"
+        className="pd-btn pd-btn-secondary pd-btn-lg"
+        onClick={() => setDialog('fill')}
+        disabled={busy}
+        title={busy ? 'Un calcul est déjà en cours sur ce planning' : undefined}
+      >
+        Générer les postes non pourvus
+      </button>
       <ActionMenu label="Plus d’actions" items={menu} large />
 
       {dialog === 'settings' && (
@@ -124,6 +135,18 @@ export function PilotHeaderActions({
           timezone={timezone}
           onClose={() => setDialog(null)}
           onActivated={onChanged}
+        />
+      )}
+      {dialog === 'fill' && (
+        <FillModal
+          planningStableId={planningStableId}
+          period={period}
+          timezone={timezone}
+          onClose={() => setDialog(null)}
+          onLaunched={(job) => {
+            onChanged()
+            onLaunched(job)
+          }}
         />
       )}
       {dialog === 'generate' && (

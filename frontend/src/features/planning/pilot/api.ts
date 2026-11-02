@@ -2,6 +2,7 @@ import { apiDownloadGet, apiFetch, type DownloadedFile } from '../../../lib/apiC
 import { withPeriod } from '../../periods/api'
 import type {
   CollectionStatus,
+  FillPreview,
   GenerationPreflight,
   PlanningJob,
   PlanningJobResponse,
@@ -107,6 +108,34 @@ export function launchGeneration(
   return apiFetch<PlanningJobResponse>(
     withPeriod(`/api/plannings/${planningStableId}/generations`, target.periodStableId),
     { method: 'POST', body },
+  )
+}
+
+/** What "Générer les postes non pourvus" would do with each line of the period (docs/decisions.md D222). */
+export function fetchFillPreview(planningStableId: string, periodStableId?: string): Promise<FillPreview> {
+  return apiFetch<FillPreview>(withPeriod(`/api/plannings/${planningStableId}/fill-preview`, periodStableId))
+}
+
+/**
+ * "Générer les postes non pourvus" / "Générer cette ligne": the lines asked
+ * for, queued like a generation (202 + a job). `restPolicy` applies only to
+ * the lines given their first generation — a completion keeps its own.
+ */
+export function requestFill(
+  planningStableId: string,
+  lines: string[],
+  restPolicy?: RestPolicyChoice,
+  overrideStaleSurgicalHubData = false,
+  periodStableId?: string,
+): Promise<PlanningJobResponse> {
+  const body: Record<string, unknown> = { ...(restPolicy ?? {}), lines }
+  if (overrideStaleSurgicalHubData) body.overrideStaleSurgicalHubData = true
+  return apiFetch<PlanningJobResponse>(
+    withPeriod(`/api/plannings/${planningStableId}/fill`, periodStableId),
+    {
+      method: 'POST',
+      body,
+    },
   )
 }
 

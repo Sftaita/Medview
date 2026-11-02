@@ -68,6 +68,19 @@ enum PreflightIssueCode: string
     case NO_LINE_TO_GENERATE = 'NO_LINE_TO_GENERATE';
 
     /**
+     * docs/decisions.md D222: a launch restricted to some lines only ever gives a line its FIRST generation. A line
+     * that already has one keeps it — its holes are completed (PlanningCompletionService), its calendar is never
+     * replaced by a new generation, which would hide every assignment it holds (D125).
+     */
+    case LINE_ALREADY_GENERATED = 'LINE_ALREADY_GENERATED';
+
+    /**
+     * docs/decisions.md D222: a conditional line (D164) whose source line was never generated, and is not generated
+     * in the same launch either — its demand cannot be decided.
+     */
+    case CONDITIONAL_SOURCE_NOT_GENERATED = 'CONDITIONAL_SOURCE_NOT_GENERATED';
+
+    /**
      * docs/decisions.md D195 (lot L4b): duties are demanded of the line in the
      * period but none of its team's memberships intersects it — the line is
      * INCOMPLETE (LineApplicability, D194), its generation is refused instead

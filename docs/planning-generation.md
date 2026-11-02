@@ -1190,3 +1190,52 @@ fois.
   `expectedCurrentTeamMemberStableId: null`.
 - **Inchangé** : droits (`PlanningVoter::MANAGE_CALENDAR`), complétion par
   période (L3), échanges refusés en multipériode.
+
+## 37. Générer une ligne seule et les postes non pourvus (docs/decisions.md D222)
+
+**Règle unique** : aucune de ces deux actions ne crée de génération pour une
+ligne qui en a déjà une. Une ligne générée est **complétée** (ses trous, dans
+sa génération courante, D145) ; une ligne jamais générée reçoit sa **première
+génération, seule**. Les gardes attribuées — par le solveur ou à la main —
+sont des affectations fixes, jamais des préférences.
+
+| Ligne | Action | Ce qui est écrit |
+|---|---|---|
+| jamais générée, brouillon | `GENERATE` | sa première génération ; les autres lignes sont des contraintes |
+| générée, trous | `COMPLETE` | les trous seulement, dans sa génération courante |
+| générée, publiée, trous | `COMPLETE` si cochée (décochée par défaut) | idem, en « Modifications non publiées » ; rien n'est republié ni envoyé |
+| générée, aucune garde non pourvue | `NOTHING` | rien |
+| archivée, rien demandé, prérequis manquant | `EXCLUDED` | rien (raison donnée) |
+
+- **Lanceur restreint** (`PlanningGenerationLauncher::preflight/launch(…,
+  $onlyLines)`) : lignes hors cible `OUT_OF_SCOPE` (non matérialisées, non
+  contrôlées, non générées) ; `PlannedCalendar::$othersKept` fait de leur
+  calendrier courant une contrainte du snapshot **et** de la relecture avant
+  écriture (`writeLaunch(…, othersKept: true)`), quel que soit le rang des
+  lignes dans l'ordre de résolution. Refus : `LINE_ALREADY_GENERATED`,
+  `CONDITIONAL_SOURCE_NOT_GENERATED`.
+- **Complétion restreinte** (`PlanningCompletionService::complete(…,
+  $onlyLines)`) : inchangée par ailleurs (§36, D145, D197).
+- **Orchestration** (`PlanningLineFillService`) : aperçu (`preview()`) puis
+  passage (`fill()`) sous le verrou moteur du planning ; lignes une par une
+  dans l'ordre de résolution, **une transaction d'écriture par ligne** ; une
+  ligne en échec n'écrit rien, les autres continuent.
+- **Mesure** (`CurrentCalendarLedger`) : affectations visibles (règle D125)
+  lues en SQL avant et après ; résultat par ligne `keptCount`,
+  `addedCount`, `remainingUncoveredCount`, `modifiedCount`, et pour le
+  planning `modifiedExistingCount` (0 attendu, mesuré).
+- **Job** `FILL` (D149), colonne `planning_jobs.target_line_stable_ids` ;
+  `failureCode` `fill_incomplete` quand une ligne demandée n'a rien reçu
+  (échec du solveur, blocage, calendrier modifié pendant le calcul).
+- **API** : `GET /api/plannings/{id}/fill-preview?period=` →
+  `{lines: FillLinePlan[], blockers, needsRestPolicy}` ;
+  `POST /api/plannings/{id}/fill` `{lines, legalMinRest…, teamMinRest…,
+  overrideStaleSurgicalHubData?}` → 202 `{job}` ; 409 `nothing_to_fill`
+  (avec l'aperçu), `job_in_progress`, `surgicalhub_data_stale` ; 422 ligne
+  inconnue ou liste vide ; 403 hors `PlanningVoter::GENERATE`.
+- **Concurrence** : job unique par planning (index partiel), verrou moteur
+  de session, relecture sous `CalendarWriteLock` avant chaque écriture
+  (complétion : unités fixes et trous identiques, éligibilité live ;
+  génération : `snapshotHash` et engagements externes identiques, calendrier
+  final cohérent). Une indisponibilité déclarée pendant le calcul fait
+  refuser l'écriture (`calendar_changed`), sans rien écrire.

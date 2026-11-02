@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { Field } from '../../../components/Field'
 import { Icon } from '../../../components/Icon'
+import { fillPlanText } from '../pilot/fillText'
+import type { FillLinePlan } from '../pilot/types'
+import '../pilot/fill.css'
 import type { PlanningLineSummary } from '../types'
 import { ActionMenu } from './ActionMenu'
 
@@ -17,6 +20,16 @@ type Props = {
   onManageMembers: (line: PlanningLineSummary) => void
   onDeleteLine: (lineStableId: string) => void
   onConfigureLine?: (line: PlanningLineSummary) => void
+  /** "Règles de génération" of this line (docs/decisions.md D222) — every line, not only the primary one. */
+  onLineRules?: (line: PlanningLineSummary) => void
+  /**
+   * What "Générer les postes non pourvus" would do with each line, by line stable id (docs/decisions.md D222):
+   * its counters, and "Générer cette ligne" when it has something to receive. Managers only.
+   */
+  fillPlans?: Record<string, FillLinePlan>
+  onGenerateLine?: (line: PlanningLineSummary) => void
+  /** A computation is running on the planning: no second one from here. */
+  busy?: boolean
   /** Resolves true once the line is created. */
   onAddLine: (name: string) => Promise<boolean>
 }
@@ -33,6 +46,10 @@ export function LinesTab({
   onManageMembers,
   onDeleteLine,
   onConfigureLine,
+  onLineRules,
+  fillPlans,
+  onGenerateLine,
+  busy = false,
   onAddLine,
 }: Props) {
   const [adding, setAdding] = useState(false)
@@ -79,6 +96,13 @@ export function LinesTab({
                     {line.team.name} · {plural(count, 'membre')}
                   </span>
                 </div>
+                {fillPlans?.[line.stableId] && (
+                  <LineFillState
+                    plan={fillPlans[line.stableId]}
+                    busy={busy}
+                    onGenerate={onGenerateLine ? () => onGenerateLine(line) : undefined}
+                  />
+                )}
               </div>
               <div className="pd-line-actions">
                 <button
@@ -89,7 +113,8 @@ export function LinesTab({
                   <Icon name="users" size={17} strokeWidth={2} />
                   Membres
                 </button>
-                {((canConfigure && onConfigureLine) || (canManage && line.type === 'SECONDARY')) && (
+                {((canConfigure && (onConfigureLine || onLineRules)) ||
+                  (canManage && line.type === 'SECONDARY')) && (
                   <ActionMenu
                     label={`Actions pour ${line.name}`}
                     items={[
@@ -99,6 +124,15 @@ export function LinesTab({
                               label: 'Paramètres de la ligne',
                               icon: 'settings' as const,
                               onSelect: () => onConfigureLine(line),
+                            },
+                          ]
+                        : []),
+                      ...(canConfigure && onLineRules
+                        ? [
+                            {
+                              label: 'Règles de génération',
+                              icon: 'check' as const,
+                              onSelect: () => onLineRules(line),
                             },
                           ]
                         : []),
@@ -158,6 +192,57 @@ export function LinesTab({
             </li>
           ))}
       </ul>
+    </div>
+  )
+}
+
+/**
+ * One line's counters and "Générer cette ligne" (docs/decisions.md D222): how
+ * many duties it holds and misses, and the action when it has something to
+ * receive — otherwise, why not, in words.
+ */
+function LineFillState({
+  plan,
+  busy,
+  onGenerate,
+}: {
+  plan: FillLinePlan
+  busy: boolean
+  onGenerate?: () => void
+}) {
+  const writable = (plan.action === 'GENERATE' || plan.action === 'COMPLETE') && plan.selectable
+  const uncovered = plan.uncoveredRequiredDutyCount ?? 0
+  return (
+    <div className="pd-line-fill">
+      {plan.generated ? (
+        <span
+          className={
+            uncovered > 0 ? 'pd-line-fill__counts pd-line-fill__counts--gap' : 'pd-line-fill__counts'
+          }
+        >
+          {plan.coveredRequiredDutyCount}/{plan.requiredDutyCount ?? 0} gardes attribuées
+          {uncovered > 0 && ` · ${uncovered} non pourvue${uncovered > 1 ? 's' : ''}`}
+        </span>
+      ) : (
+        <span className="pd-line-fill__counts">
+          Jamais générée
+          {plan.requiredDutyCount !== null &&
+            ` · ${plan.requiredDutyCount} garde${plan.requiredDutyCount > 1 ? 's' : ''} à pourvoir`}
+        </span>
+      )}
+      {writable && onGenerate ? (
+        <button
+          type="button"
+          className="pd-btn pd-btn-secondary"
+          onClick={onGenerate}
+          disabled={busy}
+          title={busy ? 'Un calcul est déjà en cours sur ce planning' : fillPlanText(plan)}
+        >
+          Générer cette ligne
+        </button>
+      ) : (
+        plan.action !== 'NOTHING' && <span className="pd-line-fill__why">{fillPlanText(plan)}</span>
+      )}
     </div>
   )
 }

@@ -1,0 +1,117 @@
+/* "Générer les postes non pourvus" / "Générer cette ligne" (docs/decisions.md D222). Prefix fill-. Tokens: styles/tokens.css. */
+
+.fill-intro {
+  margin: 0 0 12px;
+  color: var(--text-body);
+  font-size: var(--text-sm);
+}
+
+.fill-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.fill-line {
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+}
+.fill-line[data-action='NOTHING'],
+.fill-line[data-action='EXCLUDED'] {
+  background: var(--surface-sunken);
+}
+
+.fill-line__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--tap-min);
+  color: var(--text-strong);
+  cursor: pointer;
+}
+.fill-line__head input:disabled {
+  cursor: not-allowed;
+}
+
+.fill-line__text {
+  margin: 2px 0 0 28px;
+  color: var(--text-body);
+  font-size: var(--text-sm);
+}
+
+.fill-line__protected {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 0 28px;
+  color: var(--green-800);
+  font-size: var(--text-sm);
+}
+
+.fill-result {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.fill-result__safe {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--green-200);
+  border-radius: var(--radius-md);
+  background: var(--green-50);
+  color: var(--green-800);
+  font-size: var(--text-sm);
+}
+.fill-result__scroll {
+  overflow-x: auto;
+}
+
+.fill-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+.fill-table th,
+.fill-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+  vertical-align: top;
+}
+.fill-table thead th {
+  color: var(--text-muted);
+  font-weight: var(--weight-semibold);
+}
+.fill-table td {
+  text-align: right;
+}
+.fill-table__status {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-weight: var(--weight-medium);
+}
+
+/* "Lignes de garde": counters and "Générer cette ligne" (D222). */
+.pd-line-fill {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: 4px;
+  font-size: var(--text-sm);
+}
+.pd-line-fill__counts {
+  color: var(--text-body);
+}
+.pd-line-fill__counts--gap {
+  color: var(--amber-700);
+}
+.pd-line-fill__why {
+  color: var(--text-muted);
+}

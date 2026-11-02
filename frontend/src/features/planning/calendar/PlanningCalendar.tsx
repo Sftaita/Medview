@@ -52,7 +52,7 @@ type Props = {
   /** A generation or a completion is queued or running on this planning. */
   jobActive?: boolean
   /** Which one — said on the disabled button, so it never reads as simply unavailable. */
-  jobKind?: 'GENERATE' | 'COMPLETE' | null
+  jobKind?: 'GENERATE' | 'COMPLETE' | 'FILL' | null
 }
 
 const MONTH = new Intl.DateTimeFormat('fr-BE', { month: 'long', year: 'numeric', timeZone: 'UTC' })

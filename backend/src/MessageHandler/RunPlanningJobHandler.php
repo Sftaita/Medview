@@ -16,6 +16,7 @@ use App\Fairness\CoverageStatus;
 use App\Message\RunPlanningJob;
 use App\Repository\PlanningJobRepository;
 use App\Service\CompletionLineResult;
+use App\Service\FillLineResult;
 use App\Service\LaunchLineReadiness;
 use App\Service\LaunchLineResult;
 use App\Service\LaunchResultPresenter;
@@ -23,6 +24,7 @@ use App\Service\PlanningCompletionService;
 use App\Service\PlanningGenerationLauncher;
 use App\Service\PlanningJobHeartbeat;
 use App\Service\PlanningJobStore;
+use App\Service\PlanningLineFillService;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\Persistence\ManagerRegistry;
 use Psr\Log\LoggerInterface;
@@ -52,6 +54,7 @@ final class RunPlanningJobHandler
         private readonly PlanningGenerationLauncher $launcher,
         private readonly PlanningCompletionService $completionService,
         private readonly LaunchResultPresenter $launchResultPresenter,
+        private readonly PlanningLineFillService $fillService,
         private readonly EntityManagerInterface $entityManager,
         private readonly ManagerRegistry $registry,
         private readonly LoggerInterface $logger,
@@ -69,7 +72,11 @@ final class RunPlanningJobHandler
         $this->heartbeat->start($message->jobId);
         $baseNestingLevel = $this->entityManager->getConnection()->getTransactionNestingLevel();
         try {
-            [$outcome, $failureCode] = PlanningJobKind::GENERATE === $job->getKind() ? $this->generate($job) : $this->complete($job);
+            [$outcome, $failureCode] = match ($job->getKind()) {
+                PlanningJobKind::GENERATE => $this->generate($job),
+                PlanningJobKind::COMPLETE => $this->complete($job),
+                PlanningJobKind::FILL => $this->fill($job),
+            };
 
             if (null === $failureCode) {
                 $this->store->succeed($message->jobId, $outcome);
@@ -144,6 +151,41 @@ final class RunPlanningJobHandler
                 'coverage' => 0 === $remaining ? 'COMPLETE' : 'INCOMPLETE',
             ],
             [] === $failed ? null : 'completion_failed',
+        ];
+    }
+
+    /**
+     * "Générer les postes non pourvus" / "Générer cette ligne" (docs/decisions.md D222): per line, what was done and
+     * the counts measured on the visible calendar. A line that failed is never hidden behind a success: the job
+     * is FAILED (`fill_incomplete`) as soon as one line asked for produced no usable result, while the lines
+     * that succeeded stay written — each line is written on its own.
+     *
+     * @return array{0: array<string, mixed>, 1: ?string}
+     */
+    private function fill(PlanningJob $job): array
+    {
+        $policy = $job->getRestPolicy() ?? [];
+        $restPolicy = new RestPolicyOptions(
+            (bool) ($policy['legalMinRestEnabled'] ?? false),
+            isset($policy['legalMinRestHours']) ? (int) $policy['legalMinRestHours'] : null,
+            (bool) ($policy['teamMinRestEnabled'] ?? false),
+            isset($policy['teamMinRestHours']) ? (int) $policy['teamMinRestHours'] : null,
+        );
+        $cycle = $job->getCycle() ?? throw new \LogicException('A job always belongs to a period.');
+
+        $run = $this->fillService->fill($job->getPlanning(), $job->getRequestedBy(), $cycle, $job->getTargetLineStableIds(), $restPolicy);
+        $failed = array_filter($run['lines'], static fn (FillLineResult $r): bool => \in_array($r->status, ['failed', 'blocked', 'calendar_changed'], true));
+        $remaining = array_sum(array_map(static fn (FillLineResult $r): int => 'not_selected' === $r->status ? 0 : ($r->remainingUncoveredCount ?? 0), $run['lines']));
+
+        return [
+            [
+                'lines' => array_map(static fn (FillLineResult $r): array => $r->toArray(), $run['lines']),
+                'modifiedExistingCount' => $run['modifiedExistingCount'],
+                'keptExistingCount' => $run['keptExistingCount'],
+                'addedCount' => $run['addedCount'],
+                'coverage' => [] === $failed && 0 === $remaining ? 'COMPLETE' : 'INCOMPLETE',
+            ],
+            [] === $failed ? null : 'fill_incomplete',
         ];
     }
 

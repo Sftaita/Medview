@@ -1,5 +1,5 @@
 import { Icon } from '../../../components/Icon'
-import type { LaunchLineResult, PlanningJob } from '../pilot/types'
+import type { FillLineResult, LaunchLineResult, PlanningJob } from '../pilot/types'
 import type { CompletionLineResult } from '../result/types'
 import { isActiveJob } from './usePlanningJob'
 import './jobs.css'
@@ -20,11 +20,13 @@ type Props = {
 const RUNNING_TITLE: Record<PlanningJob['kind'], string> = {
   GENERATE: 'Génération du planning en cours…',
   COMPLETE: 'Complétion du planning en cours…',
+  FILL: 'Génération des postes non pourvus en cours…',
 }
 
 const FAILED_TITLE: Record<PlanningJob['kind'], string> = {
   GENERATE: 'La génération du planning a échoué.',
   COMPLETE: 'La complétion automatique a échoué.',
+  FILL: 'Les postes non pourvus n’ont pas tous pu être générés.',
 }
 
 /** Plain-language cause of a failure — from its stable code, never an internal message. */
@@ -38,6 +40,9 @@ function failureText(job: PlanningJob): string {
       return 'Le calcul a été interrompu avant sa fin.'
     case 'never_started':
       return 'Le calcul n’a pas pu démarrer.'
+    case 'fill_incomplete':
+      // docs/decisions.md D222: each line is written on its own — what succeeded stays, what failed wrote nothing.
+      return `Au moins une ligne n’a rien reçu ; les autres ont été complétées. Aucune affectation existante n’a été modifiée (${job.outcome?.modifiedExistingCount ?? 0}).`
     case 'generation_failed':
     case 'completion_failed':
       return 'Le moteur n’a pas pu produire de résultat exploitable.'
@@ -52,6 +57,21 @@ function successText(job: PlanningJob): string {
     return job.kind === 'COMPLETE'
       ? 'Complétion terminée : le planning est à jour.'
       : 'Génération terminée : le planning est à jour.'
+  }
+  if (job.kind === 'FILL') {
+    const lines = (job.outcome.lines ?? []) as FillLineResult[]
+    const added = job.outcome.addedCount ?? 0
+    const remaining = lines.reduce(
+      (sum, line) => sum + (line.status === 'not_selected' ? 0 : (line.remainingUncoveredCount ?? 0)),
+      0,
+    )
+    const kept = job.outcome.keptExistingCount ?? 0
+    return (
+      `${added} garde${added > 1 ? 's' : ''} attribuée${added > 1 ? 's' : ''}, ${kept} affectation${kept > 1 ? 's' : ''} existante${kept > 1 ? 's' : ''} conservée${kept > 1 ? 's' : ''}, ${job.outcome.modifiedExistingCount ?? 0} modifiée.` +
+      (remaining > 0
+        ? ` ${remaining} garde${remaining > 1 ? 's' : ''} toujours non pourvue${remaining > 1 ? 's' : ''}.`
+        : '')
+    )
   }
   if (job.kind === 'COMPLETE') {
     const lines = (job.outcome?.lines ?? []) as CompletionLineResult[]
@@ -150,7 +170,7 @@ export function PlanningJobBanner({
         <div className="job-banner__text">
           <span>{successText(finished)}</span>
         </div>
-        {finished.kind === 'GENERATE' && finished.outcome && onShowDetail && (
+        {(finished.kind === 'GENERATE' || finished.kind === 'FILL') && finished.outcome && onShowDetail && (
           <button type="button" className="pd-btn pd-btn-secondary" onClick={() => onShowDetail(finished)}>
             Voir le détail
           </button>

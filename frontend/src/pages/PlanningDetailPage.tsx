@@ -46,9 +46,17 @@ import { PlanningJobBanner } from '../features/planning/jobs/PlanningJobBanner'
 import { usePlanningJob } from '../features/planning/jobs/usePlanningJob'
 import { PersonalPlanningView } from '../features/planning/PersonalPlanningView'
 import { CollectionStatusPanel } from '../features/planning/pilot/CollectionStatusPanel'
+import { fetchFillPreview } from '../features/planning/pilot/api'
+import { FillModal, FillResultBody } from '../features/planning/pilot/FillModal'
 import { ResultBody } from '../features/planning/pilot/GenerationModal'
 import { PilotHeaderActions, type PilotDialog } from '../features/planning/pilot/PilotHeaderActions'
-import type { CollectionStatus, LaunchResult, PlanningJob } from '../features/planning/pilot/types'
+import { RuleSetModal } from '../features/planning/pilot/RuleSetModal'
+import type {
+  CollectionStatus,
+  FillLinePlan,
+  LaunchResult,
+  PlanningJob,
+} from '../features/planning/pilot/types'
 import { completePlanning } from '../features/planning/result/api'
 import { usePlanningPilot } from '../features/planning/pilot/usePlanningPilot'
 import type { PlanningDetail, PlanningLineSummary } from '../features/planning/types'
@@ -98,6 +106,10 @@ export function PlanningDetailPage() {
   const [membersLine, setMembersLine] = useState<PlanningLineSummary | null>(null)
   const [settingsLine, setSettingsLine] = useState<PlanningLineSummary | null>(null)
   const [pilotDialog, setPilotDialog] = useState<PilotDialog | null>(null)
+  // docs/decisions.md D222: "Générer cette ligne", "Règles de génération" of any line, and each line's counters.
+  const [fillLine, setFillLine] = useState<PlanningLineSummary | null>(null)
+  const [rulesLine, setRulesLine] = useState<PlanningLineSummary | null>(null)
+  const [fillPlans, setFillPlans] = useState<Record<string, FillLinePlan>>({})
   // The per-collection detail (history, close) is one click away for a manager, not the first thing they see.
   const [showCollectionHistory, setShowCollectionHistory] = useState(false)
   // Bumped after an extension so the availability follow-up shows the collection it just opened.
@@ -125,6 +137,29 @@ export function PlanningDetailPage() {
     [planningId, periodStableId],
   )
   const single = periods.length <= 1
+
+  // docs/decisions.md D222: each line's counters (assigned / not filled) and whether "Générer cette ligne" applies —
+  // read from the server again whenever the calendar may have changed (a job ended, a line was added…).
+  const canGenerate = planning?.canGenerate === true
+  useEffect(() => {
+    if (!planningId || !canGenerate) {
+      setFillPlans({})
+      return
+    }
+    let cancelled = false
+    fetchFillPreview(planningId, periodStableId)
+      .then((preview) => {
+        if (!cancelled) {
+          setFillPlans(Object.fromEntries(preview.lines.map((line) => [line.lineStableId, line])))
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setFillPlans({})
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [planningId, periodStableId, canGenerate, generationVersion, planning])
 
   /** Another period: a new history entry, so the browser's back button returns to the previous one. */
   const selectPeriod = useCallback(
@@ -532,6 +567,8 @@ export function PlanningDetailPage() {
         onRelaunch={(kind) => {
           if (kind === 'GENERATE') {
             setPilotDialog('generate')
+          } else if (kind === 'FILL') {
+            setPilotDialog('fill')
           } else {
             requestCompletion().catch(() =>
               setActionError('La complétion automatique n’a pas pu être relancée.'),
@@ -640,6 +677,10 @@ export function PlanningDetailPage() {
               onManageMembers={setMembersLine}
               onDeleteLine={handleDeleteLine}
               onConfigureLine={setSettingsLine}
+              onLineRules={planning.canGenerate ? setRulesLine : undefined}
+              fillPlans={planning.canGenerate ? fillPlans : undefined}
+              onGenerateLine={planning.canGenerate ? setFillLine : undefined}
+              busy={jobs.active}
               onAddLine={handleAddLine}
             />
           )}
@@ -835,10 +876,51 @@ export function PlanningDetailPage() {
         </div>
       )}
 
-      {jobDetail?.outcome && (
+      {jobDetail?.outcome && jobDetail.kind === 'FILL' && (
+        <Sheet title="Bilan par ligne" wide onClose={() => setJobDetail(null)}>
+          <FillResultBody outcome={jobDetail.outcome} />
+        </Sheet>
+      )}
+      {jobDetail?.outcome && jobDetail.kind !== 'FILL' && (
         <Sheet title="Résultat de la génération" wide onClose={() => setJobDetail(null)}>
           <ResultBody result={jobDetail.outcome as unknown as LaunchResult} timezone={planning.timezone} />
         </Sheet>
+      )}
+
+      {fillLine && (
+        <FillModal
+          planningStableId={planning.stableId}
+          period={
+            periodView
+              ? {
+                  stableId: periodView.stableId,
+                  number: periodView.number,
+                  startsAt: periodView.startsAt,
+                  lastDay: periodView.lastDay,
+                  named: !single,
+                }
+              : undefined
+          }
+          timezone={planning.timezone}
+          onlyLineStableId={fillLine.stableId}
+          onClose={() => setFillLine(null)}
+          onLaunched={(job) => {
+            void pilot.reload()
+            jobs.track(job)
+          }}
+        />
+      )}
+      {rulesLine && (
+        <RuleSetModal
+          lineStableId={rulesLine.stableId}
+          lineName={rulesLine.name}
+          timezone={planning.timezone}
+          onClose={() => setRulesLine(null)}
+          onActivated={() => {
+            void load()
+            void pilot.reload()
+          }}
+        />
       )}
 
       {renameOpen && (
