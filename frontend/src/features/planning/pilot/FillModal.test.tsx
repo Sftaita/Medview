@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { makePreflight, makeStatus } from '../../../testUtils/pilotFixtures'
 import { status as httpStatus, stubApi } from '../../../testUtils/stubApi'
 import { FillModal, FillResultBody } from './FillModal'
+import { fillResultText } from './fillText'
 import { PilotHeaderActions } from './PilotHeaderActions'
 import type { FillLinePlan, FillPreview, PlanningJob } from './types'
 
@@ -306,6 +307,35 @@ describe('FillResultBody — the report', () => {
         .map((cell) => cell.textContent),
     ).toEqual(['0', '27', '3', '0'])
     expect(within(juniors).getByText('Première génération effectuée.')).toBeInTheDocument()
+    // On a phone each count keeps its label (cards, never a hidden column).
+    expect(
+      within(juniors)
+        .getAllByRole('cell')
+        .map((cell) => cell.dataset.label),
+    ).toEqual([
+      'Gardes existantes conservées',
+      'Nouvelles gardes attribuées',
+      'Gardes toujours non pourvues',
+      'Affectations existantes modifiées',
+    ])
+  })
+
+  it('never says "complétés" when a completion could give nobody (recette at 390 px)', () => {
+    const completion = (addedCount: number, remainingUncoveredCount: number) => ({
+      lineStableId: 'l3',
+      lineName: 'Renfort',
+      action: 'COMPLETE' as const,
+      status: 'done' as const,
+      reason: null,
+      keptCount: 19,
+      modifiedCount: 0,
+      addedCount,
+      remainingUncoveredCount,
+      blockers: [],
+    })
+    expect(fillResultText(completion(0, 2))).toBe('Personne n’a pu être attribué : postes vacants inchangés.')
+    expect(fillResultText(completion(1, 1))).toBe('Postes vacants complétés en partie.')
+    expect(fillResultText(completion(2, 0))).toBe('Postes vacants complétés.')
   })
 })
 

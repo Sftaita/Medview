@@ -70,7 +70,12 @@ export function fillPlanText(plan: FillLinePlan): string {
 export function fillResultText(line: FillLineResult): string {
   switch (line.status) {
     case 'done':
-      return line.action === 'GENERATE' ? 'Première génération effectuée.' : 'Postes vacants complétés.'
+      if (line.action === 'GENERATE') return 'Première génération effectuée.'
+      // Never "complétés" when nobody could take them: what happened, as measured.
+      if (line.addedCount === 0) return 'Personne n’a pu être attribué : postes vacants inchangés.'
+      return (line.remainingUncoveredCount ?? 0) > 0
+        ? 'Postes vacants complétés en partie.'
+        : 'Postes vacants complétés.'
     case 'nothing_to_do':
       return 'Rien à faire.'
     case 'not_selected':

@@ -554,9 +554,9 @@ export function PlanningCalendar({
             )}
           </span>
           {canEdit &&
-            (model.completableCount > 0
-              ? ' — attribuez-les une à une ou utilisez « Compléter automatiquement ».'
-              : ' — attribuez-les une à une.')}
+            `${model.uncoveredCount === 1 ? ' — attribuez-la' : ' — attribuez-les une à une'}${
+              model.completableCount > 0 ? ' ou utilisez « Compléter automatiquement ».' : '.'
+            }`}
         </p>
       )}
       {canEdit && model && model.lockedLinesWithHoles.length > 0 && (
@@ -564,9 +564,8 @@ export function PlanningCalendar({
           <Icon name="lock" size={14} strokeWidth={2.2} />
           <span>
             {model.lockedLinesWithHoles.length === 1
-              ? `${model.lockedLinesWithHoles[0]} est publiée : elle n’est jamais complétée automatiquement.`
-              : `${model.lockedLinesWithHoles.join(', ')} sont publiées : elles ne sont jamais complétées automatiquement.`}{' '}
-            Attribuez leurs gardes une à une, puis republiez.
+              ? `${model.lockedLinesWithHoles[0]} est publiée : elle n’est jamais complétée automatiquement. Attribuez ses gardes une à une, puis republiez.`
+              : `${model.lockedLinesWithHoles.join(', ')} sont publiées : elles ne sont jamais complétées automatiquement. Attribuez leurs gardes une à une, puis republiez.`}
           </span>
         </p>
       )}

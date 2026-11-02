@@ -1248,3 +1248,21 @@ sont des affectations fixes, jamais des préférences.
   génération : `snapshotHash` et engagements externes identiques, calendrier
   final cohérent). Une indisponibilité déclarée pendant le calcul fait
   refuser l'écriture (`calendar_changed`), sans rien écrire.
+
+## 38. Une ligne publiée n'est jamais complétée automatiquement (docs/decisions.md D223)
+
+La règle de §37 vaut pour **tous** les points d'entrée, parce qu'elle est
+dans `PlanningCompletionService` lui-même.
+
+| Situation de la période | `POST /api/plannings/{id}/complete` | Bouton « Compléter automatiquement » |
+|---|---|---|
+| toutes les lignes générées sont `VALIDATED` / `PUBLISHED` / `ARCHIVED` | 409 `published_lines_not_completed` (`lines`), aucun job | indisponible, raison affichée à côté |
+| au moins une ligne générée en brouillon | 202, le job complète les brouillons ; chaque ligne verrouillée → `published` / `archived` | disponible ; la ligne publiée est nommée comme laissée telle quelle |
+| ligne publiée pendant le calcul | job `FAILED` (`calendar_changed`), rien d'écrit | — |
+
+- `CompletionLineResult.status` gagne `published` et `archived`.
+- `/result` expose `periodStatus` par ligne ; `calendarModel` en tire
+  `completableCount` et `lockedLinesWithHoles`.
+- Les modifications manuelles après publication (réaffecter, retirer,
+  échanger) sont inchangées, tracées (`wasPublished`) et republiées
+  explicitement.

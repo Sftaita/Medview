@@ -97,6 +97,45 @@
   font-weight: var(--weight-medium);
 }
 
+/* On a phone the five columns do not fit: one card per line, every count labelled — none hidden behind a scroll. */
+@media (max-width: 560px) {
+  .fill-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .fill-table,
+  .fill-table tbody,
+  .fill-table tr,
+  .fill-table th,
+  .fill-table td {
+    display: block;
+    width: 100%;
+  }
+  .fill-table tr {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .fill-table th,
+  .fill-table td {
+    padding: 2px 0;
+    border-bottom: none;
+  }
+  .fill-table td {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .fill-table td::before {
+    content: attr(data-label);
+    color: var(--text-muted);
+    text-align: left;
+  }
+}
+
 /* "Lignes de garde": counters and "Générer cette ligne" (D222). */
 .pd-line-fill {
   display: flex;

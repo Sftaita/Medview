@@ -142,11 +142,11 @@ describe('"Compléter automatiquement" and published lines (docs/decisions.md D2
     ).toBeInTheDocument()
     expect(button).toBeDisabled()
     expect(button).toHaveAccessibleDescription(
-      /jamais complétée automatiquement.*Attribuez leurs gardes une à une, puis republiez/,
+      /jamais complétée automatiquement.*Attribuez ses gardes une à une, puis republiez/,
     )
     fireEvent.click(button)
     expect(onRequestCompletion).not.toHaveBeenCalled()
-    expect(screen.getByText(/attribuez-les une à une\.$/)).toBeInTheDocument()
+    expect(screen.getByText(/— attribuez-la\.$/)).toBeInTheDocument()
     // The manual workflow is untouched: the hole of the published line can still be edited.
     expect(screen.getByRole('button', { name: /^Modifier : .*2026-10-06/ })).toBeEnabled()
   })

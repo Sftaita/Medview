@@ -1,7 +1,7 @@
-# Recette D222 — Générer une ligne seule et les postes non pourvus
+# Recette D222-D223 — Générer une ligne seule et les postes non pourvus
 
-Preuves des deux recettes de la PR #32 (`docs/decisions.md` D222). Les deux ont
-été faites **dans le navigateur (Chrome desktop)**, avec le backend, le worker
+Preuves des trois recettes de la PR #32 (`docs/decisions.md` D222, D223). Toutes
+ont été faites **dans le navigateur (Chrome)**, avec le backend, le worker
 et le frontend de la branche lancés dans des conteneurs jetables, sur une
 **copie isolée** de la base de dev. Elles n'ont rien écrit dans la base de dev
 `app`, ni dans `app_test`, ni en production. Aucun e-mail n'a été envoyé : rien
@@ -15,6 +15,7 @@ dans ces parcours n'en envoie.
 | `app_test_lg2` | tests automatisés, migration finale (tour 2) |
 | `app_uat_lg` | recette 1 (« Recette D222 Gardes »), première version de la migration |
 | `app_uat_lg2` | recette 2 (« Recette D222 v2 »), migration finale |
+| `app_uat_lg3` | recette 3 : copie de `app_uat_lg2` après la recette 2, plus « Recette D223 » |
 
 Comptes de recette : `uat-d222-*@example.test` (recette 1), `uat2-*@example.test` (recette 2).
 Les mots de passe sont générés et ne sont pas consignés ici.
@@ -85,14 +86,57 @@ Les mots de passe sont générés et ne sont pas consignés ici.
   Renfort 19/21 (`r2-lignes-apres-actualisation.jpg`). Le bilan affiché
   correspond au job (`r2-bilan.jpg`).
 
+## Recette 3 (2026-11-02, après la deuxième revue — D223)
+
+Base `app_uat_lg3` (copie de `app_uat_lg2`, qui reste intacte). Affichage
+téléphone : l'application chargée une fois dans une iframe de même origine de
+**390 px** de large (la fenêtre du navigateur ne se redimensionne pas), puis la
+même iframe élargie pour le bureau.
+
+- **« Générer les postes non pourvus » à 390 px** sur « Recette D222 v2 » :
+  - en-tête : le bouton principal **débordait de 10 px à gauche** (libellé
+    long sur une ligne) → corrigé, il passe sur deux lignes dans la marge ;
+  - attente de l'aperçu visible et annoncée, bouton de lancement indisponible
+    (`r3-390-apercu-chargement.jpg`) ; aperçu prêt en 6 à 19 s selon le cache
+    (`r3-390-apercu.jpg` : Seniors publiée non cochable, Juniors rien à faire,
+    Renfort 2 postes à compléter) ;
+  - **double clic** sur le lancement : un seul job créé (n° 21), bouton
+    « Envoi… » désactivé, puis bouton de l'en-tête désactivé pendant le calcul ;
+  - bilan : à 390 px la colonne « Affectations existantes modifiées » était
+    **cachée derrière un défilement horizontal**, et Renfort affichait
+    « Postes vacants complétés » alors que **0** garde avait été attribuée
+    (`r3-390-bilan-avant-correction.jpg`) → corrigé : une carte par ligne,
+    chaque nombre étiqueté, et « Personne n'a pu être attribué : postes vacants
+    inchangés » (`r3-390-bilan.jpg`). 0 affectation existante modifiée.
+- **Calendrier, ligne publiée à côté d'une ligne brouillon** : « Compléter
+  automatiquement » reste disponible pour Renfort, et la ligne publiée est
+  nommée : « Seniors est publiée : elle n'est jamais complétée
+  automatiquement. Attribuez ses gardes une à une, puis republiez. »
+  (`r3-390-calendrier-ligne-publiee-et-brouillon.jpg`).
+- **« Recette D223 »** (une ligne Seniors, 7 jours, générée, publiée, puis la
+  garde du 3 février retirée — seule une ligne publiée a un trou) :
+  - **appel direct de l'API historique** `POST /complete` : **409**
+    `published_lines_not_completed` (ligne Seniors nommée) ; sur 3 158 lignes
+    de 14 tables, **0** différente avant/après ; aucun job (22 → 22) ; PDF de
+    la diffusion identique (SHA-256) ; aucun e-mail dans Mailpit (20 → 20) ;
+  - **bouton** : indisponible, raison affichée à côté et annoncée
+    (`aria-describedby`) (`r3-390-completer-indisponible.jpg`) ;
+  - **réaffectation manuelle** du trou depuis le calendrier à 390 px :
+    acceptée (`r3-390-reaffectation-manuelle.jpg`) ; historique : retrait puis
+    attribution `MANUAL`, tous deux marqués « après publication ». La titulaire
+    d'origine ayant été choisie, A → ∅ → A n'est pas une modification à
+    republier (règle existante) ; la republication explicite après un vrai
+    changement est couverte par les tests ;
+  - bureau après la réaffectation (`r3-bureau-apres-reaffectation.jpg`).
+
 ## Ce que « non testé » veut dire ici
 
 Rien n'a vérifié la fonctionnalité dans ces cas, ni par un test automatisé, ni
 dans le navigateur, ni en base :
 
-- **Affichage à 390 px** : l'outil navigateur ne change pas la largeur réelle
-  de la page.
-- **Ligne de renfort et sa source générées dans le même passage** : le code
-  et l'aperçu le gèrent (`afterSource`), mais aucun test ne l'exerce.
 - **Production** : aucun déploiement, aucune recette sur une copie de la base
   de production.
+- **Vrai téléphone** : l'affichage à 390 px a été vérifié dans une iframe de
+  Chrome de bureau, pas sur un appareil (tactile, clavier virtuel, Safari iOS).
+- **Ligne de renfort et sa source générées dans le même passage** : testé par
+  `PlanningLineFillConditionalTest` (OR-Tools réel), pas dans le navigateur.

@@ -368,10 +368,16 @@ export function FillResultBody({ outcome }: { outcome: NonNullable<PlanningJob['
                   {line.lineName}
                   <span className="fill-table__status">{fillResultText(line)}</span>
                 </th>
-                <td className="tnum">{line.keptCount}</td>
-                <td className="tnum">{line.addedCount}</td>
-                <td className="tnum">{line.remainingUncoveredCount ?? '—'}</td>
-                <td className="tnum">
+                <td className="tnum" data-label="Gardes existantes conservées">
+                  {line.keptCount}
+                </td>
+                <td className="tnum" data-label="Nouvelles gardes attribuées">
+                  {line.addedCount}
+                </td>
+                <td className="tnum" data-label="Gardes toujours non pourvues">
+                  {line.remainingUncoveredCount ?? '—'}
+                </td>
+                <td className="tnum" data-label="Affectations existantes modifiées">
                   <strong>{line.modifiedCount}</strong>
                 </td>
               </tr>
