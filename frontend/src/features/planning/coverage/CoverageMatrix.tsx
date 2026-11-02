@@ -81,9 +81,7 @@ export function CoverageMatrix({ rows, selection, excludedWeekdays, disabled = f
   }
 
   function outsideNote(row: MatrixRow) {
-    return row.outsideSource ? (
-      <span className="cov-note">Ne fait plus partie de la ligne à renforcer</span>
-    ) : null
+    return row.outsideSource ? <span className="cov-note">Ne fait plus partie de la ligne à renforcer</span> : null
   }
 
   if (rows.length === 0) {
@@ -95,11 +93,7 @@ export function CoverageMatrix({ rows, selection, excludedWeekdays, disabled = f
   }
 
   return (
-    <div
-      ref={ref}
-      className={stacked ? 'cov-matrix cov-matrix--stacked' : 'cov-matrix'}
-      data-layout={stacked ? 'stacked' : 'table'}
-    >
+    <div ref={ref} className={stacked ? 'cov-matrix cov-matrix--stacked' : 'cov-matrix'} data-layout={stacked ? 'stacked' : 'table'}>
       {stacked ? (
         <ul className="cov-cards" aria-label="Jours nécessitant un renfort, par chirurgien">
           {rows.map((row) => (
