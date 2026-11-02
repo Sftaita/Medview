@@ -10207,3 +10207,10 @@ modifié.
   personne en double. Empreinte md5 des 14 tables : 0 des 2 989 lignes existantes modifiée. CI verte
   (backend 1 814 tests). Non vérifiés : 390 px (outil navigateur), cas conditionnel source + renfort dans le
   même passage ; aperçu lent sur la pile de dev (7 à 20 s), à mesurer en conditions réelles.
+- **Recette 2 (2026-11-02, après la revue, copie isolée `app_uat_lg2`)** : migration finale
+  appliquée, annulée, réappliquée sur des données réelles ; « Générer le planning » absent dès
+  qu'une ligne est générée ; « Régénérer entièrement… » exige la confirmation cochée (non lancé) ;
+  ligne publiée exclue (case non cochable), un membre arrivé après la génération (Lou) reçoit le
+  seul trou possible, la réaffectation manuelle reste `MANUAL`, une ligne jamais générée reçoit sa
+  première génération ; 0 des 3 079 lignes existantes modifiée ; statistiques et calendrier
+  identiques au décompte en base après actualisation. Preuves : `docs/recette/d222/`.

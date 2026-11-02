@@ -161,7 +161,10 @@ final class PlanningLineFillService
             foreach ($preview->lines as $plan) {
                 $this->heartbeat->beat();
                 if (!\in_array((string) $plan->line->getStableId(), $lineStableIds, true)) {
-                    $results[] = new FillLineResult($plan, 'not_selected');
+                    // A line that could not have been selected (published, archived…) says why, not "not selected".
+                    $results[] = FillLinePlan::EXCLUDED === $plan->action
+                        ? new FillLineResult($plan, 'excluded', $plan->reason, blockers: $plan->blockers)
+                        : new FillLineResult($plan, 'not_selected');
                     continue;
                 }
                 $results[] = match ($plan->action) {

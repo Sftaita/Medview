@@ -127,6 +127,12 @@ final class PlanningLineFillSafetyTest extends WebTestCase
         }
         self::assertSame(0, (int) $this->db()->fetchOne('SELECT COUNT(*) FROM duty_assignment_events WHERE id > ? AND was_published', [max(array_keys($before['duty_assignment_events']))]));
 
+        // Not asked for, it still says why it was left alone.
+        $before = $this->protectedRows();
+        $this->unassignDuty($this->client, $this->s, $this->dutyOn($this->s['planningId'], '2027-01-05', 1));
+        $job = $this->fillNow($this->client, $this->s, [$juniors]);
+        self::assertSame(['excluded', 'published'], [$this->fillLines($job)['Seniors']['status'], $this->fillLines($job)['Seniors']['reason']]);
+
         // The published line alone: nothing to do, no job.
         $before = $this->protectedRows();
         $refusal = $this->fillNow($this->client, $this->s, [$preview['Seniors']['lineStableId']]);
