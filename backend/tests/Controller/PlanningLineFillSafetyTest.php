@@ -33,8 +33,6 @@ final class PlanningLineFillSafetyTest extends WebTestCase
 {
     use LineFillTestHelpers;
 
-    private const REST = ['legalMinRestEnabled' => true, 'legalMinRestHours' => 11];
-
     private KernelBrowser $client;
 
     /** @var array<string, mixed> */
@@ -254,18 +252,19 @@ final class PlanningLineFillSafetyTest extends WebTestCase
      * The cross-line rule of a first generation (D161/D222): the Juniors are
      * generated first, alone — Alice holds the night of 5 January. The
      * Seniors, generated afterwards and FIRST in the resolution order, must
-     * still see that night as a commitment (11-hour rest): Alice never gets
+     * still see that night as a commitment (it overlaps the day, 19:00-20:00 —
+     * a conflict, always HARD, no rest rule involved): Alice never gets
      * the day before it, the day stays uncovered, her night stays hers.
      * Without it, the Seniors' result would conflict and be thrown away.
      */
     public function testAFirstGenerationRespectsALineThatComesAfterItInTheResolutionOrder(): void
     {
         $this->prepareLine($this->s['planningId'], [['2027-01-05 08:00', '2027-01-05 20:00']]);
-        $juniors = $this->addJuniors([['2027-01-05 21:00', '2027-01-06 07:00']], ['junior1@example.com'], ['alice@example.com']);
+        $juniors = $this->addJuniors([['2027-01-05 19:00', '2027-01-06 07:00']], ['junior1@example.com'], ['alice@example.com']);
         $this->unavailable('junior1@example.com', '2027-01-05 00:00', '2027-01-07 00:00');
         $seniors = $this->lineIds($this->client, $this->s)[0];
 
-        $first = $this->fillNow($this->client, $this->s, [$juniors], self::REST);
+        $first = $this->fillNow($this->client, $this->s, [$juniors]);
         self::assertSame('done', $this->fillLines($first)['Juniors']['status']);
         self::assertSame('alice@example.com', $this->currentCalendar($this->s['planningId'])['1|2027-01-05|ONCALL']);
 
@@ -273,7 +272,7 @@ final class PlanningLineFillSafetyTest extends WebTestCase
         $this->unavailable('bob@example.com', '2027-01-05 00:00', '2027-01-06 00:00');
         $before = $this->protectedRows();
 
-        $second = $this->fillNow($this->client, $this->s, [$seniors], self::REST);
+        $second = $this->fillNow($this->client, $this->s, [$seniors]);
 
         $line = $this->fillLines($second)['Seniors'];
         self::assertSame(['done', 0, 1], [$line['status'], $line['addedCount'], $line['remainingUncoveredCount']]);
