@@ -42,6 +42,7 @@ use Symfony\Component\Mime\Email;
  */
 final class PeriodPreparationRunnerTest extends WebTestCase
 {
+    use \Symfony\Component\Clock\Test\ClockSensitiveTrait;
     use CalendarWorkflowTestHelpers;
 
     private KernelBrowser $client;
@@ -53,6 +54,10 @@ final class PeriodPreparationRunnerTest extends WebTestCase
 
     protected function setUp(): void
     {
+        // These tests plan announcements on fixed dates (2 November 2026, 1 March 2027): "today" is frozen before them,
+        // otherwise they start failing the day those dates pass ("announcement_in_past"). The runner itself is always
+        // given its own instant (runAt).
+        static::mockTime(new \DateTimeImmutable('2026-11-01 09:00:00', new \DateTimeZone('Europe/Brussels')));
         $this->client = static::createClient();
         $this->s = $this->pilotScenario($this->client);
     }
