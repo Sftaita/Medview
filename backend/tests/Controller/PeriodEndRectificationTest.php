@@ -31,6 +31,7 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
  */
 final class PeriodEndRectificationTest extends WebTestCase
 {
+    use \App\Tests\LegacyConditionalTestHelpers;
     use CalendarWorkflowTestHelpers;
 
     /** Friday → Sunday block, single weekdays (the structure of Trauma Delta). */
@@ -216,6 +217,8 @@ final class PeriodEndRectificationTest extends WebTestCase
         }
 
         // Period 2 now starts on Friday 29: the weekend is materialized there whole, as an ordinary block.
+        // docs/decisions.md D224: the GET only projects — materialized the way a launch does.
+        $this->materializeLikeALaunch($this->s['planningId'], $period2);
         $preflight = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/generation-preflight?period={$period2}", token: $this->s['creator']);
         self::assertResponseIsSuccessful();
         self::assertNotContains('HISTORICAL_BLOCK_REMAINDER', array_column($preflight['warnings'], 'code'));
@@ -244,6 +247,8 @@ final class PeriodEndRectificationTest extends WebTestCase
         self::assertResponseStatusCodeSame(403);
 
         // Period 2 prepared (duties materialized): the boundary no longer moves.
+        // docs/decisions.md D224: the GET only projects — materialized the way a launch does.
+        $this->materializeLikeALaunch($this->s['planningId'], $period2);
         $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/generation-preflight?period={$period2}", token: $this->s['creator']);
         self::assertResponseIsSuccessful();
         $options = $this->options($period1);
@@ -280,6 +285,8 @@ final class PeriodEndRectificationTest extends WebTestCase
         self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
 
         // 2027-05-01 (exclusive): the last day is Friday 30 April, the weekend of 30 April - 2 May does not fit.
+        // docs/decisions.md D224: the GET only projects — materialized the way a launch does.
+        $this->materializeLikeALaunch($this->s['planningId'], $period1);
         $preflight = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/generation-preflight?period={$period1}", token: $this->s['creator']);
         self::assertResponseIsSuccessful();
         self::assertContains('PERIOD_END_CUTS_BLOCK', array_column($preflight['warnings'], 'code'));
@@ -290,6 +297,8 @@ final class PeriodEndRectificationTest extends WebTestCase
         $this->db()->executeStatement("DELETE FROM duty_assignments WHERE duty_id IN (SELECT id FROM duties WHERE local_date >= '2027-04-30')");
         $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period1}", ['endsAt' => '2027-04-30', 'expectedEndsAt' => '2027-05-01'], $this->s['creator']);
         self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
+        // docs/decisions.md D224: the GET only projects — materialized the way a launch does.
+        $this->materializeLikeALaunch($this->s['planningId'], $period1);
         $preflight = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/generation-preflight?period={$period1}", token: $this->s['creator']);
         self::assertNotContains('PERIOD_END_CUTS_BLOCK', array_column($preflight['warnings'], 'code'));
     }

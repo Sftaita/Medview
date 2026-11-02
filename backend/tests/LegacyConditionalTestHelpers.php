@@ -53,11 +53,12 @@ trait LegacyConditionalTestHelpers
     }
 
     /** What a real launch does before solving: every line of the planning's only period materialized, sources first. */
-    private function materializeLikeALaunch(string $planningStableId): void
+    private function materializeLikeALaunch(string $planningStableId, ?string $periodStableId = null): void
     {
         $container = static::getContainer();
         $container->get(EntityManagerInterface::class)->clear();
         $planning = $container->get(PlanningRepository::class)->findOneByStableId($planningStableId);
-        $container->get(PlanningGenerationLauncher::class)->preflight($planning, materialize: true);
+        $cycle = null !== $periodStableId ? $container->get(\App\Repository\PlanningCycleRepository::class)->findOneForPlanning($planning, $periodStableId) : null;
+        $container->get(PlanningGenerationLauncher::class)->preflight($planning, $cycle, materialize: true);
     }
 }

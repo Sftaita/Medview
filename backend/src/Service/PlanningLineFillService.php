@@ -224,7 +224,10 @@ final class PlanningLineFillService
         ));
 
         // A reinforcement line's duties exist only once its source is assigned (D167): never a guessed number.
-        $required = null !== $readiness->demandSourceLine ? null : $readiness->dutyCount;
+        // docs/decisions.md D224: an inheriting reinforcement line whose source already has a calendar knows its count
+        // (projected in memory); otherwise it depends on the source generated in the same run — unknown, never guessed.
+        $sourceUndecided = \in_array('SOURCE_NOT_DECIDED_YET', $readiness->applicability?->reasons ?? [], true);
+        $required = null !== $readiness->demandSourceLine && ($sourceUndecided || !$this->inheritedReinforcements->inherits($line)) ? null : $readiness->dutyCount;
         if ([] !== $blockers) {
             return new FillLinePlan($line, $period->getStatus(), false, FillLinePlan::EXCLUDED, 'blocked', false, false, $required, 0, $required, $protected, $blockers, $warnings);
         }

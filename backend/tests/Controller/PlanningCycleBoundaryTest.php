@@ -27,6 +27,7 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
  */
 final class PlanningCycleBoundaryTest extends WebTestCase
 {
+    use \App\Tests\LegacyConditionalTestHelpers;
     use CalendarWorkflowTestHelpers;
 
     private const WEEKEND = [
@@ -171,6 +172,8 @@ final class PlanningCycleBoundaryTest extends WebTestCase
         $this->setStructure(self::WEEKEND);
         self::assertResponseIsSuccessful();
 
+        // docs/decisions.md D224: the GET only projects — materialized the way a launch does.
+        $this->materializeLikeALaunch($this->s['planningId']);
         $preflight = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/generation-preflight", token: $this->s['creator']);
         self::assertResponseIsSuccessful();
         self::assertNotContains('BLOCK_CUT_BY_PERIOD_BOUNDARY', array_column($preflight['blockers'], 'code'));
@@ -194,6 +197,8 @@ final class PlanningCycleBoundaryTest extends WebTestCase
         $em->flush();
 
         foreach ($this->periods() as $period) {
+            // docs/decisions.md D224: the GET only projects — materialized the way a launch does.
+            $this->materializeLikeALaunch($this->s['planningId'], $period['stableId']);
             $preflight = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/generation-preflight?period={$period['stableId']}", token: $this->s['creator']);
             self::assertResponseIsSuccessful();
             self::assertContains('BLOCK_CUT_BY_PERIOD_BOUNDARY', array_column($preflight['blockers'], 'code'), "period {$period['number']}");

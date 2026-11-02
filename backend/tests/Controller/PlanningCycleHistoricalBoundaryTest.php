@@ -24,6 +24,7 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
  */
 final class PlanningCycleHistoricalBoundaryTest extends WebTestCase
 {
+    use \App\Tests\LegacyConditionalTestHelpers;
     use CalendarWorkflowTestHelpers;
 
     private const STRUCTURE = [
@@ -136,6 +137,8 @@ final class PlanningCycleHistoricalBoundaryTest extends WebTestCase
 
     private function preflightOfPeriodTwo(): array
     {
+        // docs/decisions.md D224: the GET only projects — materialized the way a launch does.
+        $this->materializeLikeALaunch($this->s['planningId'], $this->periods()[1]['stableId']);
         $preflight = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/generation-preflight?period={$this->periods()[1]['stableId']}", token: $this->s['creator']);
         self::assertResponseIsSuccessful();
 

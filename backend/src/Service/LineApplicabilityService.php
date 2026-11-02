@@ -61,6 +61,12 @@ final class LineApplicabilityService
             if ([] === $policy->toRules()->triggersByUser) {
                 return new LineApplicability(LineApplicability::NO_DEMAND, ['NO_TRIGGER'], 0, 0, true);
             }
+            // Its source has neither a duty nor a weekly structure in this period: nothing to reinforce.
+            $sourcePeriod = $policy->getSourceLine()?->periodIn($cycle);
+            if (null !== $sourcePeriod && 0 === \count($this->dutyRepository->findByPlanningPeriod($sourcePeriod))
+                && [] === $this->patternRepository->findActiveRecurringByTeam($policy->getSourceLine()->getPlanningTeam())) {
+                return new LineApplicability(LineApplicability::NO_DEMAND, ['INHERITED_STRUCTURE', 'SOURCE_HAS_NO_DUTY'], 0, 0, true);
+            }
             $plan = $this->inheritedReinforcements->plan($period);
             if (!$plan->inherits) {
                 $missing = $this->missingPrerequisites($line, $cycle);

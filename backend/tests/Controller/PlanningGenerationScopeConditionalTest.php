@@ -211,13 +211,8 @@ final class PlanningGenerationScopeConditionalTest extends WebTestCase
             $this->addMemberAs($this->client, $s['creator'], $s['planningId'], $nuit['team']['stableId'], $email, 'MEMBER');
         }
         $this->activateRuleSet(static::getContainer()->get(\App\Service\PlanningRuleSetService::class), $this->line($s['planningId'], 2)->getPlanningTeam());
-        $this->api($this->client, 'PUT', "/api/planning-lines/{$nuit['stableId']}/demand-policy", [
-            'schemaVersion' => 1,
-            'mode' => 'CONDITIONAL_ON_SOURCE_ASSIGNMENT',
-            'source' => ['lineStableId' => $s['primaryLineId']],
-            'triggers' => [['userStableId' => $this->userId('alice@example.com'), 'weekdays' => self::ALL_DAYS, 'increment' => 1]],
-        ], $s['creator']);
-        self::assertResponseIsSuccessful();
+        // A historical OWN reinforcement (recorded before D224): it demands nothing until its own weekly structure.
+        $this->recordOwnStructurePolicy($nuit['stableId'], $s['primaryLineId'], [['alice@example.com', self::ALL_DAYS]]);
 
         // Nuit demands nothing yet: Seniors and Renfort are generated and published, Nuit excluded.
         $job = $this->generateNow($this->client, $s['planningId'], $s['creator']);

@@ -28,6 +28,7 @@ use Symfony\Component\Clock\Test\ClockSensitiveTrait;
  */
 final class DemandPolicyControllerTest extends WebTestCase
 {
+    use \App\Tests\LegacyConditionalTestHelpers;
     use CalendarWorkflowTestHelpers;
     use ClockSensitiveTrait;
 
@@ -156,7 +157,9 @@ final class DemandPolicyControllerTest extends WebTestCase
         self::assertSame($s['primaryLineId'], $view['source']['lineStableId']);
         self::assertSame(self::WEEKEND, $view['triggers'][1]['weekdays'], 'Stored and returned in ISO order.');
         self::assertSame(1, $view['triggers'][1]['increment']);
-        self::assertSame(['TARGET_HAS_NO_WEEK_STRUCTURE'], $this->warningCodes($view));
+        // docs/decisions.md D224: the blocks are inherited from the source — no structure of its own to be missing.
+        self::assertSame([], $this->warningCodes($view));
+        self::assertSame(['INHERITED', $s['primaryLineId']], [$view['structureSource'], $view['inheritedFrom']['lineStableId']]);
 
         // Read back from the database, then evaluated by the pure evaluator.
         static::getContainer()->get(EntityManagerInterface::class)->clear();
@@ -411,7 +414,13 @@ final class DemandPolicyControllerTest extends WebTestCase
 
     // --- state rules ----------------------------------------------------------------------------
 
-    public function testAConditionalConfigurationAfterPublicationIsRefused(): void
+    /**
+     * docs/decisions.md D224 (supersedes the V1 rule "configure it before
+     * the first publication"): a line is generated and published on its own
+     * since D196/D222 — a reinforcement of an already published line is
+     * configured, then generated alone from the published holders.
+     */
+    public function testAConditionalConfigurationAfterPublicationIsAccepted(): void
     {
         $client = static::createClient();
         $s = $this->pilotScenario($client);
@@ -424,9 +433,8 @@ final class DemandPolicyControllerTest extends WebTestCase
 
         $error = $this->put($client, $s['creator'], $lines[1]['stableId'], $this->conditional($lines[0]['stableId'], [['bob@example.com', self::WEEKEND]]));
 
-        self::assertResponseStatusCodeSame(409);
-        self::assertSame('planning_already_published', $error['error']);
-        self::assertStringContainsString('before the first publication', $error['message']);
+        self::assertResponseIsSuccessful();
+        self::assertSame(['CONDITIONAL_ON_SOURCE_ASSIGNMENT', 'INHERITED'], [$error['mode'], $error['structureSource']]);
     }
 
     public function testChangingTheModeOfAMaterializedLineIsRefusedButATriggerChangeIsNot(): void
@@ -439,23 +447,22 @@ final class DemandPolicyControllerTest extends WebTestCase
         self::assertResponseStatusCodeSame(409);
         self::assertSame('line_already_materialized', $error['error']);
 
-        // "Renfort" is made conditional first, then its duties exist — materialized the real way (D163: weekly
-        // structure + preflight, each one CONDITIONAL and linked to the main line's duty that day): only its
-        // triggers may still change.
-        $this->put($client, $s['creator'], $s['lines']['Renfort'], $this->conditional($s['primaryLineId'], [['bob@example.com', self::WEEKEND]]));
-        self::assertResponseIsSuccessful();
+        // "Renfort", a historical OWN reinforcement (recorded before D224), whose duties exist — materialized the
+        // way a launch does (D163: weekly structure, each one CONDITIONAL and linked to the main line's duty that
+        // day): only its triggers may still change, and they keep its own structure (never mixed with inherited).
+        $this->recordOwnStructurePolicy($s['lines']['Renfort'], $s['primaryLineId'], [['bob@example.com', self::WEEKEND]]);
         $this->prepareLine($s['planningId'], [['2027-01-08', '2027-01-09']]);
         $this->api($client, 'PUT', "/api/planning-lines/{$s['lines']['Renfort']}/week-structure", [
             'blocks' => [], 'solo' => ['VEN'], 'soloFamily' => '', 'excluded' => ['LUN', 'MAR', 'MER', 'JEU', 'SAM', 'DIM'],
         ], $s['creator']);
         self::assertResponseIsSuccessful();
-        $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/generation-preflight", token: $s['creator']);
-        self::assertResponseIsSuccessful();
+        $this->materializeLikeALaunch($s['planningId']);
         self::assertTrue($this->dutyEntityOn($s['planningId'], '2027-01-08', 1)->isConditional(), 'Precondition: the line now has its (conditional) duty.');
 
         $view = $this->put($client, $s['creator'], $s['lines']['Renfort'], $this->conditional($s['primaryLineId'], [['bob@example.com', ['SATURDAY']]]));
         self::assertResponseIsSuccessful();
         self::assertSame(2, $view['policy']['version']);
+        self::assertSame('OWN', $view['structureSource'], 'Its duties exist: the new triggers keep its own structure.');
 
         $this->put($client, $s['creator'], $s['lines']['Renfort'], $this->independent());
         self::assertResponseStatusCodeSame(409);
@@ -478,11 +485,14 @@ final class DemandPolicyControllerTest extends WebTestCase
         ], $s['creator']);
         self::assertResponseIsSuccessful();
 
-        $view = $this->put($client, $s['creator'], $s['lines']['Renfort'], $this->conditional($s['primaryLineId'], [
+        // The structure warnings are those of a historical OWN reinforcement (D224: an inheriting one has no
+        // structure of its own, see testAnInheritingLineWarnsOnlyAboutItsTriggers).
+        $this->recordOwnStructurePolicy($s['lines']['Renfort'], $s['primaryLineId'], [
             ['bob@example.com', ['FRIDAY', 'SATURDAY']],     // part of the Friday–Sunday block
             ['alice@example.com', ['THURSDAY', 'MONDAY']],   // Thursday has no duty on this line
             ['carol@example.com', ['MONDAY']],               // not a member of the main line
-        ]));
+        ]);
+        $view = $this->api($client, 'GET', "/api/planning-lines/{$s['lines']['Renfort']}/demand-policy", token: $s['creator']);
 
         self::assertResponseIsSuccessful();
         self::assertSame(3, \count($view['triggers']), 'Warnings never refuse.');
@@ -602,5 +612,25 @@ final class DemandPolicyControllerTest extends WebTestCase
     public function testTheModeEnumIsTheStableApiContract(): void
     {
         self::assertSame(['INDEPENDENT', 'CONDITIONAL_ON_SOURCE_ASSIGNMENT'], array_map(static fn (DemandMode $m): string => $m->value, DemandMode::cases()));
+    }
+
+    /** docs/decisions.md D224: an inheriting reinforcement warns about its triggers only — never about a structure. */
+    public function testAnInheritingLineWarnsOnlyAboutItsTriggers(): void
+    {
+        $client = static::createClient();
+        $s = $this->scenario($client);
+        $this->userToken($client, 'carol@example.com');
+
+        $none = $this->put($client, $s['creator'], $s['lines']['Renfort'], $this->conditional($s['primaryLineId'], []));
+        self::assertResponseIsSuccessful();
+        self::assertSame(['NO_TRIGGER'], $this->warningCodes($none));
+
+        $view = $this->put($client, $s['creator'], $s['lines']['Renfort'], $this->conditional($s['primaryLineId'], [['carol@example.com', ['MONDAY']]]));
+        self::assertResponseIsSuccessful();
+        self::assertSame(['TRIGGER_PERSON_NOT_IN_SOURCE_LINE'], $this->warningCodes($view));
+
+        $refused = $this->api($client, 'PUT', "/api/planning-lines/{$s['lines']['Renfort']}/week-structure", ['blocks' => [], 'solo' => ['MAR'], 'soloFamily' => '', 'excluded' => ['LUN', 'MER', 'JEU', 'VEN', 'SAM', 'DIM']], $s['creator']);
+        self::assertResponseStatusCodeSame(409);
+        self::assertSame('structure_inherited', $refused['error']);
     }
 }

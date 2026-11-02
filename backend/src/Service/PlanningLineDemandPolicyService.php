@@ -6,6 +6,7 @@ namespace App\Service;
 
 use App\Demand\DemandMode;
 use App\Demand\DemandRules;
+use App\Demand\StructureSource;
 use App\Demand\Weekday;
 use App\Dto\DemandPolicyUpdateRequest;
 use App\Entity\DemandTrigger;
@@ -136,7 +137,13 @@ final class PlanningLineDemandPolicyService
                     $this->entityManager->flush();
                 }
 
-                $policy = new PlanningLineDemandPolicy($line, $this->policyRepository->findNextVersionNumber($line), $mode, $sourceLine, $author);
+                // docs/decisions.md D224: a reinforcement inherits its blocks — except a historical OWN line whose duties
+                // already exist in a period not generated yet: its new triggers apply to those same duties, never
+                // mixed with inherited ones.
+                $structure = $mode->isConditional() && null !== $current && StructureSource::OWN === $current->getStructureSource()
+                    && $current->getMode() === $mode && $current->getSourceLine() === $sourceLine && $this->hasUngeneratedDuties($line)
+                    ? StructureSource::OWN : null;
+                $policy = new PlanningLineDemandPolicy($line, $this->policyRepository->findNextVersionNumber($line), $mode, $sourceLine, $author, $structure);
                 $this->entityManager->persist($policy);
                 foreach ($triggers as [$user, $weekdays, $increment]) {
                     $this->entityManager->persist(new DemandTrigger($policy, $user, $weekdays, $increment));
@@ -170,7 +177,7 @@ final class PlanningLineDemandPolicyService
             $mode,
             (string) $sourceLine->getStableId(),
             array_map(static fn (array $t): \App\Demand\DemandTriggerRule => new \App\Demand\DemandTriggerRule((string) $t[0]->getStableId(), $t[1], $t[2]), $triggers),
-            \App\Demand\StructureSource::INHERITED,
+            StructureSource::INHERITED,
         );
 
         $periods = [];
@@ -321,18 +328,26 @@ final class PlanningLineDemandPolicyService
         // docs/decisions.md D224: one configuration per line, for every period not generated yet. Only a period
         // whose duties already exist without being generated would mix two configurations: then mode, source and
         // structure are fixed (the triggers stay editable). A generated period reads the rules its snapshot froze.
-        $structureChanges = $mode->isConditional() && !$current->inheritsStructure();
         $modeOrSourceChanges = $current->mode !== $mode
-            || $current->sourceLineStableId !== (null !== $sourceLine ? (string) $sourceLine->getStableId() : null)
-            || $structureChanges;
+            || $current->sourceLineStableId !== (null !== $sourceLine ? (string) $sourceLine->getStableId() : null);
         if (!$modeOrSourceChanges) {
             return;
         }
+        if ($this->hasUngeneratedDuties($line)) {
+            throw new DemandPolicyConflictException('line_already_materialized', 'Duties of this line already exist in a period not generated yet: its mode and its source can no longer change for that period.');
+        }
+    }
+
+    /** A period of $line not generated yet already holds duties (materialized under the configuration in force). */
+    private function hasUngeneratedDuties(PlanningLine $line): bool
+    {
         foreach ($line->getPeriods() as $period) {
             if ($this->dutyRepository->existsForPeriod($period) && null === $this->generationRepository->findMostRecentCompletedByPlanningPeriod($period)) {
-                throw new DemandPolicyConflictException('line_already_materialized', 'Duties of this line already exist in a period not generated yet: its mode, its source and its structure can no longer change for that period.');
+                return true;
             }
         }
+
+        return false;
     }
 
     /**
