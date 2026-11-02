@@ -10170,3 +10170,12 @@ modifié.
   `othersKept`, ou en régénérant au lieu de compléter, les tests échouent.
   Frontend : `FillModal.test.tsx`, `LinesTab.test.tsx`, bannière `FILL`.
   Détail : `docs/planning-generation.md` §37.
+- **Recette (2026-11-02, Chrome desktop, backend/worker/frontend du worktree sur une copie isolée de la base de dev)** :
+  Seniors générée (28 gardes), une garde réaffectée à la main, une garde retirée ; ligne Juniors ajoutée
+  (Jules, et Simone aussi Senior). « Lignes de garde » : « 27/28 gardes attribuées · 1 non pourvue » et
+  « Jamais générée · 28 gardes à pourvoir », « Générer cette ligne » sur chacune ; « Générer le planning »
+  avertit qu'il remplacerait les 27 gardes de Seniors ; « Générer les postes non pourvus » (sans règle de
+  repos) : Seniors 27 conservées + 1, Juniors 28, **0 modifiée** ; garde réaffectée toujours `MANUAL`,
+  personne en double. Empreinte md5 des 14 tables : 0 des 2 989 lignes existantes modifiée. CI verte
+  (backend 1 814 tests). Non vérifiés : 390 px (outil navigateur), cas conditionnel source + renfort dans le
+  même passage ; aperçu lent sur la pile de dev (7 à 20 s), à mesurer en conditions réelles.
