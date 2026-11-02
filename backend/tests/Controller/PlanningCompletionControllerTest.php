@@ -185,7 +185,12 @@ final class PlanningCompletionControllerTest extends WebTestCase
         self::assertSame('not_generated', $response['lines'][0]['status']);
     }
 
-    public function testCompletionWorksOnAPublishedPlanningWhichStaysPublished(): void
+    /**
+     * docs/decisions.md D223 (supersedes D145 on this point): a published
+     * line is never completed automatically — the request is refused, the
+     * hole stays a hole and the planning stays published as it was.
+     */
+    public function testCompletionIsRefusedOnAPublishedPlanningWhichStaysPublished(): void
     {
         $client = static::createClient();
         $s = $this->pilotScenario($client);
@@ -195,10 +200,11 @@ final class PlanningCompletionControllerTest extends WebTestCase
         self::assertResponseIsSuccessful();
 
         $this->unassignDuty($client, $s, $this->dutyOn($s['planningId'], '2027-01-06'));
-        $this->completePlanning($client, $s);
-        self::assertResponseIsSuccessful();
+        $response = $this->completePlanning($client, $s);
+        self::assertResponseStatusCodeSame(409);
+        self::assertSame('published_lines_not_completed', $response['error']);
 
-        self::assertNotNull($this->currentCalendar($s['planningId'])['0|2027-01-06|ONCALL']);
+        self::assertNull($this->currentCalendar($s['planningId'])['0|2027-01-06|ONCALL']);
         self::assertSame(PlanningPeriodStatus::PUBLISHED, $this->periodStatusOf($s['planningId']));
     }
 

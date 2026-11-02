@@ -116,6 +116,11 @@ export type PlanningResultLine = {
   superfluousDutyCount: number
   /** Conditional duties the live demand does not require, held or not (D166) — never "to cover". */
   notRequiredDutyCount: number
+  /**
+   * docs/decisions.md D223 — the status of the line's period read; VALIDATED,
+   * PUBLISHED or ARCHIVED: never completed automatically. Absent from an older server.
+   */
+  periodStatus?: PlanningPeriodStatus | null
   duties: PlanningResultDuty[]
 }
 
@@ -171,7 +176,8 @@ export type ReassignmentCandidatesView = {
 export type CompletionLineResult = {
   lineStableId: string
   lineName: string
-  status: 'completed' | 'nothing_to_complete' | 'not_generated' | 'solver_failed'
+  /** `published` / `archived` (D223): the line was left exactly as it is, never completed automatically. */
+  status: 'completed' | 'nothing_to_complete' | 'not_generated' | 'solver_failed' | 'published' | 'archived'
   holeCount: number
   filledUnitCount: number
   remainingUncoveredRequiredUnitCount: number

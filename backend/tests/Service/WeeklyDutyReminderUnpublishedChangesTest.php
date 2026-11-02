@@ -98,17 +98,21 @@ final class WeeklyDutyReminderUnpublishedChangesTest extends WebTestCase
         }
     }
 
-    public function testACompletionNotRepublishedIsMarkedForTheNewHolder(): void
+    /**
+     * A hole of the published line filled again, not republished: the new
+     * holder's reminder marks it. Since docs/decisions.md D223 a published
+     * line is never completed automatically — the hole is filled by hand.
+     */
+    public function testAHoleFilledByHandNotRepublishedIsMarkedForTheNewHolder(): void
     {
         ['tuesday' => $former] = $this->holders();
         $tuesday = $this->dutyOn($this->s['planningId'], '2027-01-05');
         $this->unassignDuty($this->client, $this->s, $tuesday);
         self::assertResponseIsSuccessful();
-        // Only one person left able to take it — never the former holder.
         $others = array_values(array_diff(self::PEOPLE, [$former]));
-        $this->declareRange($this->client, $this->s[strstr($former, '@', true)], '2027-01-05', '2027-01-06');
-        $this->declareRange($this->client, $this->s[strstr($others[1], '@', true)], '2027-01-05', '2027-01-06');
         $this->completePlanning($this->client, $this->s);
+        self::assertResponseStatusCodeSame(409);
+        $this->reassignTo($this->client, $this->s, $tuesday, $others[0]);
         self::assertResponseIsSuccessful();
         self::assertSame($others[0], $this->currentCalendar($this->s['planningId'])['0|2027-01-05|ONCALL']);
 

@@ -189,9 +189,17 @@ export function FillModal({
       }
     >
       {!preview && !loadError && (
-        <p role="status" className="muted">
-          Analyse des lignes…
-        </p>
+        // The analysis takes several seconds (up to ~20 s on a large planning): a visible, announced wait,
+        // with the launch button unavailable until it is over.
+        <div role="status" aria-live="polite" className="fill-loading">
+          <span className="fill-spinner" aria-hidden />
+          <span>
+            <strong>Analyse des lignes en cours…</strong>
+            <span className="fill-loading__hint">
+              Cela peut prendre jusqu’à une vingtaine de secondes. Rien n’est modifié pendant l’analyse.
+            </span>
+          </span>
+        </div>
       )}
       {loadError && (
         <p role="alert" className="alert alert--error">

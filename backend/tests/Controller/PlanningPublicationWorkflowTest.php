@@ -307,16 +307,33 @@ final class PlanningPublicationWorkflowTest extends WebTestCase
         self::assertStringContainsString('2027-01-10', json_encode($calendar, \JSON_THROW_ON_ERROR));
     }
 
-    public function testALateAbsenceIsFixedByRemovingTheAssignmentThenCompletingWithoutTouchingAnythingElse(): void
+    /**
+     * docs/decisions.md D223 (supersedes D145 here): on a published line the
+     * removed block is never completed automatically — refused — and is given
+     * by hand instead, then republished.
+     */
+    public function testALateAbsenceIsFixedByRemovingTheAssignmentThenReassigningByHandWithoutTouchingAnythingElse(): void
     {
         [$client, $s, $holder, $firstDuty, $before] = $this->publishedBlockWithALateAbsence();
 
         $this->unassignDuty($client, $s, $firstDuty);
         self::assertResponseIsSuccessful();
         $response = $this->completePlanning($client, $s);
+        self::assertResponseStatusCodeSame(409);
+        self::assertSame('published_lines_not_completed', $response['error']);
+        self::assertNull($this->holderOn($this->currentCalendar($s['planningId']), '2027-01-09'), 'Refused: the block is still a hole.');
+
+        $view = $this->candidatesFor($client, $s, $firstDuty);
+        $replacement = null;
+        foreach (['admin@example.com', 'alice@example.com', 'bob@example.com'] as $email) {
+            if ($email !== $holder && \in_array($this->memberStableIdIn($s['planningId'], $email), array_column($view['candidates'], 'teamMemberStableId'), true)) {
+                $replacement = $email;
+                break;
+            }
+        }
+        self::assertNotNull($replacement, 'Someone can take the block.');
+        $this->reassignTo($client, $s, $firstDuty, $replacement);
         self::assertResponseIsSuccessful();
-        self::assertSame('completed', $response['lines'][0]['status']);
-        self::assertSame(1, $response['lines'][0]['filledUnitCount'], 'The block is one unit.');
 
         $after = $this->currentCalendar($s['planningId']);
         $newHolder = $this->holderOn($after, '2027-01-09');

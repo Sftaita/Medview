@@ -95,6 +95,34 @@ describe('PlanningJobBanner (docs/decisions.md D149)', () => {
     )
   })
 
+  it('says which published line a completion left alone, never "rien à compléter" (D223)', () => {
+    const done = job({
+      kind: 'COMPLETE',
+      status: 'SUCCEEDED',
+      outcome: {
+        lines: [
+          {
+            lineName: 'Seniors',
+            status: 'published',
+            filledUnitCount: 0,
+            remainingUncoveredRequiredUnitCount: 0,
+          },
+          {
+            lineName: 'Juniors',
+            status: 'nothing_to_complete',
+            filledUnitCount: 0,
+            remainingUncoveredRequiredUnitCount: 0,
+          },
+        ],
+        coverage: 'COMPLETE',
+      },
+    })
+    renderBanner(done, done)
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Aucune garde attribuée. Seniors : ligne publiée, jamais complétée automatiquement.',
+    )
+  })
+
   it('says when a completion left a reinforcement alone because its demand cannot be evaluated (D165)', () => {
     const done = job({
       kind: 'COMPLETE',

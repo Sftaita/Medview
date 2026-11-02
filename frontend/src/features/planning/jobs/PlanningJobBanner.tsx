@@ -83,21 +83,30 @@ function successText(job: PlanningJob): string {
       undetermined > 0
         ? ` ${undetermined} renfort${undetermined > 1 ? 's' : ''} non évalué${undetermined > 1 ? 's' : ''} : la garde dont ${undetermined > 1 ? 'ils dépendent' : 'il dépend'} n’a pas de titulaire.`
         : ''
+    // docs/decisions.md D223: a published line is left exactly as it is — said, so "rien à compléter" never misleads.
+    const locked = lines.filter((line) => line.status === 'published' || line.status === 'archived')
+    const lockedText =
+      locked.length > 0
+        ? ` ${locked.map((line) => line.lineName).join(', ')} : ${locked.length > 1 ? 'lignes publiées, jamais complétées' : 'ligne publiée, jamais complétée'} automatiquement.`
+        : ''
     if (filled === 0 && remaining === 0 && undetermined > 0) {
-      return `Aucune garde attribuée.${undeterminedText}`
+      return `Aucune garde attribuée.${undeterminedText}${lockedText}`
     }
     if (filled === 0 && remaining > 0) {
-      return `Aucune garde n’a pu être attribuée : ${remaining} reste${remaining > 1 ? 'nt' : ''} non attribuée${remaining > 1 ? 's' : ''} (personne n’est disponible).${undeterminedText}`
+      return `Aucune garde n’a pu être attribuée : ${remaining} reste${remaining > 1 ? 'nt' : ''} non attribuée${remaining > 1 ? 's' : ''} (personne n’est disponible).${undeterminedText}${lockedText}`
     }
     if (filled === 0) {
-      return 'Aucune garde non attribuée : rien à compléter.'
+      return locked.length > 0
+        ? `Aucune garde attribuée.${lockedText}`
+        : 'Aucune garde non attribuée : rien à compléter.'
     }
     return (
       `${filled} garde${filled > 1 ? 's' : ''} ou bloc${filled > 1 ? 's' : ''} attribué${filled > 1 ? 's' : ''} automatiquement, sans toucher aux affectations existantes.` +
       (remaining > 0
         ? ` ${remaining} reste${remaining > 1 ? 'nt' : ''} non attribuée${remaining > 1 ? 's' : ''}.`
         : '') +
-      undeterminedText
+      undeterminedText +
+      lockedText
     )
   }
 

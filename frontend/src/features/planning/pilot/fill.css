@@ -115,3 +115,47 @@
 .pd-line-fill__why {
   color: var(--text-muted);
 }
+
+/* The preview takes several seconds (docs/decisions.md D222/D223): a clear, announced wait. */
+.fill-loading {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  color: var(--text-body);
+  font-size: var(--text-sm);
+}
+.fill-loading strong {
+  display: block;
+}
+.fill-loading__hint {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
+}
+.fill-spinner {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: fill-spin 0.9s linear infinite;
+}
+@keyframes fill-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fill-spinner {
+    animation: none;
+    border-right-color: currentColor;
+    opacity: 0.6;
+  }
+}

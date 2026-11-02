@@ -333,10 +333,13 @@ final class PlanningJobControllerTest extends WebTestCase
         self::assertSame('GENERATE', $this->latestJob($client, $s)['kind'], 'Still the first generation job — nothing new was queued.');
         self::assertSame('SUCCEEDED', $this->latestJob($client, $s)['status']);
 
-        // …while completing a published planning is still possible.
+        // …and so is its automatic completion since docs/decisions.md D223 — no job either.
         $this->unassignDuty($client, $s, $this->dutyOn($s['planningId'], '2027-01-06'));
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/complete", [], $s['creator']);
-        self::assertResponseStatusCodeSame(202);
+        $refused = $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/complete", [], $s['creator']);
+        self::assertResponseStatusCodeSame(409);
+        self::assertSame('published_lines_not_completed', $refused['error']);
+        self::assertSame(0, $this->queuedPlanningJobMessageCount());
+        self::assertSame('GENERATE', $this->latestJob($client, $s)['kind']);
     }
 
     // --- abandoned jobs -------------------------------------------------------------------

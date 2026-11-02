@@ -8,13 +8,16 @@ use App\Entity\Planning;
 use App\Entity\PlanningCycle;
 use App\Entity\PlanningJob;
 use App\Entity\PlanningJobKind;
+use App\Entity\PlanningLine;
 use App\Entity\RestPolicyOptions;
 use App\Entity\User;
 use App\Exception\NothingToFillException;
 use App\Exception\PlanningJobInProgressException;
 use App\Exception\PlanningNotLaunchableException;
+use App\Exception\PublishedLinesNotCompletedException;
 use App\Exception\SurgicalHubDataStaleException;
 use App\Message\RunPlanningJob;
+use App\Repository\PlanningGenerationRepository;
 use App\Repository\PlanningJobRepository;
 use App\Service\SurgicalHub\SurgicalHubFreshnessGate;
 use App\Service\SurgicalHub\SurgicalHubFreshnessReport;
@@ -48,6 +51,8 @@ final class PlanningJobService
         private readonly SurgicalHubFreshnessGate $surgicalHubGate,
         private readonly PeriodPreparationService $preparationService,
         private readonly PlanningLineFillService $fillService,
+        private readonly PlanningLineOrder $lineOrder,
+        private readonly PlanningGenerationRepository $generationRepository,
     ) {
     }
 
@@ -94,7 +99,14 @@ final class PlanningJobService
     }
 
     /**
+     * docs/decisions.md D223: refused, with no job queued, when every
+     * generated line of the period is published, validated or archived —
+     * none of them is ever completed automatically. When some are and others
+     * are not, the job runs and the locked ones are reported as left alone
+     * (PlanningCompletionService).
+     *
      * @throws PlanningJobInProgressException
+     * @throws PublishedLinesNotCompletedException
      */
     public function requestCompletion(Planning $planning, User $requestedBy, ?PlanningCycle $cycle = null): PlanningJob
     {
@@ -104,6 +116,15 @@ final class PlanningJobService
         $active = $this->jobRepository->findActiveForPlanning($planning);
         if (null !== $active) {
             throw new PlanningJobInProgressException($active);
+        }
+
+        $generated = array_values(array_filter(
+            $this->lineOrder->activeInCycle($cycle),
+            fn (PlanningLine $line): bool => null !== ($period = $line->periodIn($cycle)) && null !== $this->generationRepository->findMostRecentCompletedByPlanningPeriod($period),
+        ));
+        $locked = array_values(array_filter($generated, static fn (PlanningLine $line): bool => null !== PlanningCompletionService::lockedReason($line, $cycle)));
+        if ([] !== $locked && \count($locked) === \count($generated)) {
+            throw new PublishedLinesNotCompletedException($locked);
         }
 
         return $this->enqueue(new PlanningJob($planning, PlanningJobKind::COMPLETE, $requestedBy), $cycle);

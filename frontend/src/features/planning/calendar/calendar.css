@@ -97,6 +97,17 @@
   color: var(--text-muted);
 }
 
+/* docs/decisions.md D223: a published line is never completed automatically - said next to the button. */
+.cal-locked {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.cal-locked svg {
+  flex: none;
+  margin-top: 3px;
+}
+
 .cal-nav {
   display: flex;
   align-items: center;

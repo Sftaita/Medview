@@ -148,6 +148,26 @@ describe('FillModal — the preview', () => {
     for (const box of within(rest).getAllByRole('checkbox')) expect(box).not.toBeChecked()
   })
 
+  it('shows a clear, announced wait while the preview is computed — nothing can be launched meanwhile', async () => {
+    let answer: (value: unknown) => void = () => {}
+    stubApi({
+      'GET /api/plannings/plan-1/fill-preview': () =>
+        new Promise((resolve) => {
+          answer = resolve
+        }),
+    })
+    renderModal()
+
+    const wait = await screen.findByRole('status')
+    expect(wait).toHaveTextContent('Analyse des lignes en cours…')
+    expect(wait).toHaveTextContent('jusqu’à une vingtaine de secondes')
+    expect(screen.getByRole('button', { name: 'Générer les postes non pourvus' })).toBeDisabled()
+
+    answer(preview([SENIORS_DRAFT_WITH_HOLES]))
+    await waitFor(() => expect(screen.queryByText('Analyse des lignes en cours…')).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Générer les postes non pourvus' })).toBeEnabled()
+  })
+
   it('says when members who joined after the generation are taken into account', async () => {
     stubApi({ 'GET /api/plannings/plan-1/fill-preview': () => preview([SENIORS_DRAFT_WITH_HOLES]) })
     renderModal()
