@@ -34,6 +34,7 @@ final class LineApplicabilityService
         private readonly PlanningRuleSetRepository $ruleSetRepository,
         private readonly PlanningTeamMemberRepository $teamMemberRepository,
         private readonly PlanningLineDemandPolicyRepository $policyRepository,
+        private readonly InheritedReinforcementService $inheritedReinforcements,
     ) {
     }
 
@@ -53,6 +54,29 @@ final class LineApplicabilityService
         $policy = $this->policyRepository->findActiveForLine($line);
         $source = null !== $policy && $policy->getMode()->isConditional() ? $policy->getSourceLine() : null;
         $conditional = null !== $source;
+
+        // docs/decisions.md D224: a reinforcement line that inherits its blocks has no structure of its own — what
+        // it is asked for comes from its triggers and the source's holders (read, never materialized here).
+        if ($conditional && 0 === $dutyCount && $this->inheritedReinforcements->inherits($line)) {
+            if ([] === $policy->toRules()->triggersByUser) {
+                return new LineApplicability(LineApplicability::NO_DEMAND, ['NO_TRIGGER'], 0, 0, true);
+            }
+            $plan = $this->inheritedReinforcements->plan($period);
+            if (!$plan->inherits) {
+                $missing = $this->missingPrerequisites($line, $cycle);
+
+                return new LineApplicability(LineApplicability::INCOMPLETE, ['INHERITED_STRUCTURE', ...$missing], 0, 0, true);
+            }
+            if ($plan->sourceDecided && 0 === $plan->triggeredCount) {
+                return new LineApplicability(LineApplicability::NO_DEMAND, ['INHERITED_STRUCTURE', 'NO_TRIGGERED_DAY'], 0, 0, true);
+            }
+            $missing = $this->missingPrerequisites($line, $cycle);
+            $evidence = ['INHERITED_STRUCTURE', 'CONDITIONAL_POLICY', ...($plan->sourceDecided ? [] : ['SOURCE_NOT_DECIDED_YET'])];
+
+            return [] === $missing
+                ? new LineApplicability(LineApplicability::APPLICABLE, $evidence, $plan->newDutyCount(), 0, true)
+                : new LineApplicability(LineApplicability::INCOMPLETE, [...$evidence, ...$missing], $plan->newDutyCount(), 0, true);
+        }
 
         if (0 === $dutyCount && 0 === $patternCount) {
             return new LineApplicability(LineApplicability::NO_DEMAND, ['NO_DUTY', 'NO_WEEKLY_STRUCTURE'], 0, 0, $conditional);

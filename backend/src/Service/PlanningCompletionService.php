@@ -142,6 +142,7 @@ final class PlanningCompletionService
         private readonly DimensionMembershipCalculator $dimensionMembershipCalculator,
         private readonly PlanningPeriodRepository $periodRepository,
         private readonly PlanningSnapshotService $snapshotService,
+        private readonly InheritedReinforcementService $inheritedReinforcements,
     ) {
     }
 
@@ -270,6 +271,11 @@ final class PlanningCompletionService
         if (null === $generation || null === $snapshot) {
             return new CompletionLineResult($line, 'not_generated');
         }
+
+        // docs/decisions.md D224: a reinforcement line that inherits its blocks first gets the days that started
+        // triggering since its generation (source reassigned since): only those days, linked to their source duty. A
+        // day of a source block already reinforced joins that block — incomplete, so never completed here (splitUnits).
+        $this->inheritedReinforcements->materialize($period);
 
         // docs/decisions.md D222: a member who joined after the generation is a candidate too — appended to the
         // snapshot (flagged late, the rows frozen at generation time untouched) before the problem is built.

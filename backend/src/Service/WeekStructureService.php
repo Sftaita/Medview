@@ -12,9 +12,11 @@ use App\Entity\PlanningLine;
 use App\Entity\PlanningTeam;
 use App\Exception\InvalidWeekStructureException;
 use App\Exception\PeriodBoundarySplitsBlockException;
+use App\Exception\StructureInheritedException;
 use App\Repository\AllocationFamilyRepository;
 use App\Repository\DutyPatternRepository;
 use App\Repository\DutyTypeRepository;
+use App\Repository\PlanningLineDemandPolicyRepository;
 use Doctrine\ORM\EntityManagerInterface;
 
 /**
@@ -57,6 +59,7 @@ final class WeekStructureService
         private readonly AllocationFamilyRepository $familyRepository,
         private readonly EntityManagerInterface $entityManager,
         private readonly PeriodBoundaryGuard $boundaryGuard,
+        private readonly PlanningLineDemandPolicyRepository $policyRepository,
     ) {
     }
 
@@ -101,9 +104,14 @@ final class WeekStructureService
      * @throws InvalidWeekStructureException
      * @throws PeriodBoundarySplitsBlockException a block would be cut by a boundary between two periods of the planning
      *                                            (docs/planning-cycles.md §5.1, lot L3)
+     * @throws StructureInheritedException        a reinforcement line inherits its source's structure (D224)
      */
     public function replace(PlanningLine $line, WeekStructureUpdateRequest $request): WeekStructureView
     {
+        $policy = $this->policyRepository->findActiveForLine($line);
+        if (null !== $policy && $policy->toRules()->inheritsStructure() && null !== $policy->getSourceLine()) {
+            throw new StructureInheritedException($policy->getSourceLine());
+        }
         $team = $line->getPlanningTeam();
         $this->validate($request);
         $this->boundaryGuard->assertStructureFits($line, array_map(

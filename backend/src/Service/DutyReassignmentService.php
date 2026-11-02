@@ -96,13 +96,26 @@ final class DutyReassignmentService
         return $this->inLockedTransaction($representativeDuty, function () use ($representativeDuty, $chosenMember, $expectedCurrentTeamMemberStableId, $author): array {
             [$generation, $block, $currentByDuty] = $this->resolveCurrentState($representativeDuty, $expectedCurrentTeamMemberStableId);
 
+            // docs/decisions.md D224: the days of the block the chosen person already holds (an incomplete inherited
+            // block) stay exactly as they are — never superseded, never re-created; only the other days change.
+            $alreadyHeld = ReassignmentCandidateService::heldBy($block, $currentByDuty, $chosenMember);
+            $keep = [];
+            foreach ($alreadyHeld as $duty) {
+                $keep[(int) $duty->getId()] = true;
+            }
+            $newlyCovered = array_values(array_filter($block, static fn (Duty $d): bool => !isset($keep[(int) $d->getId()])));
+
             // docs/decisions.md D165: a conditional block takes a NEW holder only while the live demand requires it —
             // replacing the holder of a superfluous reinforcement is a new assignment too, and is refused alike.
-            $this->conditionalCoverage->assertCanBeNewlyCovered($block);
+            // D224: checked on what is newly covered, never on the days the chosen person keeps.
+            $this->conditionalCoverage->assertCanBeNewlyCovered($newlyCovered);
 
-            $error = $this->candidateService->assignabilityError($generation, $block, $chosenMember);
+            $error = $this->candidateService->assignabilityError($generation, $block, $chosenMember, [], $alreadyHeld);
             if (null !== $error) {
                 throw new InvalidReassignmentCandidateException($error);
+            }
+            foreach ($alreadyHeld as $duty) {
+                unset($currentByDuty[(int) $duty->getId()]);
             }
 
             $snapshot = $this->snapshotRepository->findOneByGeneration($generation);
@@ -121,6 +134,9 @@ final class DutyReassignmentService
             $wasPublished = $this->periodRepository->isPublishedNow($generation->getPlanningPeriod());
             $planning = $representativeDuty->getPlanningPeriod()->getTeam()->getPlanning();
             foreach ($block as $duty) {
+                if (isset($keep[(int) $duty->getId()])) {
+                    continue;
+                }
                 $previous = $currentByDuty[(int) $duty->getId()] ?? null;
                 $new = $this->dutyAssignmentService->createManualBatchItem($generation, $snapshot, $duty, $chosenMember);
                 $this->entityManager->persist(new DutyAssignmentEvent($planning, $generation, $duty, $previous, $new, $author, $wasPublished, $occurredAt));

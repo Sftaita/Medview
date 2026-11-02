@@ -70,7 +70,10 @@ final class DutyUnitFactory
      * intrinsic unit is kept as it is; a conditional unit is kept only when
      * the demand view finds it REQUIRED (then flagged so), and is otherwise
      * ABSENT — never turned into an optional unit, never given to the
-     * solver. A unit whose demand could not be determined is absent too.
+     * solver. A unit whose demand could not be determined is absent too, and
+     * so is a PARTIAL inherited block (docs/decisions.md D224): some of its
+     * days stopped triggering since it was created — never given to the
+     * solver as a whole, it is left to a person.
      *
      * @param list<DutyUnit> $units
      *
@@ -84,7 +87,8 @@ final class DutyUnitFactory
                 $kept[] = $unit;
                 continue;
             }
-            if (!$demand->forUnit($unit)->required) {
+            $unitDemand = $demand->forUnit($unit);
+            if (!$unitDemand->required || $unitDemand->partial) {
                 continue;
             }
             $kept[] = self::withDemandDecision($unit, true);

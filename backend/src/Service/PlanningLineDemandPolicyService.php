@@ -11,7 +11,6 @@ use App\Dto\DemandPolicyUpdateRequest;
 use App\Entity\DemandTrigger;
 use App\Entity\PlanningLine;
 use App\Entity\PlanningLineDemandPolicy;
-use App\Entity\PlanningPeriodStatus;
 use App\Entity\User;
 use App\Exception\DemandPolicyConflictException;
 use App\Exception\InvalidDemandPolicyException;
@@ -40,12 +39,19 @@ use Doctrine\ORM\EntityManagerInterface;
  * source — i.e. depth 1, no chain, no cycle. A trigger names a person
  * (User), at least one weekday, and increment 1.
  *
- * State rules (409): no conditional configuration once a line of the
- * Planning is published (it could never be generated for this period —
- * D133, V1 limitation), and no change of mode or source once the line's
- * duties are materialized (their demand kind is fixed at materialization).
- * A trigger-only change of a conditional line stays possible: it applies
- * to the next generations.
+ * State rule (409, docs/decisions.md D224 — replaces the V1 rules): no
+ * change of mode, of source or of structure while a period of the line
+ * that is NOT generated yet already holds duties (their kind and their
+ * blocks are fixed at materialization). One configuration per line,
+ * applying to every period not generated yet; a generated period keeps the
+ * rules its generation froze (snapshot). A line of the planning being
+ * published no longer forbids anything: since D196/D222 a line is
+ * generated and published on its own, after the others.
+ *
+ * Every conditional policy written now INHERITS its blocks from its source
+ * line (StructureSource::INHERITED): the reinforcement line has no weekly
+ * structure of its own. An OWN policy recorded before D224 is read as it
+ * was, never rewritten unless the configuration is changed.
  *
  * Warnings are computed, never refusals (DemandPolicyWarning).
  */
@@ -62,6 +68,8 @@ final class PlanningLineDemandPolicyService
         private readonly DutyRepository $dutyRepository,
         private readonly WeekStructureService $weekStructureService,
         private readonly EntityManagerInterface $entityManager,
+        private readonly \App\Repository\PlanningGenerationRepository $generationRepository,
+        private readonly InheritedReinforcementService $inheritedReinforcements,
     ) {
     }
 
@@ -78,7 +86,9 @@ final class PlanningLineDemandPolicyService
         $triggerUsers = null !== $policy ? array_map(static fn (DemandTrigger $t): User => $t->getUser(), $policy->getTriggers()->toArray()) : [];
         $sourceLine = $policy?->getSourceLine();
 
-        $structure = $this->weekStructureService->read($line);
+        // docs/decisions.md D224: an inheriting line shows its source's structure — it has none of its own.
+        $inheritsFrom = $rules->inheritsStructure() ? $sourceLine : null;
+        $structure = $this->weekStructureService->read($inheritsFrom ?? $line);
         $hasStructure = [] !== $structure->blocks || [] !== $structure->solo;
         $targetBlocks = [];
         foreach ($structure->blocks as $block) {
@@ -96,6 +106,7 @@ final class PlanningLineDemandPolicyService
             $targetBlocks,
             $targetExcluded,
             $this->warnings($rules, $sourceLine, $triggerUsers, $targetBlocks, $targetExcluded),
+            $inheritsFrom,
         );
     }
 
@@ -137,6 +148,49 @@ final class PlanningLineDemandPolicyService
         }
 
         return $this->read($line);
+    }
+
+    /**
+     * docs/decisions.md D224 — the reinforcement duties a configuration
+     * (saved or not) would ask for, period by period, from the source line's
+     * CURRENT calendar. Validated exactly like replace(); reads only, writes
+     * nothing, sends nothing.
+     *
+     * @return list<array{period: \App\Entity\PlanningPeriod, generated: bool, sourceGenerated: bool, units: list<list<\App\Entity\Duty>>}>
+     *
+     * @throws InvalidDemandPolicyException
+     */
+    public function preview(PlanningLine $line, DemandPolicyUpdateRequest $request): array
+    {
+        [$mode, $sourceLine, $triggers] = $this->validate($line, $request);
+        if (!$mode->isConditional() || null === $sourceLine) {
+            return [];
+        }
+        $rules = new DemandRules(
+            $mode,
+            (string) $sourceLine->getStableId(),
+            array_map(static fn (array $t): \App\Demand\DemandTriggerRule => new \App\Demand\DemandTriggerRule((string) $t[0]->getStableId(), $t[1], $t[2]), $triggers),
+            \App\Demand\StructureSource::INHERITED,
+        );
+
+        $periods = [];
+        foreach ($line->getPeriods() as $period) {
+            $cycle = $period->getCycle();
+            $sourcePeriod = null !== $cycle ? $sourceLine->periodIn($cycle) : null;
+            if (null === $sourcePeriod) {
+                continue;
+            }
+            $units = $this->inheritedReinforcements->preview($rules, $sourcePeriod);
+            $periods[] = [
+                'period' => $period,
+                'generated' => null !== $this->generationRepository->findMostRecentCompletedByPlanningPeriod($period),
+                'sourceGenerated' => null !== $units,
+                'units' => $units ?? [],
+            ];
+        }
+        usort($periods, static fn (array $a, array $b): int => $a['period']->getStartsAt() <=> $b['period']->getStartsAt());
+
+        return $periods;
     }
 
     /**
@@ -264,19 +318,20 @@ final class PlanningLineDemandPolicyService
      */
     private function assertApplicable(PlanningLine $line, DemandRules $current, DemandMode $mode, ?PlanningLine $sourceLine): void
     {
-        if ($mode->isConditional()) {
-            foreach ($this->lineRepository->findByPlanning($line->getPlanning()) as $other) {
-                if ($other->isActive() && \in_array($other->getSingleCyclePeriod()?->getStatus(), [PlanningPeriodStatus::PUBLISHED, PlanningPeriodStatus::ARCHIVED], true)) {
-                    throw new DemandPolicyConflictException('planning_already_published', 'This planning is already published: its lines can no longer be generated for this period, so a conditional line configured now could never be used. Configure it before the first publication.');
-                }
-            }
-        }
-
+        // docs/decisions.md D224: one configuration per line, for every period not generated yet. Only a period
+        // whose duties already exist without being generated would mix two configurations: then mode, source and
+        // structure are fixed (the triggers stay editable). A generated period reads the rules its snapshot froze.
+        $structureChanges = $mode->isConditional() && !$current->inheritsStructure();
         $modeOrSourceChanges = $current->mode !== $mode
-            || $current->sourceLineStableId !== (null !== $sourceLine ? (string) $sourceLine->getStableId() : null);
-        $period = $line->getSingleCyclePeriod();
-        if ($modeOrSourceChanges && null !== $period && $this->dutyRepository->existsForPeriod($period)) {
-            throw new DemandPolicyConflictException('line_already_materialized', 'The duties of this line already exist for this period: its mode or its source can no longer change for this period.');
+            || $current->sourceLineStableId !== (null !== $sourceLine ? (string) $sourceLine->getStableId() : null)
+            || $structureChanges;
+        if (!$modeOrSourceChanges) {
+            return;
+        }
+        foreach ($line->getPeriods() as $period) {
+            if ($this->dutyRepository->existsForPeriod($period) && null === $this->generationRepository->findMostRecentCompletedByPlanningPeriod($period)) {
+                throw new DemandPolicyConflictException('line_already_materialized', 'Duties of this line already exist in a period not generated yet: its mode, its source and its structure can no longer change for that period.');
+            }
         }
     }
 
@@ -290,7 +345,13 @@ final class PlanningLineDemandPolicyService
             if ($line === $target || !$line->isActive() || $this->rulesFor($line)->mode->isConditional()) {
                 continue;
             }
-            $options[] = new DemandSourceOption($line, $this->currentPeople($line));
+            $structure = $this->weekStructureService->read($line);
+            $codes = static fn (array $days): array => array_map(static fn (string $code): string => Weekday::fromWeekStructureCode($code)->value, $days);
+            $options[] = new DemandSourceOption($line, $this->currentPeople($line), [
+                'blocks' => array_map(static fn ($block): array => ['name' => $block->name, 'weekdays' => $codes($block->days)], $structure->blocks),
+                'soloWeekdays' => $codes($structure->solo),
+                'excludedWeekdays' => $codes($structure->excluded),
+            ]);
         }
 
         return $options;
@@ -330,6 +391,15 @@ final class PlanningLineDemandPolicyService
         }
 
         $warnings = [];
+        if ([] === $rules->triggersByUser) {
+            $warnings[] = new DemandPolicyWarning('NO_TRIGGER', [], 'Aucune condition de renfort : aucune garde de renfort ne sera demandée tant qu’aucun chirurgien n’a de jour coché.');
+        }
+        if ($rules->inheritsStructure()) {
+            // docs/decisions.md D224: the blocks are the source's, a reinforcement exists only on a triggered day —
+            // no structure of its own to be missing, no day excluded by it, never a block completed for one day.
+            $targetExcluded = [];
+            $targetBlocks = [];
+        }
         if (null === $targetExcluded) {
             $warnings[] = new DemandPolicyWarning('TARGET_HAS_NO_WEEK_STRUCTURE', [], 'Cette ligne n’a pas encore de semaine type : aucune garde de renfort ne peut exister tant qu’elle n’est pas configurée.');
         }

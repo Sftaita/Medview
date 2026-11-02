@@ -22,6 +22,8 @@ final readonly class DemandRules
         public DemandMode $mode,
         public ?string $sourceLineStableId,
         array $triggers,
+        /** docs/decisions.md D224 — conditional only: the line inherits its blocks from its source (never "whole block for one day"). */
+        public StructureSource $structureSource = StructureSource::OWN,
     ) {
         if ($mode->isConditional() !== (null !== $sourceLineStableId)) {
             throw new \InvalidArgumentException('A conditional demand has exactly one source line; an independent one has none.');
@@ -38,6 +40,11 @@ final readonly class DemandRules
             $byUser[$trigger->userStableId] = $trigger;
         }
         $this->triggersByUser = $byUser;
+    }
+
+    public function inheritsStructure(): bool
+    {
+        return $this->mode->isConditional() && StructureSource::INHERITED === $this->structureSource;
     }
 
     /** No policy at all means exactly this (D162). */

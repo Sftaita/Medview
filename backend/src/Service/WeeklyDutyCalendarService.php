@@ -94,6 +94,36 @@ final class WeeklyDutyCalendarService
      */
     public function ensureMaterialized(PlanningPeriod $planningPeriod, \DateTimeImmutable $until): array
     {
+        $this->projection = null;
+
+        return $this->run($planningPeriod, $until);
+    }
+
+    /**
+     * docs/decisions.md D224 — what ensureMaterialized() WOULD create, counted
+     * in memory: nothing is written, nothing is flushed. The generation
+     * preview reads this; only a real launch materializes.
+     */
+    public function project(PlanningPeriod $planningPeriod, \DateTimeImmutable $until): ProjectedMaterialization
+    {
+        $this->projection = ['claimed' => [], 'duties' => 0, 'families' => []];
+        try {
+            $anomalies = $this->run($planningPeriod, $until);
+
+            return new ProjectedMaterialization($this->projection['duties'], $this->projection['families'], $anomalies);
+        } finally {
+            $this->projection = null;
+        }
+    }
+
+    /** @var array{claimed: array<string, true>, duties: int, families: array<string, int>}|null set while projecting */
+    private ?array $projection = null;
+
+    /**
+     * @return list<CoverageSourceAnomaly>
+     */
+    private function run(PlanningPeriod $planningPeriod, \DateTimeImmutable $until): array
+    {
         // docs/planning-cycles.md I8 (lot L3): a validated, published or archived period never gets a new duty — a
         // weekly structure changed since its publication applies to the periods still to be generated only.
         if (\in_array($planningPeriod->getStatus(), self::LOCKED_STATUSES, true)) {
@@ -179,7 +209,7 @@ final class WeeklyDutyCalendarService
             return [];
         }
 
-        if ($this->dutyRepository->existsForPeriodAndLocalDate($period, $day)) {
+        if ($this->isTaken($period, $day)) {
             return [];
         }
 
@@ -189,6 +219,12 @@ final class WeeklyDutyCalendarService
             if ($coverageSource instanceof CoverageSourceAnomaly) {
                 return [$coverageSource];
             }
+        }
+
+        if (null !== $this->projection) {
+            $this->claim([$day], null === $coverageSource, $pattern->getFamily()?->getName());
+
+            return [];
         }
 
         $this->materializationService->createStandaloneDuty(
@@ -236,7 +272,7 @@ final class WeeklyDutyCalendarService
                 continue;
             }
 
-            if ($this->dutyRepository->existsForPeriodAndLocalDate($period, $day)) {
+            if ($this->isTaken($period, $day)) {
                 return [];
             }
 
@@ -258,6 +294,11 @@ final class WeeklyDutyCalendarService
         }
 
         $demandType = null !== $sourcePeriod ? DutyDemandType::CONDITIONAL : DutyDemandType::REQUIRED;
+        if (null !== $this->projection) {
+            $this->claim(array_map(static fn (array $times): \DateTimeImmutable => $times[0], array_values($componentLocalTimes)), null === $sourcePeriod, $pattern->getFamily()?->getName());
+
+            return [];
+        }
         if ($remainder) {
             $this->materializationService->materializeBlockRemainder($period, $pattern, $monday, $componentLocalTimes, $demandType, $coverageSources);
         } else {
@@ -272,6 +313,28 @@ final class WeeklyDutyCalendarService
         }
 
         return [];
+    }
+
+    /** A day already holding a duty — or, while projecting, one a pattern before this one would have taken. */
+    private function isTaken(PlanningPeriod $period, \DateTimeImmutable $day): bool
+    {
+        return isset($this->projection['claimed'][$day->format('Y-m-d')]) || $this->dutyRepository->existsForPeriodAndLocalDate($period, $day);
+    }
+
+    /**
+     * @param list<\DateTimeImmutable> $days     one unit's days
+     * @param bool                     $required a REQUIRED (intrinsic) unit, counted per family like D137 does
+     */
+    private function claim(array $days, bool $required, ?string $family): void
+    {
+        foreach ($days as $day) {
+            $this->projection['claimed'][$day->format('Y-m-d')] = true;
+        }
+        $this->projection['duties'] += \count($days);
+        if ($required) {
+            $key = $family ?? '';
+            $this->projection['families'][$key] = ($this->projection['families'][$key] ?? 0) + 1;
+        }
     }
 
     /** THE duty of the source line that calendar day — or why there is none to pick. */

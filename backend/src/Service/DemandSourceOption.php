@@ -20,6 +20,8 @@ final readonly class DemandSourceOption
     public function __construct(
         public PlanningLine $line,
         public array $people,
+        /** @var array{blocks: list<array{name: string, weekdays: list<string>}>, soloWeekdays: list<string>, excludedWeekdays: list<string>} docs/decisions.md D224 */
+        public array $structure = ['blocks' => [], 'soloWeekdays' => [], 'excludedWeekdays' => []],
     ) {
     }
 }

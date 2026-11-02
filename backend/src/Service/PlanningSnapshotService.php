@@ -294,7 +294,7 @@ final class PlanningSnapshotService
     private function freezeDemand(PlanningSnapshot $snapshot, PlanningLineDemandPolicy $policy, PlanningLine $sourceLine, PlanningGeneration $sourceGeneration, ?array $plannedHolders = null): void
     {
         $period = $snapshot->getGeneration()->getPlanningPeriod();
-        $frozenPolicy = new PlanningSnapshotDemandPolicy($snapshot, $policy->getStableId(), $policy->getVersion(), $sourceLine->getStableId(), $sourceGeneration->getStableId());
+        $frozenPolicy = new PlanningSnapshotDemandPolicy($snapshot, $policy->getStableId(), $policy->getVersion(), $sourceLine->getStableId(), $sourceGeneration->getStableId(), $policy->getStructureSource());
         $this->entityManager->persist($frozenPolicy);
         foreach ($policy->getTriggers() as $trigger) {
             $this->entityManager->persist(new PlanningSnapshotDemandTrigger($frozenPolicy, $trigger));

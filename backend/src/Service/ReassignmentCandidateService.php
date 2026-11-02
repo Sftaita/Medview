@@ -118,13 +118,17 @@ final class ReassignmentCandidateService
             if ($member === $currentTeamMember) {
                 continue;
             }
-            if (null !== $this->assignabilityError($generation, $block, $member)) {
+            // docs/decisions.md D224: an incomplete block (a day that started triggering later) — the days its
+            // member already holds are not a conflict with themselves.
+            $held = self::heldBy($block, $currentByDuty, $member);
+            if (null !== $this->assignabilityError($generation, $block, $member, [], $held)) {
                 continue;
             }
-            $candidates[] = new ReassignmentCandidate((string) $member->getStableId(), $member->getUser()->getFirstName(), $member->getUser()->getLastName());
+            $candidates[] = new ReassignmentCandidate((string) $member->getStableId(), $member->getUser()->getFirstName(), $member->getUser()->getLastName(), [] !== $held);
         }
 
-        usort($candidates, static fn (ReassignmentCandidate $a, ReassignmentCandidate $b): int => [$a->lastName, $a->firstName] <=> [$b->lastName, $b->firstName]);
+        // The holder of the rest of an incomplete block first (D224), then by name.
+        usort($candidates, static fn (ReassignmentCandidate $a, ReassignmentCandidate $b): int => [!$a->holdsRestOfBlock, $a->lastName, $a->firstName] <=> [!$b->holdsRestOfBlock, $b->lastName, $b->firstName]);
 
         return new ReassignmentCandidatesView(
             null !== $duty->getGroupInstance() ? (string) $duty->getGroupInstance()->getStableId() : null,
@@ -182,6 +186,19 @@ final class ReassignmentCandidateService
         usort($duties, static fn (Duty $a, Duty $b): int => $a->getLocalDate() <=> $b->getLocalDate());
 
         return $duties;
+    }
+
+    /**
+     * The duties of $block $member currently holds (docs/decisions.md D224).
+     *
+     * @param list<Duty>                 $block
+     * @param array<int, DutyAssignment> $currentByDuty keyed by duty id
+     *
+     * @return list<Duty>
+     */
+    public static function heldBy(array $block, array $currentByDuty, PlanningTeamMember $member): array
+    {
+        return array_values(array_filter($block, static fn (Duty $duty): bool => ($currentByDuty[(int) $duty->getId()] ?? null)?->getTeamMember() === $member));
     }
 
     /**

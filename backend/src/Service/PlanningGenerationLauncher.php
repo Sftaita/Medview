@@ -100,6 +100,7 @@ final class PlanningGenerationLauncher
         private readonly PeriodBoundaryGuard $boundaryGuard,
         private readonly LineApplicabilityService $applicability,
         private readonly PlanningGenerationRepository $generationRepository,
+        private readonly InheritedReinforcementService $inheritedReinforcements,
     ) {
     }
 
@@ -141,9 +142,14 @@ final class PlanningGenerationLauncher
      * REGENERATION_NOT_CONFIRMED. Replacing a calendar is a distinct, explicit
      * choice, never the default of "Générer le planning".
      *
+     * $materialize (docs/decisions.md D224): false — every read of the
+     * preflight (the generation dialog, "Générer les postes non pourvus", a
+     * request before it is queued) — PROJECTS what the weekly calendar would
+     * create, in memory, and writes nothing. Only launch() materializes.
+     *
      * @param list<PlanningLine>|null $onlyLines
      */
-    public function preflight(Planning $planning, ?PlanningCycle $cycle = null, ?string $scope = null, ?array $onlyLines = null, bool $replaceExisting = false): PlanningGenerationPreflight
+    public function preflight(Planning $planning, ?PlanningCycle $cycle = null, ?string $scope = null, ?array $onlyLines = null, bool $replaceExisting = false, bool $materialize = false): PlanningGenerationPreflight
     {
         $cycle ??= $planning->getOnlyCycle();
         if (null !== $scope && self::SCOPE_UNLOCKED_LINES !== $scope) {
@@ -191,7 +197,18 @@ final class PlanningGenerationLauncher
             // Sources first (PlanningLineOrder): a conditional line's source calendar already exists here (D163).
             // A conditional line whose source takes no part in this period has nothing to materialize (§5.6).
             // A locked period is never materialized (WeeklyDutyCalendarService).
-            $anomalies = $sourceMissing ? [] : $this->weeklyDutyCalendarService->ensureMaterialized($period, $period->getEndsAt());
+            $projected = null;
+            if ($sourceMissing) {
+                $anomalies = [];
+            } elseif ($materialize) {
+                $anomalies = $this->weeklyDutyCalendarService->ensureMaterialized($period, $period->getEndsAt());
+            } else {
+                $projected = $this->weeklyDutyCalendarService->project($period, $period->getEndsAt());
+                $anomalies = $projected->anomalies;
+            }
+            // docs/decisions.md D224: a reinforcement line that inherits its blocks gets its duties at launch, from
+            // the source's holders — here only counted (its applicability reads the same plan).
+            $inherits = $this->inheritedReinforcements->inherits($line);
 
             // docs/decisions.md D194/D195: read once its duties exist — a weekly structure, a ponctual duty, a
             // remainder block (D192) or a conditional duty all make it count.
@@ -209,10 +226,10 @@ final class PlanningGenerationLauncher
             $readiness = new LaunchLineReadiness(
                 $line,
                 \count($this->teamMemberRepository->findIntersecting($line->getPlanningTeam(), $period->getStartsAt(), $period->getEndsAt())),
-                \count($this->dutyRepository->findByPlanningPeriod($period)),
+                $this->projectedDutyCount($period, $projected, $inherits),
                 $period->getStatus(),
                 null !== $this->ruleSetRepository->findActive($line->getPlanningTeam()),
-                $this->familyUnitCounts($period),
+                $this->mergeCounts($this->familyUnitCounts($period), $projected?->familyUnitCounts ?? []),
                 $source,
                 $decision,
                 $applicability,
@@ -253,7 +270,9 @@ final class PlanningGenerationLauncher
             if (\in_array('NO_ACTIVE_RULE_SET', $missing, true)) {
                 $blockers[] = new PreflightIssue(PreflightIssueCode::NO_ACTIVE_RULE_SET, $line);
             }
-            if (0 === $readiness->dutyCount) {
+            // An inheriting reinforcement line whose source is generated in this very launch has no duty yet: its
+            // demand is decided from the source's result (D224) — never a blocker.
+            if (0 === $readiness->dutyCount && !$inherits) {
                 $blockers[] = new PreflightIssue(PreflightIssueCode::NO_DUTIES, $line);
             }
             if (\in_array('CONDITIONAL_SOURCE_NOT_IN_PERIOD', $missing, true)) {
@@ -349,7 +368,7 @@ final class PlanningGenerationLauncher
         }
 
         try {
-            $preflight = $this->preflight($planning, $cycle, $scope, $onlyLines, $replaceExisting);
+            $preflight = $this->preflight($planning, $cycle, $scope, $onlyLines, $replaceExisting, materialize: true);
             if (!$preflight->canGenerate()) {
                 throw new PlanningNotLaunchableException($preflight);
             }
@@ -447,6 +466,33 @@ final class PlanningGenerationLauncher
     }
 
     /**
+     * Duties of $period now, plus what a launch would add (docs/decisions.md D224): the weekly calendar's projection,
+     * or the reinforcements an inheriting line would get from the source's current holders.
+     */
+    private function projectedDutyCount(PlanningPeriod $period, ?ProjectedMaterialization $projected, bool $inherits): int
+    {
+        $existing = \count($this->dutyRepository->findByPlanningPeriod($period));
+        $inherited = $inherits ? $this->inheritedReinforcements->plan($period)->newDutyCount() : 0;
+
+        return $existing + ($projected?->dutyCount ?? 0) + $inherited;
+    }
+
+    /**
+     * @param array<string, int> $a
+     * @param array<string, int> $b
+     *
+     * @return array<string, int>
+     */
+    private function mergeCounts(array $a, array $b): array
+    {
+        foreach ($b as $key => $count) {
+            $a[$key] = ($a[$key] ?? 0) + $count;
+        }
+
+        return $a;
+    }
+
+    /**
      * @return array{0: LaunchLineResult, 1: ?SolvedGeneration} the line's result, and its solved generation (written later)
      */
     private function runLine(PlanningLine $line, PlanningCycle $cycle, User $launchedBy, RestPolicyOptions $restPolicy, PlannedCalendar $planned): array
@@ -465,6 +511,14 @@ final class PlanningGenerationLauncher
         } catch (PlanningPeriodNotGeneratableException) {
             // Locked between the preflight and now (a publication of this period): never generated (I8).
             return [new LaunchLineResult($line, null, null, null, 'period_locked'), null];
+        }
+
+        // docs/decisions.md D224: an inheriting reinforcement line gets its duties now — only the triggered days, from
+        // the holders its snapshot freezes next (the source planned in this launch, or its current calendar).
+        $context = $this->inheritedReinforcements->contextOf($period);
+        if (null !== $context) {
+            $sourcePeriod = $context[1];
+            $this->inheritedReinforcements->materialize($period, $planned->covers($sourcePeriod) ? $planned->holdersOf($sourcePeriod) : null);
         }
 
         try {

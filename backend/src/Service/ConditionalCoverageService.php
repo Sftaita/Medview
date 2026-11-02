@@ -54,16 +54,21 @@ final class ConditionalCoverageService
      */
     public function assertCanBeNewlyCovered(array $block): void
     {
-        if (!$block[0]->isConditional()) {
+        if ([] === $block || !$block[0]->isConditional()) {
             return;
         }
 
-        $demand = $this->demandViewFactory->forPlanning($this->planningOf($block[0]))->forDuty($block[0]);
-        if (!$demand->determined) {
-            throw new CoverageUndeterminedException();
-        }
-        if (!$demand->required) {
-            throw new CoverageNotRequiredException();
+        // docs/decisions.md D224: every day — an inherited block is required day by day (for an OWN one, the block
+        // answer is the same on each of its days).
+        $view = $this->demandViewFactory->forPlanning($this->planningOf($block[0]));
+        foreach ($block as $duty) {
+            $demand = $view->forDuty($duty);
+            if (!$demand->determined) {
+                throw new CoverageUndeterminedException();
+            }
+            if (!$demand->required) {
+                throw new CoverageNotRequiredException();
+            }
         }
     }
 

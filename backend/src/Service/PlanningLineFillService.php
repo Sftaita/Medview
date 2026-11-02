@@ -64,6 +64,7 @@ final class PlanningLineFillService
         private readonly PlanningResultService $resultService,
         private readonly PlanningGenerationLauncher $launcher,
         private readonly PlanningCompletionService $completionService,
+        private readonly InheritedReinforcementService $inheritedReinforcements,
         private readonly LaunchResultPresenter $launchResultPresenter,
         private readonly CurrentCalendarLedger $ledger,
         private readonly EntityManagerInterface $entityManager,
@@ -104,7 +105,10 @@ final class PlanningLineFillService
             }
 
             if ($generated) {
-                $uncovered = $count->uncoveredRequiredDutyCount ?? 0;
+                // docs/decisions.md D224: plus the reinforcement days that started triggering since the generation
+                // (source reassigned since) — counted in memory, created by the completion itself.
+                $uncovered = ($count->uncoveredRequiredDutyCount ?? 0)
+                    + ($this->inheritedReinforcements->inherits($line) ? $this->inheritedReinforcements->plan($period)->newDutyCount() : 0);
                 if (\in_array($status, self::LOCKED_STATUSES, true)) {
                     // docs/decisions.md D222: a published (or validated) line is never completed by this operation, even
                     // when asked: the new assignments, the publication status, the stored PDF and the members'

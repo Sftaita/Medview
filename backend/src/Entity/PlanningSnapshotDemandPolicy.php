@@ -7,6 +7,7 @@ namespace App\Entity;
 use App\Demand\DemandMode;
 use App\Demand\DemandRules;
 use App\Demand\DemandTriggerRule;
+use App\Demand\StructureSource;
 use App\Repository\PlanningSnapshotDemandPolicyRepository;
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
@@ -61,13 +62,18 @@ class PlanningSnapshotDemandPolicy
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
-    public function __construct(PlanningSnapshot $snapshot, Uuid $policyStableId, int $policyVersion, Uuid $sourceLineStableId, Uuid $sourceGenerationStableId)
+    /** docs/decisions.md D224: frozen with the rules — how this generation read its blocks. */
+    #[ORM\Column(length: 16, enumType: StructureSource::class, options: ['default' => 'OWN'])]
+    private StructureSource $structureSource;
+
+    public function __construct(PlanningSnapshot $snapshot, Uuid $policyStableId, int $policyVersion, Uuid $sourceLineStableId, Uuid $sourceGenerationStableId, StructureSource $structureSource = StructureSource::OWN)
     {
         $this->snapshot = $snapshot;
         $this->policyStableId = $policyStableId;
         $this->policyVersion = $policyVersion;
         $this->sourceLineStableId = $sourceLineStableId;
         $this->sourceGenerationStableId = $sourceGenerationStableId;
+        $this->structureSource = $structureSource;
         $this->triggers = new ArrayCollection();
         $this->createdAt = new \DateTimeImmutable();
         $snapshot->addDemandPolicy($this);
@@ -133,6 +139,12 @@ class PlanningSnapshotDemandPolicy
             DemandMode::CONDITIONAL_ON_SOURCE_ASSIGNMENT,
             (string) $this->sourceLineStableId,
             array_values(array_map(static fn (PlanningSnapshotDemandTrigger $t): DemandTriggerRule => $t->toRule(), $this->triggers->toArray())),
+            $this->structureSource,
         );
+    }
+
+    public function getStructureSource(): StructureSource
+    {
+        return $this->structureSource;
     }
 }
