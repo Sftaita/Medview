@@ -366,7 +366,7 @@ describe('PlanningDetailPage — lines', () => {
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Paramètres de la ligne' }))
     expect(await screen.findByText('Paramètres — Assistant')).toBeInTheDocument()
     expect(
-      await screen.findByRole('radio', { name: /Renfort selon le chirurgien de garde/ }),
+      await screen.findByRole('radio', { name: /Renfort conditionnel/ }),
     ).toBeInTheDocument()
   })
 
