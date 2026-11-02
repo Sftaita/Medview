@@ -81,6 +81,13 @@ enum PreflightIssueCode: string
     case CONDITIONAL_SOURCE_NOT_GENERATED = 'CONDITIONAL_SOURCE_NOT_GENERATED';
 
     /**
+     * docs/decisions.md D222: generating again a line that already has a generation replaces its calendar — every
+     * assignment it holds, manual ones included, stops being shown (D125). Never by default: only with the explicit
+     * confirmation `replaceExisting` ("Régénérer entièrement"); otherwise its holes are completed instead.
+     */
+    case REGENERATION_NOT_CONFIRMED = 'REGENERATION_NOT_CONFIRMED';
+
+    /**
      * docs/decisions.md D195 (lot L4b): duties are demanded of the line in the
      * period but none of its team's memberships intersects it — the line is
      * INCOMPLETE (LineApplicability, D194), its generation is refused instead

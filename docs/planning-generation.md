@@ -1203,7 +1203,7 @@ sont des affectations fixes, jamais des préférences.
 |---|---|---|
 | jamais générée, brouillon | `GENERATE` | sa première génération ; les autres lignes sont des contraintes |
 | générée, trous | `COMPLETE` | les trous seulement, dans sa génération courante |
-| générée, publiée, trous | `COMPLETE` si cochée (décochée par défaut) | idem, en « Modifications non publiées » ; rien n'est republié ni envoyé |
+| générée, publiée (ou validée) | `EXCLUDED` (`published`), jamais cochable | rien — n'empêche pas de générer les autres lignes |
 | générée, aucune garde non pourvue | `NOTHING` | rien |
 | archivée, rien demandé, prérequis manquant | `EXCLUDED` | rien (raison donnée) |
 
@@ -1215,7 +1215,16 @@ sont des affectations fixes, jamais des préférences.
   lignes dans l'ordre de résolution. Refus : `LINE_ALREADY_GENERATED`,
   `CONDITIONAL_SOURCE_NOT_GENERATED`.
 - **Complétion restreinte** (`PlanningCompletionService::complete(…,
-  $onlyLines)`) : inchangée par ailleurs (§36, D145, D197).
+  $onlyLines)`) : inchangée par ailleurs (§36, D145, D197), sauf que les
+  membres arrivés après la génération sont ajoutés au snapshot avant le
+  calcul (`appendLateMembers()`, `planning_snapshot_members.captured_late_at`,
+  lignes d'origine intactes) et deviennent candidats.
+- **Régénération explicite** : « Générer le planning » refuse une ligne qui a
+  déjà une génération `COMPLETED` (`REGENERATION_NOT_CONFIRMED`) ;
+  « Régénérer entièrement… » envoie `replaceExistingAssignments: true` après
+  une confirmation cochée (`planning_jobs.replace_existing`). Même règle sur
+  `POST /api/planning-periods/{id}/generations` (409
+  `regeneration_not_confirmed`).
 - **Orchestration** (`PlanningLineFillService`) : aperçu (`preview()`) puis
   passage (`fill()`) sous le verrou moteur du planning ; lignes une par une
   dans l'ordre de résolution, **une transaction d'écriture par ligne** ; une

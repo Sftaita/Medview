@@ -36,10 +36,13 @@ use Doctrine\ORM\EntityManagerInterface;
  * One line after another, in resolution order (PlanningLineOrder, D161), each
  * written atomically on its own: a line that fails writes nothing and the
  * lines after it still run, seeing the calendar as it really is (what the
- * lines before them just wrote included). A published line is completed only
- * when explicitly selected; its additions are unpublished changes (D148),
- * never republished nor emailed by this operation. An archived line is never
- * touched.
+ * lines before them just wrote included). A published (or validated) line is
+ * never completed, even when asked — the coherence of new assignments with the
+ * publication, its stored PDF and the notifications comes first — and never
+ * prevents another line from being generated. An archived line is never
+ * touched. A member who joined after a line's generation is taken into
+ * account by its completion (PlanningCompletionService, late snapshot
+ * members).
  *
  * The whole run holds the planning's engine lock (the one the launcher and
  * the completion take, re-entrant for this session): never two runs, nor a
@@ -102,10 +105,17 @@ final class PlanningLineFillService
 
             if ($generated) {
                 $uncovered = $count->uncoveredRequiredDutyCount ?? 0;
-                $published = \in_array($status, self::LOCKED_STATUSES, true);
+                if (\in_array($status, self::LOCKED_STATUSES, true)) {
+                    // docs/decisions.md D222: a published (or validated) line is never completed by this operation, even
+                    // when asked: the new assignments, the publication status, the stored PDF and the members'
+                    // notifications must first be made coherent — a separate piece of work. It blocks no other line.
+                    $plans[] = new FillLinePlan($line, $status, true, FillLinePlan::EXCLUDED, 'published', false, false, $count?->requiredDutyCount, $count->coveredRequiredDutyCount ?? 0, $uncovered, $protected);
+                    continue;
+                }
+                $lateMembers = 0 === $uncovered ? 0 : \count($this->completionService->lateMembersOf($line, $cycle));
                 $plans[] = 0 === $uncovered
                     ? new FillLinePlan($line, $status, true, FillLinePlan::NOTHING, 'nothing_to_complete', false, false, $count?->requiredDutyCount, $count->coveredRequiredDutyCount ?? 0, 0, $protected)
-                    : new FillLinePlan($line, $status, true, FillLinePlan::COMPLETE, $published ? 'published' : null, [] === $globalBlockers, !$published && [] === $globalBlockers, $count?->requiredDutyCount, $count->coveredRequiredDutyCount ?? 0, $uncovered, $protected, $globalBlockers);
+                    : new FillLinePlan($line, $status, true, FillLinePlan::COMPLETE, null, [] === $globalBlockers, [] === $globalBlockers, $count?->requiredDutyCount, $count->coveredRequiredDutyCount ?? 0, $uncovered, $protected, $globalBlockers, lateMemberCount: $lateMembers);
                 continue;
             }
 

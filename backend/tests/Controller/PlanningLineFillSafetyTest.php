@@ -86,12 +86,13 @@ final class PlanningLineFillSafetyTest extends WebTestCase
     }
 
     /**
-     * A published line with a hole: never completed unless explicitly
-     * selected; completing it is an unpublished change — never a
-     * republication, never an email, the stored PDF untouched. And it never
-     * prevents a draft line from being generated.
+     * A published line with a hole is never completed by this operation —
+     * not by default, not even when asked (docs/decisions.md D222): the
+     * coherence of new assignments with the publication, the stored PDF and
+     * the notifications comes first. It never prevents the draft line from
+     * being generated, and nothing is republished or sent.
      */
-    public function testAPublishedLineIsOnlyCompletedWhenSelectedAndNothingIsRepublished(): void
+    public function testAPublishedLineIsNeverCompletedEvenWhenAskedAndNeverBlocksADraftLine(): void
     {
         // A line added once its period is published only takes part from the next period: the draft line exists
         // before the publication, and only the Seniors are generated ("Générer cette ligne") and published.
@@ -109,29 +110,29 @@ final class PlanningLineFillSafetyTest extends WebTestCase
         $before = $this->protectedRows();
 
         $preview = array_column($this->fillPreview($this->client, $this->s)['lines'], null, 'lineName');
-        self::assertSame(['COMPLETE', 'published', true, false], [$preview['Seniors']['action'], $preview['Seniors']['reason'], $preview['Seniors']['selectable'], $preview['Seniors']['selectedByDefault']]);
+        self::assertSame(['EXCLUDED', 'published', false, false], [$preview['Seniors']['action'], $preview['Seniors']['reason'], $preview['Seniors']['selectable'], $preview['Seniors']['selectedByDefault']]);
+        self::assertSame(1, $preview['Seniors']['uncoveredRequiredDutyCount']);
         self::assertSame(['GENERATE', true], [$preview['Juniors']['action'], $preview['Juniors']['selectedByDefault']]);
 
-        // The default selection: the draft line only.
-        $job = $this->fillNow($this->client, $this->s, [$juniors]);
+        // Both asked for: the draft line is generated, the published one is excluded, its hole left as it is.
+        $job = $this->fillNow($this->client, $this->s, [$preview['Seniors']['lineStableId'], $juniors]);
         $lines = $this->fillLines($job);
-        self::assertSame('not_selected', $lines['Seniors']['status']);
-        self::assertSame(2, $lines['Juniors']['addedCount']);
+        self::assertSame('SUCCEEDED', $job['status']);
+        self::assertSame(['excluded', 'published', 3, 0, 0], [$lines['Seniors']['status'], $lines['Seniors']['reason'], $lines['Seniors']['keptCount'], $lines['Seniors']['addedCount'], $lines['Seniors']['modifiedCount']]);
+        self::assertSame(['done', 2], [$lines['Juniors']['status'], $lines['Juniors']['addedCount']]);
         self::assertNull($this->currentCalendar($this->s['planningId'])['0|2027-01-05|ONCALL'], 'The published line was not touched.');
         $this->assertNoExistingRowChanged($before);
-
-        // Explicitly selected: the hole is completed, journaled as a change made after publication.
-        $before = $this->protectedRows();
-        $job = $this->fillNow($this->client, $this->s, [$preview['Seniors']['lineStableId']]);
-        self::assertSame(['done', 3, 0, 1], [$this->fillLines($job)['Seniors']['status'], $this->fillLines($job)['Seniors']['keptCount'], $this->fillLines($job)['Seniors']['modifiedCount'], $this->fillLines($job)['Seniors']['addedCount']]);
-        $this->assertNoExistingRowChanged($before);
-        self::assertSame(1, (int) $this->db()->fetchOne('SELECT COUNT(*) FROM duty_assignment_events WHERE id > ? AND was_published', [max(array_keys($before['duty_assignment_events']))]));
         foreach (['planning_publications', 'planning_publication_documents', 'planning_publication_notifications', 'planning_publication_deliveries'] as $table) {
             self::assertSame(0, $this->newRowCount($before, $table), "No republication: nothing new in {$table}.");
         }
-        $state = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/publication-state", token: $this->s['creator']);
-        self::assertResponseIsSuccessful();
-        self::assertNotEmpty(array_filter(array_map('json_encode', $state)), 'The publication state still answers.');
+        self::assertSame(0, (int) $this->db()->fetchOne('SELECT COUNT(*) FROM duty_assignment_events WHERE id > ? AND was_published', [max(array_keys($before['duty_assignment_events']))]));
+
+        // The published line alone: nothing to do, no job.
+        $before = $this->protectedRows();
+        $refusal = $this->fillNow($this->client, $this->s, [$preview['Seniors']['lineStableId']]);
+        self::assertSame([409, 'nothing_to_fill'], [$refusal['httpStatus'], $refusal['error']]);
+        $this->assertNoExistingRowChanged($before);
+        self::assertSame(0, $this->newRowCount($before, 'duty_assignments'));
     }
 
     /**

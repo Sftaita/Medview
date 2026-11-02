@@ -296,8 +296,10 @@ describe('PlanningDetailPage — periods (lot L6)', () => {
     expect(within(renfort).getByText('Aucune garde demandée')).toBeInTheDocument()
     expect(within(renfort).getByText(/Ne bloque ni la génération ni la publication/)).toBeInTheDocument()
 
-    // Partly published: the generation of the lines not published stays possible (D195).
-    expect(screen.getByRole('button', { name: 'Générer la période 2' })).toBeInTheDocument()
+    // Partly published, a line already generated (Juniors): the main action protects what is assigned (D222) —
+    // "Générer les postes non pourvus"; replacing a calendar is only "Régénérer entièrement…", in the menu.
+    expect(screen.queryByRole('button', { name: 'Générer la période 2' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Générer les postes non pourvus' })).toBeInTheDocument()
   })
 
   it('follows the period in the URL, keeps older periods readable and moves back with the browser', async () => {

@@ -60,7 +60,7 @@ final class PlanningJobService
      * @throws PlanningJobInProgressException
      * @throws SurgicalHubDataStaleException  outdated SurgicalHub leave and no allowed override
      */
-    public function requestGeneration(Planning $planning, User $requestedBy, RestPolicyOptions $restPolicy, bool $overrideStaleSurgicalHubData = false, ?PlanningCycle $cycle = null, ?string $scope = null): RequestedGeneration
+    public function requestGeneration(Planning $planning, User $requestedBy, RestPolicyOptions $restPolicy, bool $overrideStaleSurgicalHubData = false, ?PlanningCycle $cycle = null, ?string $scope = null, bool $replaceExisting = false): RequestedGeneration
     {
         // docs/planning-cycles.md §5.4 (lot L3): one period per job, named by the caller on a planning with several.
         $cycle ??= $planning->getOnlyCycle();
@@ -72,7 +72,8 @@ final class PlanningJobService
         }
 
         // docs/decisions.md D195: the same scope the worker replays — a period with nothing to generate never queues a job.
-        $preflight = $this->launcher->preflight($planning, $cycle, $scope);
+        // docs/decisions.md D222: a line already generated is only generated again on explicit confirmation.
+        $preflight = $this->launcher->preflight($planning, $cycle, $scope, null, $replaceExisting);
         if (!$preflight->canGenerate()) {
             throw new PlanningNotLaunchableException($preflight);
         }
@@ -84,7 +85,7 @@ final class PlanningJobService
             'legalMinRestHours' => $restPolicy->legalMinRestHours,
             'teamMinRestEnabled' => $restPolicy->teamMinRestEnabled,
             'teamMinRestHours' => $restPolicy->teamMinRestHours,
-        ], $scope), $cycle);
+        ], $scope, null, $replaceExisting), $cycle);
         $this->surgicalHubGate->recordOverride($surgicalHub, $planning, $requestedBy, (string) $job->getStableId());
         // docs/decisions.md D210: the generation is launched — the reminders not sent yet are pointless.
         $this->preparationService->onGenerationRequested($cycle);

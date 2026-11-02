@@ -178,7 +178,8 @@ final class PlanningCycleGenerationTest extends WebTestCase
      */
     private function generatePeriod(int $number, array $body = []): array
     {
-        $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/generations", ['period' => $this->periodId($number)] + $body, $this->s['creator']);
+        // docs/decisions.md D222: generating a period again is a deliberate regeneration in these tests.
+        $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/generations", $this->confirmingRegeneration($this->s['planningId'], ['period' => $this->periodId($number)] + $body), $this->s['creator']);
         self::assertResponseStatusCodeSame(202, (string) $this->client->getResponse()->getContent());
         self::assertSame(1, $this->runQueuedPlanningJobs());
 

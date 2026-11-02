@@ -10113,12 +10113,42 @@ modifié.
     réentrant pour la session) : jamais deux passages, ni un passage et une
     génération ou une complétion à la fois ; le job reste unique par planning
     (index partiel, D149).
-  - **Lignes publiées** : jamais régénérées. Une ligne publiée avec des trous
-    n'est complétée que si elle est **cochée explicitement** (décochée par
-    défaut) ; ses ajouts sont des « Modifications non publiées » (événement
-    `was_published`, D148), jamais une republication, jamais un e-mail, PDF
-    stocké intact. Elle n'empêche jamais de générer une ligne en brouillon.
-    Une ligne archivée n'est jamais touchée.
+  - **Lignes publiées** (révisé après la première revue, 2026-11-02) :
+    jamais régénérées, et **jamais complétées par ces actions, même
+    demandées** (`EXCLUDED`, raison `published`, case non cochable ; demandée
+    seule → 409 `nothing_to_fill`). La cohérence entre de nouvelles
+    affectations, le statut de publication, le PDF stocké et les notifications
+    aux membres sera traitée à part. Une ligne publiée n'empêche jamais de
+    générer une ligne en brouillon. Une ligne archivée n'est jamais touchée.
+    Le bouton historique « Compléter automatiquement » (D145, D171) reste
+    inchangé : il complète encore une ligne publiée (modifications non
+    publiées, sans republication) — question ouverte.
+  - **Régénération explicite** (révisé, 2026-11-02) : « Générer le planning »
+    ne remplace **jamais** par défaut le calendrier d'une ligne qui a une
+    génération `COMPLETED` — blocage `REGENERATION_NOT_CONFIRMED`, refusé par
+    le serveur avant tout job. Remplacer est une action distincte,
+    « Régénérer entièrement… » (menu « ⋯ », présentée en action
+    destructrice), qui exige de cocher une confirmation citant les gardes
+    remplacées ; le serveur n'accepte que `replaceExistingAssignments: true`
+    (booléen), enregistré sur le job (`planning_jobs.replace_existing`).
+    L'API technique par période (`POST /api/planning-periods/{id}/generations`)
+    applique la même règle (409 `regeneration_not_confirmed`). Dès qu'une
+    ligne de la période est générée, l'action principale de l'en-tête devient
+    « Générer les postes non pourvus ».
+  - **Membres arrivés après la génération** (révisé, 2026-11-02) : la
+    complétion d'une ligne les prend en compte. Avant le calcul, ils sont
+    **ajoutés** au snapshot de la génération courante
+    (`PlanningSnapshotService::appendLateMembers()`), capturés exactement
+    comme les membres d'origine — participation, indisponibilités,
+    non-participations telles qu'elles sont au moment de la complétion —
+    et marqués `planning_snapshot_members.captured_late_at`. Les lignes
+    figées avec le snapshot ne sont jamais modifiées ni supprimées ; un membre
+    n'est jamais ajouté deux fois. Ils entrent dans l'éligibilité (et la
+    revalidation live, `assignabilityError`) et dans les phases d'équité
+    comme les autres ; la population d'origine reste lisible (`captured_late_at
+    IS NULL`). S'applique aux deux complétions (celle-ci et « Compléter
+    automatiquement »). Un membre ajouté reste dans le snapshot même si la
+    complétion ne lui attribue rien : c'est la trace qu'il a été considéré.
   - **Mesure, pas promesse** : `CurrentCalendarLedger` lit en SQL, hors cache
     Doctrine, chaque affectation visible (règle D125) avant et après ; chaque
     résultat donne les gardes conservées, ajoutées, toujours non pourvues et
@@ -10141,23 +10171,21 @@ modifié.
     garde », pour chaque ligne : gardes attribuées / non pourvues, « Générer
     cette ligne » quand elle a quelque chose à recevoir, sinon la raison ;
     « Règles de génération » pour chaque ligne ; bilan par ligne après le
-    calcul (« Voir le détail »). « Générer le planning » avertit désormais,
-    ligne par ligne, qu'il remplace le calendrier d'une ligne qui a des
-    gardes attribuées, et renvoie vers « Générer les postes non pourvus ».
+    calcul (« Voir le détail »). Les cases « Règles de repos » sont
+    décochées par défaut : aucun repos minimum n'est jamais supposé ni
+    activé automatiquement (aucun minimum légal n'a été défini pour MedVue).
 - **Alternatives écartées** : une génération ne contenant que les postes
   vacants (rend les anciens invisibles, D125) ; recopier les anciennes
   affectations dans une nouvelle génération (nouvelles identités, historique
   dédoublé) ; REPAIR (non implémenté, et inutile : rien ne doit bouger) ;
   régénérer une ligne entière « en gardant les manuelles » (une garde
   attribuée par le solveur est tout autant protégée).
-- **Limites connues** : la complétion d'une ligne prend les candidats de son
-  snapshot (D145) — un membre ajouté après la génération de la ligne ne reçoit
-  pas de garde par complétion ; les règles de repos d'une complétion restent
-  celles de la génération de la ligne. L'API bas niveau par période
-  (`POST /api/planning-periods/{id}/generations` puis `…/solve`, D106) n'est
-  utilisée par aucun écran et peut toujours régénérer une période : hors
-  périmètre. Le cas conditionnel (source et renfort générés dans le même
-  passage) est couvert par le code et l'aperçu, pas par un test dédié.
+- **Limites connues** : les règles de repos d'une complétion restent celles
+  de la génération de la ligne. Une réaffectation **manuelle** ne propose
+  toujours pas un membre arrivé après la génération tant qu'aucune complétion
+  ne l'a ajouté au snapshot. Le cas conditionnel (source et renfort générés
+  dans le même passage) est couvert par le code et l'aperçu, pas par un test
+  dédié.
 - **Tests** : `PlanningLineFillTest` (critère d'acceptation 30 + 30 avec une
   réaffectation manuelle, « Générer cette ligne » sans régénérer la ligne
   brouillon, trous et bloc de deux jours, rien à faire, double clic, droits),

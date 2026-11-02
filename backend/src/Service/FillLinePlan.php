@@ -19,9 +19,8 @@ use App\Entity\PlanningPeriodStatus;
  * - EXCLUDED — never touched, `$reason` says why (archived, nothing
  *   demanded, a blocker of its first generation…).
  *
- * A published (or validated) line is COMPLETE-able only when explicitly
- * selected (`selectedByDefault` false): its added duties are unpublished
- * changes, republished only by the existing explicit workflow (D148).
+ * A published (or validated) line is always EXCLUDED (`published`), never
+ * completed by this operation; it never blocks the other lines.
  */
 final readonly class FillLinePlan
 {
@@ -52,6 +51,8 @@ final readonly class FillLinePlan
         public array $warnings = [],
         /** A first generation that needs its source line's, generated just before it in the same run (D164). */
         public bool $afterSource = false,
+        /** Members who joined after the line's generation, taken into account by its completion. */
+        public int $lateMemberCount = 0,
     ) {
     }
 
@@ -82,6 +83,7 @@ final readonly class FillLinePlan
             'blockers' => $this->blockers,
             'warnings' => $this->warnings,
             'afterSource' => $this->afterSource,
+            'lateMemberCount' => $this->lateMemberCount,
         ];
     }
 }

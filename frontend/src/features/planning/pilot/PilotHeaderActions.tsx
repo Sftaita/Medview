@@ -8,7 +8,7 @@ import { PlanningSettingsModal } from './PlanningSettingsModal'
 import { RuleSetModal } from './RuleSetModal'
 import type { CollectionStatus, PlanningJob } from './types'
 
-export type PilotDialog = 'settings' | 'generate' | 'fill' | 'week-structure' | 'rule-set'
+export type PilotDialog = 'settings' | 'generate' | 'regenerate' | 'fill' | 'week-structure' | 'rule-set'
 
 type Props = {
   planningStableId: string
@@ -37,6 +37,11 @@ type Props = {
   canLaunchGeneration?: boolean
   /** A generation or a completion is queued or running: no second launch from here. */
   busy?: boolean
+  /**
+   * docs/decisions.md D222: a line of the period is already generated. The main action then protects what is
+   * assigned ("Générer les postes non pourvus"); replacing calendars is the distinct "Régénérer entièrement…".
+   */
+  hasGeneratedLines?: boolean
   /** Optional control of the open dialog, so the page can open one from elsewhere (the empty "Planning" tab). */
   dialog?: PilotDialog | null
   onDialogChange?: (dialog: PilotDialog | null) => void
@@ -63,6 +68,7 @@ export function PilotHeaderActions({
   onLaunched,
   canLaunchGeneration = true,
   busy = false,
+  hasGeneratedLines = false,
   dialog: controlledDialog,
   onDialogChange,
 }: Props) {
@@ -83,11 +89,21 @@ export function PilotHeaderActions({
           { label: 'Règles de génération', icon: 'check' as const, onSelect: () => setDialog('rule-set') },
         ]
       : []),
+    ...(canLaunchGeneration && hasGeneratedLines
+      ? [
+          {
+            label: 'Régénérer entièrement…',
+            icon: 'alert' as const,
+            danger: true,
+            onSelect: () => setDialog('regenerate'),
+          },
+        ]
+      : []),
   ]
 
   return (
     <div className="pd-head-actions">
-      {canLaunchGeneration && (
+      {canLaunchGeneration && !hasGeneratedLines && (
         <button
           type="button"
           className="pd-btn pd-btn-primary pd-btn-lg pd-grow"
@@ -99,10 +115,11 @@ export function PilotHeaderActions({
           <Icon name="arrow" size={18} strokeWidth={2.2} />
         </button>
       )}
-      {/* docs/decisions.md D222: complete what is missing, line by line, never touching what is assigned. */}
+      {/* docs/decisions.md D222: complete what is missing, line by line, never touching what is assigned —
+          the main action as soon as a line holds a calendar. */}
       <button
         type="button"
-        className="pd-btn pd-btn-secondary pd-btn-lg"
+        className={`pd-btn ${hasGeneratedLines ? 'pd-btn-primary pd-grow' : 'pd-btn-secondary'} pd-btn-lg`}
         onClick={() => setDialog('fill')}
         disabled={busy}
         title={busy ? 'Un calcul est déjà en cours sur ce planning' : undefined}
@@ -142,6 +159,18 @@ export function PilotHeaderActions({
           planningStableId={planningStableId}
           period={period}
           timezone={timezone}
+          onClose={() => setDialog(null)}
+          onLaunched={(job) => {
+            onChanged()
+            onLaunched(job)
+          }}
+        />
+      )}
+      {dialog === 'regenerate' && (
+        <GenerationModal
+          planningStableId={planningStableId}
+          period={period}
+          replace
           onClose={() => setDialog(null)}
           onLaunched={(job) => {
             onChanged()

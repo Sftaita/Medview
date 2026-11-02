@@ -127,6 +127,8 @@ export type PreflightIssueCode =
   | 'BLOCK_CUT_BY_PERIOD_BOUNDARY'
   | 'HISTORICAL_BLOCK_REMAINDER'
   | 'PERIOD_END_CUTS_BLOCK'
+  // docs/decisions.md D222: a generated line is only generated again on explicit confirmation.
+  | 'REGENERATION_NOT_CONFIRMED'
 
 export type PreflightIssue = {
   code: PreflightIssueCode
@@ -309,6 +311,8 @@ export type FillLinePlan = {
   blockers: string[]
   warnings: string[]
   afterSource: boolean
+  /** Members who joined after the line's generation, taken into account by its completion (D222). */
+  lateMemberCount?: number
 }
 
 export type FillPreview = {

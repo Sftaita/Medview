@@ -79,16 +79,21 @@ export function remindParticipants(
  * Which period, and which scope: `unlocked_lines` generates only the lines not
  * locked yet (docs/decisions.md D195) — always chosen explicitly, never deduced.
  */
-export type GenerationTarget = { periodStableId?: string; scope?: 'unlocked_lines' }
+export type GenerationTarget = {
+  periodStableId?: string
+  scope?: 'unlocked_lines'
+  /** docs/decisions.md D222: "Régénérer entièrement" — the explicit confirmation that generated lines are replaced. */
+  replaceExisting?: boolean
+}
 
 export function fetchGenerationPreflight(
   planningStableId: string,
   target: GenerationTarget = {},
 ): Promise<GenerationPreflight> {
-  const path = withPeriod(`/api/plannings/${planningStableId}/generation-preflight`, target.periodStableId)
-  return apiFetch<GenerationPreflight>(
-    target.scope ? `${path}${path.includes('?') ? '&' : '?'}scope=${target.scope}` : path,
-  )
+  let path = withPeriod(`/api/plannings/${planningStableId}/generation-preflight`, target.periodStableId)
+  if (target.scope) path = `${path}${path.includes('?') ? '&' : '?'}scope=${target.scope}`
+  if (target.replaceExisting) path = `${path}${path.includes('?') ? '&' : '?'}replaceExisting=1`
+  return apiFetch<GenerationPreflight>(path)
 }
 
 /** `restPolicy` omitted (or every field left at its disabled default) means
@@ -105,6 +110,8 @@ export function launchGeneration(
   const body: Record<string, unknown> = { ...(restPolicy ?? {}) }
   if (overrideStaleSurgicalHubData) body.overrideStaleSurgicalHubData = true
   if (target.scope) body.scope = target.scope
+  // Only ever sent from "Régénérer entièrement", once the manager ticked the confirmation (D222).
+  if (target.replaceExisting) body.replaceExistingAssignments = true
   return apiFetch<PlanningJobResponse>(
     withPeriod(`/api/plannings/${planningStableId}/generations`, target.periodStableId),
     { method: 'POST', body },

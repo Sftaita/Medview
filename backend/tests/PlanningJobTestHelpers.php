@@ -59,11 +59,46 @@ trait PlanningJobTestHelpers
      */
     private function generateNow(KernelBrowser $client, string $planningStableId, string $token, array $body = []): array
     {
+        // docs/decisions.md D222: generating again a planning whose lines are already generated replaces their
+        // calendar — only on explicit confirmation ("Régénérer entièrement"). A test that generates again does so on
+        // purpose: it confirms, as the manager would. The refusal without confirmation has its own tests
+        // (PlanningRegenerationAndLateMemberTest); pass `replaceExistingAssignments` explicitly to test it.
+        if (!\array_key_exists('replaceExistingAssignments', $body) && $this->hasCompletedGeneration($planningStableId)) {
+            $body['replaceExistingAssignments'] = true;
+        }
         $this->api($client, 'POST', "/api/plannings/{$planningStableId}/generations", $body, $token);
         self::assertResponseStatusCodeSame(202);
         self::assertSame(1, $this->runQueuedPlanningJobs());
 
         return $this->api($client, 'GET', "/api/plannings/{$planningStableId}/jobs/latest", token: $token)['job'];
+    }
+
+    /**
+     * docs/decisions.md D222: $body plus the explicit confirmation of a regeneration when the planning already has a
+     * generated line — what "Régénérer entièrement" sends. For the tests that generate again on purpose.
+     *
+     * @param array<string, mixed> $body
+     *
+     * @return array<string, mixed>
+     */
+    private function confirmingRegeneration(string $planningStableId, array $body = []): array
+    {
+        return $this->hasCompletedGeneration($planningStableId) && !\array_key_exists('replaceExistingAssignments', $body)
+            ? $body + ['replaceExistingAssignments' => true]
+            : $body;
+    }
+
+    private function hasCompletedGeneration(string $planningStableId): bool
+    {
+        return (bool) static::getContainer()->get(\Doctrine\DBAL\Connection::class)->fetchOne(<<<'SQL'
+            SELECT EXISTS (
+              SELECT 1 FROM planning_generations g
+              JOIN planning_periods pp ON pp.id = g.planning_period_id
+              JOIN planning_lines pl ON pl.id = pp.planning_line_id
+              JOIN plannings p ON p.id = pl.planning_id
+              WHERE p.stable_id = ? AND g.status = 'COMPLETED'
+            )
+            SQL, [$planningStableId]);
     }
 
     private function planningJobsTransport(): TransportInterface

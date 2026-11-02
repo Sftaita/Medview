@@ -112,7 +112,38 @@ final class PlanningCompletionService
         private readonly DutyRepository $dutyRepository,
         private readonly DimensionMembershipCalculator $dimensionMembershipCalculator,
         private readonly PlanningPeriodRepository $periodRepository,
+        private readonly PlanningSnapshotService $snapshotService,
     ) {
+    }
+
+    /**
+     * docs/decisions.md D222: the members of $line's team present in its
+     * period of $cycle who are not in the snapshot of its current generation —
+     * they joined after it. A completion appends them to that snapshot
+     * (PlanningSnapshotService::appendLateMembers()) before solving, so the
+     * holes may go to them, with their unavailabilities, participation and
+     * the fairness phases like anybody else. Read only.
+     *
+     * @return list<PlanningTeamMember>
+     */
+    public function lateMembersOf(PlanningLine $line, PlanningCycle $cycle): array
+    {
+        $period = $line->periodIn($cycle);
+        $generation = null !== $period ? $this->generationRepository->findMostRecentCompletedByPlanningPeriod($period) : null;
+        $snapshot = null !== $generation ? $this->snapshotRepository->findOneByGeneration($generation) : null;
+        if (null === $period || null === $snapshot) {
+            return [];
+        }
+
+        $known = [];
+        foreach ($snapshot->getMembers() as $member) {
+            $known[(string) $member->getSourceTeamMemberStableId()] = true;
+        }
+
+        return array_values(array_filter(
+            $this->teamMemberRepository->findIntersecting($line->getPlanningTeam(), $period->getStartsAt(), $period->getEndsAt()),
+            static fn (PlanningTeamMember $member): bool => !isset($known[(string) $member->getStableId()]),
+        ));
     }
 
     /**
@@ -204,6 +235,10 @@ final class PlanningCompletionService
         if (null === $generation || null === $snapshot) {
             return new CompletionLineResult($line, 'not_generated');
         }
+
+        // docs/decisions.md D222: a member who joined after the generation is a candidate too — appended to the
+        // snapshot (flagged late, the rows frozen at generation time untouched) before the problem is built.
+        $this->snapshotService->appendLateMembers($snapshot);
 
         // Without the cross-line commitments frozen at generation time (D161): they may no longer hold (a
         // reassignment on another line since), and must never keep excluding someone who is free today. The

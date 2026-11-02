@@ -103,7 +103,7 @@ final class RunPlanningJobHandler
             isset($policy['teamMinRestHours']) ? (int) $policy['teamMinRestHours'] : null,
         );
 
-        $all = $this->launcher->launch($job->getPlanning(), $job->getRequestedBy(), $restPolicy, $job->getCycle(), $job->getScope());
+        $all = $this->launcher->launch($job->getPlanning(), $job->getRequestedBy(), $restPolicy, $job->getCycle(), $job->getScope(), null, $job->isReplaceExisting());
         // docs/decisions.md D195: `lines` keeps its meaning — the lines generated; the others are listed apart.
         $results = array_values(array_filter($all, static fn (LaunchLineResult $r): bool => $r->isGenerated()));
         $leftAsIs = static fn (string $decision): array => array_values(array_map(

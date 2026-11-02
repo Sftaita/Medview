@@ -425,6 +425,10 @@ export function PlanningDetailPage() {
     : planning.lines.some((line) => line.periodStatus && line.periodStatus !== 'DRAFT')
   // A fully published period offers no (re)generation (the server refuses it anyway, PERIOD_LOCKED). A partly
   // published one does: the dialog offers to generate only the lines not published (docs/decisions.md D195).
+  // docs/decisions.md D222: a line of the selected period already holds a calendar — never replaced by default.
+  const hasGeneratedLines = periodView
+    ? periodView.lines.some((line) => line.status !== 'DRAFT')
+    : planning.lines.some((line) => line.periodStatus && line.periodStatus !== 'DRAFT')
   const fullyPublished = periodView
     ? periodView.status === 'published'
     : planning.lines.some((line) => line.active && line.periodStatus === 'PUBLISHED')
@@ -520,6 +524,7 @@ export function PlanningDetailPage() {
               onChanged={() => void pilot.reload()}
               onLaunched={(job) => jobs.track(job)}
               canLaunchGeneration={!fullyPublished}
+              hasGeneratedLines={hasGeneratedLines}
               busy={jobs.active}
               dialog={pilotDialog}
               onDialogChange={setPilotDialog}

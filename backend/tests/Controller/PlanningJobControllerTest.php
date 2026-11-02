@@ -207,7 +207,8 @@ final class PlanningJobControllerTest extends WebTestCase
         $this->prepareLine($s['planningId'], self::STANDALONE);
         $this->generate($client, $s);
 
-        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $s['creator']);
+        // docs/decisions.md D222: generating again is a deliberate, confirmed regeneration.
+        $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", ['replaceExistingAssignments' => true], $s['creator']);
         self::assertResponseStatusCodeSame(202);
         $refused = $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/complete", [], $s['admin']);
         self::assertResponseStatusCodeSame(409, 'No completion while a generation is queued or running.');

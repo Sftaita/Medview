@@ -136,9 +136,14 @@ final class PlanningGenerationLauncher
      * replaced. A conditional line needs its source generated, or generated in
      * the same launch (CONDITIONAL_SOURCE_NOT_GENERATED). Never with $scope.
      *
+     * $replaceExisting (docs/decisions.md D222): without it, a line that
+     * already has a COMPLETED generation is never generated again —
+     * REGENERATION_NOT_CONFIRMED. Replacing a calendar is a distinct, explicit
+     * choice, never the default of "Générer le planning".
+     *
      * @param list<PlanningLine>|null $onlyLines
      */
-    public function preflight(Planning $planning, ?PlanningCycle $cycle = null, ?string $scope = null, ?array $onlyLines = null): PlanningGenerationPreflight
+    public function preflight(Planning $planning, ?PlanningCycle $cycle = null, ?string $scope = null, ?array $onlyLines = null, bool $replaceExisting = false): PlanningGenerationPreflight
     {
         $cycle ??= $planning->getOnlyCycle();
         if (null !== $scope && self::SCOPE_UNLOCKED_LINES !== $scope) {
@@ -231,6 +236,9 @@ final class PlanningGenerationLauncher
             // generated before too, whose own applicability only says GENERATED: they must still hold to generate
             // it again. A missing one is a blocker, never a warning: no calendar is produced that cannot hold.
             $missing = $this->applicability->missingPrerequisites($line, $cycle);
+            if (null === $onlyLines && !$replaceExisting && null !== $this->generationRepository->findMostRecentCompletedByPlanningPeriod($period)) {
+                $blockers[] = new PreflightIssue(PreflightIssueCode::REGENERATION_NOT_CONFIRMED, $line);
+            }
             if (null !== $onlyLines) {
                 // docs/decisions.md D222: a first generation only — a generated line is completed, never replaced.
                 if (null !== $this->generationRepository->findMostRecentCompletedByPlanningPeriod($period)) {
@@ -327,11 +335,13 @@ final class PlanningGenerationLauncher
      * $onlyLines (docs/decisions.md D222): only these lines, each given its
      * first generation (see preflight()); every other line keeps its calendar
      * and constrains them, whatever its place in the resolution order.
+     * $replaceExisting: see preflight() — the explicit confirmation that the
+     * lines already generated are generated again.
      *
      * @throws PlanningNotLaunchableException        a blocker of the preflight applies
      * @throws PlanningGenerationInProgressException another launch of this planning is running
      */
-    public function launch(Planning $planning, User $launchedBy, ?RestPolicyOptions $restPolicy = null, ?PlanningCycle $cycle = null, ?string $scope = null, ?array $onlyLines = null): array
+    public function launch(Planning $planning, User $launchedBy, ?RestPolicyOptions $restPolicy = null, ?PlanningCycle $cycle = null, ?string $scope = null, ?array $onlyLines = null, bool $replaceExisting = false): array
     {
         $cycle ??= $planning->getOnlyCycle();
         if (!$this->tryLock($planning)) {
@@ -339,7 +349,7 @@ final class PlanningGenerationLauncher
         }
 
         try {
-            $preflight = $this->preflight($planning, $cycle, $scope, $onlyLines);
+            $preflight = $this->preflight($planning, $cycle, $scope, $onlyLines, $replaceExisting);
             if (!$preflight->canGenerate()) {
                 throw new PlanningNotLaunchableException($preflight);
             }

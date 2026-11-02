@@ -38,9 +38,11 @@ export function fillPlanText(plan: FillLinePlan): string {
     }
     case 'COMPLETE': {
       const holes = plural(plan.uncoveredRequiredDutyCount ?? 0, 'garde non pourvue', 'gardes non pourvues')
-      return plan.reason === 'published'
-        ? `${holes}. Ligne publiée : les gardes ajoutées apparaîtront dans « Modifications non publiées » — rien n’est republié ni envoyé.`
-        : `${holes} à compléter, sans toucher aux gardes attribuées.`
+      const late =
+        (plan.lateMemberCount ?? 0) > 0
+          ? ` ${plural(plan.lateMemberCount ?? 0, 'membre arrivé', 'membres arrivés')} depuis la génération ${(plan.lateMemberCount ?? 0) > 1 ? 'sont pris' : 'est pris'} en compte.`
+          : ''
+      return `${holes} à compléter, sans toucher aux gardes attribuées.${late}`
     }
     case 'NOTHING':
       return 'Toutes les gardes obligatoires sont attribuées : rien à faire.'
@@ -48,6 +50,10 @@ export function fillPlanText(plan: FillLinePlan): string {
       switch (plan.reason) {
         case 'archived':
           return 'Archivée : jamais modifiée.'
+        case 'published': {
+          const holes = plan.uncoveredRequiredDutyCount ?? 0
+          return `Publiée : jamais complétée automatiquement${holes > 0 ? ` (${plural(holes, 'garde non pourvue', 'gardes non pourvues')}, à attribuer à la main)` : ''}. Elle n’empêche pas de générer les autres lignes.`
+        }
         case 'nothing_demanded':
           return 'Aucune garde demandée sur cette période.'
         case 'locked':
@@ -70,7 +76,9 @@ export function fillResultText(line: FillLineResult): string {
     case 'not_selected':
       return 'Non sélectionnée : inchangée.'
     case 'excluded':
-      return 'Exclue : inchangée.'
+      return line.reason === 'published'
+        ? 'Publiée : jamais complétée automatiquement, inchangée.'
+        : 'Exclue : inchangée.'
     case 'blocked':
       return line.blockers.length > 0
         ? `Non générée : ${line.blockers.map(fillBlockerText).join(' ; ')}.`
