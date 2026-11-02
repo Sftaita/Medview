@@ -6,6 +6,7 @@ namespace App\Controller;
 
 use App\Entity\PlanningGeneration;
 use App\Entity\PlanningPeriod;
+use App\Entity\PlanningPeriodStatus;
 use App\Entity\PlanningSnapshot;
 use App\Entity\PlanningSnapshotExternalCommitment;
 use App\Entity\PlanningTeam;
@@ -72,6 +73,18 @@ final class PlanningGenerationController
         [$restPolicy, $errorResponse] = $this->restPolicyParser->parse($request);
         if (null !== $errorResponse) {
             return $errorResponse;
+        }
+
+        // docs/decisions.md D222: a new generation of a period already generated replaces its calendar (D125) —
+        // on this technical path too, only on explicit confirmation.
+        $body = json_decode($request->getContent() ?: '{}', true);
+        $locked = \in_array($planningPeriod->getStatus(), [PlanningPeriodStatus::VALIDATED, PlanningPeriodStatus::PUBLISHED, PlanningPeriodStatus::ARCHIVED], true);
+        if (!$locked && null !== $this->generationRepository->findMostRecentCompletedByPlanningPeriod($planningPeriod)
+            && !(\is_array($body) && true === ($body['replaceExistingAssignments'] ?? null))) {
+            return new JsonResponse([
+                'error' => 'regeneration_not_confirmed',
+                'message' => 'This period is already generated: a new generation would replace its calendar. Send replaceExistingAssignments: true to confirm.',
+            ], 409);
         }
 
         $generation = $this->generationService->create($planningPeriod, $user, $restPolicy);

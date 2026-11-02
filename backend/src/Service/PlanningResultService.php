@@ -74,7 +74,7 @@ final class PlanningResultService
         $period = null !== $cycle ? $line->periodIn($cycle) : $line->getSingleCyclePeriod();
         $generation = null !== $period ? $this->generationRepository->findMostRecentCompletedByPlanningPeriod($period) : null;
         if (null === $period || null === $generation) {
-            return new PlanningResultLine($line, null, null, 0, 0, 0, []);
+            return new PlanningResultLine($line, null, null, 0, 0, 0, [], periodStatus: $period?->getStatus());
         }
 
         /** @var array<int, DutyAssignment> $assignmentByDutyId */
@@ -144,6 +144,7 @@ final class PlanningResultService
             $undeterminedCount,
             $superfluousCount,
             $notRequiredCount,
+            $period->getStatus(),
         );
     }
 

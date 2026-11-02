@@ -585,7 +585,12 @@ final class PlanningCycleReassignmentTest extends WebTestCase
         self::assertTrue($this->eventsOf($dutyId)[0]['was_published']);
     }
 
-    public function testACompletionRecordsWhetherThePeriodWasPublishedWhenItWrites(): void
+    /**
+     * docs/decisions.md D223 (supersedes the D197 expectation of this test):
+     * the period is published while the completion solves — the status read
+     * under the lock refuses the write. Nothing is written, period 2 untouched.
+     */
+    public function testACompletionNeverWritesIntoAPeriodPublishedWhileItSolved(): void
     {
         $this->createPeriod();
         $this->addDuties(1, [['2027-04-27 08:00', '2027-04-27 20:00']]);
@@ -609,10 +614,10 @@ final class PlanningCycleReassignmentTest extends WebTestCase
         self::assertResponseStatusCodeSame(202);
         self::assertSame(1, $this->runQueuedPlanningJobs());
 
-        self::assertNotNull($this->holderOn(1, '2027-04-27'));
-        $events = $this->eventsOf($duty);
-        self::assertCount(2, $events);
-        self::assertSame(['was_published' => true, 'had_previous' => false, 'has_new' => true, 'author' => 'creator@example.com', 'generation_period' => 1], $events[1]);
+        $job = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/jobs/latest?period={$this->periodId(1)}", token: $this->s['creator'])['job'];
+        self::assertSame(['FAILED', 'calendar_changed'], [$job['status'], $job['failureCode']]);
+        self::assertNull($this->holderOn(1, '2027-04-27'), 'Nothing written into the published period.');
+        self::assertCount(1, $this->eventsOf($duty), 'Only the removal is recorded.');
         self::assertSame($period2, $this->fingerprint(2), 'completing period 1 never touches period 2');
     }
 

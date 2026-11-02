@@ -76,8 +76,9 @@ final class NeighbourCommitmentCollector
                 continue;
             }
             $otherPeriod = $other->periodIn($cycle);
-            // D161: the lines solved before this one; D195: a locked line, before or after it.
-            if (null !== $otherPeriod && ($preceding || \in_array($otherPeriod->getStatus(), self::LOCKED_STATUSES, true))) {
+            // D161: the lines solved before this one; D195: a locked line, before or after it; D222: in a launch
+            // restricted to some lines, every other line — none of them is regenerated, their calendar stays.
+            if (null !== $otherPeriod && ($preceding || ($planned?->othersKept ?? false) || \in_array($otherPeriod->getStatus(), self::LOCKED_STATUSES, true))) {
                 $sameCycle[] = $otherPeriod;
             }
         }

@@ -340,6 +340,14 @@
 .pd-grow {
   flex: 1 1 auto;
   max-width: 320px;
+  /* A long label ("Générer les postes non pourvus", D222) wraps on a narrow phone instead of overflowing the gutter. */
+  min-width: 0;
+  height: auto;
+  min-height: 48px;
+  padding-block: 6px;
+  white-space: normal;
+  text-align: center;
+  line-height: 1.2;
 }
 
 /* ---------- Période ---------- */

@@ -56,7 +56,8 @@ final class PlanningLaunchControllerTest extends WebTestCase
         // Asynchronous since docs/decisions.md D149: 202 + a queued job, run here by "the worker";
         // returns the finished job's outcome (its per-line `lines`, as the synchronous launch used to),
         // or the refusal body when the request itself was refused.
-        $response = $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $token ?? $s['creator']);
+        // docs/decisions.md D222: a launch on a planning already generated is a deliberate regeneration here.
+        $response = $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", $this->confirmingRegeneration($s['planningId']), $token ?? $s['creator']);
         if (202 !== $client->getResponse()->getStatusCode()) {
             return $response;
         }

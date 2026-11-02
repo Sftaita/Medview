@@ -80,6 +80,17 @@ class PlanningJob
     #[ORM\Column(name: 'generation_scope', length: 20, nullable: true)]
     private ?string $scope = null;
 
+    /** FILL only (docs/decisions.md D222): the stable ids of the lines asked for. */
+    #[ORM\Column(name: 'target_line_stable_ids', type: 'json', nullable: true)]
+    private ?array $targetLineStableIds = null;
+
+    /**
+     * GENERATE only (docs/decisions.md D222): the manager explicitly confirmed that the lines already generated are
+     * generated again — their calendar replaced. Never implied: false by default, and the launch refuses without it.
+     */
+    #[ORM\Column(name: 'replace_existing', options: ['default' => false])]
+    private bool $replaceExisting = false;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -104,10 +115,13 @@ class PlanningJob
 
     /**
      * @param array<string, mixed>|null $restPolicy
+     * @param list<string>|null         $targetLineStableIds FILL only
      */
-    public function __construct(Planning $planning, PlanningJobKind $kind, User $requestedBy, ?array $restPolicy = null, ?string $scope = null)
+    public function __construct(Planning $planning, PlanningJobKind $kind, User $requestedBy, ?array $restPolicy = null, ?string $scope = null, ?array $targetLineStableIds = null, bool $replaceExisting = false)
     {
+        $this->replaceExisting = $replaceExisting;
         $this->scope = $scope;
+        $this->targetLineStableIds = $targetLineStableIds;
         $this->stableId = Uuid::v7();
         $this->planning = $planning;
         $this->kind = $kind;
@@ -179,6 +193,19 @@ class PlanningJob
     public function getScope(): ?string
     {
         return $this->scope;
+    }
+
+    public function isReplaceExisting(): bool
+    {
+        return $this->replaceExisting;
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function getTargetLineStableIds(): array
+    {
+        return $this->targetLineStableIds ?? [];
     }
 
     public function getCreatedAt(): \DateTimeImmutable

@@ -89,7 +89,8 @@ trait PlanningCycleTestHelpers
     /** @param array<string, mixed> $body */
     private function generatePeriod(int $number, array $body = []): void
     {
-        $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/generations", ['period' => $this->periodId($number)] + $body, $this->s['creator']);
+        // docs/decisions.md D222: generating a period again is a deliberate, confirmed regeneration in these tests.
+        $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/generations", $this->confirmingRegeneration($this->s['planningId'], ['period' => $this->periodId($number)] + $body), $this->s['creator']);
         self::assertResponseStatusCodeSame(202, (string) $this->client->getResponse()->getContent());
         self::assertSame(1, $this->runQueuedPlanningJobs());
         $job = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/jobs/latest?period={$this->periodId($number)}", token: $this->s['creator'])['job'];

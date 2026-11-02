@@ -10060,3 +10060,245 @@ modifié.
   Exactement deux e-mails dans Mailpit. Non vérifié dans le navigateur :
   l'affichage à 390 px et l'inscription par le lien (couverte par
   `InvitationRegistrationTest`).
+
+## D222 — Générer une ligne seule et les postes non pourvus, sans jamais toucher une affectation existante
+
+- **Problème réel (audit du code, 2026-11-02)** — ajouter une ligne à un
+  planning déjà généré n'avait aucun chemin sûr :
+  - « Générer le planning » (D129/D195) **régénère toute ligne non
+    verrouillée**, y compris une ligne déjà générée en brouillon. Une
+    génération écrit dans une **nouvelle** `PlanningGeneration`, et le
+    calendrier lit la génération `COMPLETED` la plus récente de chaque
+    période (D125) : le calendrier précédent de cette ligne, réaffectations
+    manuelles comprises, devient invisible — il reste en base, mais plus
+    personne ne le voit. La boîte de dialogue disait seulement « sera
+    générée ».
+  - « Compléter automatiquement » (D145) protège bien chaque affectation
+    (unités fixées, écriture dans la génération courante, relecture sous
+    verrou), mais **ignore une ligne jamais générée** (`not_generated`).
+  - Le cas « ligne 1 publiée, ligne 2 en brouillon » était déjà couvert
+    (`scope: unlocked_lines`, D195) ; « ligne 1 générée mais non publiée »
+    ne l'était pas.
+  - Écarts doc/code relevés au passage : `CLAUDE.md` disait la semaine type
+    « limitée à la ligne principale (dette) », alors que « Paramètres de la
+    ligne » (D167) l'ouvre pour chaque ligne ; « Règles de génération »
+    n'existait en revanche que pour la ligne principale (menu de l'en-tête).
+    REPAIR reste non implémenté (`docs/allocation-algorithm.md` §11) ;
+    `fixedAssignments` est réel depuis D145.
+- **Décision** — deux actions, aucun troisième moteur :
+  - **Une ligne déjà générée n'est jamais régénérée par ces actions** : ses
+    trous sont complétés (D145, `PlanningCompletionService` restreint à cette
+    ligne), dans sa génération courante. Aucune nouvelle génération qui ne
+    contiendrait que les postes vacants n'est jamais créée : c'est ce qui
+    aurait rendu les anciennes affectations invisibles. Pas de fusion
+    artificielle côté frontend non plus.
+  - **Une ligne jamais générée reçoit sa première génération, seule** :
+    `PlanningGenerationLauncher` accepte `$onlyLines`. Les autres lignes de la
+    période sont `OUT_OF_SCOPE` — ni matérialisées, ni contrôlées, ni
+    régénérées — et leur calendrier courant est une **contrainte de la ligne
+    générée quel que soit son rang dans l'ordre de résolution**
+    (`PlannedCalendar::$othersKept` lu par `NeighbourCommitmentCollector`, à la
+    prise du snapshot comme à la relecture avant écriture) ; sans cela, une
+    ligne générée avant une autre dans l'ordre D161 l'ignorerait. Dans ce
+    mode, une ligne qui a déjà une génération `COMPLETED` est refusée
+    (`LINE_ALREADY_GENERATED`) : aucun chemin de cette fonctionnalité ne peut
+    remplacer un calendrier. Une ligne conditionnelle exige sa source générée
+    ou générée dans le même passage (`CONDITIONAL_SOURCE_NOT_GENERATED`).
+  - **`PlanningLineFillService`** (« Générer les postes non pourvus », et
+    « Générer cette ligne » = la même chose pour une ligne) : les lignes
+    choisies, **une par une dans l'ordre de résolution**, chacune écrite
+    atomiquement de son côté — une ligne qui échoue n'écrit rien, les
+    suivantes s'exécutent et voient le calendrier réel. Tout le passage tient
+    le verrou moteur du planning (celui du lanceur et de la complétion,
+    réentrant pour la session) : jamais deux passages, ni un passage et une
+    génération ou une complétion à la fois ; le job reste unique par planning
+    (index partiel, D149).
+  - **Lignes publiées** (révisé après la première revue, 2026-11-02) :
+    jamais régénérées, et **jamais complétées par ces actions, même
+    demandées** (`EXCLUDED`, raison `published`, case non cochable ; demandée
+    seule → 409 `nothing_to_fill`). La cohérence entre de nouvelles
+    affectations, le statut de publication, le PDF stocké et les notifications
+    aux membres sera traitée à part. Une ligne publiée n'empêche jamais de
+    générer une ligne en brouillon. Une ligne archivée n'est jamais touchée.
+    Le bouton historique « Compléter automatiquement » (D145, D171) suit
+    désormais la même règle : voir D223.
+  - **Régénération explicite** (révisé, 2026-11-02) : « Générer le planning »
+    ne remplace **jamais** par défaut le calendrier d'une ligne qui a une
+    génération `COMPLETED` — blocage `REGENERATION_NOT_CONFIRMED`, refusé par
+    le serveur avant tout job. Remplacer est une action distincte,
+    « Régénérer entièrement… » (menu « ⋯ », présentée en action
+    destructrice), qui exige de cocher une confirmation citant les gardes
+    remplacées ; le serveur n'accepte que `replaceExistingAssignments: true`
+    (booléen), enregistré sur le job (`planning_jobs.replace_existing`).
+    L'API technique par période (`POST /api/planning-periods/{id}/generations`)
+    applique la même règle (409 `regeneration_not_confirmed`). Dès qu'une
+    ligne de la période est générée, l'action principale de l'en-tête devient
+    « Générer les postes non pourvus ».
+  - **Membres arrivés après la génération** (révisé, 2026-11-02) : la
+    complétion d'une ligne les prend en compte. Avant le calcul, ils sont
+    **ajoutés** au snapshot de la génération courante
+    (`PlanningSnapshotService::appendLateMembers()`), capturés exactement
+    comme les membres d'origine — participation, indisponibilités,
+    non-participations telles qu'elles sont au moment de la complétion —
+    et marqués `planning_snapshot_members.captured_late_at`. Les lignes
+    figées avec le snapshot ne sont jamais modifiées ni supprimées ; un membre
+    n'est jamais ajouté deux fois. Ils entrent dans l'éligibilité (et la
+    revalidation live, `assignabilityError`) et dans les phases d'équité
+    comme les autres ; la population d'origine reste lisible (`captured_late_at
+    IS NULL`). S'applique aux deux complétions (celle-ci et « Compléter
+    automatiquement »). Un membre ajouté reste dans le snapshot même si la
+    complétion ne lui attribue rien : c'est la trace qu'il a été considéré.
+  - **Mesure, pas promesse** : `CurrentCalendarLedger` lit en SQL, hors cache
+    Doctrine, chaque affectation visible (règle D125) avant et après ; chaque
+    résultat donne les gardes conservées, ajoutées, toujours non pourvues et
+    **les affectations existantes modifiées — mesurées, 0 attendu**, par ligne
+    et pour tout le planning.
+  - **Job `FILL`** (D149) : `planning_jobs.target_line_stable_ids` (JSON) et
+    la contrainte de type élargie — migration `Version20261102090000`,
+    purement additive, `down()` refusé tant qu'un job `FILL` existe. FAILED
+    (`fill_incomplete`) dès qu'une ligne demandée n'a rien reçu par échec,
+    blocage ou calendrier modifié, les autres lignes gardant ce qu'elles ont
+    reçu. Contrôle SurgicalHub et fin des rappels de préparation (D210)
+    seulement quand une ligne reçoit sa première génération.
+  - **Endpoints** : `GET /api/plannings/{id}/fill-preview?period=` et
+    `POST /api/plannings/{id}/fill` (`lines`, règles de repos pour les
+    premières générations, `overrideStaleSurgicalHubData`), sous
+    `PlanningVoter::GENERATE`. Rien à faire → 409 `nothing_to_fill`, aucun job.
+  - **Interface** : « Générer les postes non pourvus » dans l'en-tête, avec un
+    aperçu par ligne (action, gardes protégées, gardes à compléter, cases à
+    cocher, règles de repos si une première génération) ; dans « Lignes de
+    garde », pour chaque ligne : gardes attribuées / non pourvues, « Générer
+    cette ligne » quand elle a quelque chose à recevoir, sinon la raison ;
+    « Règles de génération » pour chaque ligne ; bilan par ligne après le
+    calcul (« Voir le détail »). Les cases « Règles de repos » sont
+    décochées par défaut : aucun repos minimum n'est jamais supposé ni
+    activé automatiquement (aucun minimum légal n'a été défini pour MedVue).
+- **Alternatives écartées** : une génération ne contenant que les postes
+  vacants (rend les anciens invisibles, D125) ; recopier les anciennes
+  affectations dans une nouvelle génération (nouvelles identités, historique
+  dédoublé) ; REPAIR (non implémenté, et inutile : rien ne doit bouger) ;
+  régénérer une ligne entière « en gardant les manuelles » (une garde
+  attribuée par le solveur est tout autant protégée).
+- **Limites connues** : les règles de repos d'une complétion restent celles
+  de la génération de la ligne. Une réaffectation **manuelle** ne propose
+  toujours pas un membre arrivé après la génération tant qu'aucune complétion
+  ne l'a ajouté au snapshot. Le cas conditionnel (source et renfort générés
+  dans le même passage) est couvert depuis D223 par
+  `PlanningLineFillConditionalTest`.
+- **Tests** : `PlanningLineFillTest` (critère d'acceptation 30 + 30 avec une
+  réaffectation manuelle, « Générer cette ligne » sans régénérer la ligne
+  brouillon, trous et bloc de deux jours, rien à faire, double clic, droits),
+  `PlanningLineFillSafetyTest` (ligne publiée, échec du solveur sur une ligne,
+  personne d'éligible, indisponibilité déclarée pendant le calcul, verrou tenu
+  par une autre session, contrainte d'une ligne placée après dans l'ordre,
+  refus du lanceur) ; empreinte md5 de chaque ligne de 14 tables (gardes,
+  affectations, événements, générations, snapshots, publications, PDF, envois)
+  avant/après : 0 ligne existante modifiée. Mutations vérifiées : sans
+  `othersKept`, ou en régénérant au lieu de compléter, les tests échouent.
+  Frontend : `FillModal.test.tsx`, `LinesTab.test.tsx`, bannière `FILL`.
+  Détail : `docs/planning-generation.md` §37.
+- **Recette (2026-11-02, Chrome desktop, backend/worker/frontend du worktree sur une copie isolée de la base de dev)** :
+  Seniors générée (28 gardes), une garde réaffectée à la main, une garde retirée ; ligne Juniors ajoutée
+  (Jules, et Simone aussi Senior). « Lignes de garde » : « 27/28 gardes attribuées · 1 non pourvue » et
+  « Jamais générée · 28 gardes à pourvoir », « Générer cette ligne » sur chacune ; « Générer le planning »
+  avertit qu'il remplacerait les 27 gardes de Seniors ; « Générer les postes non pourvus » (sans règle de
+  repos) : Seniors 27 conservées + 1, Juniors 28, **0 modifiée** ; garde réaffectée toujours `MANUAL`,
+  personne en double. Empreinte md5 des 14 tables : 0 des 2 989 lignes existantes modifiée. CI verte
+  (backend 1 814 tests). Non vérifiés : 390 px (outil navigateur), cas conditionnel source + renfort dans le
+  même passage ; aperçu lent sur la pile de dev (7 à 20 s), à mesurer en conditions réelles.
+- **Recette 2 (2026-11-02, après la revue, copie isolée `app_uat_lg2`)** : migration finale
+  appliquée, annulée, réappliquée sur des données réelles ; « Générer le planning » absent dès
+  qu'une ligne est générée ; « Régénérer entièrement… » exige la confirmation cochée (non lancé) ;
+  ligne publiée exclue (case non cochable), un membre arrivé après la génération (Lou) reçoit le
+  seul trou possible, la réaffectation manuelle reste `MANUAL`, une ligne jamais générée reçoit sa
+  première génération ; 0 des 3 079 lignes existantes modifiée ; statistiques et calendrier
+  identiques au décompte en base après actualisation. Preuves : `docs/recette/d222/`.
+
+## D223 — Une ligne publiée n'est jamais complétée automatiquement, quel que soit le point d'entrée
+
+- **Contexte** — après D222, « Générer les postes non pourvus » excluait les
+  lignes publiées, mais le bouton historique « Compléter automatiquement »
+  du calendrier (D145, `POST /api/plannings/{id}/complete`) complétait encore
+  une ligne `PUBLISHED` : ses ajouts devenaient des modifications non
+  publiées, sans cohérence garantie avec le PDF stocké, la publication et
+  les notifications. Demande explicite (2026-11-02) : appliquer la même
+  règle partout, **côté serveur**, sans toucher aux modifications manuelles
+  après publication.
+- **Points d'entrée vérifiés** — la complétion automatique n'a que deux
+  appelants : le job `COMPLETE` (`RunPlanningJobHandler`, demandé par
+  `PlanningCompletionController` via `PlanningJobService::requestCompletion()`)
+  et `PlanningLineFillService` (« Générer les postes non pourvus » / « Générer
+  cette ligne », qui excluait déjà les lignes publiées). Aucune commande
+  console ni autre contrôleur n'appelle `PlanningCompletionService`.
+- **Décision** — la règle vit dans le service lui-même, donc vaut pour tout
+  appelant :
+  - `PlanningCompletionService::complete()` ignore une ligne dont la période
+    est `VALIDATED`, `PUBLISHED` ou `ARCHIVED` : résultat `published` /
+    `archived`, calendrier jamais lu pour ses trous, jamais écrit. Elle ne
+    bloque aucune autre ligne.
+  - Le statut est relu **sous le verrou du calendrier** au moment d'écrire
+    (`PlanningPeriodRepository::statusNow()`, règle D197) : une ligne publiée
+    pendant le calcul rend la complétion obsolète (`calendar_changed`), rien
+    n'est écrit.
+  - L'API refuse **avant tout job** quand toutes les lignes générées de la
+    période sont verrouillées : 409 `published_lines_not_completed` (avec
+    les lignes concernées), aucun message au worker. Sinon le job tourne sur
+    les autres lignes et nomme celle qu'il a laissée telle quelle.
+  - `/result` expose `periodStatus` par ligne. Le bouton du calendrier est
+    indisponible quand seules des lignes publiées ont des trous, et dit
+    pourquoi à côté de lui (texte visible, `title`, `aria-describedby`) :
+    « Seniors est publiée : elle n'est jamais complétée automatiquement.
+    Attribuez ses gardes une à une, puis republiez. » Le bandeau du job
+    nomme la ligne laissée telle quelle au lieu de « rien à compléter ».
+- **Inchangé, volontairement** — réaffectation et retrait manuels après
+  publication (D143), historisés (`DutyAssignmentEvent.wasPublished`), avec
+  republication explicite (D172) ; échanges (D178). Seule la complétion ou
+  la génération **automatique** d'une ligne publiée est interdite.
+- **Remplace** — l'attente « une période publiée reste complétable » de
+  `docs/planning-cycles.md` I8 et de D145/D197 (complétion d'un calendrier
+  publié enregistrée `wasPublished`). Les tests qui la vérifiaient attendent
+  désormais le refus (`PlanningCompletionControllerTest`,
+  `PlanningPublicationWorkflowTest`, `PlanningCycleGenerationTest`,
+  `PlanningCycleReassignmentTest`, `PlanningJobControllerTest`,
+  `WeeklyDutyReminderUnpublishedChangesTest` — le trou y est rempli à la
+  main).
+- **Aussi dans ce lot** :
+  - **Source et renfort générés dans le même passage** :
+    `PlanningLineFillConditionalTest` (OR-Tools réel). Les deux lignes jamais
+    générées sont générées dans un seul job, la source d'abord. Invariants
+    vérifiés : un titulaire par garde, personne sur la source et son renfort
+    le même jour, renfort requis exactement quand le titulaire de la source le
+    déclenche (bloc vendredi-dimanche décidé en entier), aucun renfort tenu
+    sans besoin, rien que le préflight de publication rejetterait, relance sans
+    effet. Cas forcé : seule la titulaire de la garde source pourrait renforcer
+    → le renfort reste non pourvu (compté), jamais attribué à elle.
+  - **Aperçu lent (7 à 20 s)** : attente visible et annoncée (`role=status`,
+    « Analyse des lignes en cours… Cela peut prendre jusqu'à une vingtaine de
+    secondes. Rien n'est modifié pendant l'analyse. »), lancement indisponible
+    pendant l'analyse. Contre les calculs simultanés : bouton désactivé et
+    garde `inFlight` au clic, boutons de l'en-tête et « Générer cette ligne »
+    désactivés tant qu'un job tourne, et côté serveur un seul job actif par
+    planning (index partiel) plus le verrou moteur.
+  - **Affichage à 390 px** (recette 3) : trois défauts trouvés et corrigés —
+    le bouton principal « Générer les postes non pourvus » débordait de la
+    marge gauche (libellé plus long, `nowrap`) ; le bilan par ligne cachait la
+    colonne « Affectations existantes modifiées » derrière un défilement
+    horizontal (désormais une carte par ligne, chaque nombre étiqueté) ; une
+    complétion qui n'attribuait rien affichait « Postes vacants complétés »
+    (désormais « Personne n'a pu être attribué : postes vacants inchangés »).
+- **Tests** — `PlanningPublishedLineCompletionTest` (5) : API refusée sans job
+  ni message ni e-mail, PDF stocké identique octet pour octet, empreinte md5
+  des 14 tables inchangée, même refus pour un ADMIN ; réaffectation manuelle
+  d'une ligne publiée possible, tracée, montrée comme modification non
+  publiée puis republiée explicitement ; ligne brouillon complétée à côté
+  d'une ligne publiée laissée telle quelle ; publication pendant le calcul ;
+  chaque statut verrouillé. Mutations vérifiées : sans le refus de l'API, sans
+  l'exclusion dans le service, ou sans la relecture sous verrou, 4 des 5 tests
+  échouent. Frontend : `PlanningCalendar.publishedCompletion.test.tsx`,
+  bandeau, attente de l'aperçu, bilan.
+- **Recette 3 (2026-11-02, Chrome, copie isolée `app_uat_lg3` de
+  `app_uat_lg2`)** — détail et captures : `docs/recette/d222/README.md`.
+- **Limites** — une ligne publiée qui a des trous ne peut être complétée qu'à
+  la main, garde par garde ; une ligne avec des postes non pourvus ne peut
+  toujours pas être publiée (D106), donc « tout publier » reste impossible
+  tant qu'un renfort requis n'a pas de titulaire.

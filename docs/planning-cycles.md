@@ -108,9 +108,10 @@ base). Une `PlanningPeriod` reste la période *d'une ligne* dans un cycle.
   sans aucune garde, quand une période vierge la suit et sans couper de bloc —
   confirmée par le créateur avec une raison, tracée
   (`planning_cycle_rectifications`) ; le calendrier publié n'est pas touché.
-  Elle reste réaffectable (D143), échangeable (D178) et complétable
-  (« Compléter automatiquement », trous uniquement) comme aujourd'hui ; chaque
-  changement reste tracé (`DutyAssignmentEvent`, `wasPublished`).
+  Elle reste réaffectable (D143) et échangeable (D178) ; chaque changement
+  reste tracé (`DutyAssignmentEvent`, `wasPublished`). Elle n'est **jamais
+  complétée automatiquement** (D223, remplace « complétable » écrit ici
+  auparavant) : ses trous s'attribuent à la main, puis on republie.
 - I9. Snapshots, générations, entrées et documents de publication,
   notifications et événements d'audit sont immuables (triggers append-only
   existants inchangés). Aucun identifiant stable ne change.

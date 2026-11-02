@@ -72,8 +72,11 @@ final class PlanningLaunchController
             return $this->invalidScope();
         }
 
+        // docs/decisions.md D222: ?replaceExisting=1 — what an explicitly confirmed regeneration would do.
+        $replaceExisting = '1' === $request->query->get('replaceExisting');
+
         return new JsonResponse([
-            ...$this->preflightToArray($planning, $this->launcher->preflight($planning, $cycle, $scope)),
+            ...$this->preflightToArray($planning, $this->launcher->preflight($planning, $cycle, $scope, null, $replaceExisting)),
             'period' => $this->cyclePresenter->reference($cycle),
         ]);
     }
@@ -101,7 +104,9 @@ final class PlanningLaunchController
         }
 
         try {
-            $requested = $this->jobService->requestGeneration($planning, $user, $restPolicy ?? RestPolicyOptions::none(), $override, $cycle, $scope);
+            // docs/decisions.md D222: replacing the calendar of a line already generated is an explicit choice, never implied.
+            $replaceExisting = \is_array($body) && true === ($body['replaceExistingAssignments'] ?? null);
+            $requested = $this->jobService->requestGeneration($planning, $user, $restPolicy ?? RestPolicyOptions::none(), $override, $cycle, $scope, $replaceExisting);
         } catch (SurgicalHubDataStaleException $exception) {
             return new JsonResponse([
                 'error' => $exception->overrideRefused ? 'surgicalhub_override_forbidden' : 'surgicalhub_data_stale',

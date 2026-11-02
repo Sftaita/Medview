@@ -16,6 +16,11 @@ final readonly class LaunchLineReadiness
     public const KEEP = 'KEEP';
     /** Nothing demanded of it in the period (LineApplicability::NO_DEMAND): left out, untouched, never a blocker. */
     public const EXCLUDE = 'EXCLUDE';
+    /**
+     * docs/decisions.md D222: a launch restricted to other lines — never generated, never read for a blocker, never
+     * materialized; its current calendar is a commitment of the lines generated, wherever it stands in the order.
+     */
+    public const OUT_OF_SCOPE = 'OUT_OF_SCOPE';
 
     /**
      * @param array<string, int> $familyUnitCounts REQUIRED DutyUnit count per
@@ -39,7 +44,7 @@ final readonly class LaunchLineReadiness
          * decided only once that line is assigned, so none is counted in $familyUnitCounts — never a guessed number.
          */
         public ?PlanningLine $demandSourceLine = null,
-        /** docs/decisions.md D195: GENERATE, KEEP or EXCLUDE. */
+        /** docs/decisions.md D195: GENERATE, KEEP or EXCLUDE — or OUT_OF_SCOPE in a launch restricted to other lines (D222). */
         public string $decision = self::GENERATE,
         /** docs/decisions.md D194/D195: why the line takes part in the period, or not. */
         public ?LineApplicability $applicability = null,

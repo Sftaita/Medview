@@ -6,6 +6,7 @@ namespace App\Service;
 
 use App\Entity\PlanningGeneration;
 use App\Entity\PlanningLine;
+use App\Entity\PlanningPeriodStatus;
 use App\Fairness\CoverageStatus;
 
 /**
@@ -34,6 +35,8 @@ final readonly class PlanningResultLine
         public int $superfluousDutyCount = 0,
         /** docs/decisions.md D166 — conditional duties the live demand does not require (held or not): never "to cover", never "missing". */
         public int $notRequiredDutyCount = 0,
+        /** docs/decisions.md D223 — the status of the line's period read (null: no period); a locked line is never completed automatically. */
+        public ?PlanningPeriodStatus $periodStatus = null,
     ) {
     }
 }

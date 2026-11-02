@@ -50,7 +50,8 @@ final class PlanningResultControllerTest extends WebTestCase
     private function launch(KernelBrowser $client, array $s, ?string $token = null): array
     {
         // Asynchronous since docs/decisions.md D149: returns the finished job's outcome (`lines`).
-        $response = $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", [], $token ?? $s['creator']);
+        // docs/decisions.md D222: a launch on a planning already generated is a deliberate regeneration here.
+        $response = $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/generations", $this->confirmingRegeneration($s['planningId']), $token ?? $s['creator']);
         if (202 !== $client->getResponse()->getStatusCode()) {
             return $response;
         }
