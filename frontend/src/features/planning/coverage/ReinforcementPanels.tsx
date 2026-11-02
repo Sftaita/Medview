@@ -12,6 +12,13 @@ const DATE = new Intl.DateTimeFormat('fr-BE', {
   timeZone: 'UTC',
 })
 
+/** The API gives a period's end exclusive: the last day is the one before. */
+function lastDay(endsAt: string): string {
+  const d = new Date(`${endsAt}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() - 1)
+  return d.toISOString().slice(0, 10)
+}
+
 function day(date: string): string {
   return DATE.format(new Date(`${date}T00:00:00Z`))
 }
@@ -164,7 +171,7 @@ export function DemandPreviewPanel({
               <section key={entry.period.stableId} className="cov-preview__period">
                 <h4>
                   {entry.period.number ? `Période ${entry.period.number}` : 'Période'} —{' '}
-                  {day(entry.period.startsAt)} au {day(entry.period.endsAt)}
+                  {day(entry.period.startsAt)} au {day(lastDay(entry.period.endsAt))}
                 </h4>
                 {!entry.sourceGenerated ? (
                   <p className="cov-help">

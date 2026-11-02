@@ -342,6 +342,7 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
 
     const result = await screen.findByRole('status', { name: 'Gardes de renfort nécessaires' })
     expect(result).toHaveTextContent('5 gardes de renfort dont 2 blocs')
+    expect(result).toHaveTextContent('Période 1 — jeu. 1 oct. au jeu. 28 janv.') // end exclusive: the last day shown
     expect(result).toHaveTextContent('Bob Claes de garde')
     expect(result).toHaveTextContent('n’est pas encore générée sur cette période')
     const sent = api.requests('POST', `${POLICY}/preview`)[0].body as { triggers: { userStableId: string }[] }
