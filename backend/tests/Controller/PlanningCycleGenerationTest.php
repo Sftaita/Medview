@@ -178,7 +178,8 @@ final class PlanningCycleGenerationTest extends WebTestCase
      */
     private function generatePeriod(int $number, array $body = []): array
     {
-        $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/generations", ['period' => $this->periodId($number)] + $body, $this->s['creator']);
+        // docs/decisions.md D222: generating a period again is a deliberate regeneration in these tests.
+        $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/generations", $this->confirmingRegeneration($this->s['planningId'], ['period' => $this->periodId($number)] + $body), $this->s['creator']);
         self::assertResponseStatusCodeSame(202, (string) $this->client->getResponse()->getContent());
         self::assertSame(1, $this->runQueuedPlanningJobs());
 
@@ -592,14 +593,21 @@ final class PlanningCycleGenerationTest extends WebTestCase
         $this->assertError(409, 'multiple_periods_not_supported');
     }
 
-    public function testAPublishedPeriodIsStillCompletedRespectingTheNextPeriod(): void
+    /**
+     * docs/decisions.md D223 (supersedes "a published period stays
+     * completable", I8): the completion of the published period is refused;
+     * its hole is filled by hand, and the candidates still respect the person
+     * on duty right after, in period 2.
+     */
+    public function testAPublishedPeriodIsNeverCompletedAndItsHoleIsFilledByHandRespectingTheNextPeriod(): void
     {
         $this->addDuties(1, [['2027-04-30 20:00', '2027-05-01 08:00']]);
         $this->generatePeriod(1, self::REST);
         $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/publish", [], $this->s['creator']);
         self::assertResponseIsSuccessful();
         // "Retirer l'affectation" while the planning still has a single period: a hole in the published period.
-        $this->unassignDuty($this->client, $this->s, $this->dutyOn($this->s['planningId'], '2027-04-30'));
+        $duty = $this->dutyOn($this->s['planningId'], '2027-04-30');
+        $this->unassignDuty($this->client, $this->s, $duty);
         self::assertResponseIsSuccessful();
         $this->createPeriod('2027-08-01');
         $this->addDuties(2, [['2027-05-01 08:00', '2027-05-01 20:00']]);
@@ -609,18 +617,20 @@ final class PlanningCycleGenerationTest extends WebTestCase
         self::assertSame('alice@example.com', $this->holderOn(2, '2027-05-01'));
         $period2 = $this->fingerprint(2);
 
-        $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/complete", ['period' => $this->periodId(1)], $this->s['creator']);
-        self::assertResponseStatusCodeSame(202, (string) $this->client->getResponse()->getContent());
-        self::assertSame(1, $this->runQueuedPlanningJobs());
-        $job = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/jobs/latest", token: $this->s['creator'])['job'];
+        $refused = $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/complete", ['period' => $this->periodId(1)], $this->s['creator']);
+        self::assertResponseStatusCodeSame(409, (string) $this->client->getResponse()->getContent());
+        self::assertSame('published_lines_not_completed', $refused['error']);
+        self::assertSame(0, $this->runQueuedPlanningJobs());
+        self::assertNull($this->holderOn(1, '2027-04-30'), 'a published period is never completed automatically (D223)');
 
-        self::assertSame('SUCCEEDED', $job['status'], json_encode($job, \JSON_THROW_ON_ERROR));
-        self::assertSame(1, $job['period']['number']);
-        $holder = $this->holderOn(1, '2027-04-30');
-        self::assertNotNull($holder, 'a published period stays completable (I8)');
-        self::assertNotSame('alice@example.com', $holder, 'never the person on duty right after, in period 2');
+        $candidates = array_column($this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/duties/{$duty}/reassignment-candidates", token: $this->s['creator'])['candidates'], 'teamMemberStableId');
+        self::assertNotContains($this->memberStableIdIn($this->s['planningId'], 'alice@example.com'), $candidates, 'never the person on duty right after, in period 2');
+        self::assertNotSame([], $candidates);
+        $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/duties/{$duty}/reassign", ['teamMemberStableId' => $candidates[0], 'expectedCurrentTeamMemberStableId' => null], $this->s['creator']);
+        self::assertResponseIsSuccessful();
+        self::assertNotNull($this->holderOn(1, '2027-04-30'));
         self::assertSame(1, (int) $this->db()->fetchOne('SELECT COUNT(*) FROM duty_assignment_events WHERE was_published AND new_assignment_id IS NOT NULL'), 'recorded as a change of the published calendar');
-        self::assertSame($period2, $this->fingerprint(2), 'completing period 1 never touches period 2');
+        self::assertSame($period2, $this->fingerprint(2), 'filling period 1 never touches period 2');
     }
 
     /**

@@ -18,9 +18,20 @@ use App\Entity\PlanningPeriod;
  * later line's snapshot freezes (D161 order unchanged), the holders a
  * conditional line's demand is decided from (D164), and the final calendar
  * checked before writing.
+ *
+ * $othersKept (docs/decisions.md D222): a launch restricted to some lines
+ * ("Générer cette ligne", "Générer les postes non pourvus") regenerates
+ * nothing else — every other line of the period keeps its current calendar,
+ * which is then a commitment of the lines generated WHEREVER it stands in
+ * the resolution order, never only when it precedes them (D161).
  */
 final class PlannedCalendar
 {
+    public function __construct(
+        public readonly bool $othersKept = false,
+    ) {
+    }
+
     /** @var array<int, PlanningGeneration> by period id */
     private array $generations = [];
 

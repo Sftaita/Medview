@@ -75,7 +75,9 @@ final class PlanningGenerationScopeTest extends WebTestCase
      */
     private function preflight(?string $scope = null, ?string $period = null): array
     {
-        $query = array_filter(['scope' => $scope, 'period' => $period]);
+        // docs/decisions.md D222: as a confirmed regeneration would see it — the rules checked here (D195) hold even
+        // when the manager explicitly confirms replacing the calendars; REGENERATION_NOT_CONFIRMED has its own tests.
+        $query = array_filter(['scope' => $scope, 'period' => $period, 'replaceExisting' => '1']);
         $preflight = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/generation-preflight".([] !== $query ? '?'.http_build_query($query) : ''), token: $this->s['creator']);
         self::assertResponseIsSuccessful();
 

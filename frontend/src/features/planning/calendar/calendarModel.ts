@@ -34,14 +34,29 @@ export type CalendarMonth = {
 export type CalendarModel = {
   lines: { stableId: string; name: string }[]
   months: CalendarMonth[]
-  /** What "Compléter automatiquement" can act on: uncovered duties and missing required reinforcements. */
+  /** Uncovered duties and missing required reinforcements, every line included. */
   uncoveredCount: number
+  /**
+   * docs/decisions.md D223 — of which: on a line "Compléter automatiquement"
+   * may act on. A published, validated or archived line is never completed
+   * automatically: its holes are given one by one.
+   */
+  completableCount: number
+  /** The lines whose holes are left to a manual assignment (published…), in line order. */
+  lockedLinesWithHoles: string[]
   /** docs/decisions.md D167 — of which: reinforcements required but not assigned. */
   missingReinforcementCount: number
   /** Reinforcements whose need cannot be evaluated (never completable, never "not required"). */
   undeterminedCount: number
   /** Reinforcements no longer required but still held — real assignments, a warning only. */
   superfluousCount: number
+}
+
+/** docs/decisions.md D223: a line never completed automatically. */
+export function isLocked(line: Pick<PlanningResultLine, 'periodStatus'>): boolean {
+  return (
+    line.periodStatus === 'VALIDATED' || line.periodStatus === 'PUBLISHED' || line.periodStatus === 'ARCHIVED'
+  )
 }
 
 /** Pure calendar arithmetic on "YYYY-MM-DD" strings — no timezone involved. */
@@ -85,14 +100,24 @@ export function buildCalendar(
     return map
   })
 
-  // Only what "Compléter automatiquement" can act on: never a reinforcement nobody needs, never an undetermined one.
+  // Never a reinforcement nobody needs, never an undetermined one.
   let uncoveredCount = 0
+  let completableCount = 0
+  const lockedLinesWithHoles: string[] = []
   let missingReinforcementCount = 0
   let undeterminedCount = 0
   let superfluousCount = 0
   for (const line of generated) {
-    uncoveredCount += line.duties.filter((duty) => !duty.covered && isShown(duty) && !isUndetermined(duty)).length
-    missingReinforcementCount += line.duties.filter((duty) => duty.demand?.state === 'REQUIRED_UNASSIGNED').length
+    const holes = line.duties.filter((duty) => !duty.covered && isShown(duty) && !isUndetermined(duty)).length
+    uncoveredCount += holes
+    if (isLocked(line)) {
+      if (holes > 0) lockedLinesWithHoles.push(line.lineName)
+    } else {
+      completableCount += holes
+    }
+    missingReinforcementCount += line.duties.filter(
+      (duty) => duty.demand?.state === 'REQUIRED_UNASSIGNED',
+    ).length
     undeterminedCount += line.duties.filter(isUndetermined).length
     superfluousCount += line.duties.filter((duty) => duty.demand?.state === 'NOT_REQUIRED_ASSIGNED').length
   }
@@ -128,6 +153,8 @@ export function buildCalendar(
     lines: generated.map((line) => ({ stableId: line.lineStableId, name: line.lineName })),
     months,
     uncoveredCount,
+    completableCount,
+    lockedLinesWithHoles,
     missingReinforcementCount,
     undeterminedCount,
     superfluousCount,
@@ -169,13 +196,33 @@ export function presentDuty(duty: PlanningResultDuty): DutyPresentation {
     case 'REQUIRED_ASSIGNED':
       return { gap: null, tag: null, tone: 'normal', spoken: 'renfort requis, attribué' }
     case 'REQUIRED_UNASSIGNED':
-      return { gap: 'Renfort requis — non attribué', tag: null, tone: 'missing', spoken: 'renfort requis, non attribué' }
+      return {
+        gap: 'Renfort requis — non attribué',
+        tag: null,
+        tone: 'missing',
+        spoken: 'renfort requis, non attribué',
+      }
     case 'NOT_REQUIRED_ASSIGNED':
-      return { gap: null, tag: 'Renfort non requis', tone: 'superfluous', spoken: 'renfort non requis, encore attribué' }
+      return {
+        gap: null,
+        tag: 'Renfort non requis',
+        tone: 'superfluous',
+        spoken: 'renfort non requis, encore attribué',
+      }
     case 'UNDETERMINED':
       return held
-        ? { gap: null, tag: 'Renfort non évalué', tone: 'undetermined', spoken: 'besoin de renfort non évaluable' }
-        : { gap: 'Renfort non évalué', tag: null, tone: 'undetermined', spoken: 'besoin de renfort non évaluable' }
+        ? {
+            gap: null,
+            tag: 'Renfort non évalué',
+            tone: 'undetermined',
+            spoken: 'besoin de renfort non évaluable',
+          }
+        : {
+            gap: 'Renfort non évalué',
+            tag: null,
+            tone: 'undetermined',
+            spoken: 'besoin de renfort non évaluable',
+          }
     case 'NOT_REQUIRED_UNASSIGNED':
       // Never reaches the calendar (isShown), kept for completeness.
       return { gap: null, tag: 'Pas de renfort', tone: 'normal', spoken: 'pas de renfort nécessaire' }

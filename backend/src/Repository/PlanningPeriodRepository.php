@@ -40,8 +40,17 @@ class PlanningPeriodRepository extends ServiceEntityRepository
      */
     public function isPublishedNow(PlanningPeriod $period): bool
     {
+        return PlanningPeriodStatus::PUBLISHED === $this->statusNow($period);
+    }
+
+    /**
+     * The status of $period in the database right now, under the same rule
+     * as isPublishedNow() (docs/decisions.md D223).
+     */
+    public function statusNow(PlanningPeriod $period): ?PlanningPeriodStatus
+    {
         $status = $this->getEntityManager()->getConnection()->fetchOne('SELECT status FROM planning_periods WHERE id = ?', [$period->getId()]);
 
-        return PlanningPeriodStatus::PUBLISHED->value === $status;
+        return \is_string($status) ? PlanningPeriodStatus::from($status) : null;
     }
 }

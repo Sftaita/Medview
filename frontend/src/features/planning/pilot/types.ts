@@ -127,6 +127,8 @@ export type PreflightIssueCode =
   | 'BLOCK_CUT_BY_PERIOD_BOUNDARY'
   | 'HISTORICAL_BLOCK_REMAINDER'
   | 'PERIOD_END_CUTS_BLOCK'
+  // docs/decisions.md D222: a generated line is only generated again on explicit confirmation.
+  | 'REGENERATION_NOT_CONFIRMED'
 
 export type PreflightIssue = {
   code: PreflightIssueCode
@@ -268,14 +270,69 @@ export type PlanningJobStatus = 'QUEUED' | 'RUNNING' | 'SUCCEEDED' | 'FAILED'
  */
 export type PlanningJob = {
   stableId: string
-  kind: 'GENERATE' | 'COMPLETE'
+  kind: 'GENERATE' | 'COMPLETE' | 'FILL'
   status: PlanningJobStatus
   requestedBy: { firstName: string; lastName: string }
   createdAt: string
   startedAt: string | null
   finishedAt: string | null
   failureCode: string | null
-  outcome: { lines: unknown[]; coverage: 'COMPLETE' | 'INCOMPLETE' | null } | null
+  outcome: {
+    lines: unknown[]
+    coverage: 'COMPLETE' | 'INCOMPLETE' | null
+    /** FILL only (docs/decisions.md D222): measured on the visible calendar before and after the run. */
+    modifiedExistingCount?: number
+    keptExistingCount?: number
+    addedCount?: number
+  } | null
+}
+
+/**
+ * "Générer les postes non pourvus" / "Générer cette ligne" (docs/decisions.md
+ * D222): what would happen to one line. GENERATE = its first generation (it
+ * never had one); COMPLETE = its holes only, every assignment it holds kept;
+ * NOTHING = nothing uncovered; EXCLUDED = never touched (`reason`).
+ */
+export type FillLinePlan = {
+  lineStableId: string
+  lineName: string
+  lineType: 'PRIMARY' | 'SECONDARY'
+  periodStatus: string
+  generated: boolean
+  action: 'GENERATE' | 'COMPLETE' | 'NOTHING' | 'EXCLUDED'
+  reason: string | null
+  selectable: boolean
+  selectedByDefault: boolean
+  /** Null when not known yet (a reinforcement line never generated). */
+  requiredDutyCount: number | null
+  coveredRequiredDutyCount: number
+  uncoveredRequiredDutyCount: number | null
+  protectedAssignmentCount: number
+  blockers: string[]
+  warnings: string[]
+  afterSource: boolean
+  /** Members who joined after the line's generation, taken into account by its completion (D222). */
+  lateMemberCount?: number
+}
+
+export type FillPreview = {
+  lines: FillLinePlan[]
+  blockers: string[]
+  needsRestPolicy: boolean
+}
+
+/** What a FILL job did on one line — counts measured, never assumed. */
+export type FillLineResult = {
+  lineStableId: string
+  lineName: string
+  action: FillLinePlan['action']
+  status: 'done' | 'nothing_to_do' | 'not_selected' | 'excluded' | 'blocked' | 'failed' | 'calendar_changed'
+  reason: string | null
+  keptCount: number
+  modifiedCount: number
+  addedCount: number
+  remainingUncoveredCount: number | null
+  blockers: string[]
 }
 
 /** POST .../generations and .../complete: 202 with the queued job. */

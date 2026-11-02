@@ -95,6 +95,34 @@ describe('PlanningJobBanner (docs/decisions.md D149)', () => {
     )
   })
 
+  it('says which published line a completion left alone, never "rien à compléter" (D223)', () => {
+    const done = job({
+      kind: 'COMPLETE',
+      status: 'SUCCEEDED',
+      outcome: {
+        lines: [
+          {
+            lineName: 'Seniors',
+            status: 'published',
+            filledUnitCount: 0,
+            remainingUncoveredRequiredUnitCount: 0,
+          },
+          {
+            lineName: 'Juniors',
+            status: 'nothing_to_complete',
+            filledUnitCount: 0,
+            remainingUncoveredRequiredUnitCount: 0,
+          },
+        ],
+        coverage: 'COMPLETE',
+      },
+    })
+    renderBanner(done, done)
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Aucune garde attribuée. Seniors : ligne publiée, jamais complétée automatiquement.',
+    )
+  })
+
   it('says when a completion left a reinforcement alone because its demand cannot be evaluated (D165)', () => {
     const done = job({
       kind: 'COMPLETE',
@@ -127,5 +155,64 @@ describe('PlanningJobBanner (docs/decisions.md D149)', () => {
       />,
     )
     expect(container).toBeEmptyDOMElement()
+  })
+
+  it('names a fill as such while it runs (docs/decisions.md D222)', () => {
+    renderBanner(job({ kind: 'FILL' }))
+    expect(screen.getByRole('status', { name: 'Calcul en cours' })).toHaveTextContent(
+      'Génération des postes non pourvus en cours…',
+    )
+  })
+
+  it('announces a finished fill with the measured counts — existing assignments modified first — and its detail', () => {
+    const done = job({
+      kind: 'FILL',
+      status: 'SUCCEEDED',
+      outcome: {
+        coverage: 'INCOMPLETE',
+        modifiedExistingCount: 0,
+        keptExistingCount: 30,
+        addedCount: 27,
+        lines: [
+          {
+            lineStableId: 'l2',
+            lineName: 'Juniors',
+            action: 'GENERATE',
+            status: 'done',
+            reason: null,
+            keptCount: 0,
+            modifiedCount: 0,
+            addedCount: 27,
+            remainingUncoveredCount: 3,
+            blockers: [],
+          },
+        ],
+      },
+    })
+    const { onShowDetail } = renderBanner(done, done)
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '27 gardes attribuées, 30 affectations existantes conservées, 0 modifiée. 3 gardes toujours non pourvues.',
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Voir le détail' }))
+    expect(onShowDetail).toHaveBeenCalledWith(done)
+  })
+
+  it('says a fill that failed on a line kept what the other lines received', () => {
+    const { onRelaunch } = renderBanner(
+      job({
+        kind: 'FILL',
+        status: 'FAILED',
+        failureCode: 'fill_incomplete',
+        outcome: { coverage: 'INCOMPLETE', modifiedExistingCount: 0, lines: [] },
+      }),
+    )
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Les postes non pourvus n’ont pas tous pu être générés.',
+    )
+    expect(screen.getByRole('alert')).toHaveTextContent('Aucune affectation existante n’a été modifiée (0).')
+    fireEvent.click(screen.getByRole('button', { name: 'Relancer' }))
+    expect(onRelaunch).toHaveBeenCalledWith('FILL')
   })
 })

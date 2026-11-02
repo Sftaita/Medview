@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Icon } from '../../../components/Icon'
 import { Overlay } from '../../../components/Overlay'
 import { ApiError } from '../../../lib/apiClient'
-import { fetchGenerationPreflight, launchGeneration } from './api'
+import { fetchFillPreview, fetchGenerationPreflight, launchGeneration } from './api'
+import { NO_REST_POLICY, surgicalHubRefusal } from './generationShared'
 import { formatDateTime, formatLongDate, formatRange, overdueMessage, plural } from './format'
 import type {
   GenerationPreflight,
@@ -17,13 +18,6 @@ import type {
   StructuralDiagnosticEntry,
   UnsatDiagnosticsPayload,
 } from './types'
-
-const NO_REST_POLICY: RestPolicyChoice = {
-  legalMinRestEnabled: false,
-  legalMinRestHours: null,
-  teamMinRestEnabled: false,
-  teamMinRestHours: null,
-}
 
 /** The period a generation works on (docs/planning-cycles.md §7.4): named in every request, shown in the dialog. */
 export type GenerationPeriod = {
@@ -44,6 +38,11 @@ type Props = {
   onClose: () => void
   /** The generation was accepted (a QUEUED job, docs/decisions.md D149): the page follows it. */
   onLaunched: (job: PlanningJob) => void
+  /**
+   * docs/decisions.md D222: "Régénérer entièrement" — the lines already generated are generated again, their
+   * calendar replaced. Only with this flag, and only once the manager ticked the confirmation.
+   */
+  replace?: boolean
 }
 
 /**
@@ -59,7 +58,7 @@ type Props = {
  * closes, and the page follows the job (PlanningJobBanner) — the solve runs
  * in the worker, however long it takes.
  */
-export function GenerationModal({ planningStableId, period, onClose, onLaunched }: Props) {
+export function GenerationModal({ planningStableId, period, onClose, onLaunched, replace = false }: Props) {
   const [preflight, setPreflight] = useState<GenerationPreflight | null>(null)
   // docs/decisions.md D195: generate only the lines not locked yet — chosen by the manager in this dialog, never implied.
   const [scope, setScope] = useState<'unlocked_lines' | undefined>(undefined)
@@ -67,6 +66,26 @@ export function GenerationModal({ planningStableId, period, onClose, onLaunched 
   const [launching, setLaunching] = useState(false)
   const [launchError, setLaunchError] = useState<string | null>(null)
   const [restPolicy, setRestPolicy] = useState<RestPolicyChoice>(NO_REST_POLICY)
+  // docs/decisions.md D222: how many assignments each line holds now — a line regenerated loses its calendar.
+  const [heldByLine, setHeldByLine] = useState<Record<string, number>>({})
+  const [confirmed, setConfirmed] = useState(false)
+  useEffect(() => {
+    let cancelled = false
+    fetchFillPreview(planningStableId, period?.stableId)
+      .then((preview) => {
+        if (!cancelled) {
+          setHeldByLine(
+            Object.fromEntries(
+              preview.lines.map((line) => [line.lineStableId, line.protectedAssignmentCount]),
+            ),
+          )
+        }
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [planningStableId, period?.stableId])
   // docs/surgicalhub-integration.md §7.5 (D8): outdated SurgicalHub leave blocks; only the creator may go on, explicitly.
   const [stale, setStale] = useState<SurgicalHubStaleRefusal | null>(null)
   const [override, setOverride] = useState(false)
@@ -80,7 +99,11 @@ export function GenerationModal({ planningStableId, period, onClose, onLaunched 
 
   useEffect(() => {
     let cancelled = false
-    fetchGenerationPreflight(planningStableId, { periodStableId: period?.stableId, scope })
+    fetchGenerationPreflight(planningStableId, {
+      periodStableId: period?.stableId,
+      scope,
+      replaceExisting: replace,
+    })
       .then((value) => {
         if (!cancelled) setPreflight(value)
       })
@@ -90,7 +113,7 @@ export function GenerationModal({ planningStableId, period, onClose, onLaunched 
     return () => {
       cancelled = true
     }
-  }, [planningStableId, period?.stableId, scope])
+  }, [planningStableId, period?.stableId, scope, replace])
 
   async function generate() {
     if (inFlight.current) {
@@ -107,6 +130,7 @@ export function GenerationModal({ planningStableId, period, onClose, onLaunched 
         {
           periodStableId: period?.stableId,
           scope,
+          replaceExisting: replace && confirmed,
         },
       )
       onLaunched(job)
@@ -143,7 +167,13 @@ export function GenerationModal({ planningStableId, period, onClose, onLaunched 
 
   return (
     <Overlay
-      title={period?.named ? `Générer la période ${period.number} ?` : 'Générer le planning ?'}
+      title={
+        replace
+          ? 'Régénérer entièrement ?'
+          : period?.named
+            ? `Générer la période ${period.number} ?`
+            : 'Générer le planning ?'
+      }
       onClose={onClose}
       dismissible={!launching}
       footer={
@@ -165,11 +195,18 @@ export function GenerationModal({ planningStableId, period, onClose, onLaunched 
                   !preflight ||
                   !preflight.canGenerate ||
                   launching ||
+                  (replace && !confirmed) ||
                   (stale !== null && (!stale.canOverride || !override))
                 }
                 aria-busy={launching}
               >
-                {launching ? 'Envoi…' : stale ? 'Générer avec ces données' : confirmLabel}
+                {launching
+                  ? 'Envoi…'
+                  : stale
+                    ? 'Générer avec ces données'
+                    : replace
+                      ? 'Régénérer et remplacer'
+                      : confirmLabel}
               </button>
             </>
           )}
@@ -240,6 +277,10 @@ export function GenerationModal({ planningStableId, period, onClose, onLaunched 
       {preflight && !launchedCaveats && (
         <PreflightBody
           preflight={preflight}
+          heldByLine={heldByLine}
+          replace={replace}
+          confirmed={confirmed}
+          onConfirmedChange={setConfirmed}
           period={period}
           restPolicy={restPolicy}
           onRestPolicyChange={setRestPolicy}
@@ -258,12 +299,20 @@ export function GenerationModal({ planningStableId, period, onClose, onLaunched 
 
 function PreflightBody({
   preflight,
+  heldByLine,
+  replace,
+  confirmed,
+  onConfirmedChange,
   period,
   restPolicy,
   onRestPolicyChange,
   disabled,
 }: {
   preflight: GenerationPreflight
+  heldByLine: Record<string, number>
+  replace: boolean
+  confirmed: boolean
+  onConfirmedChange: (next: boolean) => void
   period?: GenerationPeriod
   restPolicy: RestPolicyChoice
   onRestPolicyChange: (next: RestPolicyChoice) => void
@@ -271,6 +320,10 @@ function PreflightBody({
 }) {
   const familyCounts = mergedFamilyUnitCounts(preflight)
   const reinforcementLines = preflight.lines.filter((line) => line.demandSourceLineName)
+  const regenerated = replace
+    ? preflight.lines.filter((line) => line.decision === 'GENERATE' && (heldByLine[line.stableId] ?? 0) > 0)
+    : []
+  const replacedCount = regenerated.reduce((sum, line) => sum + (heldByLine[line.stableId] ?? 0), 0)
 
   return (
     <>
@@ -326,6 +379,43 @@ function PreflightBody({
             </li>
           ))}
         </ul>
+      )}
+
+      {replace && (
+        <div role="alert" className="alert alert--error">
+          <Icon name="alert" size={18} strokeWidth={2} />
+          <div>
+            <p>
+              <strong>Action destructrice.</strong> Régénérer remplace le calendrier
+              {regenerated.length > 0
+                ? ` de ${regenerated
+                    .map(
+                      (line) =>
+                        `« ${line.name} » (${plural(heldByLine[line.stableId] ?? 0, 'garde attribuée', 'gardes attribuées')})`,
+                    )
+                    .join(', ')}`
+                : ' des lignes déjà générées'}
+              , modifications manuelles comprises : ces gardes ne seront plus affichées.
+            </p>
+            <p>
+              Pour garder ces gardes et ne compléter que les postes vacants ou les nouvelles lignes, utilisez
+              « Générer les postes non pourvus ».
+            </p>
+            <label className="sh-stale__override">
+              <input
+                type="checkbox"
+                checked={confirmed}
+                onChange={(event) => onConfirmedChange(event.target.checked)}
+                disabled={disabled}
+              />
+              Je confirme remplacer{' '}
+              {replacedCount > 0
+                ? plural(replacedCount, 'garde attribuée', 'gardes attribuées')
+                : 'les gardes attribuées'}{' '}
+              par une nouvelle génération.
+            </label>
+          </div>
+        </div>
       )}
 
       {preflight.blockers.length > 0 && (
@@ -385,7 +475,7 @@ function mergedFamilyUnitCounts(preflight: GenerationPreflight): [string, number
  * both disabled by default (never a guessed regulatory value). Left
  * disabled, the launch is identical to before D137.
  */
-function RestPolicyFields({
+export function RestPolicyFields({
   value,
   onChange,
   disabled,
@@ -654,6 +744,8 @@ function blockerText(issue: PreflightIssue): string {
       return `${line}aucune règle de planning n’est active.`
     case 'NO_DUTIES':
       return `${line}aucune garde à répartir sur cette période.`
+    case 'REGENERATION_NOT_CONFIRMED':
+      return `${line}déjà générée : « Générer le planning » ne remplace jamais des gardes attribuées. Utilisez « Générer les postes non pourvus », ou « Régénérer entièrement » (menu ⋯) pour remplacer volontairement son calendrier.`
     case 'PERIOD_LOCKED':
       return `${line}la période est publiée ou archivée : une nouvelle génération est impossible.`
     case 'NO_SOLVER_PARAMETER_SET':
@@ -693,17 +785,13 @@ function warningText(issue: PreflightIssue, preflight: GenerationPreflight): str
   }
 }
 
-function surgicalHubRefusal(err: unknown): SurgicalHubStaleRefusal | null {
-  if (!(err instanceof ApiError) || (err.status !== 409 && err.status !== 403)) {
-    return null
-  }
-  const body = err.body as Partial<SurgicalHubStaleRefusal> | null
-  return body?.error === 'surgicalhub_data_stale' || body?.error === 'surgicalhub_override_forbidden'
-    ? (body as SurgicalHubStaleRefusal)
-    : null
-}
-
-function SurgicalHubPeople({ people, timeZone }: { people: SurgicalHubParticipant[]; timeZone: string }) {
+export function SurgicalHubPeople({
+  people,
+  timeZone,
+}: {
+  people: SurgicalHubParticipant[]
+  timeZone: string
+}) {
   return (
     <ul className="list">
       {people.map((person) => (
@@ -719,7 +807,7 @@ function SurgicalHubPeople({ people, timeZone }: { people: SurgicalHubParticipan
 }
 
 /** The generation is queued; what the manager must still know about SurgicalHub leave (decision D8). */
-function SurgicalHubCaveats({
+export function SurgicalHubCaveats({
   caveats,
   timeZone,
 }: {

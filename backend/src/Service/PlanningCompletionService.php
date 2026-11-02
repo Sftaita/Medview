@@ -14,6 +14,7 @@ use App\Entity\PlanningCycle;
 use App\Entity\PlanningGeneration;
 use App\Entity\PlanningLine;
 use App\Entity\PlanningPeriod;
+use App\Entity\PlanningPeriodStatus;
 use App\Entity\PlanningSnapshot;
 use App\Entity\PlanningTeamMember;
 use App\Entity\SolverParameterSet;
@@ -80,6 +81,16 @@ use Doctrine\ORM\EntityManagerInterface;
  * demand only), but a real load the fairness phases count. The population,
  * participation factors and eligibility stay the snapshot's.
  *
+ * Published lines (docs/decisions.md D223): a line whose period is
+ * VALIDATED, PUBLISHED or ARCHIVED is never completed automatically — by
+ * this service, whoever calls it (the calendar's "Compléter
+ * automatiquement", "Générer les postes non pourvus"). It is reported
+ * `published` / `archived`, its calendar is not even read for holes, and it
+ * blocks no other line. Its holes are filled one by one by a manager
+ * (manual reassignment, history and republication, D143-D148), never here.
+ * The status is checked again under the calendar lock: a line published
+ * while the solve ran makes the whole completion stale — nothing written.
+ *
  * Concurrency: the same session lock as the generation launcher (never
  * both at once on a Planning), and the persistence step re-reads the
  * calendar under the CalendarWriteLock — if anything the solve relied on
@@ -89,6 +100,24 @@ final class PlanningCompletionService
 {
     /** Same namespace as PlanningGenerationLauncher on purpose: a completion and a generation never run together. */
     private const ENGINE_LOCK_NAMESPACE = 7351;
+
+    /** docs/decisions.md D223: never completed automatically. */
+    public const LOCKED_STATUSES = [PlanningPeriodStatus::VALIDATED, PlanningPeriodStatus::PUBLISHED, PlanningPeriodStatus::ARCHIVED];
+
+    /**
+     * docs/decisions.md D223: why $line can never be completed automatically
+     * in $cycle — `published` (VALIDATED or PUBLISHED) or `archived` — or
+     * null when it can. Read only.
+     */
+    public static function lockedReason(PlanningLine $line, PlanningCycle $cycle): ?string
+    {
+        $status = $line->periodIn($cycle)?->getStatus();
+        if (null === $status || !\in_array($status, self::LOCKED_STATUSES, true)) {
+            return null;
+        }
+
+        return PlanningPeriodStatus::ARCHIVED === $status ? 'archived' : 'published';
+    }
 
     public function __construct(
         private readonly PlanningLineRepository $lineRepository,
@@ -112,7 +141,38 @@ final class PlanningCompletionService
         private readonly DutyRepository $dutyRepository,
         private readonly DimensionMembershipCalculator $dimensionMembershipCalculator,
         private readonly PlanningPeriodRepository $periodRepository,
+        private readonly PlanningSnapshotService $snapshotService,
     ) {
+    }
+
+    /**
+     * docs/decisions.md D222: the members of $line's team present in its
+     * period of $cycle who are not in the snapshot of its current generation —
+     * they joined after it. A completion appends them to that snapshot
+     * (PlanningSnapshotService::appendLateMembers()) before solving, so the
+     * holes may go to them, with their unavailabilities, participation and
+     * the fairness phases like anybody else. Read only.
+     *
+     * @return list<PlanningTeamMember>
+     */
+    public function lateMembersOf(PlanningLine $line, PlanningCycle $cycle): array
+    {
+        $period = $line->periodIn($cycle);
+        $generation = null !== $period ? $this->generationRepository->findMostRecentCompletedByPlanningPeriod($period) : null;
+        $snapshot = null !== $generation ? $this->snapshotRepository->findOneByGeneration($generation) : null;
+        if (null === $period || null === $snapshot) {
+            return [];
+        }
+
+        $known = [];
+        foreach ($snapshot->getMembers() as $member) {
+            $known[(string) $member->getSourceTeamMemberStableId()] = true;
+        }
+
+        return array_values(array_filter(
+            $this->teamMemberRepository->findIntersecting($line->getPlanningTeam(), $period->getStartsAt(), $period->getEndsAt()),
+            static fn (PlanningTeamMember $member): bool => !isset($known[(string) $member->getStableId()]),
+        ));
     }
 
     /**
@@ -123,13 +183,21 @@ final class PlanningCompletionService
      * again under the calendar lock at write time. Omitted: the planning's
      * only period (refused when it has several).
      *
-     * @return list<CompletionLineResult> one per active line of $cycle
+     * $onlyLines (docs/decisions.md D222): only these lines are completed —
+     * "Générer cette ligne", or one line at a time by "Générer les postes non
+     * pourvus" (PlanningLineFillService). The others are not read for holes;
+     * their current calendar constrains the holes like any other calendar
+     * (assignabilityError, live).
+     *
+     * @param list<PlanningLine>|null $onlyLines
+     *
+     * @return list<CompletionLineResult> one per active line of $cycle (of $onlyLines, when given)
      *
      * @throws PlanningGenerationInProgressException a generation or another completion is running on this Planning
      * @throws NoSolverParameterSetException
      * @throws PlanningCompletionStaleException      nothing was written
      */
-    public function complete(Planning $planning, User $author, ?PlanningCycle $cycle = null): array
+    public function complete(Planning $planning, User $author, ?PlanningCycle $cycle = null, ?array $onlyLines = null): array
     {
         $cycle ??= $planning->getOnlyCycle();
         if (!$this->tryLock($planning)) {
@@ -154,6 +222,15 @@ final class PlanningCompletionService
             $liveDemand = $this->demandViewFactory->forPlanning($planning);
             $virtualHoldings = [];
             foreach ($this->lineOrder->activeInCycle($cycle) as $line) {
+                if (null !== $onlyLines && !\in_array($line, $onlyLines, true)) {
+                    continue;
+                }
+                $locked = self::lockedReason($line, $cycle);
+                if (null !== $locked) {
+                    // docs/decisions.md D223: left exactly as it is — not read for holes, never written.
+                    $results[] = new CompletionLineResult($line, $locked);
+                    continue;
+                }
                 $plan = $this->solveLine($line, $cycle, $parameterSet, $virtualCommitments, $liveDemand->withSourceHoldings($virtualHoldings));
                 if ($plan instanceof CompletionLineResult) {
                     $results[] = $plan;
@@ -193,6 +270,10 @@ final class PlanningCompletionService
         if (null === $generation || null === $snapshot) {
             return new CompletionLineResult($line, 'not_generated');
         }
+
+        // docs/decisions.md D222: a member who joined after the generation is a candidate too — appended to the
+        // snapshot (flagged late, the rows frozen at generation time untouched) before the problem is built.
+        $this->snapshotService->appendLateMembers($snapshot);
 
         // Without the cross-line commitments frozen at generation time (D161): they may no longer hold (a
         // reassignment on another line since), and must never keep excluding someone who is free today. The
@@ -381,8 +462,12 @@ final class PlanningCompletionService
                     throw new PlanningCompletionStaleException();
                 }
 
-                // docs/decisions.md D197: the committed status, read under the lock — never the entity loaded before the solve.
-                $wasPublished = $this->periodRepository->isPublishedNow($generation->getPlanningPeriod());
+                // docs/decisions.md D223: the committed status, read under the lock (D197) — a line published or
+                // validated while the solve ran is never completed: the whole completion is stale, nothing written.
+                if (\in_array($this->periodRepository->statusNow($generation->getPlanningPeriod()), self::LOCKED_STATUSES, true)) {
+                    throw new PlanningCompletionStaleException();
+                }
+                $wasPublished = false;
                 // D165: the live demand again, under the lock — what the lines written just before in this
                 // transaction now hold included. A reinforcement the calendar no longer requires is never written.
                 $demandNow = $this->demandViewFactory->forPlanning($planning);

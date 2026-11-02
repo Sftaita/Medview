@@ -1,0 +1,200 @@
+/* "Générer les postes non pourvus" / "Générer cette ligne" (docs/decisions.md D222). Prefix fill-. Tokens: styles/tokens.css. */
+
+.fill-intro {
+  margin: 0 0 12px;
+  color: var(--text-body);
+  font-size: var(--text-sm);
+}
+
+.fill-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.fill-line {
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+}
+.fill-line[data-action='NOTHING'],
+.fill-line[data-action='EXCLUDED'] {
+  background: var(--surface-sunken);
+}
+
+.fill-line__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--tap-min);
+  color: var(--text-strong);
+  cursor: pointer;
+}
+.fill-line__head input:disabled {
+  cursor: not-allowed;
+}
+
+.fill-line__text {
+  margin: 2px 0 0 28px;
+  color: var(--text-body);
+  font-size: var(--text-sm);
+}
+
+.fill-line__protected {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 0 28px;
+  color: var(--green-800);
+  font-size: var(--text-sm);
+}
+
+.fill-result {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.fill-result__safe {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--green-200);
+  border-radius: var(--radius-md);
+  background: var(--green-50);
+  color: var(--green-800);
+  font-size: var(--text-sm);
+}
+.fill-result__scroll {
+  overflow-x: auto;
+}
+
+.fill-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+.fill-table th,
+.fill-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: left;
+  vertical-align: top;
+}
+.fill-table thead th {
+  color: var(--text-muted);
+  font-weight: var(--weight-semibold);
+}
+.fill-table td {
+  text-align: right;
+}
+.fill-table__status {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-weight: var(--weight-medium);
+}
+
+/* On a phone the five columns do not fit: one card per line, every count labelled — none hidden behind a scroll. */
+@media (max-width: 560px) {
+  .fill-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .fill-table,
+  .fill-table tbody,
+  .fill-table tr,
+  .fill-table th,
+  .fill-table td {
+    display: block;
+    width: 100%;
+  }
+  .fill-table tr {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .fill-table th,
+  .fill-table td {
+    padding: 2px 0;
+    border-bottom: none;
+  }
+  .fill-table td {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .fill-table td::before {
+    content: attr(data-label);
+    color: var(--text-muted);
+    text-align: left;
+  }
+}
+
+/* "Lignes de garde": counters and "Générer cette ligne" (D222). */
+.pd-line-fill {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin-top: 4px;
+  font-size: var(--text-sm);
+}
+.pd-line-fill__counts {
+  color: var(--text-body);
+}
+.pd-line-fill__counts--gap {
+  color: var(--amber-700);
+}
+.pd-line-fill__why {
+  color: var(--text-muted);
+}
+
+/* The preview takes several seconds (docs/decisions.md D222/D223): a clear, announced wait. */
+.fill-loading {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+  color: var(--text-body);
+  font-size: var(--text-sm);
+}
+.fill-loading strong {
+  display: block;
+}
+.fill-loading__hint {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-muted);
+}
+.fill-spinner {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: fill-spin 0.9s linear infinite;
+}
+@keyframes fill-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fill-spinner {
+    animation: none;
+    border-right-color: currentColor;
+    opacity: 0.6;
+  }
+}

@@ -122,50 +122,7 @@ final class PlanningSnapshotService
         );
 
         foreach ($relevantMembers as $member) {
-            $snapshotMember = new PlanningSnapshotMember(
-                $snapshot,
-                $member->getStableId(),
-                $member->getUser()->getStableId(),
-                $member->getMembershipStart(),
-                $member->getMembershipEnd(),
-                $member->getRole(),
-                $member->getUser()->isActive(),
-            );
-            $this->entityManager->persist($snapshotMember);
-
-            foreach ($this->participationPeriodRepository->findIntersecting($member, $planningPeriod->getStartsAt(), $planningPeriod->getEndsAt()) as $period) {
-                $this->entityManager->persist(new PlanningSnapshotParticipationPeriod(
-                    $snapshotMember,
-                    $period->getValidFrom(),
-                    $period->getValidTo(),
-                    $period->toFloat(),
-                    $period->getChangeReason(),
-                ));
-            }
-
-            foreach ($this->availabilityPeriodRepository->findIntersecting($member->getUser(), $fromInstant, $toInstant) as $period) {
-                $this->entityManager->persist(new PlanningSnapshotAvailabilityPeriod(
-                    $snapshotMember,
-                    $period->getStableId(),
-                    $period->getType(),
-                    $period->getStartsAt(),
-                    $period->getEndsAt(),
-                    $period->getCreatedAt(),
-                    $period->getUpdatedAt(),
-                    $period->getSource(),
-                ));
-            }
-
-            foreach ($this->nonParticipationPeriodRepository->findIntersecting($member, $fromInstant, $toInstant) as $period) {
-                $this->entityManager->persist(new PlanningSnapshotNonParticipationPeriod(
-                    $snapshotMember,
-                    $period->getStableId(),
-                    $period->getStartsAt(),
-                    $period->getEndsAt(),
-                    $period->getCreatedAt(),
-                    $period->getUpdatedAt(),
-                ));
-            }
+            $this->captureMember($snapshot, $member, $planningPeriod, $fromInstant, $toInstant);
         }
 
         $this->freezeExternalCommitments($snapshot, $relevantMembers, $planned);
@@ -189,6 +146,100 @@ final class PlanningSnapshotService
         }
 
         return $snapshot;
+    }
+
+    /**
+     * docs/decisions.md D222: the members of the snapshot's team who joined
+     * after its generation (their membership intersects the period, they are
+     * not in the snapshot), appended to it — captured exactly like the members
+     * frozen at generation time (participation, availability and
+     * non-participation as they are NOW), flagged `capturedLateAt`. The rows
+     * frozen with the snapshot are never touched; nothing is ever removed.
+     * Idempotent: a member already in the snapshot is never appended twice.
+     *
+     * @return list<PlanningSnapshotMember> the members appended by this call
+     */
+    public function appendLateMembers(PlanningSnapshot $snapshot): array
+    {
+        $planningPeriod = $snapshot->getGeneration()->getPlanningPeriod();
+        $team = $planningPeriod->getTeam();
+        $timezone = new \DateTimeZone($team->getTimezone());
+        $fromInstant = new \DateTimeImmutable($planningPeriod->getStartsAt()->format('Y-m-d').' 00:00:00', $timezone);
+        $toInstant = new \DateTimeImmutable($planningPeriod->getEndsAt()->format('Y-m-d').' 00:00:00', $timezone);
+
+        $known = [];
+        foreach ($snapshot->getMembers() as $existing) {
+            $known[(string) $existing->getSourceTeamMemberStableId()] = true;
+        }
+
+        $now = new \DateTimeImmutable();
+        $appended = [];
+        foreach ($this->teamMemberRepository->findIntersecting($team, $planningPeriod->getStartsAt(), $planningPeriod->getEndsAt()) as $member) {
+            if (isset($known[(string) $member->getStableId()])) {
+                continue;
+            }
+            $appended[] = $this->captureMember($snapshot, $member, $planningPeriod, $fromInstant, $toInstant, $now);
+        }
+        if ([] !== $appended) {
+            $this->entityManager->flush();
+        }
+
+        return $appended;
+    }
+
+    /**
+     * One member of the snapshot, as they are now: their membership, and their
+     * participation, availability and non-participation over the period.
+     */
+    private function captureMember(PlanningSnapshot $snapshot, PlanningTeamMember $member, PlanningPeriod $planningPeriod, \DateTimeImmutable $fromInstant, \DateTimeImmutable $toInstant, ?\DateTimeImmutable $capturedLateAt = null): PlanningSnapshotMember
+    {
+        $snapshotMember = new PlanningSnapshotMember(
+            $snapshot,
+            $member->getStableId(),
+            $member->getUser()->getStableId(),
+            $member->getMembershipStart(),
+            $member->getMembershipEnd(),
+            $member->getRole(),
+            $member->getUser()->isActive(),
+            $capturedLateAt,
+        );
+        $this->entityManager->persist($snapshotMember);
+
+        foreach ($this->participationPeriodRepository->findIntersecting($member, $planningPeriod->getStartsAt(), $planningPeriod->getEndsAt()) as $period) {
+            $this->entityManager->persist(new PlanningSnapshotParticipationPeriod(
+                $snapshotMember,
+                $period->getValidFrom(),
+                $period->getValidTo(),
+                $period->toFloat(),
+                $period->getChangeReason(),
+            ));
+        }
+
+        foreach ($this->availabilityPeriodRepository->findIntersecting($member->getUser(), $fromInstant, $toInstant) as $period) {
+            $this->entityManager->persist(new PlanningSnapshotAvailabilityPeriod(
+                $snapshotMember,
+                $period->getStableId(),
+                $period->getType(),
+                $period->getStartsAt(),
+                $period->getEndsAt(),
+                $period->getCreatedAt(),
+                $period->getUpdatedAt(),
+                $period->getSource(),
+            ));
+        }
+
+        foreach ($this->nonParticipationPeriodRepository->findIntersecting($member, $fromInstant, $toInstant) as $period) {
+            $this->entityManager->persist(new PlanningSnapshotNonParticipationPeriod(
+                $snapshotMember,
+                $period->getStableId(),
+                $period->getStartsAt(),
+                $period->getEndsAt(),
+                $period->getCreatedAt(),
+                $period->getUpdatedAt(),
+            ));
+        }
+
+        return $snapshotMember;
     }
 
     /**

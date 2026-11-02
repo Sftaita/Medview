@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use App\Entity\PlanningLine;
 use App\Entity\User;
 use App\Exception\PlanningJobInProgressException;
+use App\Exception\PublishedLinesNotCompletedException;
 use App\Repository\PlanningRepository;
 use App\Security\Voter\PlanningVoter;
 use App\Service\PlanningCycleResolver;
@@ -25,6 +27,12 @@ use Symfony\Component\Security\Http\Attribute\CurrentUser;
  * Queued like a generation since D149 (202 + a PlanningJob the screen
  * follows) — the business rule itself is PlanningCompletionService's,
  * unchanged, run by the worker. PlanningVoter::MANAGE_CALENDAR.
+ *
+ * docs/decisions.md D223: a published (validated, archived) line is never
+ * completed automatically — 409 `published_lines_not_completed` when every
+ * generated line of the period is one; otherwise those lines are reported
+ * as left alone by the job. Manual changes after publication are untouched
+ * by this rule (reassignment, removal, republication).
  */
 final class PlanningCompletionController
 {
@@ -53,6 +61,12 @@ final class PlanningCompletionController
 
         try {
             $job = $this->jobService->requestCompletion($planning, $user, $cycle);
+        } catch (PublishedLinesNotCompletedException $exception) {
+            return new JsonResponse([
+                'error' => 'published_lines_not_completed',
+                'message' => $exception->getMessage(),
+                'lines' => array_map(static fn (PlanningLine $line): array => ['lineStableId' => (string) $line->getStableId(), 'lineName' => $line->getName()], $exception->lines),
+            ], 409);
         } catch (PlanningJobInProgressException $exception) {
             return new JsonResponse([
                 'error' => 'job_in_progress',

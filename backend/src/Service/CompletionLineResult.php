@@ -14,7 +14,10 @@ use App\Fairness\SolverStatus;
  *   (possibly 0 when nobody could take any of them);
  * - `nothing_to_complete`: no uncovered unit on this line;
  * - `not_generated`: no COMPLETED generation yet — "Générer" first;
- * - `solver_failed`: the solver produced no usable result, nothing written.
+ * - `solver_failed`: the solver produced no usable result, nothing written;
+ * - `published` / `archived` (docs/decisions.md D223): the line's period is
+ *   VALIDATED or PUBLISHED / ARCHIVED — never completed automatically, left
+ *   exactly as it is.
  */
 final readonly class CompletionLineResult
 {

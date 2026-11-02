@@ -253,12 +253,14 @@ final class PlanningGenerationService
      * written. Nothing existing is ever changed by a generation that is not
      * written.
      *
-     * @param list<SolvedGeneration> $solved in resolution order, usable ones only
+     * @param list<SolvedGeneration> $solved     in resolution order, usable ones only
+     * @param bool                   $othersKept a launch restricted to some lines (docs/decisions.md D222): every other
+     *                                           line of the period is a commitment, as when the snapshots were taken
      *
      * @return array<int, StalePlanningGenerationDataException|PlanningGenerationContextChangedException> why each generation
      *                                                                                                    NOT written was not, by generation id
      */
-    public function writeLaunch(Planning $planning, array $solved): array
+    public function writeLaunch(Planning $planning, array $solved, bool $othersKept = false): array
     {
         /** @var array<int, StalePlanningGenerationDataException|PlanningGenerationContextChangedException> $discarded */
         $discarded = [];
@@ -268,7 +270,7 @@ final class PlanningGenerationService
             $this->calendarWriteLock->acquire($planning);
 
             do {
-                [$accepted, $planned, $refused] = $this->acceptable($solved, $discarded);
+                [$accepted, $planned, $refused] = $this->acceptable($solved, $discarded, $othersKept);
                 $discarded += $refused;
                 $conflicts = $this->finalCalendarConflicts($planning, $accepted, $planned);
                 foreach ($conflicts as $generationId => $list) {
@@ -313,10 +315,10 @@ final class PlanningGenerationService
      *
      * @return array{0: list<SolvedGeneration>, 1: PlannedCalendar, 2: array<int, StalePlanningGenerationDataException|PlanningGenerationContextChangedException>}
      */
-    private function acceptable(array $solved, array $discarded): array
+    private function acceptable(array $solved, array $discarded, bool $othersKept = false): array
     {
         $accepted = [];
-        $planned = new PlannedCalendar();
+        $planned = new PlannedCalendar($othersKept);
         $refused = [];
         $notWritten = [];
         foreach ($solved as $generation) {

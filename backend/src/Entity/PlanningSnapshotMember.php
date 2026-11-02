@@ -81,6 +81,16 @@ class PlanningSnapshotMember
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
+    /**
+     * docs/decisions.md D222: null for a member frozen with the snapshot; set
+     * for a member who joined the team after the generation and was appended
+     * by a completion that took them into account — captured exactly like the
+     * others (participation, availability, non-participation as they were at
+     * that moment), never mistaken for the population of the generation.
+     */
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $capturedLateAt = null;
+
     public function __construct(
         PlanningSnapshot $snapshot,
         Uuid $sourceTeamMemberStableId,
@@ -89,7 +99,9 @@ class PlanningSnapshotMember
         ?\DateTimeImmutable $membershipEnd,
         TeamMemberRole $role,
         bool $active,
+        ?\DateTimeImmutable $capturedLateAt = null,
     ) {
+        $this->capturedLateAt = $capturedLateAt;
         $this->snapshot = $snapshot;
         $this->sourceTeamMemberStableId = $sourceTeamMemberStableId;
         $this->sourceUserStableId = $sourceUserStableId;
@@ -107,6 +119,16 @@ class PlanningSnapshotMember
     public function getId(): ?int
     {
         return $this->id;
+    }
+
+    public function getCapturedLateAt(): ?\DateTimeImmutable
+    {
+        return $this->capturedLateAt;
+    }
+
+    public function isCapturedLate(): bool
+    {
+        return null !== $this->capturedLateAt;
     }
 
     public function getSnapshot(): PlanningSnapshot

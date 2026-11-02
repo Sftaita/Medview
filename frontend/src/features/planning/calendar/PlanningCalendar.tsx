@@ -52,8 +52,12 @@ type Props = {
   /** A generation or a completion is queued or running on this planning. */
   jobActive?: boolean
   /** Which one — said on the disabled button, so it never reads as simply unavailable. */
-  jobKind?: 'GENERATE' | 'COMPLETE' | null
+  jobKind?: 'GENERATE' | 'COMPLETE' | 'FILL' | null
 }
+
+/** docs/decisions.md D223 — said wherever "Compléter automatiquement" cannot act on a published line. */
+const LOCKED_COMPLETION_TEXT =
+  'Une ligne publiée n’est jamais complétée automatiquement : attribuez ses gardes une à une, puis republiez.'
 
 const MONTH = new Intl.DateTimeFormat('fr-BE', { month: 'long', year: 'numeric', timeZone: 'UTC' })
 const DAY = new Intl.DateTimeFormat('fr-BE', {
@@ -198,6 +202,8 @@ export function PlanningCalendar({
   const from = period?.startsAt ?? planning.startsAt
   const to = period?.endsAt ?? planning.endsAt
   const model = useMemo(() => (result ? buildCalendar(result.lines, from, to) : null), [result, from, to])
+  // docs/decisions.md D223: holes only on published lines — the button is unavailable, and says why.
+  const lockedHolesOnly = model !== null && model.uncoveredCount > 0 && model.completableCount === 0
   const monthKeys = useMemo(() => model?.months.map((m) => m.key) ?? [], [model])
   const shownMonth = month && monthKeys.includes(month) ? month : initialMonth(monthKeys)
   const monthIndex = shownMonth ? monthKeys.indexOf(shownMonth) : -1
@@ -251,7 +257,9 @@ export function PlanningCalendar({
         text:
           code === 'job_in_progress'
             ? 'Une génération ou une complétion est déjà en cours sur ce planning.'
-            : 'La complétion automatique n’a pas pu être lancée.',
+            : code === 'published_lines_not_completed'
+              ? LOCKED_COMPLETION_TEXT
+              : 'La complétion automatique n’a pas pu être lancée.',
       })
     } finally {
       setCompleting(false)
@@ -340,14 +348,17 @@ export function PlanningCalendar({
               type="button"
               className="pd-btn pd-btn-secondary"
               onClick={handleComplete}
-              disabled={completing || jobActive || !model || model.uncoveredCount === 0}
+              disabled={completing || jobActive || !model || model.completableCount === 0}
               aria-busy={completing || jobActive}
+              aria-describedby={lockedHolesOnly ? 'cal-complete-locked' : undefined}
               title={
                 jobActive
                   ? 'Un calcul est en cours sur ce planning'
                   : model?.uncoveredCount === 0
                     ? 'Aucune garde non attribuée'
-                    : undefined
+                    : lockedHolesOnly
+                      ? LOCKED_COMPLETION_TEXT
+                      : undefined
               }
             >
               {jobActive ? (
@@ -542,7 +553,20 @@ export function PlanningCalendar({
               model.missingReinforcementCount,
             )}
           </span>
-          {canEdit && ' — attribuez-les une à une ou utilisez « Compléter automatiquement ».'}
+          {canEdit &&
+            `${model.uncoveredCount === 1 ? ' — attribuez-la' : ' — attribuez-les une à une'}${
+              model.completableCount > 0 ? ' ou utilisez « Compléter automatiquement ».' : '.'
+            }`}
+        </p>
+      )}
+      {canEdit && model && model.lockedLinesWithHoles.length > 0 && (
+        <p className="cal-summary cal-locked" id="cal-complete-locked">
+          <Icon name="lock" size={14} strokeWidth={2.2} />
+          <span>
+            {model.lockedLinesWithHoles.length === 1
+              ? `${model.lockedLinesWithHoles[0]} est publiée : elle n’est jamais complétée automatiquement. Attribuez ses gardes une à une, puis republiez.`
+              : `${model.lockedLinesWithHoles.join(', ')} sont publiées : elles ne sont jamais complétées automatiquement. Attribuez leurs gardes une à une, puis republiez.`}
+          </span>
         </p>
       )}
       {model && model.undeterminedCount > 0 && (

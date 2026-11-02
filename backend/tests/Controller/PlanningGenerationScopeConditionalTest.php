@@ -83,7 +83,9 @@ final class PlanningGenerationScopeConditionalTest extends WebTestCase
      */
     private function preflight(array $s, ?string $scope = null): array
     {
-        $preflight = $this->api($this->client, 'GET', "/api/plannings/{$s['planningId']}/generation-preflight".(null !== $scope ? '?scope='.$scope : ''), token: $s['creator']);
+        // docs/decisions.md D222: as a confirmed regeneration would see it — the rules checked here (D195) hold even
+        // when the manager explicitly confirms replacing the calendars; REGENERATION_NOT_CONFIRMED has its own tests.
+        $preflight = $this->api($this->client, 'GET', "/api/plannings/{$s['planningId']}/generation-preflight?replaceExisting=1".(null !== $scope ? '&scope='.$scope : ''), token: $s['creator']);
         self::assertResponseIsSuccessful();
 
         return $preflight;

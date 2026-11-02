@@ -153,6 +153,7 @@ final class PlanningResultController
             'undeterminedDutyCount' => $result->undeterminedDutyCount,
             'superfluousDutyCount' => $result->superfluousDutyCount,
             'notRequiredDutyCount' => $result->notRequiredDutyCount,
+            'periodStatus' => $result->periodStatus?->value,
             'duties' => array_map($this->dutyToArray(...), $result->duties),
         ];
     }
