@@ -2195,3 +2195,32 @@ a.mv-btn {
 .mv-dialog__foot--three {
   flex-wrap: wrap;
 }
+
+/* docs/decisions.md D229: a day that cuts a block is possible, and said to be a decision. */
+.mv-bcal__day.is-warned {
+  background: var(--mv-warn-bg, #fdf6e5);
+  border-color: var(--mv-warn-line, #eccf8d);
+  color: var(--mv-warn-ink, #7a5400);
+}
+.mv-bcal__swatch.is-warned {
+  background: var(--mv-warn-bg, #fdf6e5);
+  border: 1px solid var(--mv-warn-line, #eccf8d);
+  color: var(--mv-warn-ink, #7a5400);
+}
+.mv-cut-notice {
+  flex: 0 0 auto;
+  margin-top: 8px;
+}
+.mv-cut-notice p {
+  margin: 0 0 8px;
+}
+.mv-cut-notice__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.mv-confirm-cut {
+  flex: 1 1 100%;
+  font-size: 0.8125rem;
+  color: var(--mv-warn-ink, #7a5400);
+}

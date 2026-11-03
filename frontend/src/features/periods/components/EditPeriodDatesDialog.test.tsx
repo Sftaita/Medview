@@ -203,6 +203,168 @@ describe('BoundaryCalendar', () => {
   })
 })
 
+describe('EditPeriodDatesDialog — a date that cuts a block, and what a date change touches (D229, D230)', () => {
+  const period: Period = {
+    id: 'p1',
+    number: 1,
+    start: '2027-01-04',
+    end: '2027-01-31',
+    status: 'publiee',
+  } as Period
+  const plan = (over: Partial<DateChangePreview>): DateChangePreview =>
+    ({
+      allowed: true,
+      reasons: [],
+      alternatives: { start: null, end: null },
+      blockCuts: [],
+      preparation: [],
+      changes: [],
+      retiredDutyCount: 0,
+      retiredAssignedCount: 0,
+      retiredPublishedCount: 0,
+      retiredUnits: [],
+      holders: [],
+      additions: [],
+      collections: [],
+      swapRequestCount: 0,
+      confirmationRequired: false,
+      republishPeriods: [],
+      recipients: [],
+      canNotify: false,
+      notifyBlock: 'nobody_to_notify',
+      pendingChanges: 0,
+      impactHash: 'hash',
+      ...over,
+    }) as DateChangePreview
+  const options = (): DateOptions =>
+    ({
+      period: { stableId: 'p1', number: 1 },
+      edge: 'end',
+      fixedStart: '2027-01-04',
+      current: '2027-01-31',
+      editable: true,
+      blockers: [],
+      historicalStartCuts: [],
+      days: [
+        { date: '2027-01-14', allowed: true, reasons: [], warnings: [] },
+        {
+          date: '2027-01-15',
+          allowed: true,
+          reasons: [],
+          warnings: [{ code: 'period_boundary_splits_block' }],
+        },
+      ],
+    }) as DateOptions
+
+  async function open(preview: DateChangePreview) {
+    const onSave = vi.fn(() => Promise.resolve())
+    render(
+      <EditPeriodDatesDialog
+        open
+        period={period}
+        loadOptions={() => Promise.resolve(options())}
+        loadPreview={() => Promise.resolve(preview)}
+        onSave={onSave}
+        onCancel={() => undefined}
+      />,
+    )
+    fireEvent.click(
+      await screen.findByRole('button', { name: /vendredi 15 janvier 2027, possible, coupe un bloc/ }),
+    )
+    return onSave
+  }
+
+  it('says the day cuts a block, proposes the dates that keep it whole, and the proposal replaces the date', async () => {
+    await open(
+      plan({
+        confirmationRequired: true,
+        alternatives: { start: null, end: { before: '2027-01-14', after: '2027-01-17' } },
+      }),
+    )
+    expect(await screen.findByText(/Cette date coupe un bloc de gardes/)).toBeInTheDocument()
+    const notice = screen
+      .getByText(/Cette date coupe un bloc de gardes/)
+      .closest('.mv-cut-notice') as HTMLElement
+    fireEvent.click(within(notice).getByRole('button', { name: /14 janv/ }))
+    expect(document.querySelector('.mv-date-choice.is-active')).toHaveTextContent('Jeu. 14 janv. 2027')
+  })
+
+  it('keeps the chosen date on confirmation: the days kept, their holder, the collection and the planned dates are all said', async () => {
+    const onSave = await open(
+      plan({
+        confirmationRequired: true,
+        alternatives: { start: null, end: { before: '2027-01-14', after: '2027-01-17' } },
+        retiredDutyCount: 2,
+        retiredAssignedCount: 2,
+        retiredUnits: [
+          {
+            periodNumber: 1,
+            line: 'Première ligne',
+            block: 'Week-end',
+            dates: ['2027-01-16', '2027-01-17'],
+            keptDates: ['2027-01-15'],
+            holder: 'Basile Leroy',
+            published: true,
+          },
+        ],
+        blockCuts: [
+          {
+            lineStableId: 'l',
+            lineName: 'Première ligne',
+            blockName: 'Week-end',
+            boundary: '2027-01-16',
+            firstDay: '2027-01-15',
+            lastDay: '2027-01-17',
+            earlierDays: ['2027-01-15'],
+            remainderDays: ['2027-01-16', '2027-01-17'],
+          },
+        ],
+        collections: [
+          {
+            periodNumber: 1,
+            startsAt: '2027-01-04',
+            lastDay: '2027-01-31',
+            newStartsAt: '2027-01-04',
+            newLastDay: '2027-01-15',
+            contacted: true,
+            answered: true,
+            kind: 'reduced',
+            open: true,
+            expected: 6,
+            responses: 2,
+            messagesSent: 3,
+            deadline: '2027-01-20',
+            newDeadline: '2027-01-15',
+            uncoveredAddedDays: 0,
+          },
+        ],
+        preparation: [
+          { periodNumber: 1, kind: 'target', from: '2027-01-25', to: '2027-01-15' },
+          { periodNumber: 1, kind: 'announcement', from: '2027-01-20', to: null },
+        ],
+      }),
+    )
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Enregistrer les dates' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer les dates' }))
+
+    expect(await screen.findByText(/Ces dates coupent 1 bloc/)).toBeInTheDocument()
+    expect(screen.getByText(/Bloc coupé/)).toHaveTextContent('reste attribué à Basile Leroy')
+    const collection = screen.getByText(/sera réduite/)
+    expect(collection).toHaveTextContent('Elle reste ouverte')
+    expect(collection).toHaveTextContent('2 réponses sur 6 personnes attendues')
+    expect(collection).toHaveTextContent('3 messages ont déjà été envoyés')
+    expect(collection).toHaveTextContent('aucun nouveau message')
+    expect(screen.getByText(/date cible de génération/)).toBeInTheDocument()
+    expect(screen.getByText(/L’annonce prévue/)).toHaveTextContent('annulée')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmer' }))
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ end: '2027-01-15', confirmation: 'hash', notify: false }),
+    )
+  })
+})
+
 describe('EditPeriodDatesDialog (docs/decisions.md D207)', () => {
   it('says the first day of a following period moves with the end of the previous one, and saves a possible last day', async () => {
     const { onSave, loadOptions, dialog } = renderDialog()

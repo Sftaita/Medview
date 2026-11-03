@@ -68,6 +68,10 @@ final class Version20261104090000 extends AbstractMigration
         $this->addSql('CREATE INDEX idx_duties_retired_by_change_id ON duties (retired_by_change_id)');
         $this->addSql('CREATE INDEX idx_duties_added_by_change_id ON duties (added_by_change_id)');
 
+        // docs/decisions.md D229: a block cut by a boundary is an explicit, recorded decision of the manager.
+        $this->addSql('ALTER TABLE planning_cycles ADD start_cut_confirmed BOOLEAN DEFAULT FALSE NOT NULL');
+        $this->addSql('ALTER TABLE planning_cycles ADD end_cut_confirmed BOOLEAN DEFAULT FALSE NOT NULL');
+
         $this->addSql('ALTER TABLE plannings ADD week_template JSONB DEFAULT NULL');
         $this->addSql("ALTER TABLE planning_lines ADD week_structure_mode VARCHAR(10) DEFAULT 'CUSTOM' NOT NULL");
         $this->addSql("ALTER TABLE planning_lines ADD CONSTRAINT chk_planning_lines_week_structure_mode CHECK (week_structure_mode IN ('GENERAL', 'CUSTOM'))");
@@ -83,6 +87,8 @@ final class Version20261104090000 extends AbstractMigration
         $this->addSql('ALTER TABLE planning_lines DROP CONSTRAINT chk_planning_lines_week_structure_mode');
         $this->addSql('ALTER TABLE planning_lines DROP week_structure_mode');
         $this->addSql('ALTER TABLE plannings DROP week_template');
+        $this->addSql('ALTER TABLE planning_cycles DROP end_cut_confirmed');
+        $this->addSql('ALTER TABLE planning_cycles DROP start_cut_confirmed');
         $this->addSql('DROP INDEX idx_duties_added_by_change_id');
         $this->addSql('DROP INDEX idx_duties_retired_by_change_id');
         $this->addSql('ALTER TABLE duties DROP CONSTRAINT fk_duties_added_by_change');

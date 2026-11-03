@@ -184,6 +184,26 @@ class PlanningCycleRepository extends ServiceEntityRepository
     }
 
     /**
+     * docs/decisions.md D230: what a collection has already lived: who is
+     * expected, who answered, how many reminders and messages went out.
+     *
+     * @return array{expected: int, answered: int, remindersSent: int}
+     */
+    public function collectionActivity(int $collectionId, PlanningCycle $cycle): array
+    {
+        $row = $this->getEntityManager()->getConnection()->fetchAssociative(<<<'SQL'
+            SELECT
+              (SELECT COUNT(*) FROM availability_collection_responses r WHERE r.collection_id = :collection) AS expected,
+              (SELECT COUNT(*) FROM availability_collection_responses r WHERE r.collection_id = :collection
+                 AND (r.acknowledged_at IS NOT NULL OR r.last_availability_change_at IS NOT NULL)) AS answered,
+              (SELECT COUNT(*) FROM planning_availability_reminders pr WHERE pr.planning_cycle_id = :cycle)
+                + (SELECT COUNT(*) FROM period_preparation_deliveries pd WHERE pd.planning_cycle_id = :cycle AND pd.status IN ('SENT', 'SENDING')) AS sent
+        SQL, ['collection' => $collectionId, 'cycle' => $cycle->getId()]);
+
+        return ['expected' => (int) $row['expected'], 'answered' => (int) $row['answered'], 'remindersSent' => (int) $row['sent']];
+    }
+
+    /**
      * The window of each collection of $cycle.
      *
      * @return list<array{start: string, end: string}>

@@ -142,6 +142,10 @@ final class PeriodBoundaryGuard
      */
     public function classifyStartCuts(PlanningCycle $previous, array $lines): array
     {
+        // docs/decisions.md D229: a cut the manager confirmed is neither to confirm again nor to refuse.
+        if ($previous->isEndCutConfirmed()) {
+            return [[], []];
+        }
         $boundary = $previous->getEndsAt();
         $locked = $this->isLocked($previous);
         $historical = [];
@@ -194,13 +198,20 @@ final class PeriodBoundaryGuard
         $cycle = $period->getCycle();
         $line = $period->getLine();
         $previous = null !== $cycle ? $this->previousOf($cycle) : null;
-        if (null === $previous || null === $line || [] === $earlierDays) {
+        if (null === $cycle || null === $line || [] === $earlierDays) {
             return false;
         }
         foreach ($earlierDays as $day) {
             if ($day->format('Y-m-d') >= $cycle->getStartsAt()->format('Y-m-d')) {
                 return false;
             }
+        }
+        // docs/decisions.md D229: a cut confirmed by the manager: the rest of the block lives on this side.
+        if (null === $previous) {
+            return $cycle->isStartCutConfirmed();
+        }
+        if ($previous->isEndCutConfirmed()) {
+            return true;
         }
 
         return $this->isLocked($previous) && !$this->earlierDaysMaterialized($line->periodIn($previous), $earlierDays);
@@ -225,6 +236,9 @@ final class PeriodBoundaryGuard
                 continue;
             }
             $previous = $cycles[$index - 1];
+            if ($previous->isEndCutConfirmed()) {
+                continue; // docs/decisions.md D229
+            }
             $locked = $this->isLocked($previous);
             foreach ($this->cutsAt($blocks, $cycle->getStartsAt(), $line) as $cut) {
                 if (!$locked || $this->earlierDaysMaterialized($line->periodIn($previous), $cut->earlierDays())) {
@@ -232,7 +246,7 @@ final class PeriodBoundaryGuard
                 }
             }
         }
-        if (\count($cycles) > 1) {
+        if (\count($cycles) > 1 && !$cycles[\count($cycles) - 1]->isEndCutConfirmed()) {
             array_push($cuts, ...$this->cutsAt($blocks, $cycles[\count($cycles) - 1]->getEndsAt(), $line));
         }
 
@@ -274,7 +288,7 @@ final class PeriodBoundaryGuard
      */
     public function endCutsOfLastPeriod(PlanningLine $line, PlanningCycle $cycle): array
     {
-        if (null !== $this->nextOf($cycle)) {
+        if (null !== $this->nextOf($cycle) || $cycle->isEndCutConfirmed()) {
             return [];
         }
 

@@ -169,7 +169,7 @@ final class PlanningResultController
         $group = $duty->getGroupInstance();
         $groupDates = null;
         if (null !== $group) {
-            $groupDates = array_map(static fn (Duty $d): string => $d->getLocalDate()->format('Y-m-d'), $group->getDuties()->toArray());
+            $groupDates = array_map(static fn (Duty $d): string => $d->getLocalDate()->format('Y-m-d'), $group->getActiveDuties());
             sort($groupDates);
         }
 

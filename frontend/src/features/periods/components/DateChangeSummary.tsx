@@ -33,15 +33,12 @@ export function DateChangeSummary({ preview }: { preview: DateChangePreview }) {
         </li>
       ))}
       {preview.collections.map((collection) => (
-        <li key={`${collection.periodNumber}-${collection.startsAt}`}>
-          La collecte des disponibilités de la période {collection.periodNumber} ira du{' '}
-          {formatDate(collection.newStartsAt, 'long')} au {formatDate(collection.newLastDay, 'long')}
-          {collection.contacted
-            ? ' : les participants ont déjà été sollicités sur les anciennes dates, aucun message ne leur sera envoyé.'
-            : collection.answered
-              ? ' : des participants y ont déjà répondu, leurs indisponibilités ne changent pas.'
-              : '.'}
+        <li key={`${collection.periodNumber}-${collection.startsAt}-${collection.kind}`}>
+          <CollectionImpact collection={collection} />
         </li>
+      ))}
+      {(preview.preparation ?? []).map((change) => (
+        <li key={`${change.periodNumber}-${change.kind}-${change.from}`}>{preparationText(change)}</li>
       ))}
       {selected &&
         preview.changes.length === 1 &&
@@ -49,6 +46,67 @@ export function DateChangeSummary({ preview }: { preview: DateChangePreview }) {
         preview.collections.length === 0 && <li>Aucune garde attribuée n’est concernée.</li>}
     </ul>
   )
+}
+
+/**
+ * What happens to a collection (docs/decisions.md D230): never closed, never reduced in silence, and nothing
+ * about anybody's declared absences changes.
+ */
+function CollectionImpact({ collection }: { collection: DateChangePreview['collections'][number] }) {
+  const range = `du ${formatDate(collection.newStartsAt, 'long')} au ${formatDate(collection.newLastDay, 'long')}`
+  if (collection.kind === 'not_extended') {
+    return (
+      <>
+        La collecte de la période {collection.periodNumber} reste {range} : elle ne couvre pas les{' '}
+        {plural(collection.uncoveredAddedDays ?? 0, 'jour ajouté', 'jours ajoutés')}. Aucun message n’est
+        envoyé ; ouvrez une collecte si vous voulez interroger les membres sur ces jours.
+      </>
+    )
+  }
+  if (collection.kind === 'follows') {
+    return (
+      <>
+        La collecte de la période {collection.periodNumber} suit les nouvelles dates ({range}) : personne n’a
+        encore répondu ni reçu de message.
+      </>
+    )
+  }
+  return (
+    <>
+      La collecte de la période {collection.periodNumber}
+      {collection.open === false ? ', déjà close,' : ''} sera réduite : {range} (au lieu du{' '}
+      {formatDate(collection.startsAt, 'long')} au {formatDate(collection.lastDay, 'long')}).{' '}
+      {collection.open !== false && 'Elle reste ouverte. '}
+      {collection.expected !== undefined &&
+        `${collection.responses ?? 0} réponse${(collection.responses ?? 0) > 1 ? 's' : ''} sur ${plural(collection.expected, 'personne attendue', 'personnes attendues')} : les réponses et les indisponibilités déclarées sont conservées. `}
+      {(collection.messagesSent ?? 0) > 0
+        ? `${plural(collection.messagesSent ?? 0, 'message a déjà été envoyé', 'messages ont déjà été envoyés')} avec les anciennes dates ; aucun nouveau message n’est envoyé automatiquement. `
+        : ''}
+      {collection.deadline && collection.newDeadline && collection.newDeadline !== collection.deadline
+        ? `Sa date limite passe du ${formatDate(collection.deadline, 'long')} au ${formatDate(collection.newDeadline, 'long')}.`
+        : ''}
+    </>
+  )
+}
+
+/** docs/decisions.md D230: each date planned for the period that changes with it. */
+function preparationText(change: NonNullable<DateChangePreview['preparation']>[number]): string {
+  const period = `période ${change.periodNumber}`
+  const from = formatDate(change.from, 'long')
+  const to = change.to ? formatDate(change.to, 'long') : null
+  switch (change.kind) {
+    case 'announcement':
+      return `L’annonce prévue le ${from} (${period}) tomberait après la fin : elle est annulée.`
+    case 'target':
+      return `La date cible de génération (${period}) passe du ${from} au ${to}.`
+    case 'deadline':
+    case 'collection_deadline':
+      return `La date limite de déclaration (${period}) passe du ${from} au ${to}.`
+    default:
+      return to
+        ? `Le rappel du ${from} (${period}) passe au ${to}.`
+        : `Le rappel du ${from} (${period}) tomberait trop tard ou serait déjà passé : il est annulé.`
+  }
 }
 
 const NOTIFY_BLOCKED: Record<string, string> = {
@@ -107,6 +165,23 @@ export function DateChangeConfirmation({ preview, saving, error, onBack, onConfi
             </p>
           ))}
 
+        {(preview.blockCuts ?? []).length > 0 && (
+          <p className="mv-banner mv-banner--warn">
+            <Icon name="info" size={20} strokeWidth={1.9} />
+            <span>
+              Ces dates coupent {plural(preview.blockCuts?.length ?? 0, 'bloc', 'blocs')} :{' '}
+              {preview.blockCuts
+                ?.map(
+                  (cut) =>
+                    `« ${cut.blockName} » (${cut.lineName}), du ${formatDate(cut.firstDay, 'card')} au ${formatDate(cut.lastDay, 'card')}`,
+                )
+                .join(' ; ')}
+              . Les jours de part et d’autre de la limite deviennent deux parties distinctes ; la partie de
+              l’autre côté pourra revenir à une autre personne.
+            </span>
+          </p>
+        )}
+
         <h3 className="mv-confirm-title">
           {preview.retiredDutyCount === 0
             ? 'Aucune garde retirée'
@@ -126,6 +201,13 @@ export function DateChangeConfirmation({ preview, saving, error, onBack, onConfi
                   {unit.line} · {unit.holder ?? 'non attribuée'}
                   {unit.published && ' · publiée'}
                 </span>
+                {unit.keptDates && unit.keptDates.length > 0 && (
+                  <span className="mv-confirm-cut">
+                    Bloc coupé : {unit.keptDates.map((date) => formatDate(date, 'card')).join(', ')} reste
+                    {unit.keptDates.length > 1 ? 'nt' : ''} attribué{unit.keptDates.length > 1 ? 's' : ''} à{' '}
+                    {unit.holder ?? 'personne'}.
+                  </span>
+                )}
               </li>
             ))}
           </ul>

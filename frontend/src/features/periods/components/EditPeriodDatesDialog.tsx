@@ -30,6 +30,52 @@ interface Props {
 }
 
 /**
+ * docs/decisions.md D229: the chosen date cuts a block. Never refused: said, with the nearest dates that keep it
+ * whole; keeping the date is a confirmation, on the next step.
+ */
+function BlockCutNotice({
+  preview,
+  onChoose,
+  disabled,
+}: {
+  preview: DateChangePreview
+  onChoose: (side: Edge, day: ISODate) => void
+  disabled: boolean
+}) {
+  const sides = (['start', 'end'] as const).filter((side) => preview.alternatives?.[side])
+  if (sides.length === 0) return null
+  return (
+    <div role="status" className="mv-banner mv-banner--warn mv-cut-notice">
+      <Icon name="info" size={20} strokeWidth={1.9} />
+      <div>
+        <p>
+          Cette date coupe un bloc de gardes. Vous pouvez la garder (à confirmer à l’étape suivante) ou
+          choisir une date qui garde le bloc entier :
+        </p>
+        <div className="mv-cut-notice__choices">
+          {sides.flatMap((side) =>
+            (['before', 'after'] as const).map((position) => {
+              const day = preview.alternatives?.[side]?.[position]
+              return day ? (
+                <button
+                  key={`${side}-${position}`}
+                  type="button"
+                  className="mv-btn mv-btn--secondary mv-btn--sm"
+                  disabled={disabled}
+                  onClick={() => onChoose(side, day)}
+                >
+                  {formatDate(day, 'card')}
+                </button>
+              ) : null
+            }),
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/**
  * « Modifier les dates » of a period, the one way to change them (docs/decisions.md
  * D207, D225), whatever its state. Each date is chosen on a calendar where a
  * refused day says why; the period next to it follows, and what the new dates do
@@ -306,7 +352,19 @@ export function EditPeriodDatesDialog({
                   </p>
                 )}
                 {shownPreview && shownPreview.allowed && !startRefused && !endRefused && (
-                  <DateChangeSummary preview={shownPreview} />
+                  <>
+                    <BlockCutNotice
+                      preview={shownPreview}
+                      onChoose={(side, day) => {
+                        setError(null)
+                        if (side === 'start') setStart(day)
+                        else setEnd(day)
+                        setMonths((current) => ({ ...current, [side]: monthOf(day) }))
+                      }}
+                      disabled={saving}
+                    />
+                    <DateChangeSummary preview={shownPreview} />
+                  </>
                 )}
                 {active.failed && (
                   <p className="mv-muted mv-small">

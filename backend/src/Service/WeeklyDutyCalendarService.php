@@ -158,7 +158,7 @@ final class WeeklyDutyCalendarService
      * [$startsAt, $endsAt[ — counted, nothing written. For the "Modifier les
      * dates" preview, before the period has moved.
      */
-    public function countExtension(PlanningPeriod $period, \DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt, \DateTimeImmutable $from, \DateTimeImmutable $to): int
+    public function countExtension(PlanningPeriod $period, \DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt, \DateTimeImmutable $from, \DateTimeImmutable $to, bool $cutConfirmed = false): int
     {
         $count = 0;
         $claimed = [];
@@ -171,18 +171,16 @@ final class WeeklyDutyCalendarService
                 if ([] === array_filter($days, static fn (\DateTimeImmutable $day): bool => $day >= $from && $day < $to)) {
                     continue;
                 }
-                if ([] !== array_filter($days, static fn (\DateTimeImmutable $day): bool => $day < $startsAt || $day >= $endsAt)) {
+                if (!$cutConfirmed && [] !== array_filter($days, static fn (\DateTimeImmutable $day): bool => $day < $startsAt || $day >= $endsAt)) {
                     continue;
                 }
                 foreach ($days as $day) {
-                    if (isset($claimed[$day->format('Y-m-d')]) || $this->dutyRepository->existsForPeriodAndLocalDate($period, $day)) {
-                        continue 2;
+                    if ($day < $startsAt || $day >= $endsAt || isset($claimed[$day->format('Y-m-d')]) || $this->dutyRepository->existsForPeriodAndLocalDate($period, $day)) {
+                        continue;
                     }
-                }
-                foreach ($days as $day) {
                     $claimed[$day->format('Y-m-d')] = true;
+                    ++$count;
                 }
-                $count += \count($days);
             }
         }
 
@@ -341,10 +339,15 @@ final class WeeklyDutyCalendarService
         $coverageSources = [];
         $anomalies = [];
         $earlierDays = [];
+        $laterDays = false;
         foreach ($pattern->getComponents() as $component) {
             $day = $monday->modify(sprintf('+%d days', $component->getDayOffset()));
             if ($day >= $period->getEndsAt()) {
-                return [];
+                // docs/decisions.md D229: only an end the manager confirmed keeps the first days of a block.
+                if (true !== $period->getCycle()?->isEndCutConfirmed()) {
+                    return [];
+                }
+                $laterDays = true;
             }
             if ($day < $period->getStartsAt()) {
                 $earlierDays[] = $day;
@@ -354,19 +357,24 @@ final class WeeklyDutyCalendarService
         // of a locked previous period, where its earlier days were never materialized) gets its days of this period
         // as a remainder block. Any other occurrence crossing the start is never materialized, as before.
         $remainder = [] !== $earlierDays;
-        // An extension never creates a remainder: only whole blocks.
-        if ($remainder && (null !== $this->window || !$this->boundaryGuard->allowsRemainder($period, $earlierDays))) {
+        if ($remainder && !$this->boundaryGuard->allowsRemainder($period, $earlierDays)) {
             return [];
         }
+        $remainder = $remainder || $laterDays;
 
         foreach ($pattern->getComponents() as $component) {
             $day = $monday->modify(sprintf('+%d days', $component->getDayOffset()));
-            if ($day < $period->getStartsAt()) {
+            if ($day < $period->getStartsAt() || $day >= $period->getEndsAt()) {
                 continue;
             }
 
             if ($this->isTaken($period, $day)) {
-                return [];
+                // docs/decisions.md D229: extending a period ended inside a block: its first days exist, the rest is added.
+                if (null === $this->window) {
+                    return [];
+                }
+                $remainder = true;
+                continue;
             }
 
             $componentLocalTimes[$component->getDayOffset()] = [$day, $day->modify('+1 day')];
@@ -384,6 +392,9 @@ final class WeeklyDutyCalendarService
         // A block is atomic: one day without a unique coverage source leaves the whole occurrence unmaterialized.
         if ([] !== $anomalies) {
             return $anomalies;
+        }
+        if ([] === $componentLocalTimes) {
+            return [];
         }
 
         $demandType = null !== $sourcePeriod ? DutyDemandType::CONDITIONAL : DutyDemandType::REQUIRED;

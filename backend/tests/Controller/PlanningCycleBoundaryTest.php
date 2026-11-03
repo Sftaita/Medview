@@ -134,8 +134,10 @@ final class PlanningCycleBoundaryTest extends WebTestCase
         $this->createPeriod('2027-08-02');
         self::assertResponseStatusCodeSame(201);
 
-        // Moving the end of the last period: never inside a block either.
-        $this->assertSplitsBlock($this->changeEnd(2, '2027-08-08'));
+        // docs/decisions.md D229: moving an existing end inside a block is possible, never without its confirmation.
+        $this->changeEnd(2, '2027-08-08');
+        self::assertResponseStatusCodeSame(409);
+        self::assertSame('date_change_confirmation_required', json_decode((string) $this->client->getResponse()->getContent(), true)['error']);
         $this->changeEnd(2, '2027-08-09');
         self::assertResponseIsSuccessful();
     }

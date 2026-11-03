@@ -15,6 +15,7 @@ use App\Entity\PlanningLine;
 use App\Entity\PlanningPeriod;
 use App\Entity\PlanningPeriodStatus;
 use App\Entity\PlanningPublication;
+use App\Entity\PreparationActionState;
 use App\Entity\User;
 use App\Exception\HistoricalBlockCutConfirmationRequiredException;
 use App\Exception\NoUnpublishedChangesException;
@@ -25,6 +26,7 @@ use App\Exception\PlanningNotPublishableException;
 use App\Repository\AvailabilityCollectionRepository;
 use App\Repository\DutySwapRequestRepository;
 use App\Repository\FairnessPeriodRepository;
+use App\Repository\PeriodPreparationReminderRepository;
 use App\Repository\PeriodPreparationRepository;
 use App\Repository\PlanningCycleRepository;
 use App\Repository\PlanningGenerationRepository;
@@ -82,6 +84,7 @@ final class PlanningCycleService
         private readonly LoggerInterface $logger,
         private readonly PeriodPreparationRepository $preparationRepository,
         private readonly PeriodDateChangePlanner $dateChangePlanner,
+        private readonly PeriodPreparationReminderRepository $reminderRepository,
         private readonly PlanningLineOrder $lineOrder,
         private readonly \App\Repository\DutyRepository $dutyRepository,
         private readonly CalendarWriteLock $calendarWriteLock,
@@ -181,13 +184,20 @@ final class PlanningCycleService
      * What these new dates would do (docs/decisions.md D225), nothing written:
      * the refusals (the same as the write) and the plan.
      *
-     * @return array{violations: list<PeriodDateViolation>, plan: PeriodDateChangePlan}
+     * @return array{violations: list<PeriodDateViolation>, plan: PeriodDateChangePlan, alternatives: array{start: ?array{before: ?string, after: ?string}, end: ?array{before: ?string, after: ?string}}}
      */
     public function previewDates(PlanningCycle $cycle, ?\DateTimeImmutable $startsAt, ?\DateTimeImmutable $endsAt): array
     {
+        $plan = $this->dateChangePlanner->plan($cycle, $startsAt, $endsAt);
+
         return [
             'violations' => $this->dateViolations($cycle, $startsAt, $endsAt),
-            'plan' => $this->dateChangePlanner->plan($cycle, $startsAt, $endsAt),
+            'plan' => $plan,
+            // docs/decisions.md D229: only when a date cuts a block.
+            'alternatives' => [
+                'start' => null !== $startsAt && [] !== $this->dateRules->cutWarnings($cycle, 'start', $startsAt) ? $this->dateRules->alternatives($cycle, 'start', $startsAt) : null,
+                'end' => null !== $endsAt && [] !== $this->dateRules->cutWarnings($cycle, 'end', $endsAt) ? $this->dateRules->alternatives($cycle, 'end', $endsAt->modify('-1 day')) : null,
+            ],
         ];
     }
 
@@ -263,6 +273,7 @@ final class PlanningCycleService
             $this->entityManager->flush();
 
             $this->moveTargets($planning, $plan);
+            $this->alignPreparation($plan, $now);
 
             $added = 0;
             foreach ($plan->targets as $target) {
@@ -363,6 +374,11 @@ final class PlanningCycleService
         foreach ($plan->targets as $target) {
             $this->setCycleDates($target['cycle'], $target['startsAt'], $target['endsAt']);
         }
+        // docs/decisions.md D229: what the manager confirmed about this boundary — a later move decides again.
+        foreach ($plan->cutDecisions as ['cycle' => $cut, 'edge' => $edge, 'cut' => $confirmed]) {
+            'end' === $edge ? $cut->recordEndCut($confirmed) : $cut->recordStartCut($confirmed);
+        }
+        $this->entityManager->flush();
 
         $this->fitFairness($fairnessPeriods);
         $all = $this->cycleRepository->findByPlanning($planning);
@@ -376,6 +392,50 @@ final class PlanningCycleService
                 if ($collection->getCycle() === $target['cycle'] && !$target['cycle']->contains($collection->getStartsAt(), $collection->getEndsAt())) {
                     $collection->clampToCycle($now);
                 }
+            }
+        }
+        $this->entityManager->flush();
+    }
+
+    /**
+     * docs/decisions.md D230: the dates planned for a period stay inside it
+     * when it ends earlier — what the plan showed before the confirmation, done
+     * here and nothing else: an announcement not made yet is cancelled, the target
+     * and the deadlines come back to the new last day, the reminders follow the
+     * target or are cancelled. What was already sent is history.
+     */
+    private function alignPreparation(PeriodDateChangePlan $plan, \DateTimeImmutable $now): void
+    {
+        foreach ($plan->preparation as $change) {
+            $cycle = $change['cycle'];
+            $preparation = $this->preparationRepository->findOneByCycle($cycle);
+            $to = null !== $change['to'] ? new \DateTimeImmutable($change['to']) : null;
+            switch ($change['kind']) {
+                case 'announcement':
+                    $preparation?->finishAnnouncement(PreparationActionState::CANCELLED, 'period_shortened', $now);
+                    break;
+                case 'target':
+                    $preparation?->changeTarget($to);
+                    break;
+                case 'deadline':
+                    $preparation?->changeDeclarationDeadline($to);
+                    break;
+                case 'collection_deadline':
+                    $this->collectionRepository->find($change['collectionId'])?->changeDeadline($to, $now);
+                    break;
+                case 'reminder':
+                    $reminder = $this->reminderRepository->find($change['reminderId']);
+                    if (null === $to) {
+                        $reminder?->finish(PreparationActionState::CANCELLED, 'period_shortened', $now);
+                    } else {
+                        // Parked first: two reminders moving together never collide on the unique scheduled day.
+                        $this->entityManager->getConnection()->executeStatement('UPDATE period_preparation_reminders SET due_on = :parked WHERE id = :id', [
+                            'parked' => (new \DateTimeImmutable('1900-01-01'))->modify(\sprintf('+%d days', (int) $change['reminderId'] % 3000))->format('Y-m-d'),
+                            'id' => $change['reminderId'],
+                        ]);
+                        $reminder?->reschedule($reminder->getOffsetValue(), $reminder->getOffsetUnit(), $to, PreparationCalendar::runAt($to), $now);
+                    }
+                    break;
             }
         }
         $this->entityManager->flush();

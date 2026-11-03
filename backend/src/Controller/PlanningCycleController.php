@@ -145,6 +145,7 @@ final class PlanningCycleController
         return new JsonResponse([
             'allowed' => [] === $preview['violations'],
             'reasons' => array_map(static fn (PeriodDateViolation $violation): array => $violation->toArray(), $preview['violations']),
+            'alternatives' => $preview['alternatives'],
             ...$preview['plan']->toArray(),
         ]);
     }
@@ -215,6 +216,8 @@ final class PlanningCycleController
                 'date' => $day['date'],
                 'allowed' => [] === $blockers && [] === $day['violations'],
                 'reasons' => $reasons([...$blockers, ...$day['violations']]),
+                // docs/decisions.md D229: possible, but the manager is told what it cuts and confirms it.
+                'warnings' => $reasons($day['warnings'] ?? []),
             ], $options['days']),
         ]);
     }

@@ -49,7 +49,8 @@ export function createPeriod(
 /** One reason a date is refused (docs/decisions.md D207): the API's error code, and the blocks a cut would split. */
 export type DateReason = { code: string; cuts?: BlockCut[] }
 
-export type DayOption = { date: string; allowed: boolean; reasons: DateReason[] }
+/** `warnings` (docs/decisions.md D229): possible, but it cuts a block — said, and confirmed against its consequences. */
+export type DayOption = { date: string; allowed: boolean; reasons: DateReason[]; warnings?: DateReason[] }
 
 /**
  * GET …/periods/date-options: what the date picker shows. For `edge: 'end'`,
@@ -93,6 +94,19 @@ export type PeriodDatesInput = {
 export type DateChangePreview = {
   allowed: boolean
   reasons: DateReason[]
+  /** The nearest dates that keep every block whole, when a chosen date cuts one (docs/decisions.md D229). */
+  alternatives?: {
+    start: { before: string | null; after: string | null } | null
+    end: { before: string | null; after: string | null } | null
+  }
+  blockCuts?: BlockCut[]
+  /** What was planned for the period and changes with it (docs/decisions.md D230). */
+  preparation?: {
+    periodNumber: number
+    kind: 'announcement' | 'target' | 'deadline' | 'collection_deadline' | 'reminder'
+    from: string
+    to: string | null
+  }[]
   changes: {
     periodStableId: string
     periodNumber: number
@@ -110,6 +124,8 @@ export type DateChangePreview = {
     line: string
     block: string | null
     dates: string[]
+    /** The days of a cut block that stay, with their holder (docs/decisions.md D229). */
+    keptDates?: string[]
     holder: string | null
     published: boolean
   }[]
@@ -131,6 +147,15 @@ export type DateChangePreview = {
     newLastDay: string
     contacted: boolean
     answered: boolean
+    /** docs/decisions.md D230. */
+    kind?: 'reduced' | 'follows' | 'not_extended'
+    open?: boolean
+    expected?: number
+    responses?: number
+    messagesSent?: number
+    deadline?: string | null
+    newDeadline?: string | null
+    uncoveredAddedDays?: number
   }[]
   swapRequestCount: number
   confirmationRequired: boolean

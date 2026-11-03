@@ -72,6 +72,21 @@ final class PlanningPeriodDatesTest extends WebTestCase
     }
 
     /**
+     * New dates as the screen sends them when they must be confirmed (D229, D230): with the hash of the plan it read.
+     *
+     * @param array<string, mixed> $body
+     *
+     * @return array<string, mixed>
+     */
+    private function confirmedPatch(string $period, array $body): array
+    {
+        $query = http_build_query(array_intersect_key($body, ['startsAt' => 1, 'endsAt' => 1]));
+        $preview = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/periods/{$period}/date-change-preview?{$query}", token: $this->s['creator']);
+
+        return $this->patch($period, $body + ['confirmation' => $preview['impactHash']]);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function options(string $period, string $edge, string $from, string $to, ?string $token = null): array
@@ -187,7 +202,10 @@ final class PlanningPeriodDatesTest extends WebTestCase
         $preview = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/periods/{$period1}/date-change-preview?startsAt=2027-01-15", token: $this->s['creator']);
         self::assertTrue($preview['allowed']);
         self::assertSame([[1, '2027-01-01', '2027-01-15', true]], array_map(static fn (array $c): array => [$c['periodNumber'], $c['startsAt'], $c['newStartsAt'], $c['answered']], $preview['collections']));
+        // People answered: seen and confirmed, never only said (D230).
         $this->patch($period1, ['startsAt' => '2027-01-15', 'expectedStartsAt' => '2027-01-01']);
+        $this->assertError(409, 'date_change_confirmation_required');
+        $this->confirmedPatch($period1, ['startsAt' => '2027-01-15', 'expectedStartsAt' => '2027-01-01']);
         self::assertResponseIsSuccessful();
         self::assertSame([['number' => 1, 's' => '2027-01-15', 'e' => '2027-05-01']], $this->dates()['collections']);
 
@@ -255,9 +273,9 @@ final class PlanningPeriodDatesTest extends WebTestCase
         self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
         self::assertSame([['number' => 1, 's' => '2027-01-01', 'e' => '2027-06-01'], ['number' => 2, 's' => '2027-06-01', 'e' => '2027-08-01']], $this->dates()['cycles']);
         self::assertSame([['number' => 1, 's' => '2027-01-01', 'e' => '2027-04-01']], $this->dates()['collections']);
-        $this->patch($period1, ['endsAt' => '2027-03-01', 'expectedEndsAt' => '2027-06-01']);
+        $this->confirmedPatch($period1, ['endsAt' => '2027-03-01', 'expectedEndsAt' => '2027-06-01']);
         self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
-        self::assertSame([['number' => 1, 's' => '2027-01-01', 'e' => '2027-03-01']], $this->dates()['collections'], 'reduced, said by the preview (D225)');
+        self::assertSame([['number' => 1, 's' => '2027-01-01', 'e' => '2027-03-01']], $this->dates()['collections'], 'reduced, once confirmed (D230)');
         $this->assertAuditClean();
 
         // Period 2 keeps 7 days at least.
@@ -301,24 +319,25 @@ final class PlanningPeriodDatesTest extends WebTestCase
 
     // --- 3. blocks ---------------------------------------------------------------------------------
 
-    public function testNoDateEverCutsABlockAndTheOptionsSayWhichOne(): void
+    public function testADateThatCutsABlockIsWarnedAndConfirmedAndANewPeriodStillNeverDoes(): void
     {
         $this->useWeekendBlocks();
         $period1 = $this->periods()[0]['stableId'];
 
-        // 2027-04-30 is a Friday: a last day on Friday or Saturday cuts the weekend block.
-        $byDay = self::reasonsByDay($this->options($period1, 'end', '2027-04-29', '2027-05-03'));
-        self::assertSame(['2027-04-29' => [], '2027-04-30' => ['period_boundary_splits_block'], '2027-05-01' => ['period_boundary_splits_block'], '2027-05-02' => [], '2027-05-03' => []], $byDay);
-        $friday = $this->options($period1, 'end', '2027-04-30', '2027-04-30')['days'][0]['reasons'][0]['cuts'][0];
+        // 2027-04-30 is a Friday: a last day on Friday or Saturday cuts the weekend block. Possible, with a warning (D229).
+        $options = $this->options($period1, 'end', '2027-04-29', '2027-05-03');
+        self::assertSame(['2027-04-29' => [], '2027-04-30' => [], '2027-05-01' => [], '2027-05-02' => [], '2027-05-03' => []], self::reasonsByDay($options));
+        self::assertSame(['2027-04-29' => [], '2027-04-30' => [], '2027-05-01' => ['period_boundary_splits_block'], '2027-05-02' => [], '2027-05-03' => []], array_map(static fn (array $day): array => array_column($day['warnings'], 'code'), array_column($options['days'], null, 'date')));
+        $friday = $this->options($period1, 'end', '2027-05-01', '2027-05-01')['days'][0]['warnings'][0]['cuts'][0];
         self::assertSame(['Seniors', 'Ven · Sam · Dim', '2027-04-30', '2027-05-02'], [$friday['lineName'], $friday['blockName'], $friday['firstDay'], $friday['lastDay']]);
 
         $this->patch($period1, ['endsAt' => '2027-05-02', 'expectedEndsAt' => '2027-05-01']);
-        $this->assertError(422, 'period_boundary_splits_block');
+        $this->assertError(409, 'date_change_confirmation_required');
         $this->patch($period1, ['endsAt' => '2027-05-03', 'expectedEndsAt' => '2027-05-01']);
         self::assertResponseIsSuccessful();
 
         // The first period's start (Saturday 2 or Sunday 3 January) and a new period's end follow the same rule.
-        self::assertSame(['period_boundary_splits_block'], self::reasonsByDay($this->options($period1, 'start', '2027-01-02', '2027-01-02'))['2027-01-02']);
+        self::assertSame(['period_boundary_splits_block'], array_column($this->options($period1, 'start', '2027-01-02', '2027-01-02')['days'][0]['warnings'], 'code'));
         $next = self::reasonsByDay($this->options('next', 'end', '2027-06-04', '2027-06-07'));
         self::assertSame(['2027-06-04' => ['period_boundary_splits_block'], '2027-06-05' => ['period_boundary_splits_block'], '2027-06-06' => [], '2027-06-07' => []], $next);
         $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/periods", ['endsAt' => '2027-06-05', 'previousPeriodStableId' => $period1], $this->s['creator']);
@@ -361,8 +380,8 @@ final class PlanningPeriodDatesTest extends WebTestCase
         // Its end, while it is blank: on any day but a Friday or a Saturday (the weekend block).
         $byDay = self::reasonsByDay($this->options($period2, 'end', '2027-02-01', '2027-02-07'));
         self::assertSame(['period_too_short'], $byDay['2027-02-01'], 'a week at least');
-        self::assertSame(['period_too_short', 'period_boundary_splits_block'], $byDay['2027-02-05'], 'every reason, not only the first');
-        self::assertSame(['period_boundary_splits_block'], $byDay['2027-02-06']);
+        self::assertSame(['period_too_short'], $byDay['2027-02-05'], 'a cut is a warning, too short stays a refusal');
+        self::assertSame([], $byDay['2027-02-06'], 'possible, with a warning (D229)');
         self::assertSame([], $byDay['2027-02-07']);
         $shortened = $this->patch($period2, ['endsAt' => '2027-04-05', 'expectedEndsAt' => '2027-05-03']);
         self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
@@ -424,7 +443,10 @@ final class PlanningPeriodDatesTest extends WebTestCase
         self::assertTrue($preview['collections'][0]['contacted']);
         self::assertSame('2027-03-31', $preview['collections'][0]['newLastDay']);
         self::assertSame([['number' => 1, 's' => '2027-01-01', 'e' => '2027-05-01']], $this->dates()['collections'], 'the preview writes nothing');
+        self::assertTrue($preview['confirmationRequired'], 'people were written to: seen and confirmed (D230)');
         $this->patch($period1, ['endsAt' => '2027-04-01', 'expectedEndsAt' => '2027-05-01']);
+        $this->assertError(409, 'date_change_confirmation_required');
+        $this->confirmedPatch($period1, ['endsAt' => '2027-04-01', 'expectedEndsAt' => '2027-05-01']);
         self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
         self::assertSame([['number' => 1, 's' => '2027-01-01', 'e' => '2027-04-01']], $this->dates()['collections']);
 
@@ -475,7 +497,7 @@ final class PlanningPeriodDatesTest extends WebTestCase
         self::assertResponseIsSuccessful('intact again: it follows');
         $this->api($this->client, 'POST', "/api/availability-collections/{$this->s['collectionId']}/close", [], $this->s['creator']);
         self::assertResponseIsSuccessful();
-        $this->patch($period1, ['endsAt' => '2027-03-01', 'expectedEndsAt' => '2027-04-01']);
+        $this->confirmedPatch($period1, ['endsAt' => '2027-03-01', 'expectedEndsAt' => '2027-04-01']);
         self::assertResponseIsSuccessful();
         self::assertSame([['number' => 1, 's' => '2027-01-01', 'e' => '2027-03-01']], $this->dates()['collections']);
     }

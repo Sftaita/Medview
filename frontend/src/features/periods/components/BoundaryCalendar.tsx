@@ -99,12 +99,20 @@ export function BoundaryCalendar({
         ))}
         {monthGrid(month).map((day) => {
           const option = optionOf(day)
-          const state = option === undefined ? 'unknown' : option.allowed ? 'allowed' : 'refused'
+          const warned = (option?.warnings?.length ?? 0) > 0
+          const state =
+            option === undefined ? 'unknown' : !option.allowed ? 'refused' : warned ? 'warned' : 'allowed'
           const isSelected = day === selected
           const reasons = option && !option.allowed ? option.reasons.map(dateReasonMessage).join(' ') : ''
           const name = [
             formatDate(day, 'long'),
-            state === 'refused' ? `impossible : ${reasons}` : state === 'allowed' ? 'possible' : '',
+            state === 'refused'
+              ? `impossible : ${reasons}`
+              : state === 'warned'
+                ? 'possible, coupe un bloc'
+                : state === 'allowed'
+                  ? 'possible'
+                  : '',
             day === current ? 'date actuelle' : '',
             day === fixed ? 'premier jour' : '',
           ]
@@ -136,6 +144,11 @@ export function BoundaryCalendar({
                   ×
                 </i>
               )}
+              {state === 'warned' && (
+                <i className="mv-bcal__mark" aria-hidden="true">
+                  !
+                </i>
+              )}
             </button>
           )
         })}
@@ -143,6 +156,9 @@ export function BoundaryCalendar({
       <ul className="mv-bcal__legend" aria-hidden="true">
         <li>
           <i className="mv-bcal__swatch is-allowed" /> Possible
+        </li>
+        <li>
+          <i className="mv-bcal__swatch is-warned">!</i> Possible, coupe un bloc (à confirmer)
         </li>
         <li>
           <i className="mv-bcal__swatch is-refused">×</i> Impossible (touchez le jour pour savoir pourquoi)

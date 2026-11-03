@@ -241,8 +241,9 @@ final class PlanningLineService
         if ($cycle->getEndsAt()->format('Y-m-d') <= $today->format('Y-m-d')) {
             return false;
         }
+        // docs/decisions.md D231: publication is per line: a line published (D196) keeps no other line out of the period.
         foreach ($this->cycleRepository->periodsOf($cycle) as $period) {
-            if (\in_array($period->getStatus(), self::LOCKED_STATUSES, true)) {
+            if (PlanningPeriodStatus::ARCHIVED === $period->getStatus()) {
                 return false;
             }
         }

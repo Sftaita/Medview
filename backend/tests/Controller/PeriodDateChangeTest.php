@@ -417,26 +417,6 @@ final class PeriodDateChangeTest extends WebTestCase
 
     // --- blocks, concurrency, rights, re-extension ------------------------------------------------
 
-    public function testABoundaryNeverCutsABlockEvenOneOfAStructureChangedSince(): void
-    {
-        $period1 = $this->generatedPeriodOne();
-
-        // Friday 15 January: cuts the weekend block.
-        $this->patch($period1, ['endsAt' => '2027-01-16', 'expectedEndsAt' => '2027-02-01']);
-        $this->assertError(422, 'period_boundary_splits_block');
-        $reasons = $this->preview($period1, 'endsAt=2027-01-16')['reasons'];
-        self::assertSame('period_boundary_splits_block', $reasons[0]['code']);
-        self::assertSame('Ven · Sam · Dim', $reasons[0]['cuts'][0]['blockName']);
-
-        // No block in the structure any more, but the weekend of 15-17 January exists in the calendar.
-        $line = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}", token: $this->s['creator'])['lines'][0]['stableId'];
-        $this->api($this->client, 'PUT', "/api/planning-lines/{$line}/week-structure", ['blocks' => [], 'solo' => ['LUN', 'MAR', 'MER', 'JEU', 'VEN', 'SAM', 'DIM'], 'soloFamily' => '', 'excluded' => []], $this->s['creator']);
-        self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
-        $this->patch($period1, ['endsAt' => '2027-01-16', 'expectedEndsAt' => '2027-02-01']);
-        $this->assertError(409, 'materialized_block_crosses_boundary');
-        self::assertSame(0, $this->rows('SELECT COUNT(*) FROM duties WHERE retired_at IS NOT NULL'));
-    }
-
     public function testASecondIdenticalRequestIsRefusedAndChangesNothing(): void
     {
         $period1 = $this->generatedPeriodOne();

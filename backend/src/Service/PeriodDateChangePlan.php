@@ -42,6 +42,12 @@ final readonly class PeriodDateChangePlan
         public ?string $notifyBlock,
         public array $pendingChanges,
         public string $impactHash,
+        /** docs/decisions.md D229: blocks of the weekly structure the new dates cut. @var list<BlockCut> */
+        public array $blockCuts = [],
+        /** What the manager decides about each boundary that moves. @var list<array{cycle: PlanningCycle, edge: string, cut: bool}> */
+        public array $cutDecisions = [],
+        /** docs/decisions.md D230: dates planned for a period that change with it. @var list<array{cycle: PlanningCycle, kind: string, from: string, to: ?string, collectionId?: int, reminderId?: int}> */
+        public array $preparation = [],
     ) {
     }
 
@@ -71,6 +77,12 @@ final readonly class PeriodDateChangePlan
                 'published' => $row['published'],
             ];
             $units[$key]['dates'][] = $duty->getLocalDate()->format('Y-m-d');
+            // docs/decisions.md D229: the days of this block that stay, with their holder.
+            if (null !== $duty->getGroupInstance()) {
+                $retiredIds = array_map(static fn (array $other): int => (int) $other['duty']->getId(), $this->retired);
+                $kept = array_values(array_filter($duty->getGroupInstance()->getActiveDuties(), static fn (Duty $other): bool => !\in_array((int) $other->getId(), $retiredIds, true)));
+                $units[$key]['keptDates'] = array_map(static fn (Duty $other): string => $other->getLocalDate()->format('Y-m-d'), $kept);
+            }
         }
 
         $assigned = array_values(array_filter($this->retired, static fn (array $row): bool => null !== $row['assignment']));
@@ -112,7 +124,23 @@ final readonly class PeriodDateChangePlan
                 'newLastDay' => (new \DateTimeImmutable($collection['newEndsAt']))->modify('-1 day')->format('Y-m-d'),
                 'contacted' => $collection['contacted'],
                 'answered' => $collection['answered'],
+                // docs/decisions.md D230: everything the manager must see before confirming.
+                'kind' => $collection['kind'],
+                'open' => $collection['open'],
+                'expected' => $collection['expected'],
+                'responses' => $collection['responses'],
+                'messagesSent' => $collection['messagesSent'],
+                'deadline' => $collection['deadline'],
+                'newDeadline' => $collection['newDeadline'],
+                'uncoveredAddedDays' => $collection['uncoveredAddedDays'],
             ], $this->collections),
+            'blockCuts' => array_map(static fn (BlockCut $cut): array => $cut->toArray(), $this->blockCuts),
+            'preparation' => array_map(static fn (array $change): array => [
+                'periodNumber' => $change['cycle']->getNumber(),
+                'kind' => $change['kind'],
+                'from' => $change['from'],
+                'to' => $change['to'],
+            ], $this->preparation),
             'swapRequestCount' => $this->swapRequestCount,
             'confirmationRequired' => $this->confirmationRequired,
             'republishPeriods' => array_map(static fn (PlanningCycle $cycle): int => $cycle->getNumber(), $this->republish),

@@ -124,6 +124,17 @@ class DutyGroupInstance
     }
 
     /**
+     * docs/decisions.md D229: the days of this block still in the calendar —
+     * a date change may have retired the others. getDuties() stays the history.
+     *
+     * @return list<Duty>
+     */
+    public function getActiveDuties(): array
+    {
+        return array_values(array_filter($this->duties->toArray(), static fn (Duty $duty): bool => !$duty->isRetired()));
+    }
+
+    /**
      * The remainder of an occurrence cut by a historical period boundary
      * (docs/decisions.md D192): fewer duties than its pattern has days —
      * the earlier days lie in the previous, locked period, where they were

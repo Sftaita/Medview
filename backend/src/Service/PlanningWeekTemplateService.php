@@ -10,6 +10,7 @@ use App\Entity\Planning;
 use App\Entity\PlanningLine;
 use App\Entity\PlanningLineType;
 use App\Exception\InvalidWeekStructureException;
+use App\Exception\PeriodBoundarySplitsBlockException;
 use App\Repository\PlanningLineDemandPolicyRepository;
 use App\Repository\PlanningLineRepository;
 use Doctrine\DBAL\LockMode;
@@ -127,7 +128,11 @@ final class PlanningWeekTemplateService
         if (!$this->isDefined($planning)) {
             return;
         }
-        $this->weekStructureService->replace($line, self::requestFrom($this->read($planning)));
+        try {
+            $this->weekStructureService->replace($line, self::requestFrom($this->read($planning)));
+        } catch (PeriodBoundarySplitsBlockException) {
+            return; // A boundary of this planning cuts it: the line starts "to configure", and creating it never fails.
+        }
         $line->changeWeekStructureMode(self::GENERAL);
         $this->entityManager->flush();
     }

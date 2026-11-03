@@ -288,7 +288,8 @@ final class PlanningPdfRenderer
         $blockPart = null;
         $blockLabel = null;
         if (null !== $group) {
-            $dates = array_map(static fn (Duty $d): string => $d->getLocalDate()->format('Y-m-d'), $group->getDuties()->toArray());
+            // docs/decisions.md D229: a day retired since is read with its whole block; a day still active, with what remains.
+            $dates = array_map(static fn (Duty $d): string => $d->getLocalDate()->format('Y-m-d'), $duty->isRetired() ? $group->getDuties()->toArray() : $group->getActiveDuties());
             sort($dates);
             $own = $duty->getLocalDate()->format('Y-m-d');
             $blockPart = match (true) {

@@ -48,7 +48,7 @@ final class SnapshotDemandView implements DemandView
     {
         $group = $duty->getGroupInstance();
 
-        return $this->compute(null !== $group ? array_values($group->getDuties()->toArray()) : [$duty])->forDuty($duty);
+        return $this->compute(null !== $group ? $group->getActiveDuties() : [$duty])->forDuty($duty);
     }
 
     public function forUnit(DutyUnit $unit): UnitDemand

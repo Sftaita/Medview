@@ -10530,3 +10530,51 @@ modifié.
   - « Prolonger la période » disparaît : « Modifier les dates » couvre ce cas. L'endpoint D122 reste, sans écran.
 - **Limite connue** — une ligne nouvelle n'entre pas dans une période dont une ligne est déjà publiée
   (`isOpenToNewLine`, D196, inchangé) : elle commence à la période suivante.
+
+## D229 — Finir une période au milieu d'un bloc : averti, confirmé, jamais interdit
+
+- **Révise D225 et, pour un changement de dates seulement, la règle du lot L3** (demande de
+  l'utilisateur, 2026-11-03). Créer une période continue de refuser une fin qui coupe un bloc ; l'attribution
+  d'un bloc ordinaire reste atomique.
+- **Décision** : `PeriodDateRules` ne refuse plus une date qui coupe un bloc ; elle la signale
+  (`warnings` jour par jour dans `date-options`, `blockCuts` et `retiredUnits[].keptDates` dans le plan) et
+  propose les dates voisines qui gardent le bloc entier (`alternatives`, jusqu'à 21 jours autour).
+  La coupe est toujours à confirmer, même si rien n'est généré.
+- **Effet** : les jours avant la limite gardent leurs lignes et leur titulaire (mêmes `DutyAssignment`) ; les jours après
+  sont retirés (D225). `DutyGroupInstance::getActiveDuties()` donne les jours encore actifs : réaffectation, retrait,
+  préflight de publication et demande conditionnelle ne voient plus que cette partie.
+- **Décision enregistrée** : `planning_cycles.end_cut_confirmed` / `start_cut_confirmed`. Seul ce drapeau autorise un
+  bloc partiel, des deux côtés de cette limite précise : première génération d'une période coupée (ses
+  premiers jours), reste du bloc dans la période suivante (`allowsRemainder`), reprolongation (les jours manquants
+  deviennent une unité distincte, le titulaire déjà en place ne change pas). Déplacer la limite décide à nouveau.
+- **Limite** : les deux parties d'un bloc coupé sont deux unités distinctes et peuvent avoir deux titulaires.
+- **Tests** : `PeriodBoundaryCutTest`.
+
+## D230 — Collectes et préparation : tout est montré avant confirmation
+
+- **Révise D225 §collectes et précise D208** : pas de réduction ni de clôture silencieuse. Une collecte n'est jamais
+  close par un changement de dates ; une réponse, une indisponibilité déclarée et un rappel envoyé ne sont jamais
+  supprimés.
+- **Trois cas, nommés dans le plan** (`collections[].kind`) :
+  - `reduced` : la fenêtre est ramenée à ce qui reste. **Confirmation obligatoire** dès que quelqu'un a répondu ou a été
+    sollicité, avec : statut, personnes attendues, réponses, messages déjà envoyés (aux anciennes dates, aucun nouveau
+    n'est envoyé), date limite avant/après ;
+  - `follows` : collecte intacte, elle suit les dates, sans confirmation ;
+  - `not_extended` : la période gagne des jours, la collecte reste telle qu'annoncée, les jours non couverts sont comptés.
+  Une collecte qui se retrouverait entièrement hors de la période reste refusée.
+- **Préparation** : quand une période finit plus tôt, ce qui était prévu après son nouveau dernier jour reste cohérent, et
+  c'est montré et confirmé avant : annonce non encore faite annulée (`period_shortened`) ; date cible et dates limites ramenées au
+  dernier jour ; rappels recalés sur la nouvelle cible, ou annulés s'ils tomberaient dans le passé. Ce qui a déjà eu lieu ne
+  change pas. Une période qui s'allonge ne change aucune date prévue.
+- **Tests** : `PeriodBoundaryCutTest` (collectes, préparation lue via l'endpoint de l'écran).
+
+## D231 — Une ligne publiée ne ferme pas sa période aux autres lignes
+
+- **Révise la conséquence tirée de D196 dans `PlanningLineService`** : `isOpenToNewLine` refusait toute période
+  contenant une ligne validée ou publiée. Seules une période terminée ou archivée restent fermées.
+- **Effet** : une nouvelle ligne rejoint la période, se configure, reçoit ses gardes par « Compléter la période » et se publie
+  seule (`FIRST_FOR_LINE`, D196) ; ses membres sont seuls prévenus. Empreintes des affectations, entrées et PDF de la ligne
+  publiée identiques (test).
+- **Conséquence visible** : une période « complète » redevient « Compléter la période N » dès qu'une ligne y est ajoutée.
+- **Aussi** : une nouvelle ligne dont la structure générale couperait une limite existante est créée « à configurer » au lieu
+  de faire échouer sa création.

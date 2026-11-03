@@ -182,7 +182,7 @@ final class ReassignmentCandidateService
             return [$duty];
         }
 
-        $duties = $group->getDuties()->toArray();
+        $duties = $group->getActiveDuties();
         usort($duties, static fn (Duty $a, Duty $b): int => $a->getLocalDate() <=> $b->getLocalDate());
 
         return $duties;
