@@ -1,0 +1,26 @@
+{"status":"ok","database":"ok"}
+
+reads [old_on_new_schema]: 31 responses, statuses {200: 31}
+  errors: []
+compare old -> old_on_new_schema: 31 responses compared, duties in the results: 120, missing responses: 0
+  [PASS] nothing returned before has changed
+  new keys only: []
+== proofs kept (no personal data in these files)
+== cleanup of the disposable environment
+loy 408355 Nov  3 14:02 copy_migrated.dump
+loy     85 Nov  3 14:02 copy_migrated.dump.sha256
+loy   4843 Nov  3 14:03 migration_up.sql
+loy   3427 Nov  3 14:03 r1.log
+loy   2317 Nov  3 14:03 r2.log
+loy    326 Nov  3 14:03 r3.log
+== production unchanged
+medvue-worker Up 31 minutes (healthy)
+medvue-frontend Up 22 hours
+medvue-backend Up 22 hours (healthy)
+medvue-database Up 2 weeks (healthy)
+migration DoctrineMigrations\Version20261102090000
+current assignments 120
+publications 2
+active jobs 0
+{"status":"ok","database":"ok"}
+

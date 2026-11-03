@@ -1,0 +1,22 @@
+== canEdit*, current code -> new code (the only differing values)
+  planning …d4d573 period 1 2026-10-01..2027-01-28 status published: canEditStart False -> True, canEditEnd False -> True
+  planning …d4d573 period 2 2027-01-29..2027-05-02 status preparation: canEditStart False -> True, canEditEnd True -> True
+  planning …aaa0db period 1 2027-01-01..2028-01-01 status collecting: canEditStart True -> True, canEditEnd True -> True
+== periods [(1, '2026-10-01', '2027-01-28', '2027-01-29'), (2, '2027-01-29', '2027-05-02', '2027-05-03')]
+== week template on a planning migrated with none stored: 200 {'blocks': 1, 'solo': 4, 'excluded': 0}
+== previews (no write expected)
+  P1 end Fri 22 Jan (cuts a block?): allowed True confirm True retired 6 added None cuts 1 alternatives {'start': None, 'end': {'before': '2027-01-21', 'after': '2027-01-24'}} collections ['reduced', 'not_extended'] preparation [] reasons []
+  P1 end one week earlier: allowed True confirm True retired 7 added None cuts 0 alternatives {'start': None, 'end': None} collections ['reduced', 'not_extended'] preparation [] reasons []
+  P1 end 4 Feb (the Trauma Delta example): allowed True confirm True retired 0 added None cuts 0 alternatives {'start': None, 'end': None} collections ['not_extended', 'reduced'] preparation [] reasons []
+  P2 end one week earlier: allowed True confirm True retired 0 added None cuts 0 alternatives {'start': None, 'end': None} collections ['reduced'] preparation [] reasons []
+  [PASS] previews wrote nothing (rows differing: 0); journal rows: 0
+== refusal without confirmation, then a real cut on the COPY (Confirmer, not notified)
+  without confirmation: 409 date_change_confirmation_required
+  with confirmation: 200 2027-01-22
+  retired duties: 6 | active on period 1 line 1: 114 | after the new end still active: 0
+  current assignments on retired duties: 0
+  duties with a past holder kept: 12
+  assignments before the new end changed: 0 | rows only before: 6 | rows only after: 6
+  current assignments left active: 114 | journal rows: 1 | publications: 2 | notifications: 0
+  /api/me/duties 200
+  tables touched by this change on the copy: {'availability_collections': 2, 'duties': 12, 'duty_assignment_events': 6, 'duty_assignments': 12, 'planning_cycles': 4, 'planning_periods': 8, 'plannings': 2}
