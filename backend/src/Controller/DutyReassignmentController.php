@@ -265,6 +265,7 @@ final class DutyReassignmentController
             'teamMemberStableId' => $candidate->teamMemberStableId,
             'firstName' => $candidate->firstName,
             'lastName' => $candidate->lastName,
+            'holdsRestOfBlock' => $candidate->holdsRestOfBlock,
         ];
     }
 }

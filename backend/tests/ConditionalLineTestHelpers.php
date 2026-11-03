@@ -30,6 +30,8 @@ use Symfony\Bundle\FrameworkBundle\KernelBrowser;
  */
 trait ConditionalLineTestHelpers
 {
+    use LegacyConditionalTestHelpers;
+
     private const ALL_DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'];
     private const WEEK = [['2027-01-05', '2027-01-06'], ['2027-01-08', '2027-01-09'], ['2027-01-09', '2027-01-10'], ['2027-01-10', '2027-01-11']];
     private const PRIMARY = ['admin@example.com', 'alice@example.com', 'bob@example.com'];
@@ -69,17 +71,18 @@ trait ConditionalLineTestHelpers
     }
 
     /**
+     * A conditional configuration recorded BEFORE docs/decisions.md D224: its
+     * own weekly structure (StructureSource::OWN), one triggered day requiring
+     * its whole block. No API writes one any more — it is the historical data
+     * D224 keeps reading exactly as before, so the tests built on it keep
+     * proving that. New configurations (PUT) inherit their blocks: see
+     * InheritedReinforcementTestHelpers.
+     *
      * @param list<array{0: string, 1: list<string>}> $triggers
      */
     private function setPolicy(KernelBrowser $client, array $s, array $triggers): void
     {
-        $this->api($client, 'PUT', "/api/planning-lines/{$s['renfortLineId']}/demand-policy", [
-            'schemaVersion' => 1,
-            'mode' => 'CONDITIONAL_ON_SOURCE_ASSIGNMENT',
-            'source' => ['lineStableId' => $s['primaryLineId']],
-            'triggers' => array_map(fn (array $t): array => ['userStableId' => $this->userId($t[0]), 'weekdays' => $t[1], 'increment' => 1], $triggers),
-        ], $s['creator']);
-        self::assertResponseIsSuccessful();
+        $this->recordOwnStructurePolicy($s['renfortLineId'], $s['primaryLineId'], $triggers);
     }
 
     /**

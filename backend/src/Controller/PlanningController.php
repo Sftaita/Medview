@@ -52,6 +52,8 @@ final class PlanningController
         private readonly Security $security,
         private readonly AvailabilityCollectionRepository $collectionRepository,
         private readonly PlanningCyclePresenter $cyclePresenter,
+        private readonly \App\Repository\PlanningLineDemandPolicyRepository $demandPolicyRepository,
+        private readonly \App\Repository\DutyPatternRepository $patternRepository,
         private readonly PlanningCycleService $cycleService,
         private readonly PeriodPreparationRepository $preparationRepository,
     ) {
@@ -362,6 +364,33 @@ final class PlanningController
     }
 
     /**
+     * docs/decisions.md D224 — when this line's duties are needed, in one
+     * glance for "Lignes de garde": an independent line with or without its
+     * own weekly structure, or a reinforcement line (its source, its number
+     * of triggers, whether it inherits its blocks). Never a recomputation of
+     * the demand.
+     *
+     * @return array<string, mixed>
+     */
+    private function coverageOf(PlanningLine $line): array
+    {
+        $policy = $this->demandPolicyRepository->findActiveForLine($line);
+        if (null === $policy || !$policy->getMode()->isConditional()) {
+            return [
+                'mode' => 'INDEPENDENT',
+                'hasWeekStructure' => [] !== $this->patternRepository->findActiveRecurringByTeam($line->getPlanningTeam()),
+            ];
+        }
+
+        return [
+            'mode' => $policy->getMode()->value,
+            'structureSource' => $policy->getStructureSource()->value,
+            'source' => null === $policy->getSourceLine() ? null : ['lineStableId' => (string) $policy->getSourceLine()->getStableId(), 'name' => $policy->getSourceLine()->getName()],
+            'triggerCount' => \count($policy->getTriggers()),
+        ];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function lineToArray(PlanningLine $line, PlanningCycle $defaultCycle): array
@@ -388,6 +417,7 @@ final class PlanningController
                 'canInvite' => $this->authorizationChecker->isGranted(PlanningTeamRoleVoter::INVITE, $team),
             ],
             'memberCount' => $memberCount,
+            'coverage' => $this->coverageOf($line),
             // The line's lifecycle (DRAFT → GENERATED → VALIDATED → PUBLISHED → ARCHIVED) in the default period
             // (null when it takes no part in it), and its periods (docs/planning-cycles.md §7.1).
             ...$this->withPeriodMemberCounts($line, $this->cyclePresenter->lineView($line, $defaultCycle)),

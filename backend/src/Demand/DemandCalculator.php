@@ -59,7 +59,7 @@ final class DemandCalculator
 
         $days = array_map(fn (Duty $duty): DayDemand => $this->day($duty, $rules, $holdingOf), $unitDuties);
 
-        return self::fromDays($days);
+        return self::fromDays($days, $rules->inheritsStructure());
     }
 
     /**
@@ -69,20 +69,28 @@ final class DemandCalculator
      * triggered day requires the whole unit; otherwise an undetermined day
      * makes the unit undetermined, never "not required".
      *
+     * $inherited (docs/decisions.md D224): a block inherited from the source
+     * line only ever holds days that triggered when it was created. Each day
+     * is then required on its own — never "by block": a day that stopped
+     * triggering since is not required (a reinforcement still held there is
+     * superfluous, D165), and the unit is `partial` (never completed
+     * automatically, reported).
+     *
      * @param list<DayDemand> $days the days of ONE conditional unit, in date order
      */
-    public static function fromDays(array $days): UnitDemand
+    public static function fromDays(array $days, bool $inherited = false): UnitDemand
     {
         $triggering = array_values(array_map(static fn (DayDemand $d): Duty => $d->duty, array_filter($days, static fn (DayDemand $d): bool => $d->isTriggered())));
         $required = [] !== $triggering;
         $determined = $required || [] === array_filter($days, static fn (DayDemand $d): bool => $d->reason->isUndetermined());
+        $partial = $inherited && $required && \count($triggering) < \count($days);
 
         $duties = array_map(static fn (DayDemand $day): DutyDemand => new DutyDemand(
             $day->duty,
-            $required,
+            $inherited ? $day->isTriggered() : $required,
             match (true) {
                 $day->isTriggered() => DemandReason::TRIGGERED,
-                $required => DemandReason::TRIGGERED_BY_BLOCK,
+                $required && !$inherited => DemandReason::TRIGGERED_BY_BLOCK,
                 default => $day->reason,
             },
             $day,
@@ -90,7 +98,7 @@ final class DemandCalculator
             $determined,
         ), $days);
 
-        return new UnitDemand($required, array_values($duties), $triggering, $determined);
+        return new UnitDemand($required, array_values($duties), $triggering, $determined, $partial);
     }
 
     /**

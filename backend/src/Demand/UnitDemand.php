@@ -16,6 +16,10 @@ use App\Entity\Duty;
  * and at least one day could not be evaluated (nobody holds its source
  * duty) — the answer is then "unknown", never "not required". A triggered
  * day always settles the question (the whole block is required).
+ *
+ * `partial` (docs/decisions.md D224): a block inherited from the source line
+ * some of whose days no longer trigger — each day is then required on its
+ * own (DutyDemand), and the block is never completed automatically.
  */
 final readonly class UnitDemand
 {
@@ -28,6 +32,7 @@ final readonly class UnitDemand
         public array $duties,
         public array $triggeringDuties,
         public bool $determined = true,
+        public bool $partial = false,
     ) {
         if ($required && !$determined) {
             throw new \InvalidArgumentException('A required unit is always determined.');

@@ -18,6 +18,15 @@ export type DemandSourceOption = {
   name: string
   type: 'PRIMARY' | 'SECONDARY'
   people: DemandPerson[]
+  /** docs/decisions.md D224 — the blocks a reinforcement of this line would inherit, shown before saving. */
+  structure?: InheritedStructure
+}
+
+/** A source line's weekly structure, read-only on the reinforcement line (D224). */
+export type InheritedStructure = {
+  blocks: { name: string; weekdays: ApiWeekday[] }[]
+  soloWeekdays: ApiWeekday[]
+  excludedWeekdays: ApiWeekday[]
 }
 
 /** A structured, non-blocking warning computed by the backend — never recomputed here. */
@@ -50,6 +59,23 @@ export type DemandPolicyView = {
     blocks: { name: string; weekdays: ApiWeekday[] }[]
   }
   warnings: DemandPolicyWarning[]
+  /** docs/decisions.md D224 — INHERITED for every reinforcement configured now; OWN for one recorded before. */
+  structureSource?: 'OWN' | 'INHERITED' | null
+  /** The line whose blocks this one inherits ($targetStructure is then its structure). */
+  inheritedFrom?: { lineStableId: string; name: string } | null
+}
+
+/** POST .../demand-policy/preview — the reinforcements a configuration would ask for (D224), nothing saved. */
+export type DemandPreview = {
+  periods: {
+    period: { stableId: string; number: number | null; startsAt: string; endsAt: string }
+    /** Already generated: its frozen rules stay; this configuration applies to the next periods. */
+    generated: boolean
+    /** The source line has a calendar in that period — otherwise nothing can be known yet. */
+    sourceGenerated: boolean
+    dutyCount: number
+    units: { dates: string[]; block: boolean; sourceHolder: DemandPerson | null }[]
+  }[]
 }
 
 /** The PUT body (schema version 1). */

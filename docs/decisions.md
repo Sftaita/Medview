@@ -10302,3 +10302,102 @@ modifié.
   la main, garde par garde ; une ligne avec des postes non pourvus ne peut
   toujours pas être publiée (D106), donc « tout publier » reste impossible
   tant qu'un renfort requis n'a pas de titulaire.
+
+## D224 — Une ligne de renfort hérite des blocs de sa ligne source ; configuration par ligne, aperçus sans écriture
+
+- **Constat (production, 2026-11-02)** — sur Trauma Delta, « Fell/Ass » (six
+  membres) affichait « Jamais générée — Aucune garde demandée » : aucune
+  semaine type et aucune politique de demande (indépendante par défaut). Le
+  moteur conditionnel existait (D162-D167) et son éditeur aussi (⋯ ›
+  « Paramètres de la ligne »), mais :
+  - l'enregistrement était refusé deux fois par le serveur sur ce planning :
+    `multiple_periods_not_supported` (le service lisait
+    `getSingleCyclePeriod()`, antérieur aux périodes successives) et
+    `planning_already_published` (règle « configurer avant la première
+    publication », devenue fausse depuis la publication et la génération par
+    ligne, D196/D222) ;
+  - la ligne de renfort avait sa propre semaine type, et un jour déclenché
+    rendait **tout son bloc** nécessaire (`TRIGGERED_BY_BLOCK`) — un renfort
+    pouvait être créé un jour qui ne le déclenche pas ;
+  - « Règles de génération » affichait « Des règles de génération sont
+    actives », lu comme une confirmation des déclencheurs ;
+  - l'aperçu de génération matérialisait les gardes (écriture en base).
+- **Décision** (validée par l'utilisateur, 2026-11-02) :
+  - **Structure héritée** (`StructureSource::INHERITED`, tout renfort
+    configuré désormais) : la ligne de renfort n'a plus de semaine type. Une
+    garde de renfort n'est créée que pour une garde source dont le titulaire
+    la déclenche (chirurgien × jour), **aux horaires exacts** de cette garde,
+    reliée à elle (`coverageSource`). Les jours déclenchés d'un même bloc
+    source forment un bloc (deux jours ou plus, consécutifs ou non), attribué
+    à une seule personne ; un jour seul est une garde isolée ; un jour non
+    déclenché n'a jamais de garde. Vendredi + samedi + dimanche → un bloc de
+    trois jours ; samedi seul → une garde isolée ; vendredi + dimanche → un
+    bloc de deux jours. Les familles d'équité et types de garde sont repris de
+    la source (motifs et types « miroirs », `inherited_from_id`, jamais
+    récurrents : la semaine type ne les matérialise jamais seule) ; l'équité
+    reste celle des membres de la ligne de renfort.
+  - **Matérialisation au lancement seulement** : `InheritedReinforcementService`
+    crée les gardes juste avant le snapshot de la ligne, d'après les
+    titulaires planifiés de la source (même lancement, D191) ou ses
+    titulaires actuels (source déjà générée ou publiée — le cas Trauma Delta).
+  - **Demande jour par jour** pour un bloc hérité : chaque jour est requis
+    s'il est déclenché (`DemandCalculator::fromDays(…, inherited: true)`) ; un
+    bloc dont un jour ne déclenche plus est `partial` : jamais donné au
+    solveur, jamais complété automatiquement. Un renfort qui cesse d'être
+    nécessaire garde son titulaire (superflu, D165) — jamais supprimé ni
+    remplacé en silence.
+  - **Titulaire de la source modifié après génération** : le jour devenu
+    nécessaire est créé par la prochaine complétion (« Générer les postes non
+    pourvus »), dans le bloc de renfort existant s'il y en a un ; il reste
+    **non pourvu** (bloc incomplet, jamais complété automatiquement) ; la
+    personne qui tient les autres jours est proposée en premier
+    (`holdsRestOfBlock`), sous réserve de son éligibilité ; la choisir
+    n'attribue que le jour manquant, ses autres jours restent les mêmes lignes
+    (jamais remplacées).
+  - **Configuration unique par ligne**, pour toutes ses périodes non encore
+    générées ; une période générée garde les règles figées par sa génération
+    (snapshot, `structure_source` figé aussi). Ni le planning à plusieurs
+    périodes ni une ligne déjà publiée n'empêchent plus de configurer ; seuls
+    restent refusés : changer le mode, la source ou la structure quand une
+    période non générée a déjà des gardes (`line_already_materialized`). La
+    semaine type propre d'une ligne de renfort est refusée
+    (`structure_inherited`, 409).
+  - **Aperçus sans aucune écriture** : le préflight de génération
+    **projette** en mémoire ce que la semaine type et l'héritage créeraient
+    (`WeeklyDutyCalendarService::project()`, `ReinforcementPlan`) ; seul
+    `launch()` matérialise. `POST /api/planning-lines/{id}/demand-policy/preview`
+    calcule, pour la configuration en cours d'édition (non enregistrée), les
+    gardes de renfort nécessaires période par période d'après le calendrier
+    actuel de la source. Ouvrir, fermer le formulaire et prévisualiser
+    n'écrivent rien et n'envoient rien.
+  - **Interface** : « Paramètres de la ligne » → « Règles de couverture »
+    (couverture indépendante ou renfort conditionnel) ; pour un renfort : la
+    ligne source, « Structure des blocs héritée de … » en lecture seule, la
+    matrice des chirurgiens **de la ligne source** × jours (ceux qui
+    déclenchent — les membres de la ligne de renfort sont ceux qui assurent),
+    un résumé des conditions, « Prévisualiser les gardes nécessaires »,
+    « Enregistrer ». « Règles de génération » dit désormais qu'elles règlent la
+    répartition entre les membres, pas quand une garde est nécessaire.
+    « Lignes de garde » : « Conditions de renfort à configurer » avec accès
+    direct, ou « Renfort de … · N chirurgiens déclencheurs · blocs hérités ».
+- **Historique conservé** : une politique enregistrée avant D224 reste
+  `OWN` et se lit exactement comme avant (sa semaine type, son bloc entier) ;
+  les snapshots antérieurs gardent leur règle (`structure_source` figé, `OWN`
+  par défaut) et leur empreinte (`SnapshotHasher` n'ajoute la clé que pour
+  `INHERITED`). Aucune donnée n'est effacée.
+- **Migration** `Version20261103090000`, additive : `structure_source` sur les
+  politiques et leurs copies figées (`OWN` partout avant), `inherited_from_id`
+  sur `duty_patterns` et `duty_types` ; `down()` refusé dès qu'un élément
+  hérité existe.
+- **Limites** : les déclencheurs réels de Trauma Delta restent à saisir par
+  le gestionnaire (aucun n'existe en production) ; une ligne de renfort sur
+  un planning à plusieurs périodes ne peut pas encore être configurée
+  différemment par période (configuration unique, décision de
+  l'utilisateur) ; les conflits entre deux plannings différents ne sont
+  toujours pas contrôlés (antérieur, D161).
+- **Contrôle à 390 px** (`docs/recette/d224/README.md` §3) : dans « Paramètres de
+  la ligne », seule la dernière réponse de chargement compte (une réponse
+  tardive effaçait les cases cochées) ; le menu « ⋯ » (`ActionMenu`) s'ouvre vers
+  le haut quand sa dernière entrée n'est pas réellement affichée, mesuré à
+  chaque ouverture avec `elementFromPoint` plutôt qu'avec la hauteur de la barre
+  du bas, parce que la carte qui coupe le menu et la fin de page comptent aussi.

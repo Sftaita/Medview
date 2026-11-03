@@ -152,6 +152,11 @@ export type ReassignmentCandidate = {
   teamMemberStableId: string
   firstName: string
   lastName: string
+  /**
+   * docs/decisions.md D224: already holds the other days of this reinforcement block (a day that started triggering
+   * later) — listed first; choosing them only assigns the missing day, their days stay as they are.
+   */
+  holdsRestOfBlock?: boolean
 }
 
 /** GET /api/plannings/{id}/duties/{duty}/reassignment-candidates. */

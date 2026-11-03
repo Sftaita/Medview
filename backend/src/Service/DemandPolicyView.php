@@ -35,6 +35,8 @@ final readonly class DemandPolicyView
         public array $targetBlocks,
         public ?array $targetExcluded,
         public array $warnings,
+        /** docs/decisions.md D224 — the line whose blocks this one inherits ($targetBlocks / $targetExcluded are then its); null otherwise. */
+        public ?PlanningLine $inheritsFrom = null,
     ) {
     }
 }

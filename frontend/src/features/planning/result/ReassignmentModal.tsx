@@ -17,7 +17,9 @@ type Props = {
   onChanged: (impacts: DependentImpact[]) => void
 }
 
-type Done = ({ kind: 'replaced'; who: ReassignmentCandidate } | { kind: 'removed' }) & { impacts: DependentImpact[] }
+type Done = ({ kind: 'replaced'; who: ReassignmentCandidate } | { kind: 'removed' }) & {
+  impacts: DependentImpact[]
+}
 
 /**
  * The assignment editor of the calendar (docs/decisions.md D131/D144):
@@ -190,9 +192,9 @@ export function ReassignmentModal({ planningStableId, dutyStableId, onClose, onC
               <span>
                 {superfluous ? (
                   <>
-                    {view.currentAssignee ? fullName(view.currentAssignee) : 'La personne'} sera retiré(e) de ce
-                    renfort, qui n’est plus nécessaire selon le titulaire actuel de la ligne à renforcer. L’historique
-                    des affectations est conservé.
+                    {view.currentAssignee ? fullName(view.currentAssignee) : 'La personne'} sera retiré(e) de
+                    ce renfort, qui n’est plus nécessaire selon le titulaire actuel de la ligne à renforcer.
+                    L’historique des affectations est conservé.
                   </>
                 ) : (
                   <>
@@ -215,8 +217,8 @@ export function ReassignmentModal({ planningStableId, dutyStableId, onClose, onC
                 <p className="alert alert--warning">
                   <Icon name="alert" size={18} strokeWidth={2} />
                   <span>
-                    Ce renfort n’est plus nécessaire selon le titulaire actuel de la ligne à renforcer. Vous pouvez le
-                    laisser en place ou le retirer : ce n’est pas une erreur.
+                    Ce renfort n’est plus nécessaire selon le titulaire actuel de la ligne à renforcer. Vous
+                    pouvez le laisser en place ou le retirer : ce n’est pas une erreur.
                   </span>
                 </p>
               ) : view.notAssignableReason === 'coverage_not_required' ? (
@@ -233,7 +235,14 @@ export function ReassignmentModal({ planningStableId, dutyStableId, onClose, onC
                 <ul className="reassignment-candidates" aria-label="Candidats">
                   {view.candidates.map((candidate) => (
                     <li key={candidate.teamMemberStableId} className="reassignment-candidate">
-                      <span className="reassignment-candidate__name">{fullName(candidate)}</span>
+                      <span className="reassignment-candidate__name">
+                        {fullName(candidate)}
+                        {candidate.holdsRestOfBlock && (
+                          <span className="reassignment-candidate__hint">
+                            Titulaire des autres jours du bloc
+                          </span>
+                        )}
+                      </span>
                       <button
                         type="button"
                         className="btn btn--sm btn--secondary"

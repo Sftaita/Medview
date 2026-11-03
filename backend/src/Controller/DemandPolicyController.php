@@ -49,6 +49,8 @@ final class DemandPolicyController
         private readonly PlanningLineRepository $planningLineRepository,
         private readonly PlanningLineDemandPolicyService $policyService,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
+        private readonly \App\Service\InheritedReinforcementService $reinforcements,
+        private readonly \App\Repository\UserRepository $userRepository,
     ) {
     }
 
@@ -56,6 +58,60 @@ final class DemandPolicyController
     public function get(string $lineStableId): JsonResponse
     {
         return new JsonResponse($this->viewToArray($this->policyService->read($this->resolveLine($lineStableId))));
+    }
+
+    /**
+     * docs/decisions.md D224 — "Prévisualisation des gardes nécessaires": the
+     * reinforcements the configuration being edited would ask for, from the
+     * source line's current calendar. Same body as PUT; nothing is saved.
+     */
+    #[Route('/api/planning-lines/{lineStableId}/demand-policy/preview', name: 'api_demand_policy_preview', methods: ['POST'])]
+    public function preview(string $lineStableId, Request $request): JsonResponse
+    {
+        $line = $this->resolveLine($lineStableId);
+
+        [$dto, $errorResponse] = $this->deserialize($request);
+        if (null !== $errorResponse) {
+            return $errorResponse;
+        }
+
+        try {
+            $periods = $this->policyService->preview($line, $dto);
+        } catch (InvalidDemandPolicyException $exception) {
+            return new JsonResponse(['error' => 'invalid_demand_policy', 'code' => $exception->errorCode, 'field' => $exception->field, 'message' => $exception->getMessage()], 422);
+        }
+
+        $holders = [];
+        $out = [];
+        foreach ($periods as $entry) {
+            $period = $entry['period'];
+            $sourceHolders = null;
+            $units = [];
+            foreach ($entry['units'] as $sources) {
+                if (null === $sourceHolders) {
+                    $sourceHolders = $this->reinforcements->currentHolders($sources[0]->getPlanningPeriod()) ?? [];
+                }
+                $holderId = $sourceHolders[(int) $sources[0]->getId()] ?? null;
+                if (null !== $holderId && !\array_key_exists($holderId, $holders)) {
+                    $user = $this->userRepository->findOneByStableId($holderId);
+                    $holders[$holderId] = null === $user ? null : ['userStableId' => $holderId, 'firstName' => $user->getFirstName(), 'lastName' => $user->getLastName()];
+                }
+                $units[] = [
+                    'dates' => array_map(static fn ($d): string => $d->getLocalDate()->format('Y-m-d'), $sources),
+                    'block' => \count($sources) >= 2,
+                    'sourceHolder' => null !== $holderId ? $holders[$holderId] : null,
+                ];
+            }
+            $out[] = [
+                'period' => ['stableId' => (string) $period->getCycle()?->getStableId(), 'number' => $period->getCycle()?->getNumber(), 'startsAt' => $period->getStartsAt()->format('Y-m-d'), 'endsAt' => $period->getEndsAt()->format('Y-m-d')],
+                'generated' => $entry['generated'],
+                'sourceGenerated' => $entry['sourceGenerated'],
+                'dutyCount' => array_sum(array_map(static fn (array $u): int => \count($u['dates']), $units)),
+                'units' => $units,
+            ];
+        }
+
+        return new JsonResponse(['periods' => $out]);
     }
 
     #[Route('/api/planning-lines/{lineStableId}/demand-policy', name: 'api_demand_policy_put', methods: ['PUT'])]
@@ -223,7 +279,12 @@ final class DemandPolicyController
                     'firstName' => $u->getFirstName(),
                     'lastName' => $u->getLastName(),
                 ], $option->people),
+                // docs/decisions.md D224: what a reinforcement of this line would inherit, before saving.
+                'structure' => $option->structure,
             ], $view->sourceOptions),
+            // docs/decisions.md D224: a reinforcement line's blocks are its source's — shown read-only.
+            'structureSource' => $view->rules->mode->isConditional() ? $view->rules->structureSource->value : null,
+            'inheritedFrom' => null === $view->inheritsFrom ? null : ['lineStableId' => (string) $view->inheritsFrom->getStableId(), 'name' => $view->inheritsFrom->getName()],
             'targetStructure' => [
                 'configured' => null !== $view->targetExcluded,
                 'excludedWeekdays' => array_map(static fn (Weekday $w): string => $w->value, $view->targetExcluded ?? []),

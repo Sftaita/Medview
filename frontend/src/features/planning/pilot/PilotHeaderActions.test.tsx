@@ -906,9 +906,7 @@ describe('Règles de génération (docs/decisions.md D137)', () => {
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Activer' }))
 
-    expect(
-      await within(dialog).findByText(/Des règles de génération sont actives pour cette ligne/),
-    ).toBeInTheDocument()
+    expect(await within(dialog).findByText(/Règles de génération actives/)).toBeInTheDocument()
     expect(api.requests('POST', '/api/planning-lines/line-1/rule-set/activate')).toHaveLength(1)
     expect(onChanged).toHaveBeenCalledTimes(1)
   })
@@ -925,9 +923,7 @@ describe('Règles de génération (docs/decisions.md D137)', () => {
 
     chooseMenu('Règles de génération')
     const dialog = await screen.findByRole('dialog')
-    expect(
-      await within(dialog).findByText(/Des règles de génération sont actives pour cette ligne/),
-    ).toBeInTheDocument()
+    expect(await within(dialog).findByText(/Règles de génération actives/)).toBeInTheDocument()
     expect(within(dialog).queryByRole('button', { name: 'Activer' })).not.toBeInTheDocument()
   })
 

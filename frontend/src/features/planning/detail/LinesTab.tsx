@@ -66,7 +66,7 @@ export function LinesTab({
   return (
     <div className="pd-stack">
       <p className="pd-help">
-        Chaque ligne est un rôle de garde à couvrir chaque jour. La ligne principale est remplie en priorité.
+        Chaque ligne est un rôle de garde. La ligne principale est remplie en priorité.
       </p>
       <ul className="pd-card pd-list" aria-label="Lignes de garde">
         {lines.map((line) => {
@@ -96,6 +96,10 @@ export function LinesTab({
                     {line.team.name} · {plural(count, 'membre')}
                   </span>
                 </div>
+                <LineCoverageState
+                  line={line}
+                  onConfigure={canConfigure && onConfigureLine ? () => onConfigureLine(line) : undefined}
+                />
                 {fillPlans?.[line.stableId] && (
                   <LineFillState
                     plan={fillPlans[line.stableId]}
@@ -194,6 +198,66 @@ export function LinesTab({
       </ul>
     </div>
   )
+}
+
+/**
+ * When this line's duties are needed (docs/decisions.md D224), in words: a
+ * reinforcement line with no condition yet says so and opens its editor —
+ * never left to read as "aucune garde demandée" without a reason. An active
+ * rule set never stands for configured triggers.
+ */
+function LineCoverageState({ line, onConfigure }: { line: PlanningLineSummary; onConfigure?: () => void }) {
+  const coverage = line.coverage
+  if (!coverage) return null
+  if (coverage.mode === 'CONDITIONAL_ON_SOURCE_ASSIGNMENT') {
+    const sourceName = coverage.source?.name ?? 'une autre ligne'
+    if (coverage.triggerCount === 0) {
+      return (
+        <div className="pd-line-coverage pd-line-coverage--todo">
+          <span>
+            <Icon name="alert" size={15} strokeWidth={2.2} /> Conditions de renfort à configurer — renfort de{' '}
+            {sourceName}
+          </span>
+          {onConfigure && (
+            <button type="button" className="pd-btn pd-btn-secondary" onClick={onConfigure}>
+              Configurer les conditions
+            </button>
+          )}
+        </div>
+      )
+    }
+    return (
+      <div className="pd-line-coverage">
+        <span>
+          Renfort de {sourceName} · {coverage.triggerCount} chirurgien{coverage.triggerCount > 1 ? 's' : ''}{' '}
+          déclencheur
+          {coverage.triggerCount > 1 ? 's' : ''}
+          {coverage.structureSource === 'INHERITED' && ` · blocs hérités de ${sourceName}`}
+        </span>
+        {onConfigure && (
+          <button type="button" className="pd-link" onClick={onConfigure}>
+            Modifier les conditions
+          </button>
+        )}
+      </div>
+    )
+  }
+  if (line.type === 'SECONDARY' && !coverage.hasWeekStructure) {
+    return (
+      <div className="pd-line-coverage pd-line-coverage--todo">
+        <span>
+          <Icon name="alert" size={15} strokeWidth={2.2} /> Règles de couverture à configurer : ni semaine
+          type, ni conditions de renfort
+        </span>
+        {onConfigure && (
+          <button type="button" className="pd-btn pd-btn-secondary" onClick={onConfigure}>
+            Configurer
+          </button>
+        )}
+      </div>
+    )
+  }
+  return null
 }
 
 /**

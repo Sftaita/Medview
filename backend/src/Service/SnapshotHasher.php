@@ -223,7 +223,10 @@ final class SnapshotHasher
         $decisions = $snapshot->getDemandDecisions()->toArray();
         usort($decisions, static fn (PlanningSnapshotDemandDecision $a, PlanningSnapshotDemandDecision $b): int => (string) $a->getDuty()->getStableId() <=> (string) $b->getDuty()->getStableId());
 
-        return [
+        // docs/decisions.md D224: only an inherited structure adds a key — every hash computed before stays the same.
+        $structure = \App\Demand\StructureSource::INHERITED === $policy->getStructureSource() ? ['structureSource' => 'INHERITED'] : [];
+
+        return $structure + [
             'policyStableId' => (string) $policy->getPolicyStableId(),
             'policyVersion' => $policy->getPolicyVersion(),
             'sourceLineStableId' => (string) $policy->getSourceLineStableId(),

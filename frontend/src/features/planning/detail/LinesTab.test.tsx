@@ -149,3 +149,57 @@ describe('LinesTab — counters and "Générer cette ligne"', () => {
     expect(screen.queryByText(/gardes attribuées/)).not.toBeInTheDocument()
   })
 })
+
+describe('LinesTab — when a line is needed (docs/decisions.md D224)', () => {
+  const fell = (coverage: PlanningLineSummary['coverage']) => ({
+    ...line('l-fell', 'Fell/Ass', 'SECONDARY'),
+    coverage,
+  })
+
+  it('a reinforcement line without any condition says so and opens its editor — an active rule set proves nothing', () => {
+    const onConfigureLine = vi.fn()
+    renderTab({
+      lines: [
+        fell({
+          mode: 'CONDITIONAL_ON_SOURCE_ASSIGNMENT',
+          structureSource: 'INHERITED',
+          source: { lineStableId: 'l1', name: 'Première ligne' },
+          triggerCount: 0,
+        }),
+      ],
+      fillPlans: {},
+      onConfigureLine,
+    })
+
+    const fellRow = row('Fell/Ass')
+    expect(
+      within(fellRow).getByText(/Conditions de renfort à configurer — renfort de Première ligne/),
+    ).toBeInTheDocument()
+    fireEvent.click(within(fellRow).getByRole('button', { name: 'Configurer les conditions' }))
+    expect(onConfigureLine).toHaveBeenCalledOnce()
+  })
+
+  it('a configured reinforcement line names its source, its triggers and its inherited blocks', () => {
+    renderTab({
+      lines: [
+        fell({
+          mode: 'CONDITIONAL_ON_SOURCE_ASSIGNMENT',
+          structureSource: 'INHERITED',
+          source: { lineStableId: 'l1', name: 'Première ligne' },
+          triggerCount: 3,
+        }),
+      ],
+      fillPlans: {},
+    })
+    expect(
+      within(row('Fell/Ass')).getByText(
+        'Renfort de Première ligne · 3 chirurgiens déclencheurs · blocs hérités de Première ligne',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('an independent secondary line with neither structure nor condition says what is missing', () => {
+    renderTab({ lines: [fell({ mode: 'INDEPENDENT', hasWeekStructure: false })], fillPlans: {} })
+    expect(within(row('Fell/Ass')).getByText(/Règles de couverture à configurer/)).toBeInTheDocument()
+  })
+})

@@ -28,11 +28,15 @@ final class SnapshotDemandView implements DemandView
      * @param DemandRules|null                 $frozenRules       the snapshot's frozen policy, null for an independent line
      * @param array<int, FrozenDemandDecision> $decisionsByDutyId keyed by conditional duty id
      */
+    private bool $inherited;
+
     public function __construct(
         private readonly DemandCalculator $calculator,
         ?DemandRules $frozenRules,
         private readonly array $decisionsByDutyId,
     ) {
+        // docs/decisions.md D224: read with the block rule the generation itself used.
+        $this->inherited = true === $frozenRules?->inheritsStructure();
         foreach ($frozenRules?->triggersByUser ?? [] as $rule) {
             if (null !== $rule->triggerStableId) {
                 $this->triggers[$rule->triggerStableId] = $rule;
@@ -63,7 +67,7 @@ final class SnapshotDemandView implements DemandView
 
         usort($duties, static fn (Duty $a, Duty $b): int => [$a->getLocalDate(), (string) $a->getStableId()] <=> [$b->getLocalDate(), (string) $b->getStableId()]);
 
-        return DemandCalculator::fromDays(array_map($this->day(...), $duties));
+        return DemandCalculator::fromDays(array_map($this->day(...), $duties), $this->inherited);
     }
 
     private function day(Duty $duty): DayDemand

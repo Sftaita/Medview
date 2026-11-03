@@ -58,6 +58,13 @@ final class WeekStructureController
             $view = $this->weekStructureService->replace($line, $dto);
         } catch (InvalidWeekStructureException $exception) {
             return new JsonResponse(['error' => 'invalid_week_structure', 'message' => $exception->getMessage()], 422);
+        } catch (\App\Exception\StructureInheritedException $exception) {
+            // docs/decisions.md D224: a reinforcement line's blocks are its source's.
+            return new JsonResponse([
+                'error' => 'structure_inherited',
+                'message' => $exception->getMessage(),
+                'source' => ['lineStableId' => (string) $exception->source->getStableId(), 'name' => $exception->source->getName()],
+            ], 409);
         }
 
         return new JsonResponse($this->viewToArray($view));

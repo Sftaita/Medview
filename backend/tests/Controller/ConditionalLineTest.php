@@ -44,6 +44,7 @@ use Symfony\Component\Clock\Test\ClockSensitiveTrait;
  */
 final class ConditionalLineTest extends WebTestCase
 {
+    use \App\Tests\LegacyConditionalTestHelpers;
     use CalendarWorkflowTestHelpers;
     use ClockSensitiveTrait;
 
@@ -79,16 +80,11 @@ final class ConditionalLineTest extends WebTestCase
             $this->addMemberAs($client, $s['creator'], $s['planningId'], $s['renfortTeamId'], $email, 'MEMBER');
         }
 
-        $this->api($client, 'PUT', "/api/planning-lines/{$s['renfortLineId']}/demand-policy", [
-            'schemaVersion' => 1,
-            'mode' => 'CONDITIONAL_ON_SOURCE_ASSIGNMENT',
-            'source' => ['lineStableId' => $s['primaryLineId']],
-            'triggers' => [
-                ['userStableId' => $this->userId('alice@example.com'), 'weekdays' => ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'], 'increment' => 1],
-                ['userStableId' => $this->userId('bob@example.com'), 'weekdays' => ['FRIDAY', 'SATURDAY', 'SUNDAY'], 'increment' => 1],
-            ],
-        ], $s['creator']);
-        self::assertResponseIsSuccessful();
+        // docs/decisions.md D224: the historical OWN-structure configuration these tests are about (no API writes one).
+        $this->recordOwnStructurePolicy($s['renfortLineId'], $s['primaryLineId'], [
+            ['alice@example.com', ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY']],
+            ['bob@example.com', ['FRIDAY', 'SATURDAY', 'SUNDAY']],
+        ]);
 
         $this->api($client, 'PUT', "/api/planning-lines/{$s['renfortLineId']}/week-structure", [
             'blocks' => [['name' => 'Week-end', 'days' => ['VEN', 'SAM', 'DIM'], 'family' => '']],
@@ -102,10 +98,12 @@ final class ConditionalLineTest extends WebTestCase
     }
 
     /**
-     * @return array<string, mixed> the preflight, which materializes both lines, sources first
+     * @return array<string, mixed> the preflight, once both lines are materialized like a launch does, sources first
+     *                              (D224: the GET itself only projects)
      */
     private function preflight(KernelBrowser $client, array $s): array
     {
+        $this->materializeLikeALaunch($s['planningId']);
         $preflight = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/generation-preflight", token: $s['creator']);
         self::assertResponseIsSuccessful();
 
@@ -229,7 +227,7 @@ final class ConditionalLineTest extends WebTestCase
         $this->api($client, 'POST', "/api/plannings/{$s['planningId']}/lines", ['name' => 'Renfort'], $s['creator']);
         $lines = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}", token: $s['creator'])['lines'];
         $this->api($client, 'PUT', "/api/planning-lines/{$lines[0]['stableId']}/week-structure", ['blocks' => [], 'solo' => ['LUN', 'MAR', 'MER', 'JEU', 'VEN', 'SAM', 'DIM'], 'soloFamily' => '', 'excluded' => []], $s['creator']);
-        $this->api($client, 'PUT', "/api/planning-lines/{$lines[1]['stableId']}/demand-policy", ['schemaVersion' => 1, 'mode' => 'CONDITIONAL_ON_SOURCE_ASSIGNMENT', 'source' => ['lineStableId' => $lines[0]['stableId']], 'triggers' => []], $s['creator']);
+        $this->recordOwnStructurePolicy($lines[1]['stableId'], $lines[0]['stableId'], []);
         $this->api($client, 'PUT', "/api/planning-lines/{$lines[1]['stableId']}/week-structure", ['blocks' => [], 'solo' => ['MAR'], 'soloFamily' => '', 'excluded' => ['LUN', 'MER', 'JEU', 'VEN', 'SAM', 'DIM']], $s['creator']);
 
         // One single preflight: the source calendar is built first, so every Tuesday of the conditional line finds its source.

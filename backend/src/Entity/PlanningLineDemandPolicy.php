@@ -6,6 +6,7 @@ namespace App\Entity;
 
 use App\Demand\DemandMode;
 use App\Demand\DemandRules;
+use App\Demand\StructureSource;
 use App\Repository\PlanningLineDemandPolicyRepository;
 use Doctrine\Common\Collections\ArrayCollection;
 use Doctrine\Common\Collections\Collection;
@@ -84,7 +85,11 @@ class PlanningLineDemandPolicy
     #[ORM\Column(nullable: true)]
     private ?\DateTimeImmutable $retiredAt = null;
 
-    public function __construct(PlanningLine $targetLine, int $version, DemandMode $mode, ?PlanningLine $sourceLine, ?User $createdBy)
+    /** docs/decisions.md D224: INHERITED for every conditional policy written since; OWN for an independent one and for the past. */
+    #[ORM\Column(length: 16, enumType: StructureSource::class, options: ['default' => 'OWN'])]
+    private StructureSource $structureSource;
+
+    public function __construct(PlanningLine $targetLine, int $version, DemandMode $mode, ?PlanningLine $sourceLine, ?User $createdBy, ?StructureSource $structureSource = null)
     {
         if ($version < 1) {
             throw new \InvalidArgumentException('A demand policy version starts at 1.');
@@ -108,6 +113,7 @@ class PlanningLineDemandPolicy
         $this->status = DemandPolicyStatus::ACTIVE;
         $this->triggers = new ArrayCollection();
         $this->createdBy = $createdBy;
+        $this->structureSource = $structureSource ?? ($mode->isConditional() ? StructureSource::INHERITED : StructureSource::OWN);
         $this->createdAt = new \DateTimeImmutable();
     }
 
@@ -214,6 +220,12 @@ class PlanningLineDemandPolicy
             $this->mode,
             null !== $this->sourceLineStableId ? (string) $this->sourceLineStableId : null,
             array_values(array_map(static fn (DemandTrigger $t) => $t->toRule(), $this->triggers->toArray())),
+            $this->structureSource,
         );
+    }
+
+    public function getStructureSource(): StructureSource
+    {
+        return $this->structureSource;
     }
 }

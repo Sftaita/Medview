@@ -26,6 +26,7 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
  */
 final class LineApplicabilityTest extends WebTestCase
 {
+    use \App\Tests\LegacyConditionalTestHelpers;
     use CalendarWorkflowTestHelpers;
 
     private const STRUCTURE = [
@@ -183,14 +184,15 @@ final class LineApplicabilityTest extends WebTestCase
         self::assertResponseIsSuccessful();
 
         $juniors = $this->applicabilityOf(1);
-        self::assertSame('NO_DEMAND', $juniors['state']);
+        self::assertSame('NO_DEMAND', $juniors['state'], 'its source has nothing to reinforce yet');
+        self::assertSame(['INHERITED_STRUCTURE', 'SOURCE_HAS_NO_DUTY'], $juniors['reasons']);
         self::assertTrue($juniors['conditional'], 'the policy is reported, it does not make a demand by itself');
 
-        // Its first weekly structure makes it count, conditional.
-        $this->setStructure(1);
+        // docs/decisions.md D224: it inherits its blocks — its SOURCE's weekly structure makes it count, conditional.
+        $this->setStructure(0);
         $juniors = $this->applicabilityOf(1);
         self::assertSame('INCOMPLETE', $juniors['state']);
-        self::assertSame(['WEEKLY_STRUCTURE', 'CONDITIONAL_POLICY', 'NO_ACTIVE_RULE_SET'], $juniors['reasons']);
+        self::assertSame(['INHERITED_STRUCTURE', 'CONDITIONAL_POLICY', 'SOURCE_NOT_DECIDED_YET', 'NO_ACTIVE_RULE_SET'], $juniors['reasons']);
     }
 
     public function testAnIncompleteLineBlocksTheFullPublicationOfThePeriod(): void
@@ -289,9 +291,11 @@ final class LineApplicabilityTest extends WebTestCase
         ], $this->s['creator']);
         self::assertResponseStatusCodeSame(201);
         $p2 = $this->periods()[1];
-        // Its duties are materialized on demand, by the generation preflight of the period (D136, D192).
+        // Its duties are materialized by a launch of the period (D136, D192) — the GET of the preflight only projects
+        // them now (D224).
         $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/generation-preflight?period={$p2['stableId']}", token: $this->s['creator']);
         self::assertResponseIsSuccessful();
+        $this->materializeLikeALaunch($this->s['planningId'], $p2['stableId']);
         self::assertSame(['2027-01-31'], $this->db()->fetchFirstColumn(<<<'SQL'
             SELECT d.local_date::text FROM duties d
             JOIN planning_periods pp ON pp.id = d.planning_period_id JOIN planning_cycles c ON c.id = pp.planning_cycle_id

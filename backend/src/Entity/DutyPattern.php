@@ -81,6 +81,14 @@ class DutyPattern
     private bool $recurring;
 
     /**
+     * docs/decisions.md D224: the DutyPattern of a source line this one mirrors, on a reinforcement line that inherits its
+     * blocks — never materialized by the weekly calendar on its own. Null for every other DutyPattern.
+     */
+    #[ORM\ManyToOne(targetEntity: DutyPattern::class)]
+    #[ORM\JoinColumn(name: 'inherited_from_id', nullable: true)]
+    private ?DutyPattern $inheritedFrom = null;
+
+    /**
      * @var Collection<int, DutyPatternComponent>
      */
     #[ORM\OneToMany(targetEntity: DutyPatternComponent::class, mappedBy: 'pattern', cascade: ['persist'], orphanRemoval: true)]
@@ -149,6 +157,16 @@ class DutyPattern
     {
         $this->active = $active;
         $this->touch();
+    }
+
+    public function getInheritedFrom(): ?DutyPattern
+    {
+        return $this->inheritedFrom;
+    }
+
+    public function markInheritedFrom(DutyPattern $source): void
+    {
+        $this->inheritedFrom = $source;
     }
 
     public function isRecurring(): bool

@@ -60,6 +60,14 @@ class DutyType
     #[ORM\Column(type: 'decimal', precision: 6, scale: 2)]
     private string $workloadValue;
 
+    /**
+     * docs/decisions.md D224: the DutyType of a source line this one mirrors, on a reinforcement line that inherits its
+     * blocks — never materialized by the weekly calendar on its own. Null for every other DutyType.
+     */
+    #[ORM\ManyToOne(targetEntity: DutyType::class)]
+    #[ORM\JoinColumn(name: 'inherited_from_id', nullable: true)]
+    private ?DutyType $inheritedFrom = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -115,6 +123,16 @@ class DutyType
     {
         $this->active = $active;
         $this->touch();
+    }
+
+    public function getInheritedFrom(): ?DutyType
+    {
+        return $this->inheritedFrom;
+    }
+
+    public function markInheritedFrom(DutyType $source): void
+    {
+        $this->inheritedFrom = $source;
     }
 
     public function getWorkloadValue(): float

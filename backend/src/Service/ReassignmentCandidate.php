@@ -18,6 +18,11 @@ final readonly class ReassignmentCandidate
         public string $teamMemberStableId,
         public string $firstName,
         public string $lastName,
+        /**
+         * docs/decisions.md D224: already holds the other days of this block (a reinforcement day that started
+         * triggering later) — offered first; choosing them only assigns the missing days.
+         */
+        public bool $holdsRestOfBlock = false,
     ) {
     }
 }

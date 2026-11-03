@@ -25,6 +25,7 @@ use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
  */
 final class PlanningCycleConditionalLineTest extends WebTestCase
 {
+    use \App\Tests\LegacyConditionalTestHelpers;
     use CalendarWorkflowTestHelpers;
     use ConditionalLineTestHelpers;
 
@@ -71,6 +72,8 @@ final class PlanningCycleConditionalLineTest extends WebTestCase
         }
         $db = static::getContainer()->get(Connection::class);
 
+        // docs/decisions.md D224: the GET only projects — materialized the way a launch does.
+        $this->materializeLikeALaunch($s['planningId'], $period2);
         $preflight = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/generation-preflight?period={$period2}", token: $s['creator']);
         self::assertResponseIsSuccessful();
         self::assertTrue($preflight['canGenerate'], json_encode($preflight['blockers'], \JSON_THROW_ON_ERROR));
@@ -125,6 +128,8 @@ final class PlanningCycleConditionalLineTest extends WebTestCase
         // The source line has no period in period 2 (it has nothing there yet: no duty, no history).
         $db->executeStatement('DELETE FROM planning_periods WHERE id = ?', [$this->periodIn($s, 0, $period2)->getId()]);
 
+        // docs/decisions.md D224: the GET only projects — materialized the way a launch does.
+        $this->materializeLikeALaunch($s['planningId'], $period2);
         $preflight = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/generation-preflight?period={$period2}", token: $s['creator']);
         self::assertResponseIsSuccessful();
         self::assertContains(['code' => 'CONDITIONAL_SOURCE_NOT_IN_PERIOD', 'lineStableId' => $s['renfortLineId'], 'lineName' => 'Renfort'], $preflight['blockers']);
@@ -161,6 +166,8 @@ final class PlanningCycleConditionalLineTest extends WebTestCase
             static::getContainer()->get(DutyMaterializationService::class)->createStandaloneDuty($primary, $type, new \DateTimeImmutable($day), (new \DateTimeImmutable($day))->modify('+1 day'));
         }
 
+        // docs/decisions.md D224: the GET only projects — materialized the way a launch does.
+        $this->materializeLikeALaunch($s['planningId'], $created['stableId']);
         $preflight = $this->api($client, 'GET', "/api/plannings/{$s['planningId']}/generation-preflight?period={$created['stableId']}", token: $s['creator']);
         self::assertResponseIsSuccessful();
         self::assertContains(['code' => 'HISTORICAL_BLOCK_REMAINDER', 'lineStableId' => $s['renfortLineId'], 'lineName' => 'Renfort'], $preflight['warnings']);
@@ -214,12 +221,14 @@ final class PlanningCycleConditionalLineTest extends WebTestCase
      */
     private function setPolicyExpectingRefusal($client, array $s): void
     {
+        // docs/decisions.md D224 (supersedes the refusal of lot L3): one configuration per line, for every period not
+        // generated yet — a planning with several periods no longer refuses it.
         $this->api($client, 'PUT', "/api/planning-lines/{$s['renfortLineId']}/demand-policy", [
             'schemaVersion' => 1,
             'mode' => 'INDEPENDENT',
             'triggers' => [],
         ], $s['creator']);
-        self::assertResponseStatusCodeSame(409);
-        self::assertSame('multiple_periods_not_supported', json_decode((string) $client->getResponse()->getContent(), true)['error'] ?? null);
+        self::assertResponseIsSuccessful();
+        self::assertSame('INDEPENDENT', json_decode((string) $client->getResponse()->getContent(), true)['mode'] ?? null);
     }
 }

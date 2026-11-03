@@ -5,6 +5,7 @@ import { ApiError } from '../../../lib/apiClient'
 import { WeekStructureModal } from '../../week-structure'
 import { fetchDemandPolicy, saveDemandPolicy } from './api'
 import { CoverageMatrix } from './CoverageMatrix'
+import { DemandPreviewPanel, InheritedStructurePanel, TriggerSummary } from './ReinforcementPanels'
 import { draftFromView, isDirty, matrixRows, toInput, type CoverageDraft } from './coverageModel'
 import type { DemandPolicyView } from './types'
 import { sortWeekdays, weekdayLabel } from './weekdays'
@@ -30,6 +31,13 @@ type Props = {
  * The weekly structure dialog replaces this one while it is open (never two
  * dialogs stacked); the unsaved matrix is kept meanwhile, and the policy
  * (warnings, days without duty) is reloaded when the structure was saved.
+ *
+ * docs/decisions.md D224: "Règles de couverture" — when a duty is needed —
+ * are the only thing set here (the distribution between members is "Règles
+ * de génération"). A reinforcement line has no weekly structure of its own:
+ * it inherits its source's blocks, shown read-only; the matrix lists the
+ * SOURCE's surgeons, who trigger a reinforcement — never this line's members,
+ * who hold them. The preview is computed by the server, nothing saved.
  */
 export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
   const [view, setView] = useState<DemandPolicyView | null>(null)
@@ -40,17 +48,33 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
   const [notice, setNotice] = useState<string | null>(null)
   const [weekOpen, setWeekOpen] = useState(false)
   const inFlight = useRef(false)
+  const outcomeRef = useRef<HTMLParagraphElement>(null)
+
+  // The outcome of "Enregistrer" is written below the form: on a phone it would sit below the fold,
+  // unseen (390 px check, D224) — bring it into view.
+  useEffect(() => {
+    if (notice || saveError) outcomeRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+  }, [notice, saveError])
   const sourceId = useId()
 
+  // Only the latest load counts: a late response must never overwrite what has been ticked since
+  // (found at 390 px, D224 — the box unticked itself seconds after the tap).
+  const latestLoad = useRef(0)
   const load = useCallback(
     (keepDraft: boolean) => {
+      const request = ++latestLoad.current
       fetchDemandPolicy(line.stableId)
         .then((value) => {
+          if (request !== latestLoad.current) return
           setView(value)
           setDraft((current) => (keepDraft && current ? current : draftFromView(value)))
           setLoadError(null)
         })
-        .catch(() => setLoadError('Impossible de charger la configuration de cette ligne.'))
+        .catch(() => {
+          if (request === latestLoad.current) {
+            setLoadError('Impossible de charger la configuration de cette ligne.')
+          }
+        })
     },
     [line.stableId],
   )
@@ -102,7 +126,12 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
   const conditional = draft?.mode === 'CONDITIONAL_ON_SOURCE_ASSIGNMENT'
   const dirty = view !== null && draft !== null && isDirty(draft, view)
   const excluded = sortWeekdays(view?.targetStructure.excludedWeekdays ?? [])
-  const hasBlocks = (view?.targetStructure.blocks.length ?? 0) > 0
+  // A reinforcement recorded before D224 kept its own structure: still shown, still editable. Never offered otherwise.
+  const legacyOwnStructure =
+    view?.mode === 'CONDITIONAL_ON_SOURCE_ASSIGNMENT' && view.structureSource === 'OWN'
+  const ownStructure = !conditional || legacyOwnStructure
+  const source = view?.sourceOptions.find((option) => option.lineStableId === draft?.sourceLineStableId)
+  const sourceExcluded = sortWeekdays(source?.structure?.excludedWeekdays ?? [])
 
   return (
     <Overlay
@@ -148,28 +177,35 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
 
       {view && draft && (
         <div className="cov-sections">
-          <section className="cov-section" aria-labelledby={`${sourceId}-week`}>
-            <h3 id={`${sourceId}-week`}>Semaine type</h3>
-            <p className="cov-help">
-              {!view.targetStructure.configured
-                ? 'Aucune semaine type n’est encore configurée pour cette ligne.'
-                : excluded.length === 0
-                  ? 'Une garde chaque jour de la semaine.'
-                  : `Pas de garde le ${excluded.map(weekdayLabel).join(', ')}.`}
-            </p>
-            <div>
-              <button type="button" className="btn btn--secondary btn--sm" onClick={() => setWeekOpen(true)} disabled={saving}>
-                <Icon name="calendar" size={16} strokeWidth={2} />
-                Modifier la semaine type
-              </button>
-            </div>
-          </section>
+          {ownStructure && (
+            <section className="cov-section" aria-labelledby={`${sourceId}-week`}>
+              <h3 id={`${sourceId}-week`}>Semaine type</h3>
+              <p className="cov-help">
+                {!view.targetStructure.configured
+                  ? 'Aucune semaine type n’est encore configurée pour cette ligne.'
+                  : excluded.length === 0
+                    ? 'Une garde chaque jour de la semaine.'
+                    : `Pas de garde le ${excluded.map(weekdayLabel).join(', ')}.`}
+              </p>
+              <div>
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--sm"
+                  onClick={() => setWeekOpen(true)}
+                  disabled={saving}
+                >
+                  <Icon name="calendar" size={16} strokeWidth={2} />
+                  Modifier la semaine type
+                </button>
+              </div>
+            </section>
+          )}
 
           {line.type === 'PRIMARY' ? (
             <section className="cov-section">
               <p className="cov-help">
-                La ligne principale est toujours une garde indépendante : ses gardes sont à couvrir chaque jour de sa
-                semaine type.
+                La ligne principale est toujours une garde indépendante : ses gardes sont à couvrir chaque
+                jour de sa semaine type.
               </p>
             </section>
           ) : (
@@ -177,7 +213,8 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
               <section className="cov-section">
                 <fieldset className="cov-modes">
                   <legend>
-                    <h3>Mode de couverture</h3>
+                    <h3>Règles de couverture</h3>
+                    <span className="cov-help">Quand une garde de cette ligne est-elle nécessaire ?</span>
                   </legend>
                   <label className="cov-mode">
                     <input
@@ -188,8 +225,10 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
                       onChange={() => setDraft((current) => current && { ...current, mode: 'INDEPENDENT' })}
                     />
                     <span>
-                      <strong>Garde indépendante</strong>
-                      <span className="cov-help">Une garde à couvrir chaque jour de la semaine type.</span>
+                      <strong>Couverture indépendante</strong>
+                      <span className="cov-help">
+                        Une garde à couvrir chaque jour de sa propre semaine type.
+                      </span>
                     </span>
                   </label>
                   <label className="cov-mode">
@@ -198,13 +237,17 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
                       name={`${sourceId}-mode`}
                       checked={conditional}
                       disabled={saving}
-                      onChange={() => setDraft((current) => current && { ...current, mode: 'CONDITIONAL_ON_SOURCE_ASSIGNMENT' })}
+                      onChange={() =>
+                        setDraft(
+                          (current) => current && { ...current, mode: 'CONDITIONAL_ON_SOURCE_ASSIGNMENT' },
+                        )
+                      }
                     />
                     <span>
-                      <strong>Renfort selon le chirurgien de garde</strong>
+                      <strong>Renfort conditionnel</strong>
                       <span className="cov-help">
-                        Un deuxième chirurgien n’est nécessaire que certains jours, selon qui est de garde sur une
-                        autre ligne.
+                        Une garde n’est nécessaire que certains jours, selon le chirurgien de garde sur une
+                        autre ligne. Les horaires et les blocs viennent de cette autre ligne.
                       </span>
                     </span>
                   </label>
@@ -217,7 +260,9 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
                     Ligne à renforcer
                   </label>
                   {view.sourceOptions.length === 0 ? (
-                    <p className="cov-help">Aucune autre ligne de ce planning ne peut être renforcée pour le moment.</p>
+                    <p className="cov-help">
+                      Aucune autre ligne de ce planning ne peut être renforcée pour le moment.
+                    </p>
                   ) : (
                     <select
                       id={`${sourceId}-source`}
@@ -240,23 +285,40 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
 
                   {draft.sourceLineStableId && (
                     <>
-                      <p className="cov-help">
-                        Lorsqu’un chirurgien sélectionné est de garde sur la ligne à renforcer un jour coché, une garde
-                        de renfort est requise sur cette ligne ce jour-là.
-                      </p>
-                      {hasBlocks && (
-                        <p className="cov-help">
-                          Pour une garde organisée en bloc, si un jour du bloc nécessite un renfort, tout le bloc est
-                          considéré comme nécessitant un renfort.
-                        </p>
+                      {source?.structure && !legacyOwnStructure && (
+                        <InheritedStructurePanel sourceName={source.name} structure={source.structure} />
                       )}
+                      <h4 className="cov-matrix-title">
+                        Chirurgiens de {source?.name ?? 'la ligne source'} qui déclenchent un renfort
+                      </h4>
+                      <p className="cov-help">
+                        Cochez, pour chaque chirurgien, les jours où sa garde sur{' '}
+                        {source?.name ?? 'la ligne source'} nécessite un renfort {line.name}. Les membres de{' '}
+                        {line.name} sont ceux qui assurent ces renforts (panneau « Membres ») : ils ne
+                        figurent pas ici.
+                      </p>
                       <CoverageMatrix
                         rows={matrixRows(view, draft)}
                         selection={draft.selection}
-                        excludedWeekdays={excluded}
+                        excludedWeekdays={legacyOwnStructure ? excluded : sourceExcluded}
                         disabled={saving}
                         // Functional updates only (docs/decisions.md D167): never a stale draft overwriting a change.
-                        onChange={(update) => setDraft((current) => current && { ...current, selection: update(current.selection) })}
+                        onChange={(update) =>
+                          setDraft(
+                            (current) => current && { ...current, selection: update(current.selection) },
+                          )
+                        }
+                      />
+                      <TriggerSummary
+                        rows={matrixRows(view, draft)}
+                        selection={draft.selection}
+                        lineName={line.name}
+                        sourceName={source?.name ?? 'la ligne source'}
+                      />
+                      <DemandPreviewPanel
+                        lineStableId={line.stableId}
+                        input={toInput(draft)}
+                        disabled={saving}
                       />
                     </>
                   )}
@@ -268,7 +330,9 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
           {view.warnings.length > 0 && (
             <section className="cov-section" aria-labelledby={`${sourceId}-warnings`}>
               <h3 id={`${sourceId}-warnings`}>À vérifier</h3>
-              <p className="cov-help">Selon la configuration enregistrée — ces points n’empêchent pas l’enregistrement.</p>
+              <p className="cov-help">
+                Selon la configuration enregistrée — ces points n’empêchent pas l’enregistrement.
+              </p>
               <ul className="cov-warnings" aria-label="Avertissements de configuration">
                 {view.warnings.map((warning, index) => (
                   <li key={`${warning.code}-${index}`} className="alert alert--warning">
@@ -283,13 +347,13 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
       )}
 
       {notice && (
-        <p role="status" className="alert alert--success">
+        <p ref={outcomeRef} role="status" className="alert alert--success">
           <Icon name="check" size={18} strokeWidth={2} />
           <span>{notice}</span>
         </p>
       )}
       {saveError && (
-        <p role="alert" className="alert alert--error">
+        <p ref={outcomeRef} role="alert" className="alert alert--error">
           <Icon name="alert" size={18} strokeWidth={2} />
           <span>{saveError}</span>
         </p>
@@ -301,9 +365,7 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
 /** Every refusal of the backend (D162), in plain words — the backend stays the authority. */
 const REFUSALS: Record<string, string> = {
   line_already_materialized:
-    'Les gardes de cette ligne existent déjà : son mode de couverture et sa ligne à renforcer ne peuvent plus changer. Les jours de chaque chirurgien restent modifiables.',
-  planning_already_published:
-    'Une ligne de ce planning est déjà publiée : une ligne de renfort ne peut plus être configurée pour cette période.',
+    'Des gardes de cette ligne existent déjà sur une période pas encore générée : son mode de couverture et sa ligne à renforcer ne peuvent plus changer pour cette période. Les jours de chaque chirurgien restent modifiables.',
   concurrent_update:
     'La configuration a été modifiée entre-temps par quelqu’un d’autre. Fermez puis rouvrez cette fenêtre pour repartir de la version actuelle.',
   PRIMARY_LINE_CANNOT_BE_CONDITIONAL: 'La ligne principale ne peut pas être une ligne de renfort.',
