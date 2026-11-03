@@ -1,0 +1,72 @@
+dump: medvue_20261103_034501.dump
+== 0. dump integrity
+medvue_20261103_034501.dump: OK
+== 1. disposable database
+== 2. environment of the copy (throwaway values only)
+== 3. fingerprint BEFORE (every row of every table, columns of the current schema)
+rows fingerprinted: 2672 in 68 tables
+== 3b. what the CURRENT production code reads, before any migration
+{"status":"ok","database":"ok"}
+
+published ports: {}
+tokens minted: 16 (not shown)
+reads [old]: 31 responses, statuses {200: 31}
+  errors: []
+[FAIL] reads by the current code: rows differ:
+      1 < calendar_feeds
+      1 > calendar_feeds
+calendar feeds read: 1/1
+== 4. migrations: status, SQL without executing, review
+|                      | Current              | DoctrineMigrations\Version20261102090000                               |
+|                      | Latest               | DoctrineMigrations\Version20261104090000                               |
+|                      | New                  | 2                                                                      |
+statements: 40
+-- destructive statements (DROP/DELETE/TRUNCATE/UPDATE) in up:
+60:UPDATE planning_lines SET week_structure_mode = 'GENERAL' WHERE type = 'PRIMARY';
+== 5. migrate
+[notice] Migrating up to DoctrineMigrations\Version20261104090000
+[notice] finished in 84.3ms, used 64.5M memory, 2 migrations executed, 34 sql queries
+
+[PASS] after up: every existing row identical (2672 rows)
+planning_lines mode: PRIMARY -> GENERAL x2
+planning_lines mode: SECONDARY -> CUSTOM x1
+plannings with week_template: 0/2
+duties retired/added: 0/0 of 120
+planning_cycles cut flags true: 0 of 3
+period_date_changes: 0
+== 6. rollback rehearsal: down, then up again
+[notice] Migrating down to DoctrineMigrations\Version20261102090000
+[notice] finished in 60.4ms, used 64.5M memory, 2 migrations executed, 26 sql queries
+[PASS] after down: every existing row identical (2672 rows)
+columns of the new schema left: 0
+table period_date_changes left: 0
+{"status":"ok","database":"ok"}
+
+published ports: {}
+tokens minted: 16 (not shown)
+reads [old_after_down]: 31 responses, statuses {200: 31}
+  errors: []
+compare old -> old_after_down: 31 responses compared, duties in the results: 120, missing responses: 0
+  [PASS] nothing returned before has changed
+  new keys only: []
+[notice] Migrating up to DoctrineMigrations\Version20261104090000
+[notice] finished in 64.4ms, used 64.5M memory, 2 migrations executed, 34 sql queries
+[PASS] up again: every existing row identical (2672 rows)
+|                      | Current              | DoctrineMigrations\Version20261104090000                               |
+|                      | New                  | 0                                                                      |
+== 7. what the NEW code reads, after the migrations
+{"status":"ok","database":"ok"}
+
+published ports: {}
+tokens minted: 16 (not shown)
+reads [new]: 31 responses, statuses {200: 31}
+  errors: []
+compare old -> new: 31 responses compared, duties in the results: 120, missing responses: 0
+  [DIFF] changed values:
+    planning … detail.json.periods[].canEditEnd x1
+    planning … detail.json.periods[].canEditStart x2
+    planning … periods.json.periods[].canEditEnd x1
+    planning … periods.json.periods[].canEditStart x2
+  new keys only: ['coverage']
+[PASS] reads by the new code: every existing row identical (2672 rows)
+== done (environment kept for the functional checks)
