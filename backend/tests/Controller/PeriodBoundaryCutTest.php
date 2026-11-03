@@ -487,6 +487,12 @@ final class PeriodBoundaryCutTest extends WebTestCase
         self::assertSame('2027-06-30', $view['declarationDeadlineOn']);
         self::assertSame('2027-06-30', $view['period']['lastDay'] ?? '2027-06-30');
         self::assertSame(['2027-06-23', '2027-06-28'], array_values(array_map(static fn (array $r): string => $r['dueOn'], array_filter($view['reminders'], static fn (array $r): bool => 'scheduled' === $r['state']))));
-        self::assertSame('CANCELLED', $this->db()->fetchOne('SELECT announcement_state FROM period_preparations'));
+        // The panel measures nothing against an announcement that no longer exists; the journal keeps what was planned.
+        self::assertNull($view['announcement']['on']);
+        self::assertNull($this->db()->fetchOne('SELECT announcement_state FROM period_preparations'));
+        self::assertStringContainsString('"kind": "announcement"', (string) $this->db()->fetchOne('SELECT impact FROM period_date_changes ORDER BY id DESC LIMIT 1'));
+        $saved = $this->api($this->client, 'PUT', "/api/plannings/{$this->s['planningId']}/periods/{$period2}/preparation", ['announceOn' => null, 'targetGenerationOn' => '2027-06-30', 'declarationDeadlineOn' => '2027-06-30', 'reminders' => array_values(array_map(static fn (array $r): array => ['stableId' => $r['stableId'], 'value' => $r['value'], 'unit' => $r['unit']], $view['reminders']))], $this->s['creator']);
+        self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
+        self::assertSame('2027-06-30', $saved['targetGenerationOn'], 'what stays is coherent: the server accepts it as it is');
     }
 }

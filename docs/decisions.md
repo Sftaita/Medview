@@ -10563,7 +10563,7 @@ modifié.
   - `not_extended` : la période gagne des jours, la collecte reste telle qu'annoncée, les jours non couverts sont comptés.
   Une collecte qui se retrouverait entièrement hors de la période reste refusée.
 - **Préparation** : quand une période finit plus tôt, ce qui était prévu après son nouveau dernier jour reste cohérent, et
-  c'est montré et confirmé avant : annonce non encore faite annulée (`period_shortened`) ; date cible et dates limites ramenées au
+  c'est montré et confirmé avant : annonce non encore faite retirée, elle repart à « Non programmée » (le journal garde ce qui était prévu) ; date cible et dates limites ramenées au
   dernier jour ; rappels recalés sur la nouvelle cible, ou annulés s'ils tomberaient dans le passé. Ce qui a déjà eu lieu ne
   change pas. Une période qui s'allonge ne change aucune date prévue.
 - **Tests** : `PeriodBoundaryCutTest` (collectes, préparation lue via l'endpoint de l'écran).

@@ -37,9 +37,11 @@ export function DateChangeSummary({ preview }: { preview: DateChangePreview }) {
           <CollectionImpact collection={collection} />
         </li>
       ))}
-      {(preview.preparation ?? []).map((change) => (
-        <li key={`${change.periodNumber}-${change.kind}-${change.from}`}>{preparationText(change)}</li>
-      ))}
+      {(preview.preparation ?? [])
+        .filter((change) => change.kind !== 'collection_deadline')
+        .map((change) => (
+          <li key={`${change.periodNumber}-${change.kind}-${change.from}`}>{preparationText(change)}</li>
+        ))}
       {selected &&
         preview.changes.length === 1 &&
         preview.additions.length === 0 &&
@@ -195,7 +197,8 @@ export function DateChangeConfirmation({ preview, saving, error, onBack, onConfi
                   {unit.dates.length > 1
                     ? `${formatDate(unit.dates[0], 'card')} → ${formatDate(unit.dates[unit.dates.length - 1], 'card')}`
                     : formatDate(unit.dates[0], 'card')}
-                  {unit.block && ` · ${unit.block}, bloc entier`}
+                  {unit.block &&
+                    ` · ${unit.block}, ${(unit.keptDates?.length ?? 0) > 0 ? 'partie du bloc' : 'bloc entier'}`}
                 </span>
                 <span className="mv-muted">
                   {unit.line} · {unit.holder ?? 'non attribuée'}

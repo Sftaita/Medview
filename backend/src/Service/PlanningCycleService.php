@@ -412,7 +412,9 @@ final class PlanningCycleService
             $to = null !== $change['to'] ? new \DateTimeImmutable($change['to']) : null;
             switch ($change['kind']) {
                 case 'announcement':
-                    $preparation?->finishAnnouncement(PreparationActionState::CANCELLED, 'period_shortened', $now);
+                    // Back to "not planned": nothing is left for the panel to measure other dates against. What was
+                    // planned and confirmed stays in the journal (PeriodDateChange::$impact).
+                    $preparation?->scheduleAnnouncement(null, null);
                     break;
                 case 'target':
                     $preparation?->changeTarget($to);

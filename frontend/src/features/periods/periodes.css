@@ -2224,3 +2224,8 @@ a.mv-btn {
   font-size: 0.8125rem;
   color: var(--mv-warn-ink, #7a5400);
 }
+
+/* A short period stays readable: its status is never cut off (acceptance D229). */
+.mv-frise__seg {
+  min-width: 176px;
+}
