@@ -305,7 +305,9 @@ export function EditPeriodDatesDialog({
                       : ''}
                   </p>
                 )}
-                {shownPreview && <DateChangeSummary preview={shownPreview} />}
+                {shownPreview && shownPreview.allowed && !startRefused && !endRefused && (
+                  <DateChangeSummary preview={shownPreview} />
+                )}
                 {active.failed && (
                   <p className="mv-muted mv-small">
                     Les jours possibles n’ont pas pu être chargés : les dates seront vérifiées à

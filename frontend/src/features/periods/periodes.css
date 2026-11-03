@@ -2157,6 +2157,7 @@ a.mv-btn {
 
 /* docs/decisions.md D225: what new dates do, then the three explicit choices. */
 .mv-date-summary {
+  flex: 0 0 auto;
   margin: 8px 0 0;
   padding-left: 18px;
   display: grid;
@@ -2172,6 +2173,8 @@ a.mv-btn {
   font-size: 1rem;
 }
 .mv-confirm-list {
+  /* Never squeezed by the scrolling body of the dialog (390 px): the exact duties are the point of this screen. */
+  flex: 0 0 auto;
   list-style: none;
   margin: 0 0 12px;
   padding: 0;

@@ -345,11 +345,10 @@ final class PeriodPreparationRunnerTest extends WebTestCase
         self::assertTrue($facts['collectionContacted']);
         self::assertNull($facts['untouchedCollectionId']);
 
-        // A collection people were written to is never resized silently (D208).
-        $periods = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/periods", token: $this->s['creator'])['periods'];
-        $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period}", ['endsAt' => '2027-07-20', 'expectedEndsAt' => $periods[1]['endsAt']], $this->s['creator']);
-        self::assertResponseStatusCodeSame(409, (string) $this->client->getResponse()->getContent());
-        self::assertSame('collection_announced', json_decode((string) $this->client->getResponse()->getContent(), true)['error']);
+        // A collection people were written to is never resized silently (D208, D225): the plan says it before saving.
+        $preview = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/periods/{$period}/date-change-preview?endsAt=2027-07-20", token: $this->s['creator']);
+        self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
+        self::assertTrue($preview['collections'][0]['contacted']);
     }
 
     // --- reminders ---------------------------------------------------------------------------------

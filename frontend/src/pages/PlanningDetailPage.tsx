@@ -632,7 +632,11 @@ export function PlanningDetailPage() {
 
         {/* docs/decisions.md D210: announcement, target generation date and reminders of this period. */}
         {period && periodStableId && planning.canManageAvailability && (
-          <PeriodPreparationPanel planningStableId={planning.stableId} periodStableId={periodStableId} />
+          <PeriodPreparationPanel
+            key={`${periodStableId}-${period.start}-${period.end}`}
+            planningStableId={planning.stableId}
+            periodStableId={periodStableId}
+          />
         )}
 
         <PeriodTabs

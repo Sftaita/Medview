@@ -211,7 +211,7 @@ export function FillModal({
                 <li key={line.lineStableId} className="fill-line" data-action={line.action}>
                   <p className="fill-line__head">
                     <strong>{line.lineName}</strong>
-                    {!writable && <span className="muted"> — inchangée</span>}
+                    {!writable && !line.followsSource && <span className="muted"> — inchangée</span>}
                   </p>
                   <p id={`fill-${line.lineStableId}`} className="fill-line__text">
                     {fillPlanText(line)}

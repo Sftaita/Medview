@@ -15,6 +15,7 @@ use DoctrineMigrations\Version20261012090000;
 use DoctrineMigrations\Version20261016090000;
 use DoctrineMigrations\Version20261024090000;
 use DoctrineMigrations\Version20261025090000;
+use DoctrineMigrations\Version20261104090000;
 use Psr\Log\NullLogger;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 
@@ -39,6 +40,7 @@ require_once \dirname(__DIR__, 2).'/migrations/Version20261012090000.php';
 require_once \dirname(__DIR__, 2).'/migrations/Version20261016090000.php';
 require_once \dirname(__DIR__, 2).'/migrations/Version20261024090000.php';
 require_once \dirname(__DIR__, 2).'/migrations/Version20261025090000.php';
+require_once \dirname(__DIR__, 2).'/migrations/Version20261104090000.php';
 
 final class PlanningCyclesMigrationTest extends WebTestCase
 {
@@ -78,6 +80,7 @@ final class PlanningCyclesMigrationTest extends WebTestCase
     {
         // The rectification journal (D211, empty) and the period preparation (D210, nothing sent in this fixture)
         // come after L4c: undone first, latest first.
+        $this->migrate(Version20261104090000::class, 'down');
         $this->migrate(Version20261025090000::class, 'down');
         $this->migrate(Version20261024090000::class, 'down');
         $this->db->executeStatement('ALTER TABLE planning_publication_lines DISABLE TRIGGER trg_planning_publication_lines_append_only');

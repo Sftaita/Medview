@@ -307,6 +307,8 @@ export type FillLinePlan = {
   afterSource: boolean
   /** Members who joined after the line's generation, taken into account by its completion (D222). */
   lateMemberCount?: number
+  /** Nothing of its own now, but it follows a source line this run gives holders to. */
+  followsSource?: boolean
   /** docs/decisions.md D226: a published line — only the duties its extension created. */
   extensionOnly?: boolean
   /** Its older holes, which are never completed automatically. */

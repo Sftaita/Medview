@@ -143,6 +143,18 @@ final class PlanningLineFillService
             $plans[] = $plan;
         }
 
+        // docs/decisions.md D224, D226: the source line, earlier in resolution order, is about to receive holders.
+        $writing = [];
+        foreach ($plans as $index => $plan) {
+            $source = $plan->writes() ? null : $this->inheritedReinforcements->sourceLineOf($plan->line);
+            if (null !== $source && isset($writing[(int) $source->getId()]) && (FillLinePlan::NOTHING === $plan->action || 'published' === $plan->reason)) {
+                $plans[$index] = $plan->followingSource();
+            }
+            if ($plan->writes()) {
+                $writing[(int) $plan->line->getId()] = true;
+            }
+        }
+
         return new FillPreview($plans, $globalBlockers);
     }
 

@@ -49,13 +49,18 @@ export function fillPlanText(plan: FillLinePlan): string {
       return `${holes} à compléter, sans toucher aux gardes attribuées.${late}`
     }
     case 'NOTHING':
-      return 'Toutes les gardes obligatoires sont attribuées : rien à faire.'
+      return plan.followsSource
+        ? 'Ses gardes actuelles sont conservées. Des renforts seront ajoutés si les nouveaux titulaires de sa ligne source les déclenchent.'
+        : 'Toutes les gardes obligatoires sont attribuées : rien à faire.'
     default:
       switch (plan.reason) {
         case 'archived':
           return 'Archivée : jamais modifiée.'
         case 'published': {
           const holes = plan.uncoveredRequiredDutyCount ?? 0
+          if (plan.followsSource) {
+            return 'Publiée : ses gardes ne changent pas. Des renforts seront ajoutés si les nouveaux titulaires de sa ligne source les déclenchent.'
+          }
           return `Publiée : conservée telle quelle${holes > 0 ? ` (${plural(holes, 'garde non pourvue', 'gardes non pourvues')}, à attribuer à la main)` : ''}. Les autres lignes sont traitées normalement.`
         }
         case 'nothing_demanded':

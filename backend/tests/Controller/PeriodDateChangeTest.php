@@ -515,4 +515,15 @@ final class PeriodDateChangeTest extends WebTestCase
         $view = $container->get(\App\Service\PlanningPdfRenderer::class)->legacyView($publication);
         self::assertStringContainsString('31 janvier 2027', json_encode($view, \JSON_UNESCAPED_UNICODE), 'the days it announced, not the new dates');
     }
+
+    public function testTheMigrationCannotBeUndoneOnceAChangeWasRecorded(): void
+    {
+        require_once \dirname(__DIR__, 2).'/migrations/Version20261104090000.php';
+        $period1 = $this->periods()[0]['stableId'];
+        $this->patch($period1, ['endsAt' => '2027-04-01', 'expectedEndsAt' => '2027-05-01']);
+        self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
+
+        $this->expectException(\Doctrine\Migrations\Exception\AbortMigration::class);
+        (new \DoctrineMigrations\Version20261104090000($this->db(), new \Psr\Log\NullLogger()))->down(new \Doctrine\DBAL\Schema\Schema());
+    }
 }

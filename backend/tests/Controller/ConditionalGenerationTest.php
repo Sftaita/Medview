@@ -423,6 +423,7 @@ final class ConditionalGenerationTest extends WebTestCase
         self::assertLessThan($renfort->getId(), $other->getId(), '...then Renfort\'s source, then Renfort.');
         self::assertSame((string) $other->getStableId(), (string) $this->snapshotOf($renfort)->getDemandPolicy()->getSourceGenerationStableId(), 'Renfort read THIS launch\'s result of its source.');
         self::assertSame([$s['primaryLineId'], (string) $autre->getStableId(), $s['renfortLineId']], array_column($job['outcome']['lines'], 'lineStableId'), 'The outcome follows the resolution order.');
-        self::assertSame(2, $job['outcome']['lines'][2]['demand']['requiredUnitCount'], 'dave holds "Autre" every day and triggers every reinforcement.');
+        // docs/decisions.md D224, D227: it inherits now — its former weekly structure is deactivated, one reinforcement per source duty.
+        self::assertSame(\count(self::WEEK), $job['outcome']['lines'][2]['demand']['requiredUnitCount'], 'dave holds "Autre" every day and triggers every reinforcement.');
     }
 }

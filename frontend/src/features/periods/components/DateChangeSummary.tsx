@@ -86,6 +86,14 @@ export function DateChangeConfirmation({ preview, saving, error, onBack, onConfi
           </p>
         )}
         {preview.changes
+          .filter((change) => !change.selected && !change.generated)
+          .map((change) => (
+            <p key={change.periodStableId} className="mv-field__hint">
+              La période {change.periodNumber}, sans gardes, ira désormais du{' '}
+              {formatDate(change.to.startsAt, 'long')} au {formatDate(change.to.lastDay, 'long')}.
+            </p>
+          ))}
+        {preview.changes
           .filter((change) => !change.selected && change.generated)
           .map((change) => (
             <p key={change.periodStableId} className="mv-banner mv-banner--warn">

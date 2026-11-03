@@ -262,6 +262,8 @@ export function LineSettingsDialog({ line, timezone = 'Europe/Brussels', onClose
 
           {line.type === 'PRIMARY' ? (
             <section className="cov-section">
+              <h3>Règles de couverture</h3>
+              <span className="cov-help">Quand une garde de cette ligne est-elle nécessaire ?</span>
               <p className="cov-help">
                 La ligne principale est toujours une garde indépendante : ses gardes sont à couvrir chaque
                 jour de sa semaine type.

@@ -1206,6 +1206,12 @@
     width: auto;
     min-width: 0;
   }
+  .pd-main-action__control {
+    padding-inline: 10px;
+  }
+  .pd-main-action__control svg {
+    display: none;
+  }
 }
 .help-tip {
   position: relative;
