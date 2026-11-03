@@ -164,6 +164,12 @@ final class PlanningPdfRenderer
         $lines = array_values(array_filter($lineByPeriodId));
         usort($lines, static fn (PlanningLine $a, PlanningLine $b): int => $a->getPosition() <=> $b->getPosition());
         [$first, $last] = self::cycleDays($publication);
+        // docs/decisions.md D225: what was diffused stays what it was, even when the period has since been shortened.
+        foreach (array_keys($byDateAndLine) as $day) {
+            $date = new \DateTimeImmutable($day);
+            $first = min($first, $date);
+            $last = max($last, $date);
+        }
 
         return $this->grid(
             $publication,
@@ -282,7 +288,8 @@ final class PlanningPdfRenderer
         $blockPart = null;
         $blockLabel = null;
         if (null !== $group) {
-            $dates = array_map(static fn (Duty $d): string => $d->getLocalDate()->format('Y-m-d'), $group->getDuties()->toArray());
+            // docs/decisions.md D229: a day retired since is read with its whole block; a day still active, with what remains.
+            $dates = array_map(static fn (Duty $d): string => $d->getLocalDate()->format('Y-m-d'), $duty->isRetired() ? $group->getDuties()->toArray() : $group->getActiveDuties());
             sort($dates);
             $own = $duty->getLocalDate()->format('Y-m-d');
             $blockPart = match (true) {

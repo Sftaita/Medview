@@ -298,6 +298,30 @@ describe('PeriodPreparationPanel', () => {
     ).not.toBeInTheDocument()
   })
 
+  it('says a reminder was cancelled because the period was shortened, never a raw code (D230)', async () => {
+    await renderPanel(
+      blank({
+        reminders: [
+          {
+            stableId: 'r1',
+            value: 1,
+            unit: 'WEEK',
+            dueOn: '2026-12-08',
+            state: 'cancelled',
+            outcome: 'period_shortened',
+            executedAt: '2026-11-20T10:00:00+00:00',
+            emails: NO_EMAILS,
+          },
+        ],
+      }),
+    )
+
+    const history = screen.getByRole('list', { name: 'Rappels passés' })
+    expect(within(history).getByText('Annulé')).toBeInTheDocument()
+    expect(within(history).getByText('la période a été raccourcie')).toBeInTheDocument()
+    expect(within(history).queryByText(/period_shortened/)).not.toBeInTheDocument()
+  })
+
   it('plans an indicative deadline between the announcement and the target, and says why one is refused (D214)', async () => {
     await renderPanel(
       blank({

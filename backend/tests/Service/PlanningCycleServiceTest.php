@@ -65,6 +65,16 @@ final class PlanningCycleServiceTest extends WebTestCase
             $container->get(PeriodDateRules::class),
             new NullLogger(),
             $container->get(PeriodPreparationRepository::class),
+            $container->get(\App\Service\PeriodDateChangePlanner::class),
+            $container->get(\App\Repository\PeriodPreparationReminderRepository::class),
+            $container->get(\App\Service\PlanningLineOrder::class),
+            $container->get(\App\Repository\DutyRepository::class),
+            $container->get(\App\Service\CalendarWriteLock::class),
+            $container->get(\App\Service\WeeklyDutyCalendarService::class),
+            $container->get(\App\Repository\PlanningGenerationRepository::class),
+            $container->get(\App\Service\PlanningPublicationService::class),
+            static fn () => throw new \LogicException('Never reached while disabled.'),
+            $container->get(\App\Repository\DutySwapRequestRepository::class),
             false,
         );
         $planning = $container->get(PlanningRepository::class)->findOneByStableId($s['planningId']);
@@ -76,9 +86,9 @@ final class PlanningCycleServiceTest extends WebTestCase
 
         $operations = [
             'period_creation_disabled' => fn () => $service->createNext($planning, (string) $cycle->getStableId(), new \DateTimeImmutable('2027-08-01'), $creator),
-            'period_management_disabled' => fn () => $service->changeEnd($planning, $cycle, new \DateTimeImmutable('2027-06-01'), new \DateTimeImmutable('2027-05-01')),
+            'period_management_disabled' => fn () => $service->changeDates($planning, $cycle, null, null, new \DateTimeImmutable('2027-06-01'), new \DateTimeImmutable('2027-05-01'), $creator),
         ];
-        $operations[] = fn () => $service->changeDates($planning, $cycle, new \DateTimeImmutable('2026-12-01'), new \DateTimeImmutable('2027-01-01'), null, null);
+        $operations[] = fn () => $service->changeDates($planning, $cycle, new \DateTimeImmutable('2026-12-01'), new \DateTimeImmutable('2027-01-01'), null, null, $creator);
         $operations[] = fn () => $service->deleteLast($planning, $cycle, (string) $cycle->getStableId());
         $operations[] = fn () => $service->openCollection($planning, $cycle, $creator, null, null, null);
 

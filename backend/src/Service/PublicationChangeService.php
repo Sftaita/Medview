@@ -48,11 +48,17 @@ final class PublicationChangeService
     public function changesSince(PlanningPublication $reference, array $cells): array
     {
         $publishedByDutyId = [];
+        $changes = [];
         foreach ($this->entryRepository->findByPublication($reference) as $entry) {
             $publishedByDutyId[(int) $entry->getDuty()->getId()] = $entry->getTeamMember();
+            // docs/decisions.md D225: a published duty a change of dates retired is no longer in the calendar — it was
+            // announced, so its holder lost it.
+            $line = $entry->getDuty()->getPlanningPeriod()->getLine();
+            if ($entry->getDuty()->isRetired() && null !== $entry->getTeamMember() && null !== $line) {
+                $changes[] = new PublicationChange($line, $entry->getDuty(), $entry->getTeamMember(), null, true, true);
+            }
         }
 
-        $changes = [];
         foreach ($cells as $cell) {
             // A duty the reference never saw (a line added since) was never announced: it reads as "uncovered" before.
             // D166: except a conditional duty, which is absent from a publication only when it was not required then.

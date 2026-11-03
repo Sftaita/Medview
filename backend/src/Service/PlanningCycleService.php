@@ -5,20 +5,31 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Entity\AvailabilityCollection;
+use App\Entity\DutyAssignmentEvent;
 use App\Entity\FairnessPeriod;
+use App\Entity\PeriodDateChange;
 use App\Entity\Planning;
 use App\Entity\PlanningCycle;
 use App\Entity\PlanningCycleRectification;
 use App\Entity\PlanningLine;
 use App\Entity\PlanningPeriod;
+use App\Entity\PlanningPeriodStatus;
+use App\Entity\PlanningPublication;
+use App\Entity\PreparationActionState;
 use App\Entity\User;
 use App\Exception\HistoricalBlockCutConfirmationRequiredException;
+use App\Exception\NoUnpublishedChangesException;
 use App\Exception\PeriodBoundarySplitsBlockException;
+use App\Exception\PeriodDateChangeConfirmationRequiredException;
 use App\Exception\PlanningCycleException;
+use App\Exception\PlanningNotPublishableException;
 use App\Repository\AvailabilityCollectionRepository;
+use App\Repository\DutySwapRequestRepository;
 use App\Repository\FairnessPeriodRepository;
+use App\Repository\PeriodPreparationReminderRepository;
 use App\Repository\PeriodPreparationRepository;
 use App\Repository\PlanningCycleRepository;
+use App\Repository\PlanningGenerationRepository;
 use App\Repository\PlanningJobRepository;
 use App\Repository\PlanningLineRepository;
 use Doctrine\DBAL\Exception\DriverException;
@@ -27,6 +38,7 @@ use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
+use Symfony\Component\DependencyInjection\Attribute\AutowireServiceClosure;
 
 /**
  * The periods of a Planning (docs/planning-cycles.md §5.1-§5.3, §5.9,
@@ -71,6 +83,18 @@ final class PlanningCycleService
         private readonly PeriodDateRules $dateRules,
         private readonly LoggerInterface $logger,
         private readonly PeriodPreparationRepository $preparationRepository,
+        private readonly PeriodDateChangePlanner $dateChangePlanner,
+        private readonly PeriodPreparationReminderRepository $reminderRepository,
+        private readonly PlanningLineOrder $lineOrder,
+        private readonly \App\Repository\DutyRepository $dutyRepository,
+        private readonly CalendarWriteLock $calendarWriteLock,
+        private readonly WeeklyDutyCalendarService $weeklyCalendar,
+        private readonly PlanningGenerationRepository $generationRepository,
+        private readonly PlanningPublicationService $publicationService,
+        // A closure: DutySwapService reads the periods through PlanningCyclePresenter, which reads this service.
+        #[AutowireServiceClosure(DutySwapService::class)]
+        private readonly \Closure $swapService,
+        private readonly DutySwapRequestRepository $swapRequestRepository,
         #[Autowire('%env(bool:MEDVUE_PERIOD_CREATION_ENABLED)%')]
         private readonly bool $creationEnabled,
     ) {
@@ -157,37 +181,50 @@ final class PlanningCycleService
     }
 
     /**
-     * §5.2. The end of a period (docs/decisions.md D207, PeriodDateRules):
-     * the last one as before — it grows keeping every collection and
-     * generation (the added days are simply not covered yet), shrinks while
-     * nothing lies beyond; an earlier one only while it and the next one are
-     * blank, the next one's start moving with it (no gap, no overlap).
+     * What these new dates would do (docs/decisions.md D225), nothing written:
+     * the refusals (the same as the write) and the plan.
      *
-     * @return array{cycle: PlanningCycle, generationOutdated: bool}
-     *
-     * @throws PlanningCycleException
-     * @throws PeriodBoundarySplitsBlockException
+     * @return array{violations: list<PeriodDateViolation>, plan: PeriodDateChangePlan, alternatives: array{start: ?array{before: ?string, after: ?string}, end: ?array{before: ?string, after: ?string}}}
      */
-    public function changeEnd(Planning $planning, PlanningCycle $cycle, \DateTimeImmutable $endsAt, \DateTimeImmutable $expectedEndsAt): array
+    public function previewDates(PlanningCycle $cycle, ?\DateTimeImmutable $startsAt, ?\DateTimeImmutable $endsAt): array
     {
-        return $this->changeDates($planning, $cycle, null, null, $endsAt, $expectedEndsAt);
+        $plan = $this->dateChangePlanner->plan($cycle, $startsAt, $endsAt);
+
+        return [
+            'violations' => $this->dateViolations($cycle, $startsAt, $endsAt),
+            'plan' => $plan,
+            // docs/decisions.md D229: only when a date cuts a block.
+            'alternatives' => [
+                'start' => null !== $startsAt && [] !== $this->dateRules->cutWarnings($cycle, 'start', $startsAt) ? $this->dateRules->alternatives($cycle, 'start', $startsAt) : null,
+                'end' => null !== $endsAt && [] !== $this->dateRules->cutWarnings($cycle, 'end', $endsAt) ? $this->dateRules->alternatives($cycle, 'end', $endsAt->modify('-1 day')) : null,
+            ],
+        ];
     }
 
     /**
-     * New dates for $cycle (docs/decisions.md D207): its end ($endsAt,
-     * exclusive), and its start ($startsAt) for the first period only — a
-     * following period starts where the previous one ends. Each date comes
-     * with the one the request was based on: a stale view is refused (409
-     * `period_changed`). Everything happens under the planning's lock, in
-     * one transaction; the rules are PeriodDateRules', the same the date
-     * picker shows.
+     * "Modifier les dates" (docs/decisions.md D207, D225) — the one way the
+     * dates of a period change, whatever its state: $endsAt (exclusive) and
+     * $startsAt, each with the date it replaces (a stale view is refused, 409
+     * `period_changed`). The neighbour follows: a following period always
+     * starts the day after the previous one.
      *
-     * @return array{cycle: PlanningCycle, generationOutdated: bool}
+     * Whatever the plan says needs a confirmation is refused without the hash of
+     * that very plan: what was confirmed is what is done. Everything below is one
+     * transaction, under the planning's row lock, the calendar lock and the
+     * engine lock: the journal, the duties retired (their current assignment
+     * superseded and recorded, never deleted), the dates of the periods, of their
+     * lines and registries, the collections, the empty duties of the days a
+     * generated line gains, and — $notify, "Confirmer et avertir" — the
+     * republication of the published lines concerned, with its PDF and its
+     * notifications. Emails leave after the commit, from the outbox (D172).
+     *
+     * @return array{cycle: PlanningCycle, generationOutdated: bool, retiredDutyCount: int, addedDutyCount: int, publications: list<PlanningPublication>}
      *
      * @throws PlanningCycleException
      * @throws PeriodBoundarySplitsBlockException
+     * @throws PeriodDateChangeConfirmationRequiredException
      */
-    public function changeDates(Planning $planning, PlanningCycle $cycle, ?\DateTimeImmutable $startsAt, ?\DateTimeImmutable $expectedStartsAt, ?\DateTimeImmutable $endsAt, ?\DateTimeImmutable $expectedEndsAt): array
+    public function changeDates(Planning $planning, PlanningCycle $cycle, ?\DateTimeImmutable $startsAt, ?\DateTimeImmutable $expectedStartsAt, ?\DateTimeImmutable $endsAt, ?\DateTimeImmutable $expectedEndsAt, User $author, ?string $confirmation = null, bool $notify = false): array
     {
         if (!$this->creationEnabled) {
             throw PlanningCycleException::conflict('period_management_disabled', 'Managing the periods of a planning is not enabled.');
@@ -196,30 +233,241 @@ final class PlanningCycleService
             throw PlanningCycleException::invalid('invalid_request', 'Give the new start (startsAt), the new end (endsAt), or both.');
         }
 
-        return $this->underPlanningLock($planning, function () use ($cycle, $startsAt, $expectedStartsAt, $endsAt, $expectedEndsAt): array {
+        $outcome = $this->underPlanningLock($planning, function () use ($planning, $cycle, $startsAt, $expectedStartsAt, $endsAt, $expectedEndsAt, $author, $confirmation, $notify): array {
             if (null !== $endsAt && $cycle->getEndsAt()->format('Y-m-d') !== $expectedEndsAt?->format('Y-m-d')) {
                 throw PlanningCycleException::conflict('period_changed', 'The end of this period changed since it was read: reload.');
             }
             if (null !== $startsAt && $cycle->getStartsAt()->format('Y-m-d') !== $expectedStartsAt?->format('Y-m-d')) {
                 throw PlanningCycleException::conflict('period_changed', 'The start of this period changed since it was read: reload.');
             }
+            if (!$this->tryEngineLock($planning)) {
+                throw PlanningCycleException::conflict('job_in_progress', 'A generation or a completion is in progress on this planning.');
+            }
 
-            // Moving the whole period earlier: its start first, so that no intermediate state is too short.
-            $generationOutdated = false;
-            if (null !== $startsAt && $startsAt < $cycle->getStartsAt()) {
-                $this->moveStart($cycle, $startsAt);
-                $startsAt = null;
+            self::throwFirst($this->dateViolations($cycle, $startsAt, $endsAt));
+            $plan = $this->dateChangePlanner->plan($cycle, $startsAt, $endsAt);
+            if (!$plan->changesAnything()) {
+                return ['cycle' => $cycle, 'generationOutdated' => false, 'retiredDutyCount' => 0, 'addedDutyCount' => 0, 'publications' => []];
             }
-            if (null !== $endsAt) {
-                $generationOutdated = $this->moveEnd($cycle, $endsAt);
+            if ($plan->confirmationRequired && $confirmation !== $plan->impactHash) {
+                throw new PeriodDateChangeConfirmationRequiredException($plan);
             }
-            if (null !== $startsAt) {
-                $this->moveStart($cycle, $startsAt);
+            if ($notify && null !== $plan->notifyBlock) {
+                throw PlanningCycleException::conflict('notify_not_possible', 'The people concerned cannot be told by this change: '.$plan->notifyBlock.'.');
             }
-            $this->assertStillContinuous($cycle->getPlanning());
+            $this->calendarWriteLock->acquire($planning);
 
-            return ['cycle' => $cycle, 'generationOutdated' => $generationOutdated];
+            $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+            $change = new PeriodDateChange($planning, $cycle, $author, $cycle->getStartsAt(), $cycle->getEndsAt(), $startsAt ?? $cycle->getStartsAt(), $endsAt ?? $cycle->getEndsAt(), $notify, $plan->toArray(), $now);
+            $this->entityManager->persist($change);
+            $this->entityManager->flush();
+
+            foreach ($plan->retired as $row) {
+                $assignment = $row['assignment'];
+                if (null !== $assignment) {
+                    $assignment->markSuperseded();
+                    $this->entityManager->persist(new DutyAssignmentEvent($planning, $assignment->getGeneration(), $row['duty'], $assignment, null, $author, PlanningPeriodStatus::PUBLISHED === $row['line']->periodIn($row['cycle'])?->getStatus(), $now));
+                }
+                $row['duty']->retire($change, $now);
+            }
+            $this->entityManager->flush();
+
+            $this->moveTargets($planning, $plan);
+            $this->alignPreparation($plan, $now);
+
+            $added = 0;
+            foreach ($plan->targets as $target) {
+                foreach (PeriodDateChangePlanner::gainedRanges($target) as [$from, $to]) {
+                    foreach ($this->lineOrder->activeInCycle($target['cycle']) as $line) {
+                        $period = $line->periodIn($target['cycle']);
+                        if (null === $period || null === $this->generationRepository->findMostRecentCompletedByPlanningPeriod($period)) {
+                            continue; // never generated: its first generation materializes everything
+                        }
+                        $before = \count($this->dutyRepository->findByPlanningPeriod($period));
+                        $this->weeklyCalendar->materializeExtension($period, $from, $to, $change);
+                        $this->entityManager->flush();
+                        $added += \count($this->dutyRepository->findByPlanningPeriod($period)) - $before;
+                    }
+                }
+            }
+            $this->assertStillContinuous($planning);
+
+            $publications = [];
+            if ($notify) {
+                if (!$this->tryPublicationLock($planning)) {
+                    throw PlanningCycleException::conflict('notify_not_possible', 'A publication is in progress on this planning.');
+                }
+                try {
+                    foreach ($plan->republish as $republished) {
+                        $publications[] = $this->publicationService->republishInTransaction($planning, $author, $republished);
+                    }
+                } catch (NoUnpublishedChangesException|PlanningNotPublishableException) {
+                    throw PlanningCycleException::conflict('notify_not_possible', 'The published lines cannot be republished as they are.');
+                }
+            }
+            $this->logger->info('Dates of period {number} of planning {planning} changed by user {user}: {retired} duties retired, {added} duties added.', [
+                'number' => $cycle->getNumber(),
+                'planning' => (string) $planning->getStableId(),
+                'user' => (string) $author->getStableId(),
+                'retired' => \count($plan->retired),
+                'added' => $added,
+            ]);
+
+            return ['cycle' => $cycle, 'generationOutdated' => [] !== $plan->additions, 'retiredDutyCount' => \count($plan->retired), 'addedDutyCount' => $added, 'publications' => $publications];
         });
+
+        // After the commit: an email failure, or a request closed late, never undoes the change.
+        foreach ($outcome['publications'] as $publication) {
+            $this->publicationService->sendNotifications($publication);
+        }
+        if ($outcome['retiredDutyCount'] > 0) {
+            ($this->swapService)()->settle($this->swapRequestRepository->findByPlanning($planning));
+        }
+
+        return $outcome;
+    }
+
+    /**
+     * @return list<PeriodDateViolation>
+     */
+    private function dateViolations(PlanningCycle $cycle, ?\DateTimeImmutable $startsAt, ?\DateTimeImmutable $endsAt): array
+    {
+        return [
+            ...(null !== $startsAt ? $this->dateRules->startViolations($cycle, $startsAt, $endsAt) : []),
+            ...(null !== $endsAt ? $this->dateRules->endViolations($cycle, $endsAt, $startsAt) : []),
+        ];
+    }
+
+    /**
+     * The new dates of every period concerned, their lines and registries. The
+     * days a period loses go first, so that two periods never overlap, not even
+     * within the transaction (exclusion constraints); the registries take the
+     * whole span first, then fit their periods again.
+     */
+    private function moveTargets(Planning $planning, PeriodDateChangePlan $plan): void
+    {
+        $cycles = array_map(static fn (array $target): PlanningCycle => $target['cycle'], $plan->targets);
+        $facts = [];
+        foreach ($plan->targets as $target) {
+            $facts[(int) $target['cycle']->getId()] = $this->cycleRepository->dateFacts($target['cycle']);
+        }
+
+        $fairnessPeriods = $this->fairnessOf($cycles);
+        foreach ($fairnessPeriods as $fairness) {
+            $first = $fairness->getStartsAt();
+            $last = $fairness->getEndsAt();
+            foreach ($plan->targets as $target) {
+                $first = min($first, $target['startsAt']);
+                $last = max($last, $target['endsAt']);
+            }
+            $fairness->extendTo($first, $last);
+        }
+        $this->entityManager->flush();
+
+        foreach ($plan->targets as $target) {
+            $start = max($target['previousStartsAt'], $target['startsAt']);
+            $end = min($target['previousEndsAt'], $target['endsAt']);
+            if ($start < $end) {
+                $this->setCycleDates($target['cycle'], $start, $end);
+            }
+        }
+        foreach ($plan->targets as $target) {
+            $this->setCycleDates($target['cycle'], $target['startsAt'], $target['endsAt']);
+        }
+        // docs/decisions.md D229: what the manager confirmed about this boundary — a later move decides again.
+        foreach ($plan->cutDecisions as ['cycle' => $cut, 'edge' => $edge, 'cut' => $confirmed]) {
+            'end' === $edge ? $cut->recordEndCut($confirmed) : $cut->recordStartCut($confirmed);
+        }
+        $this->entityManager->flush();
+
+        $this->fitFairness($fairnessPeriods);
+        $all = $this->cycleRepository->findByPlanning($planning);
+        $planning->changeEnvelope($all[0]->getStartsAt(), $all[\count($all) - 1]->getEndsAt());
+        $this->entityManager->flush();
+
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        foreach ($plan->targets as $target) {
+            $this->followUntouchedCollection($facts[(int) $target['cycle']->getId()]);
+            foreach ($this->collectionRepository->findByPlanning($planning) as $collection) {
+                if ($collection->getCycle() === $target['cycle'] && !$target['cycle']->contains($collection->getStartsAt(), $collection->getEndsAt())) {
+                    $collection->clampToCycle($now);
+                }
+            }
+        }
+        $this->entityManager->flush();
+    }
+
+    /**
+     * docs/decisions.md D230: the dates planned for a period stay inside it
+     * when it ends earlier — what the plan showed before the confirmation, done
+     * here and nothing else: an announcement not made yet is cancelled, the target
+     * and the deadlines come back to the new last day, the reminders follow the
+     * target or are cancelled. What was already sent is history.
+     */
+    private function alignPreparation(PeriodDateChangePlan $plan, \DateTimeImmutable $now): void
+    {
+        foreach ($plan->preparation as $change) {
+            $cycle = $change['cycle'];
+            $preparation = $this->preparationRepository->findOneByCycle($cycle);
+            $to = null !== $change['to'] ? new \DateTimeImmutable($change['to']) : null;
+            switch ($change['kind']) {
+                case 'announcement':
+                    // Back to "not planned": nothing is left for the panel to measure other dates against. What was
+                    // planned and confirmed stays in the journal (PeriodDateChange::$impact).
+                    $preparation?->scheduleAnnouncement(null, null);
+                    break;
+                case 'target':
+                    $preparation?->changeTarget($to);
+                    break;
+                case 'deadline':
+                    $preparation?->changeDeclarationDeadline($to);
+                    break;
+                case 'collection_deadline':
+                    $this->collectionRepository->find($change['collectionId'])?->changeDeadline($to, $now);
+                    break;
+                case 'reminder':
+                    $reminder = $this->reminderRepository->find($change['reminderId']);
+                    if (null === $to) {
+                        $reminder?->finish(PreparationActionState::CANCELLED, 'period_shortened', $now);
+                    } else {
+                        // Parked first: two reminders moving together never collide on the unique scheduled day.
+                        $this->entityManager->getConnection()->executeStatement('UPDATE period_preparation_reminders SET due_on = :parked WHERE id = :id', [
+                            'parked' => (new \DateTimeImmutable('1900-01-01'))->modify(\sprintf('+%d days', (int) $change['reminderId'] % 3000))->format('Y-m-d'),
+                            'id' => $change['reminderId'],
+                        ]);
+                        $reminder?->reschedule($reminder->getOffsetValue(), $reminder->getOffsetUnit(), $to, PreparationCalendar::runAt($to), $now);
+                    }
+                    break;
+            }
+        }
+        $this->entityManager->flush();
+    }
+
+    private function setCycleDates(PlanningCycle $cycle, \DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt): void
+    {
+        // In the order the entity's own check accepts: its start stays before its end at each step.
+        if ($startsAt >= $cycle->getEndsAt()) {
+            $cycle->changeEnd($endsAt);
+            $cycle->changeStart($startsAt);
+        } else {
+            $cycle->changeStart($startsAt);
+            $cycle->changeEnd($endsAt);
+        }
+        foreach ($this->cycleRepository->periodsOf($cycle) as $period) {
+            $period->followCycleDates();
+        }
+        $this->entityManager->flush();
+    }
+
+    /** Never during a generation or a completion: the same lock as theirs, released with the transaction. */
+    private function tryEngineLock(Planning $planning): bool
+    {
+        return (bool) $this->entityManager->getConnection()->fetchOne('SELECT pg_try_advisory_xact_lock(7351, :planning)', ['planning' => $planning->getId()]);
+    }
+
+    private function tryPublicationLock(Planning $planning): bool
+    {
+        return (bool) $this->entityManager->getConnection()->fetchOne('SELECT pg_try_advisory_xact_lock(7353, :planning)', ['planning' => $planning->getId()]);
     }
 
     /**
@@ -298,95 +546,6 @@ final class PlanningCycleService
     }
 
     /**
-     * @return bool whether the current generation no longer covers the period
-     */
-    private function moveEnd(PlanningCycle $cycle, \DateTimeImmutable $endsAt): bool
-    {
-        self::throwFirst($this->dateRules->endViolations($cycle, $endsAt));
-        $current = $cycle->getEndsAt()->format('Y-m-d');
-        $requested = $endsAt->format('Y-m-d');
-        if ($requested === $current) {
-            return false;
-        }
-        $grows = $requested > $current;
-        $planning = $cycle->getPlanning();
-        $next = $this->nextOf($cycle);
-        $facts = $this->cycleRepository->dateFacts($cycle);
-
-        if (null === $next) {
-            // The last period: the end of the planning moves with it.
-            $cycle->changeEnd($endsAt);
-            foreach ($this->cycleRepository->periodsOf($cycle) as $period) {
-                $fairness = $period->getFairnessPeriod();
-                if ($grows && $fairness->getEndsAt() < $endsAt) {
-                    $fairness->extendTo($fairness->getStartsAt(), $endsAt);
-                }
-                $period->changeEnd($endsAt);
-                if (!$grows && $fairness->getEndsAt() > $endsAt) {
-                    $fairness->changeEnd($endsAt);
-                }
-            }
-            $planning->changeEnvelope($planning->getStartsAt(), $endsAt);
-            $this->entityManager->flush();
-            $this->followUntouchedCollection($facts);
-            $this->entityManager->flush();
-
-            // The current generation no longer covers the added days (coverage incomplete until regenerated or
-            // completed — publishing still requires a complete coverage, D106). No snapshot is touched.
-            return $grows && null !== $this->cycleRepository->milestones($cycle)['generatedAt'];
-        }
-
-        // The boundary with the next period (both blank, PeriodDateRules): the shrinking side moves first, so that
-        // the two periods never overlap, not even within the transaction (exclusion constraints).
-        $nextFacts = $this->cycleRepository->dateFacts($next);
-        $fairnessPeriods = $this->fairnessOf([$cycle, $next]);
-        foreach ($fairnessPeriods as $fairness) {
-            $fairness->extendTo(min($fairness->getStartsAt(), $endsAt), max($fairness->getEndsAt(), $endsAt));
-        }
-        $this->entityManager->flush();
-        if ($grows) {
-            $this->shiftStart($next, $endsAt);
-            $this->shiftEnd($cycle, $endsAt);
-        } else {
-            $this->shiftEnd($cycle, $endsAt);
-            $this->shiftStart($next, $endsAt);
-        }
-        $this->fitFairness($fairnessPeriods);
-        $this->followUntouchedCollection($facts);
-        $this->followUntouchedCollection($nextFacts);
-        $this->entityManager->flush();
-        $this->logger->info('Boundary between periods {number} and {next} of planning {planning} moved to {boundary}.', [
-            'number' => $cycle->getNumber(),
-            'next' => $next->getNumber(),
-            'planning' => (string) $planning->getStableId(),
-            'boundary' => $requested,
-        ]);
-
-        return false;
-    }
-
-    /** The first period's own start (PeriodDateRules: blank; the planning's start moves with it). */
-    private function moveStart(PlanningCycle $cycle, \DateTimeImmutable $startsAt): void
-    {
-        self::throwFirst($this->dateRules->startViolations($cycle, $startsAt));
-        if ($startsAt->format('Y-m-d') === $cycle->getStartsAt()->format('Y-m-d')) {
-            return;
-        }
-        $planning = $cycle->getPlanning();
-        $facts = $this->cycleRepository->dateFacts($cycle);
-        $fairnessPeriods = $this->fairnessOf([$cycle]);
-        foreach ($fairnessPeriods as $fairness) {
-            $fairness->extendTo(min($fairness->getStartsAt(), $startsAt), $fairness->getEndsAt());
-        }
-        $this->shiftStart($cycle, $startsAt);
-        $this->fitFairness($fairnessPeriods);
-        $planning->changeEnvelope($startsAt, $planning->getEndsAt());
-        $this->entityManager->flush();
-        $this->followUntouchedCollection($facts);
-        $this->entityManager->flush();
-    }
-
-    /**
      * What changeDates() commits, checked before the commit (docs/decisions.md
      * D208): the periods of $planning follow each other without gap nor
      * overlap, each line period has the dates of its period and stays inside
@@ -423,15 +582,6 @@ final class PlanningCycleService
         $cycle->changeStart($startsAt);
         foreach ($this->cycleRepository->periodsOf($cycle) as $period) {
             $period->changeStart($startsAt);
-        }
-        $this->entityManager->flush();
-    }
-
-    private function shiftEnd(PlanningCycle $cycle, \DateTimeImmutable $endsAt): void
-    {
-        $cycle->changeEnd($endsAt);
-        foreach ($this->cycleRepository->periodsOf($cycle) as $period) {
-            $period->changeEnd($endsAt);
         }
         $this->entityManager->flush();
     }

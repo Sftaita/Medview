@@ -31,14 +31,14 @@ describe('PlanningJobBanner (docs/decisions.md D149)', () => {
   it('says a generation is running, with no invented percentage, and that the page can be left', () => {
     renderBanner(job())
     const banner = screen.getByRole('status', { name: 'Calcul en cours' })
-    expect(banner).toHaveTextContent('Génération du planning en cours…')
+    expect(banner).toHaveTextContent('Génération de la période en cours…')
     expect(banner).toHaveTextContent('Vous pouvez quitter cette page. Le calcul continuera en arrière-plan.')
     expect(banner).not.toHaveTextContent('%')
   })
 
   it('says when a queued job has not started yet, and names a completion as such', () => {
     renderBanner(job({ kind: 'COMPLETE', status: 'QUEUED' }))
-    expect(screen.getByRole('status')).toHaveTextContent('Complétion du planning en cours…')
+    expect(screen.getByRole('status')).toHaveTextContent('Complétion de la période en cours…')
     expect(screen.getByRole('status')).toHaveTextContent('En attente de démarrage.')
   })
 
@@ -160,7 +160,7 @@ describe('PlanningJobBanner (docs/decisions.md D149)', () => {
   it('names a fill as such while it runs (docs/decisions.md D222)', () => {
     renderBanner(job({ kind: 'FILL' }))
     expect(screen.getByRole('status', { name: 'Calcul en cours' })).toHaveTextContent(
-      'Génération des postes non pourvus en cours…',
+      'Complétion de la période en cours…',
     )
   })
 
@@ -208,9 +208,7 @@ describe('PlanningJobBanner (docs/decisions.md D149)', () => {
       }),
     )
 
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'Les postes non pourvus n’ont pas tous pu être générés.',
-    )
+    expect(screen.getByRole('alert')).toHaveTextContent('La période n’a pas pu être complétée entièrement.')
     expect(screen.getByRole('alert')).toHaveTextContent('Aucune affectation existante n’a été modifiée (0).')
     fireEvent.click(screen.getByRole('button', { name: 'Relancer' }))
     expect(onRelaunch).toHaveBeenCalledWith('FILL')

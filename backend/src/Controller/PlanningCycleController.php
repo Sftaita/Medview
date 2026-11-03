@@ -7,6 +7,7 @@ namespace App\Controller;
 use App\Entity\Planning;
 use App\Entity\PlanningCycle;
 use App\Entity\User;
+use App\Exception\PeriodDateChangeConfirmationRequiredException;
 use App\Exception\PlanningCycleException;
 use App\Repository\PlanningCycleRepository;
 use App\Repository\PlanningRepository;
@@ -89,7 +90,7 @@ final class PlanningCycleController
     }
 
     #[Route('/api/plannings/{planningStableId}/periods/{periodStableId}', name: 'api_planning_period_update', methods: ['PATCH'])]
-    public function update(string $planningStableId, string $periodStableId, Request $request): JsonResponse
+    public function update(string $planningStableId, string $periodStableId, Request $request, #[CurrentUser] User $user): JsonResponse
     {
         $planning = $this->resolvePlanning($planningStableId);
         $this->denyUnlessCanManage($planning);
@@ -99,16 +100,54 @@ final class PlanningCycleController
         // docs/decisions.md D207: the end, the start (first period only), or both — each with the date it replaces.
         $endsAt = $this->date($body, 'endsAt');
         $startsAt = $this->date($body, 'startsAt');
-        $outcome = $this->cycleService->changeDates(
-            $planning,
-            $cycle,
-            $startsAt,
-            null !== $startsAt ? $this->date($body, 'expectedStartsAt', required: true) : null,
-            $endsAt,
-            null !== $endsAt ? $this->date($body, 'expectedEndsAt', required: true) : null,
-        );
+        // docs/decisions.md D225: `confirmation` is the hash of the plan the manager read; `notify` is "Confirmer et avertir".
+        $confirmation = $body['confirmation'] ?? null;
+        try {
+            $outcome = $this->cycleService->changeDates(
+                $planning,
+                $cycle,
+                $startsAt,
+                null !== $startsAt ? $this->date($body, 'expectedStartsAt', required: true) : null,
+                $endsAt,
+                null !== $endsAt ? $this->date($body, 'expectedEndsAt', required: true) : null,
+                $user,
+                \is_string($confirmation) ? $confirmation : null,
+                true === ($body['notify'] ?? false),
+            );
+        } catch (PeriodDateChangeConfirmationRequiredException $exception) {
+            return new JsonResponse(['error' => 'date_change_confirmation_required', 'message' => $exception->getMessage(), 'plan' => $exception->plan->toArray()], 409);
+        }
 
-        return new JsonResponse([...$this->presenter->period($outcome['cycle']), 'generationOutdated' => $outcome['generationOutdated']]);
+        return new JsonResponse([
+            ...$this->presenter->period($outcome['cycle']),
+            'generationOutdated' => $outcome['generationOutdated'],
+            'retiredDutyCount' => $outcome['retiredDutyCount'],
+            'addedDutyCount' => $outcome['addedDutyCount'],
+            'republished' => \count($outcome['publications']),
+        ]);
+    }
+
+    /**
+     * docs/decisions.md D225: what these new dates would do — the refusals (the
+     * ones a write would answer) and every consequence, nothing written.
+     * `?startsAt=` and/or `?endsAt=` (exclusive).
+     */
+    #[Route('/api/plannings/{planningStableId}/periods/{periodStableId}/date-change-preview', name: 'api_planning_period_date_change_preview', methods: ['GET'])]
+    public function dateChangePreview(string $planningStableId, string $periodStableId, Request $request): JsonResponse
+    {
+        $planning = $this->resolvePlanning($planningStableId);
+        $this->denyUnlessCanManage($planning);
+        $cycle = $this->resolveCycle($planning, $periodStableId);
+        $query = ['startsAt' => $request->query->getString('startsAt'), 'endsAt' => $request->query->getString('endsAt')];
+
+        $preview = $this->cycleService->previewDates($cycle, $this->date($query, 'startsAt'), $this->date($query, 'endsAt'));
+
+        return new JsonResponse([
+            'allowed' => [] === $preview['violations'],
+            'reasons' => array_map(static fn (PeriodDateViolation $violation): array => $violation->toArray(), $preview['violations']),
+            'alternatives' => $preview['alternatives'],
+            ...$preview['plan']->toArray(),
+        ]);
     }
 
     /**
@@ -177,6 +216,8 @@ final class PlanningCycleController
                 'date' => $day['date'],
                 'allowed' => [] === $blockers && [] === $day['violations'],
                 'reasons' => $reasons([...$blockers, ...$day['violations']]),
+                // docs/decisions.md D229: possible, but the manager is told what it cuts and confirms it.
+                'warnings' => $reasons($day['warnings'] ?? []),
             ], $options['days']),
         ]);
     }

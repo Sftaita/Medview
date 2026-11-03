@@ -1292,3 +1292,19 @@ dans `PlanningCompletionService` lui-même.
   block, sourceHolder}}`), `PUT …/week-structure` → 409 `structure_inherited`
   pour une ligne qui hérite ; `GET /api/plannings/{id}` → `lines[].coverage` ;
   candidats de réaffectation → `holdsRestOfBlock`.
+
+## 40. « Compléter la période » et les dates d'une période (D225-D228)
+
+- **Une action, un emplacement** (`.pd-main-action`, `periodAction.ts`) : « Générer la période N » tant
+  qu'aucune ligne n'est générée ; « Compléter la période N » dès qu'une ligne l'est ; « Période complète »
+  quand plus rien n'est à faire ; « N gardes à attribuer à la main » s'il ne reste que d'anciens trous de
+  lignes publiées.
+- **« Compléter » concerne toutes les lignes** (`PlanningLineFillService`, §37) : chaque ligne écrite
+  atomiquement, équité par groupe, conflits inter-lignes respectés, bilan par ligne. Une ligne publiée
+  reste telle quelle, sauf les gardes créées par une prolongation (`duties.added_by_change_id`, D226).
+- **`GET /api/plannings/{p}/periods/{period}/date-change-preview?startsAt=&endsAt=`** : refus et conséquences,
+  sans écriture. **`PATCH /api/plannings/{p}/periods/{period}`** : `startsAt`/`expectedStartsAt`,
+  `endsAt`/`expectedEndsAt`, `confirmation` (hash du plan lu, exigé quand le plan le dit, sinon 409
+  `date_change_confirmation_required` avec le plan à jour), `notify` (« Confirmer et avertir », 409
+  `notify_not_possible` si impossible).
+- Détail et compromis : `docs/decisions.md` D225-D228.

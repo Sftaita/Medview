@@ -19,24 +19,23 @@ use App\Repository\PlanningLineRepository;
  * lists every violation of every day).
  *
  * - A following period always starts the day after the last day of the
- *   previous one: no gap, no overlap. Its start moves only with the end of
- *   the previous period.
- * - The first period's start moves while it is blank.
- * - The end of the last period moves as before (docs/planning-cycles.md
- *   §5.2): it grows freely, shrinks while nothing lies beyond.
- * - The boundary between two periods moves only while both are blank: no
- *   line period validated, published or archived, no generation, no
- *   publication, no calculation, no duty prepared.
- * - A boundary never cuts a block (lot L3) — the one exception, a historical
- *   boundary (D192), is the start of a period after a locked one, which by
- *   definition never moves.
- * - Collections bound the dates: a new end never leaves one outside, a new
- *   start never either — except the intact collection of a blank period
- *   (PlanningCycleRepository::dateFacts(): the only one, open, covering it
- *   exactly, nobody answered, changed, withdrew or was written to), which
- *   follows the new dates. A collection people were written to, or answered,
- *   is never resized silently: the refusal says so (collection_announced,
- *   collection_answered).
+ *   previous one: no gap, no overlap. Choosing its first day moves the end of
+ *   the previous period with it, and the other way round.
+ * - docs/decisions.md D225: since "Modifier les dates" is one action, what a
+ *   date does to a generated or published period is no longer a refusal here:
+ *   it is its plan (PeriodDateChangePlanner), said and confirmed before anything
+ *   is written. What is left here is what no confirmation can make acceptable:
+ *   an archived period, a calculation running, a period too short, a boundary
+ *   that cuts a block — of the weekly structure, or one actually materialized,
+ *   whatever the structure has become since — and a collection that would lie
+ *   entirely outside its period.
+ * - A collection is never resized silently: the plan names each one reduced,
+ *   and says when people had already answered or been written to (D208).
+ * - D229: moving a boundary inside a block is not refused either: it is a
+ *   warning (cutWarnings()), confirmed against its exact consequences, with the
+ *   nearest dates that keep every block whole. Creating a period keeps refusing
+ *   it (lot L3, D192). None of this touches the atomicity of an ordinary block.
+ * - The exceptional rectification of D211 keeps its own stricter rules below.
  */
 final class PeriodDateRules
 {
@@ -86,17 +85,17 @@ final class PeriodDateRules
      *
      * @return list<PeriodDateViolation>
      */
-    public function endViolations(PlanningCycle $cycle, \DateTimeImmutable $endsAt): array
+    public function endViolations(PlanningCycle $cycle, \DateTimeImmutable $endsAt, ?\DateTimeImmutable $startsAt = null): array
     {
         $context = $this->context($cycle);
 
-        return [...$this->endBlockersIn($context), ...$this->endDateViolations($context, $endsAt)];
+        return [...$this->endBlockersIn($context), ...$this->endDateViolations($context, $endsAt, $startsAt)];
     }
 
     /**
      * Each last day (inclusive) from $from to $to: allowed or not, and why.
      *
-     * @return array{blockers: list<PeriodDateViolation>, days: list<array{date: string, violations: list<PeriodDateViolation>}>}
+     * @return array{blockers: list<PeriodDateViolation>, days: list<array{date: string, violations: list<PeriodDateViolation>, warnings: list<PeriodDateViolation>}>}
      */
     public function endOptions(PlanningCycle $cycle, \DateTimeImmutable $from, \DateTimeImmutable $to): array
     {
@@ -104,8 +103,88 @@ final class PeriodDateRules
 
         return [
             'blockers' => $this->endBlockersIn($context),
-            'days' => $this->days($from, $to, fn (\DateTimeImmutable $lastDay): array => $this->endDateViolations($context, $lastDay->modify('+1 day'))),
+            'days' => $this->days(
+                $from,
+                $to,
+                fn (\DateTimeImmutable $lastDay): array => $this->endDateViolations($context, $lastDay->modify('+1 day')),
+                fn (\DateTimeImmutable $lastDay): array => $this->warningsAt($context['blocks'], $context['materializedBlocks'], $lastDay->modify('+1 day'), $cycle->getEndsAt()),
+            ),
         ];
+    }
+
+    /**
+     * docs/decisions.md D229: what moving a boundary of $cycle to $boundary
+     * would cut — blocks of the weekly structure, and blocks already created.
+     * $edge: the end of $cycle, or its first day (for a following period, the same
+     * boundary as the end of the previous one).
+     *
+     * @return list<PeriodDateViolation>
+     */
+    public function cutWarnings(PlanningCycle $cycle, string $edge, \DateTimeImmutable $boundary): array
+    {
+        $context = $this->context($cycle);
+        if ('end' === $edge) {
+            return $this->warningsAt($context['blocks'], $context['materializedBlocks'], $boundary, $cycle->getEndsAt());
+        }
+        if (null !== $context['previous']) {
+            return $this->cutWarnings($context['previous'], 'end', $boundary);
+        }
+
+        return $this->warningsAt($context['startBlocks'], $context['materializedBlocks'], $boundary, $cycle->getStartsAt());
+    }
+
+    /**
+     * The nearest possible dates around $date that cut no block, on this edge:
+     * what the manager is offered instead.
+     *
+     * @return array{before: ?string, after: ?string}
+     */
+    public function alternatives(PlanningCycle $cycle, string $edge, \DateTimeImmutable $date): array
+    {
+        // A last day for the end (the boundary is the day after), a first day for the start.
+        $boundaryOf = static fn (\DateTimeImmutable $day): \DateTimeImmutable => 'end' === $edge ? $day->modify('+1 day') : $day;
+        $isClean = function (\DateTimeImmutable $day) use ($cycle, $edge, $boundaryOf): bool {
+            $boundary = $boundaryOf($day);
+            $violations = 'end' === $edge ? $this->endViolations($cycle, $boundary) : $this->startViolations($cycle, $boundary);
+
+            return [] === $violations && [] === $this->cutWarnings($cycle, $edge, $boundary);
+        };
+        $found = ['before' => null, 'after' => null];
+        for ($distance = 1; $distance <= 21 && (null === $found['before'] || null === $found['after']); ++$distance) {
+            $earlier = $date->modify(\sprintf('-%d days', $distance));
+            $later = $date->modify(\sprintf('+%d days', $distance));
+            if (null === $found['before'] && $isClean($earlier)) {
+                $found['before'] = $earlier->format('Y-m-d');
+            }
+            if (null === $found['after'] && $isClean($later)) {
+                $found['after'] = $later->format('Y-m-d');
+            }
+        }
+
+        return $found;
+    }
+
+    /**
+     * @param list<array{line: PlanningLine, blocks: list<array{name: string, offsets: list<int>}>}> $blocks
+     * @param list<array{name: string, line: string, first: string, last: string}>                   $materialized
+     *
+     * @return list<PeriodDateViolation>
+     */
+    private function warningsAt(array $blocks, array $materialized, \DateTimeImmutable $boundary, \DateTimeImmutable $current): array
+    {
+        if ($boundary->format('Y-m-d') === $current->format('Y-m-d')) {
+            return []; // nothing moves there
+        }
+        $warnings = [];
+        $cuts = $this->cutsAt($blocks, $boundary);
+        if ([] !== $cuts) {
+            $warnings[] = PeriodDateViolation::splitsBlock($cuts);
+        }
+        if (self::fallsInsideMaterializedBlock($materialized, $boundary->format('Y-m-d'))) {
+            $warnings[] = self::materializedBlockCut();
+        }
+
+        return $warnings;
     }
 
     // --- the start of the first period -------------------------------------------------------------
@@ -121,23 +200,31 @@ final class PeriodDateRules
     /**
      * @return list<PeriodDateViolation>
      */
-    public function startViolations(PlanningCycle $cycle, \DateTimeImmutable $startsAt): array
+    public function startViolations(PlanningCycle $cycle, \DateTimeImmutable $startsAt, ?\DateTimeImmutable $endsAt = null): array
     {
         $context = $this->context($cycle);
 
-        return [...$this->startBlockersIn($context), ...$this->startDateViolations($context, $startsAt)];
+        return [...$this->startBlockersIn($context), ...$this->startDateViolations($context, $startsAt, $endsAt)];
     }
 
     /**
-     * @return array{blockers: list<PeriodDateViolation>, days: list<array{date: string, violations: list<PeriodDateViolation>}>}
+     * @return array{blockers: list<PeriodDateViolation>, days: list<array{date: string, violations: list<PeriodDateViolation>, warnings: list<PeriodDateViolation>}>}
      */
     public function startOptions(PlanningCycle $cycle, \DateTimeImmutable $from, \DateTimeImmutable $to): array
     {
         $context = $this->context($cycle);
+        $boundaryContext = null !== $context['previous'] ? $this->context($context['previous']) : null;
 
         return [
             'blockers' => $this->startBlockersIn($context),
-            'days' => $this->days($from, $to, fn (\DateTimeImmutable $day): array => $this->startDateViolations($context, $day)),
+            'days' => $this->days(
+                $from,
+                $to,
+                fn (\DateTimeImmutable $day): array => $this->startDateViolations($context, $day),
+                fn (\DateTimeImmutable $day): array => null !== $boundaryContext
+                    ? $this->warningsAt($boundaryContext['blocks'], $boundaryContext['materializedBlocks'], $day, $cycle->getStartsAt())
+                    : $this->warningsAt($context['startBlocks'], $context['materializedBlocks'], $day, $cycle->getStartsAt()),
+            ),
         ];
     }
 
@@ -323,6 +410,11 @@ final class PeriodDateRules
             'facts' => $this->cycleRepository->dateFacts($cycle),
             'nextLocked' => self::anyLocked($nextPeriods),
             'nextFacts' => null !== $next ? $this->cycleRepository->dateFacts($next) : null,
+            'archived' => self::anyArchived($periods),
+            'nextArchived' => self::anyArchived($nextPeriods),
+            'materializedBlocks' => $withBlocks ? [...$this->cycleRepository->materializedBlocks($cycle), ...(null !== $next ? $this->cycleRepository->materializedBlocks($next) : [])] : [],
+            'collectionWindows' => $withBlocks ? $this->cycleRepository->collectionWindows($cycle) : [],
+            'nextCollectionWindows' => $withBlocks && null !== $next ? $this->cycleRepository->collectionWindows($next) : [],
             'jobActive' => null !== $this->jobRepository->findActiveForPlanning($cycle->getPlanning()),
             // The end is a boundary of the lines of this period and of the next one; the start, of this one.
             'blocks' => $withBlocks ? $this->blocksOfLines(self::activeLines([...$periods, ...$nextPeriods])) : [],
@@ -338,19 +430,11 @@ final class PeriodDateRules
     private function endBlockersIn(array $context): array
     {
         $blockers = [];
-        if ($context['locked']) {
-            $blockers[] = PeriodDateViolation::conflict('period_locked', 'This period is validated or published: its dates no longer change.');
+        if ($context['archived'] || $context['nextArchived']) {
+            $blockers[] = self::archived();
         }
         if ($context['jobActive']) {
             $blockers[] = self::jobInProgress();
-        }
-        if (null !== $context['next']) {
-            if (!$context['locked'] && !self::isBlank(false, $context['facts'])) {
-                $blockers[] = PeriodDateViolation::conflict('period_not_blank', 'The boundary with the next period moves only while this period has no generation, publication, calculation or prepared duty.');
-            }
-            if (!self::isBlank($context['nextLocked'], $context['nextFacts'])) {
-                $blockers[] = PeriodDateViolation::conflict('next_period_not_blank', 'The boundary with the next period moves only while the next period has no generation, publication, calculation or prepared duty.');
-            }
         }
 
         return $blockers;
@@ -361,29 +445,21 @@ final class PeriodDateRules
      *
      * @return list<PeriodDateViolation>
      */
-    private function endDateViolations(array $context, \DateTimeImmutable $endsAt): array
+    private function endDateViolations(array $context, \DateTimeImmutable $endsAt, ?\DateTimeImmutable $startsAt = null): array
     {
         /** @var PlanningCycle $cycle */
         $cycle = $context['cycle'];
-        $facts = $context['facts'];
+        $startsAt ??= $cycle->getStartsAt();
         $end = $endsAt->format('Y-m-d');
         $violations = [];
-        if (!self::lastsLongEnough($cycle->getStartsAt(), $endsAt)) {
+        if (!self::lastsLongEnough($startsAt, $endsAt)) {
             $violations[] = self::tooShort();
         }
-        $cuts = $this->cutsAt($context['blocks'], $endsAt);
-        if ([] !== $cuts) {
-            $violations[] = PeriodDateViolation::splitsBlock($cuts);
-        }
-        if ($end < $cycle->getEndsAt()->format('Y-m-d')) {
-            if ($facts['generations'] > 0) {
-                $violations[] = PeriodDateViolation::conflict('period_has_generation', 'This period was already generated: it can no longer be shortened.');
-            }
-            if (null !== $facts['lastDutyDay'] && $facts['lastDutyDay'] >= $end) {
-                $violations[] = PeriodDateViolation::conflict('period_has_duties_after', 'Duties already exist after the new end.');
-            }
-            if (null === $facts['untouchedCollectionId'] && null !== $facts['lastCollectionEnd'] && $facts['lastCollectionEnd'] > $end) {
-                $violations[] = self::collectionKept($facts, 'collection_beyond_end', 'An availability collection of this period goes beyond the new end.');
+        // The intact collection follows the new dates; any other one keeps what is left of its window — if anything is.
+        foreach (null === $context['facts']['untouchedCollectionId'] ? $context['collectionWindows'] : [] as $window) {
+            if ($window['start'] >= $end) {
+                $violations[] = PeriodDateViolation::conflict('collection_outside_period', 'An availability collection of this period would lie entirely outside it.');
+                break;
             }
         }
         /** @var ?PlanningCycle $next */
@@ -392,9 +468,11 @@ final class PeriodDateRules
             if (!self::lastsLongEnough($endsAt, $next->getEndsAt())) {
                 $violations[] = PeriodDateViolation::invalid('next_period_too_short', \sprintf('The next period would last less than %d days.', PlanningCycleService::MIN_DAYS));
             }
-            $nextFacts = $context['nextFacts'];
-            if ($end > $cycle->getEndsAt()->format('Y-m-d') && null === $nextFacts['untouchedCollectionId'] && null !== $nextFacts['firstCollectionStart'] && $nextFacts['firstCollectionStart'] < $end) {
-                $violations[] = self::collectionKept($nextFacts, 'collection_before_start', 'An availability collection of the next period starts before the new boundary.');
+            foreach (null === $context['nextFacts']['untouchedCollectionId'] ? $context['nextCollectionWindows'] : [] as $window) {
+                if ($window['end'] <= $end) {
+                    $violations[] = PeriodDateViolation::conflict('collection_outside_period', 'An availability collection of the next period would lie entirely outside it.');
+                    break;
+                }
             }
         }
 
@@ -408,18 +486,16 @@ final class PeriodDateRules
      */
     private function startBlockersIn(array $context): array
     {
+        // A following period's start IS the end of the previous one: the same boundary, the same rules.
         if (null !== $context['previous']) {
-            return [PeriodDateViolation::conflict('period_start_follows_previous', 'A following period starts the day after the last day of the previous one: change the end of the previous period instead.')];
+            return $this->endBlockersIn($this->context($context['previous'], false));
         }
         $blockers = [];
-        if ($context['locked']) {
-            $blockers[] = PeriodDateViolation::conflict('period_locked', 'This period is validated or published: its dates no longer change.');
+        if ($context['archived']) {
+            $blockers[] = self::archived();
         }
         if ($context['jobActive']) {
             $blockers[] = self::jobInProgress();
-        }
-        if (!$context['locked'] && !self::isBlank(false, $context['facts'])) {
-            $blockers[] = PeriodDateViolation::conflict('period_not_blank', 'The start of the first period moves only while it has no generation, publication, calculation or prepared duty.');
         }
 
         return $blockers;
@@ -430,26 +506,31 @@ final class PeriodDateRules
      *
      * @return list<PeriodDateViolation>
      */
-    private function startDateViolations(array $context, \DateTimeImmutable $startsAt): array
+    private function startDateViolations(array $context, \DateTimeImmutable $startsAt, ?\DateTimeImmutable $endsAt = null): array
     {
         /** @var PlanningCycle $cycle */
         $cycle = $context['cycle'];
-        $facts = $context['facts'];
+        $endsAt ??= $cycle->getEndsAt();
         $start = $startsAt->format('Y-m-d');
+        /** @var ?PlanningCycle $previous */
+        $previous = $context['previous'];
+        if (null !== $previous) {
+            $previousContext = $this->context($previous);
+            $violations = $this->endDateViolations($previousContext, $startsAt);
+            if (!self::lastsLongEnough($startsAt, $endsAt) && [] === array_filter($violations, static fn (PeriodDateViolation $v): bool => 'next_period_too_short' === $v->code)) {
+                $violations[] = self::tooShort();
+            }
+
+            return $violations;
+        }
         $violations = [];
-        if (!self::lastsLongEnough($startsAt, $cycle->getEndsAt())) {
+        if (!self::lastsLongEnough($startsAt, $endsAt)) {
             $violations[] = self::tooShort();
         }
-        $cuts = $this->cutsAt($context['startBlocks'], $startsAt);
-        if ([] !== $cuts) {
-            $violations[] = PeriodDateViolation::splitsBlock($cuts);
-        }
-        if ($start > $cycle->getStartsAt()->format('Y-m-d')) {
-            if (null !== $facts['firstDutyDay'] && $facts['firstDutyDay'] < $start) {
-                $violations[] = PeriodDateViolation::conflict('period_has_duties_before', 'Duties already exist before the new start.');
-            }
-            if (null === $facts['untouchedCollectionId'] && null !== $facts['firstCollectionStart'] && $facts['firstCollectionStart'] < $start) {
-                $violations[] = self::collectionKept($facts, 'collection_before_start', 'An availability collection of this period starts before the new start.');
+        foreach (null === $context['facts']['untouchedCollectionId'] ? $context['collectionWindows'] : [] as $window) {
+            if ($window['end'] <= $start) {
+                $violations[] = PeriodDateViolation::conflict('collection_outside_period', 'An availability collection of this period would lie entirely outside it.');
+                break;
             }
         }
 
@@ -478,15 +559,16 @@ final class PeriodDateRules
     // --- helpers -----------------------------------------------------------------------------------
 
     /**
-     * @param callable(\DateTimeImmutable): list<PeriodDateViolation> $violationsOf
+     * @param callable(\DateTimeImmutable): list<PeriodDateViolation>        $violationsOf
+     * @param (callable(\DateTimeImmutable): list<PeriodDateViolation>)|null $warningsOf
      *
-     * @return list<array{date: string, violations: list<PeriodDateViolation>}>
+     * @return list<array{date: string, violations: list<PeriodDateViolation>, warnings: list<PeriodDateViolation>}>
      */
-    private function days(\DateTimeImmutable $from, \DateTimeImmutable $to, callable $violationsOf): array
+    private function days(\DateTimeImmutable $from, \DateTimeImmutable $to, callable $violationsOf, ?callable $warningsOf = null): array
     {
         $days = [];
         for ($day = new \DateTimeImmutable($from->format('Y-m-d')); $day <= $to; $day = $day->modify('+1 day')) {
-            $days[] = ['date' => $day->format('Y-m-d'), 'violations' => $violationsOf($day)];
+            $days[] = ['date' => $day->format('Y-m-d'), 'violations' => $violationsOf($day), 'warnings' => null !== $warningsOf ? $warningsOf($day) : []];
         }
 
         return $days;
@@ -589,6 +671,44 @@ final class PeriodDateRules
         }
 
         return PeriodDateViolation::conflict($code, $message);
+    }
+
+    /**
+     * @param list<array{name: string, line: string, first: string, last: string}> $blocks
+     */
+    private static function fallsInsideMaterializedBlock(array $blocks, string $boundary): bool
+    {
+        foreach ($blocks as $block) {
+            if ($block['first'] < $boundary && $boundary <= $block['last']) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static function materializedBlockCut(): PeriodDateViolation
+    {
+        return PeriodDateViolation::conflict('materialized_block_crosses_boundary', 'A block of duties already created would be cut in two: a block stays whole.');
+    }
+
+    private static function archived(): PeriodDateViolation
+    {
+        return PeriodDateViolation::conflict('period_archived', 'An archived period never changes.');
+    }
+
+    /**
+     * @param list<PlanningPeriod> $periods
+     */
+    private static function anyArchived(array $periods): bool
+    {
+        foreach ($periods as $period) {
+            if (PlanningPeriodStatus::ARCHIVED === $period->getStatus()) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static function jobInProgress(): PeriodDateViolation

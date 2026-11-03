@@ -26,7 +26,7 @@ export function fillBlockerText(code: string): string {
   }
 }
 
-/** What "Générer les postes non pourvus" would do with this line, in one sentence. */
+/** What "Compléter la période" would do with this line, in one sentence. */
 export function fillPlanText(plan: FillLinePlan): string {
   switch (plan.action) {
     case 'GENERATE': {
@@ -34,9 +34,13 @@ export function fillPlanText(plan: FillLinePlan): string {
         plan.requiredDutyCount === null
           ? 'ses renforts seront déterminés d’après la ligne dont ils dépendent'
           : plural(plan.requiredDutyCount, 'garde à pourvoir', 'gardes à pourvoir')
-      return `Jamais générée : première génération de cette ligne seule${plan.afterSource ? ', juste après la ligne dont elle dépend' : ''} (${what}).`
+      return `Jamais générée : ses gardes seront créées puis attribuées${plan.afterSource ? ', juste après la ligne dont elle dépend' : ''} (${what}).`
     }
     case 'COMPLETE': {
+      if (plan.extensionOnly) {
+        const others = plan.otherUncoveredCount ?? 0
+        return `Publiée : ${plural(plan.uncoveredRequiredDutyCount ?? 0, 'garde des nouvelles dates à attribuer', 'gardes des nouvelles dates à attribuer')}. Les gardes déjà publiées ne changent pas${others > 0 ? `, et ${plural(others, 'ancien poste vacant reste', 'anciens postes vacants restent')} à attribuer à la main` : ''}. À republier ensuite.`
+      }
       const holes = plural(plan.uncoveredRequiredDutyCount ?? 0, 'garde non pourvue', 'gardes non pourvues')
       const late =
         (plan.lateMemberCount ?? 0) > 0
@@ -45,14 +49,19 @@ export function fillPlanText(plan: FillLinePlan): string {
       return `${holes} à compléter, sans toucher aux gardes attribuées.${late}`
     }
     case 'NOTHING':
-      return 'Toutes les gardes obligatoires sont attribuées : rien à faire.'
+      return plan.followsSource
+        ? 'Ses gardes actuelles sont conservées. Des renforts seront ajoutés si les nouveaux titulaires de sa ligne source les déclenchent.'
+        : 'Toutes les gardes obligatoires sont attribuées : rien à faire.'
     default:
       switch (plan.reason) {
         case 'archived':
           return 'Archivée : jamais modifiée.'
         case 'published': {
           const holes = plan.uncoveredRequiredDutyCount ?? 0
-          return `Publiée : jamais complétée automatiquement${holes > 0 ? ` (${plural(holes, 'garde non pourvue', 'gardes non pourvues')}, à attribuer à la main)` : ''}. Elle n’empêche pas de générer les autres lignes.`
+          if (plan.followsSource) {
+            return 'Publiée : ses gardes ne changent pas. Des renforts seront ajoutés si les nouveaux titulaires de sa ligne source les déclenchent.'
+          }
+          return `Publiée : conservée telle quelle${holes > 0 ? ` (${plural(holes, 'garde non pourvue', 'gardes non pourvues')}, à attribuer à la main)` : ''}. Les autres lignes sont traitées normalement.`
         }
         case 'nothing_demanded':
           return 'Aucune garde demandée sur cette période.'

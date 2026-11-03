@@ -6,10 +6,15 @@ namespace App\Controller;
 
 use App\Dto\WeekStructureBlockInput;
 use App\Dto\WeekStructureUpdateRequest;
+use App\Entity\Planning;
 use App\Entity\PlanningLine;
+use App\Entity\PlanningPeriodStatus;
 use App\Exception\InvalidWeekStructureException;
+use App\Repository\PlanningGenerationRepository;
 use App\Repository\PlanningLineRepository;
+use App\Repository\PlanningRepository;
 use App\Security\Voter\PlanningVoter;
+use App\Service\PlanningWeekTemplateService;
 use App\Service\WeekStructureBlockView;
 use App\Service\WeekStructureService;
 use App\Service\WeekStructureView;
@@ -33,7 +38,108 @@ final class WeekStructureController
         private readonly PlanningLineRepository $planningLineRepository,
         private readonly WeekStructureService $weekStructureService,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
+        private readonly PlanningWeekTemplateService $templateService,
+        private readonly PlanningRepository $planningRepository,
+        private readonly PlanningGenerationRepository $generationRepository,
     ) {
+    }
+
+    /**
+     * docs/decisions.md D227: the general weekly structure, and what each line
+     * uses — with the state of its periods, because a change only ever reaches
+     * what is created afterwards.
+     */
+    #[Route('/api/plannings/{planningStableId}/week-template', name: 'api_week_template_get', methods: ['GET'])]
+    public function template(string $planningStableId): JsonResponse
+    {
+        $planning = $this->resolvePlanning($planningStableId);
+
+        return new JsonResponse([...$this->viewToArray($this->templateService->read($planning)), 'lines' => $this->linesOf($planning)]);
+    }
+
+    #[Route('/api/plannings/{planningStableId}/week-template', name: 'api_week_template_put', methods: ['PUT'])]
+    public function saveTemplate(string $planningStableId, Request $request): JsonResponse
+    {
+        $planning = $this->resolvePlanning($planningStableId);
+        [$dto, $errorResponse] = $this->deserialize($request);
+        if (null !== $errorResponse) {
+            return $errorResponse;
+        }
+
+        try {
+            $applied = $this->templateService->save($planning, $dto);
+        } catch (InvalidWeekStructureException $exception) {
+            return new JsonResponse(['error' => 'invalid_week_structure', 'message' => $exception->getMessage()], 422);
+        }
+
+        return new JsonResponse([
+            ...$this->viewToArray($this->templateService->read($planning)),
+            'lines' => $this->linesOf($planning),
+            'appliedTo' => array_map(static fn (PlanningLine $line): string => $line->getName(), $applied),
+        ]);
+    }
+
+    /** `{"mode": "GENERAL" | "CUSTOM"}`: what this line uses from now on. */
+    #[Route('/api/planning-lines/{lineStableId}/week-structure-mode', name: 'api_week_structure_mode', methods: ['PUT'])]
+    public function changeMode(string $lineStableId, Request $request): JsonResponse
+    {
+        $line = $this->resolveLine($lineStableId);
+        $raw = json_decode($request->getContent() ?: '{}', true);
+        $mode = \is_array($raw) ? ($raw['mode'] ?? null) : null;
+        if (!\in_array($mode, [PlanningWeekTemplateService::GENERAL, PlanningWeekTemplateService::CUSTOM], true)) {
+            return new JsonResponse(['error' => 'validation_failed', 'violations' => ['mode' => 'GENERAL or CUSTOM.']], 422);
+        }
+        if ('INHERITED' === $this->templateService->kindOf($line)) {
+            return new JsonResponse(['error' => 'structure_inherited', 'message' => 'A reinforcement line inherits the blocks of its source line.'], 409);
+        }
+
+        $this->templateService->setMode($line, $mode);
+
+        return new JsonResponse(['mode' => $line->getWeekStructureMode(), ...$this->viewToArray($this->weekStructureService->read($line))]);
+    }
+
+    private function resolvePlanning(string $stableId): Planning
+    {
+        $planning = $this->planningRepository->findOneByStableId($stableId);
+        if (null === $planning) {
+            throw new NotFoundHttpException('Planning not found.');
+        }
+        if (!$this->authorizationChecker->isGranted(PlanningVoter::MANAGE_LINE_STRUCTURE, $planning)) {
+            throw new AccessDeniedHttpException('Only the creator or an OWNER/ADMIN of this Planning can manage its weekly structure.');
+        }
+
+        return $planning;
+    }
+
+    /**
+     * @return list<array{stableId: string, name: string, kind: string, periods: list<array{number: int, state: string}>}>
+     */
+    private function linesOf(Planning $planning): array
+    {
+        $lines = [];
+        foreach ($this->planningLineRepository->findByPlanning($planning) as $line) {
+            if (!$line->isActive()) {
+                continue;
+            }
+            $periods = [];
+            foreach ($planning->getCycles() as $cycle) {
+                $period = $line->periodIn($cycle);
+                if (null === $period) {
+                    continue;
+                }
+                $periods[] = [
+                    'number' => $cycle->getNumber(),
+                    'state' => match (true) {
+                        \in_array($period->getStatus(), [PlanningPeriodStatus::VALIDATED, PlanningPeriodStatus::PUBLISHED, PlanningPeriodStatus::ARCHIVED], true) => 'published',
+                        null !== $this->generationRepository->findMostRecentCompletedByPlanningPeriod($period) => 'generated',
+                        default => 'never',
+                    },
+                ];
+            }
+            $lines[] = ['stableId' => (string) $line->getStableId(), 'name' => $line->getName(), 'kind' => $this->templateService->kindOf($line), 'periods' => $periods];
+        }
+
+        return $lines;
     }
 
     #[Route('/api/planning-lines/{lineStableId}/week-structure', name: 'api_week_structure_get', methods: ['GET'])]
@@ -55,6 +161,9 @@ final class WeekStructureController
         }
 
         try {
+            // docs/decisions.md D227: saved on the line itself, it is that line's own from now on — decided first: the
+            // primary line may be what the general structure still reads.
+            $this->templateService->markCustomized($line);
             $view = $this->weekStructureService->replace($line, $dto);
         } catch (InvalidWeekStructureException $exception) {
             return new JsonResponse(['error' => 'invalid_week_structure', 'message' => $exception->getMessage()], 422);

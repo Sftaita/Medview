@@ -75,7 +75,7 @@ const PLANS: Record<string, FillLinePlan> = {
 }
 
 function renderTab(props: Partial<Parameters<typeof LinesTab>[0]> = {}) {
-  const handlers = { onGenerateLine: vi.fn(), onLineRules: vi.fn() }
+  const handlers = { onGenerateLine: vi.fn() }
   render(
     <LinesTab
       lines={LINES}
@@ -97,6 +97,12 @@ function renderTab(props: Partial<Parameters<typeof LinesTab>[0]> = {}) {
 
 const row = (name: string) => screen.getByText(name, { selector: 'strong' }).closest('li') as HTMLElement
 
+/** The entries of a line's "⋯" menu, left open. */
+function menuOf(name: string) {
+  fireEvent.click(within(row(name)).getByRole('button', { name: `Actions pour ${name}` }))
+  return screen.getByRole('menu', { name: `Actions pour ${name}` })
+}
+
 describe('LinesTab — counters and "Générer cette ligne"', () => {
   it('shows what each line holds and misses', () => {
     renderTab()
@@ -105,22 +111,22 @@ describe('LinesTab — counters and "Générer cette ligne"', () => {
     expect(within(row('Juniors')).getByText('Jamais générée · 30 gardes à pourvoir')).toBeInTheDocument()
   })
 
-  it('offers "Générer cette ligne" only where the line has something to receive', () => {
+  it('offers "Générer cette ligne" in the line’s menu, only where it has something to receive', () => {
     const { onGenerateLine } = renderTab()
 
-    expect(
-      within(row('Seniors')).queryByRole('button', { name: 'Générer cette ligne' }),
-    ).not.toBeInTheDocument()
-    fireEvent.click(within(row('Juniors')).getByRole('button', { name: 'Générer cette ligne' }))
+    expect(within(menuOf('Seniors')).queryByRole('menuitem', { name: 'Générer cette ligne' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Actions pour Seniors' }))
+
+    fireEvent.click(within(menuOf('Juniors')).getByRole('menuitem', { name: 'Générer cette ligne' }))
     expect(onGenerateLine).toHaveBeenCalledWith(LINES[1])
+    // Never a button of its own on the row.
+    expect(screen.queryByRole('button', { name: 'Générer cette ligne' })).not.toBeInTheDocument()
   })
 
   it('explains, in words, why a line cannot be generated', () => {
     renderTab()
 
-    expect(
-      within(row('Renfort')).queryByRole('button', { name: 'Générer cette ligne' }),
-    ).not.toBeInTheDocument()
+    expect(within(menuOf('Renfort')).queryByRole('menuitem', { name: 'Générer cette ligne' })).toBeNull()
     expect(
       within(row('Renfort')).getByText(
         /Impossible pour l’instant : les règles de génération de la ligne ne sont pas activées/,
@@ -131,21 +137,22 @@ describe('LinesTab — counters and "Générer cette ligne"', () => {
   it('no second computation while one is running', () => {
     renderTab({ busy: true })
 
-    expect(within(row('Juniors')).getByRole('button', { name: 'Générer cette ligne' })).toBeDisabled()
+    const menu = menuOf('Juniors')
+    expect(within(menu).queryByRole('menuitem', { name: 'Générer cette ligne' })).toBeNull()
+    // The rest of the menu stays.
+    expect(within(menu).getByRole('menuitem', { name: 'Paramètres de la ligne' })).toBeInTheDocument()
   })
 
-  it('gives every line — secondary ones too — its "Règles de génération"', () => {
-    const { onLineRules } = renderTab()
+  it('no "Règles de génération" entry: the rules are in the settings of the line (docs/decisions.md D228)', () => {
+    renderTab()
 
-    fireEvent.click(within(row('Juniors')).getByRole('button', { name: 'Actions pour Juniors' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Règles de génération' }))
-    expect(onLineRules).toHaveBeenCalledWith(LINES[1])
+    expect(within(menuOf('Juniors')).queryByRole('menuitem', { name: /Règles/ })).toBeNull()
   })
 
   it('shows nothing of this to someone without the plans (a plain member)', () => {
     renderTab({ fillPlans: undefined, onGenerateLine: undefined })
 
-    expect(screen.queryByRole('button', { name: 'Générer cette ligne' })).not.toBeInTheDocument()
+    expect(within(menuOf('Juniors')).queryByRole('menuitem', { name: 'Générer cette ligne' })).toBeNull()
     expect(screen.queryByText(/gardes attribuées/)).not.toBeInTheDocument()
   })
 })
@@ -201,5 +208,21 @@ describe('LinesTab — when a line is needed (docs/decisions.md D224)', () => {
   it('an independent secondary line with neither structure nor condition says what is missing', () => {
     renderTab({ lines: [fell({ mode: 'INDEPENDENT', hasWeekStructure: false })], fillPlans: {} })
     expect(within(row('Fell/Ass')).getByText(/Règles de couverture à configurer/)).toBeInTheDocument()
+  })
+
+  it('an independent line says which weekly structure it uses (docs/decisions.md D227)', () => {
+    renderTab({
+      lines: [
+        fell({ mode: 'INDEPENDENT', hasWeekStructure: true, weekStructure: 'GENERAL' }),
+        {
+          ...line('l-own', 'Propre', 'SECONDARY'),
+          coverage: { mode: 'INDEPENDENT', hasWeekStructure: true, weekStructure: 'CUSTOM' },
+        },
+      ],
+      fillPlans: {},
+    })
+
+    expect(within(row('Fell/Ass')).getByText('Semaine type générale')).toBeInTheDocument()
+    expect(within(row('Propre')).getByText('Semaine type personnalisée')).toBeInTheDocument()
   })
 })

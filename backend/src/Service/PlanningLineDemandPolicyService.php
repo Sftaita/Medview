@@ -148,6 +148,11 @@ final class PlanningLineDemandPolicyService
                 foreach ($triggers as [$user, $weekdays, $increment]) {
                     $this->entityManager->persist(new DemandTrigger($policy, $user, $weekdays, $increment));
                 }
+                // docs/decisions.md D227: it inherits now — neither the general structure nor one of its own.
+                if ($policy->toRules()->inheritsStructure()) {
+                    $this->weekStructureService->deactivate($line);
+                    $line->changeWeekStructureMode('CUSTOM');
+                }
                 $this->entityManager->flush();
             });
         } catch (UniqueConstraintViolationException) {

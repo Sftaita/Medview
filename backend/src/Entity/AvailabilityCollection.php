@@ -177,6 +177,22 @@ class AvailabilityCollection
      * cycle has already moved. Its expected people are resynchronized by
      * AvailabilityCollectionService::followPeriod().
      */
+    /**
+     * docs/decisions.md D225: its window brought back inside its period after
+     * "Modifier les dates" — the days removed only, never a day added. The
+     * manager saw it before confirming; nothing about anybody's absences changes.
+     */
+    public function clampToCycle(\DateTimeImmutable $now): void
+    {
+        if (null === $this->cycle) {
+            throw new \LogicException('Only a collection of a period follows its dates.');
+        }
+
+        $this->startsAt = max($this->startsAt, $this->cycle->getStartsAt());
+        $this->endsAt = min($this->endsAt, $this->cycle->getEndsAt());
+        $this->updatedAt = $now;
+    }
+
     public function followCycle(\DateTimeImmutable $now): void
     {
         if (null === $this->cycle) {

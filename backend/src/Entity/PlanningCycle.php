@@ -52,6 +52,17 @@ class PlanningCycle
     #[ORM\Column(type: 'date_immutable')]
     private \DateTimeImmutable $endsAt;
 
+    /**
+     * docs/decisions.md D229: the manager confirmed that the first day of this
+     * period (first period only) / its end cuts a block. Only then may a block
+     * be materialized in part at that boundary; every other block stays atomic.
+     */
+    #[ORM\Column(options: ['default' => false])]
+    private bool $startCutConfirmed = false;
+
+    #[ORM\Column(options: ['default' => false])]
+    private bool $endCutConfirmed = false;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -142,6 +153,26 @@ class PlanningCycle
      * earlier, its start never moves. Every rule deciding whether the data
      * allow it lives in PlanningCycleService::changeEnd().
      */
+    public function isStartCutConfirmed(): bool
+    {
+        return $this->startCutConfirmed;
+    }
+
+    public function isEndCutConfirmed(): bool
+    {
+        return $this->endCutConfirmed;
+    }
+
+    public function recordStartCut(bool $confirmed): void
+    {
+        $this->startCutConfirmed = $confirmed;
+    }
+
+    public function recordEndCut(bool $confirmed): void
+    {
+        $this->endCutConfirmed = $confirmed;
+    }
+
     public function changeEnd(\DateTimeImmutable $endsAt): void
     {
         if ($endsAt <= $this->startsAt) {

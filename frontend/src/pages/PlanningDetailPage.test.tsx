@@ -2,6 +2,7 @@ import '@testing-library/jest-dom/vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { FillLinePlan, FillPreview } from '../features/planning/pilot/types'
 import type { PlanningDetail, PlanningLineSummary, PlanningPeriodView } from '../features/planning/types'
 import { makePreflight, makeRow, makeStatus } from '../testUtils/pilotFixtures'
 import { status as httpStatus, stubApi, type Route as ApiRoute } from '../testUtils/stubApi'
@@ -133,6 +134,32 @@ function blankPreparation(stableId: string) {
   }
 }
 
+const mainAction = () => document.querySelector('.pd-main-action') as HTMLElement
+
+/** GET .../fill-preview: what each line of the period would receive (docs/decisions.md D222, D228). */
+const fillPreview = (lines: FillLinePlan[]): FillPreview => ({ lines, blockers: [], needsRestPolicy: false })
+
+function publishedPlan(holes: number): FillLinePlan {
+  return {
+    lineStableId: 'line-1',
+    lineName: 'Première ligne',
+    lineType: 'PRIMARY',
+    periodStatus: 'PUBLISHED',
+    generated: true,
+    action: 'EXCLUDED',
+    reason: 'published',
+    selectable: false,
+    selectedByDefault: false,
+    requiredDutyCount: 10,
+    coveredRequiredDutyCount: 10 - holes,
+    uncoveredRequiredDutyCount: holes,
+    protectedAssignmentCount: 10 - holes,
+    blockers: [],
+    warnings: [],
+    afterSource: false,
+  }
+}
+
 function renderPage(detail: PlanningDetail = planning(), extra: Record<string, ApiRoute> = {}) {
   const api = stubApi({
     'GET /api/plannings/plan-1': () => detail,
@@ -209,15 +236,14 @@ describe('PlanningDetailPage — header and period', () => {
     expect(api.requests('PATCH', '/api/plannings/plan-1')[0].body).toEqual({ name: 'Trauma Omega' })
   })
 
-  it('opens the extension of a single-period planning in a dialog from the ⋯ menu', async () => {
-    renderPage()
+  it('keeps only what concerns the planning in the ⋯ menu: no extension, settings or rules', async () => {
+    renderPage(planning({ canManageLineStructure: true }))
 
     fireEvent.click(await screen.findByRole('button', { name: 'Plus d’actions' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Prolonger la période' }))
-    const dialog = screen.getByRole('dialog', { name: 'Prolonger la période' })
-    expect(within(dialog).getByLabelText('Nouvelle fin')).toBeInTheDocument()
-    fireEvent.keyDown(window, { key: 'Escape' })
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      'Modifier le nom',
+      'Semaine type',
+    ])
   })
 
   it('gives a plain member no management action at all', async () => {
@@ -226,9 +252,8 @@ describe('PlanningDetailPage — header and period', () => {
     })
 
     await screen.findByRole('heading', { level: 1, name: 'Trauma Delta' })
-    expect(screen.queryByRole('button', { name: 'Générer le planning' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Générer|Compléter/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Plus d’actions' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Prolonger la période' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Ajouter une ligne' })).not.toBeInTheDocument()
   })
 })
@@ -251,7 +276,7 @@ describe('PlanningDetailPage — steps and tabs', () => {
     expect(screen.queryByText(/ont confirmé/)).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: /Planning/ }))
-    expect(screen.getByText('Pas encore de planning')).toBeInTheDocument()
+    expect(screen.getByText('Pas encore de gardes')).toBeInTheDocument()
   })
 
   it('names each tab the same way at every width (the short label is only visual)', async () => {
@@ -280,31 +305,32 @@ describe('PlanningDetailPage — steps and tabs', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: 'Planning' }))
     expect(await screen.findByRole('region', { name: 'Calendrier du planning' })).toBeInTheDocument()
-    expect(screen.queryByText('Pas encore de planning')).not.toBeInTheDocument()
+    expect(screen.queryByText('Pas encore de gardes')).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Par personne' }))
     expect(await screen.findByRole('region', { name: 'Planning par personne' })).toBeInTheDocument()
   })
 
-  it('opens the same generation dialog from the empty Planning tab', async () => {
+  it('has no second way to generate in the empty Planning tab: it points to the main action', async () => {
     renderPage(planning(), { 'GET /api/plannings/plan-1/generation-preflight': () => makePreflight() })
 
     fireEvent.click(await screen.findByRole('tab', { name: /Planning/ }))
-    const empty = screen.getByText('Pas encore de planning').closest('div')!
-    fireEvent.click(within(empty).getByRole('button', { name: 'Générer le planning' }))
+    const empty = screen.getByText('Pas encore de gardes').closest('div')!
+    expect(within(empty).queryByRole('button')).not.toBeInTheDocument()
+    expect(within(empty).getByText(/Utilisez « Générer la période 1 » en haut de page/)).toBeInTheDocument()
 
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 1' }))
     expect(await screen.findByRole('dialog')).toBeInTheDocument()
   })
 
-  it('opens the planning settings from "Fixer une date limite indicative"', async () => {
-    renderPage()
+  it('shows the indicative deadline read-only: nothing sets it from the availability tab', async () => {
+    renderPage(planning(), {
+      'GET /api/plannings/plan-1/collection-status': () => makeStatus({ availabilityDeadline: '2026-09-25' }),
+    })
 
     fireEvent.click(await screen.findByRole('tab', { name: /Indisponibilités/ }))
-    fireEvent.click(await screen.findByRole('button', { name: 'Fixer une date limite indicative' }))
-
-    expect(
-      await screen.findByLabelText('Date limite indicative de déclaration des indisponibilités'),
-    ).toBeInTheDocument()
+    expect(await screen.findByText('Date limite indicative : 25 septembre 2026')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /date limite indicative/ })).not.toBeInTheDocument()
   })
 
   it('shows the collection history on demand', async () => {
@@ -338,6 +364,7 @@ describe('PlanningDetailPage — lines', () => {
 
   it('opens "Paramètres de la ligne" for any line when allowed — the reinforcement mode only for a secondary one (D167)', async () => {
     renderPage(planning({ canManageLineStructure: true }), {
+      'GET /api/planning-lines/line-2/rule-set': () => ({ active: false }),
       'GET /api/planning-lines/line-2/demand-policy': () => ({
         schemaVersion: 1,
         line: { stableId: 'line-2', name: 'Assistant', type: 'SECONDARY' },
@@ -365,9 +392,7 @@ describe('PlanningDetailPage — lines', () => {
     expect(within(menu).getByRole('menuitem', { name: 'Supprimer la ligne' })).toBeInTheDocument()
     fireEvent.click(within(menu).getByRole('menuitem', { name: 'Paramètres de la ligne' }))
     expect(await screen.findByText('Paramètres — Assistant')).toBeInTheDocument()
-    expect(
-      await screen.findByRole('radio', { name: /Renfort conditionnel/ }),
-    ).toBeInTheDocument()
+    expect(await screen.findByRole('radio', { name: /Renfort conditionnel/ })).toBeInTheDocument()
   })
 
   it('adds a line with a name', async () => {
@@ -514,9 +539,11 @@ describe('PlanningDetailPage — engine jobs (docs/decisions.md D149)', () => {
     renderPage(planning(), { 'GET /api/plannings/plan-1/jobs/latest': () => ({ job: job() }) })
 
     expect(await screen.findByRole('status', { name: 'Calcul en cours' })).toHaveTextContent(
-      'Génération du planning en cours…',
+      'Génération de la période en cours…',
     )
-    expect(screen.getByRole('button', { name: 'Générer le planning' })).toBeDisabled()
+    // One main action, which says so: nothing to click a second time.
+    expect(within(mainAction()).getByRole('status')).toHaveTextContent('Calcul en cours…')
+    expect(screen.queryByRole('button', { name: /Générer la période/ })).not.toBeInTheDocument()
   })
 
   it('launches a generation: the dialog closes at once and the page shows it running', async () => {
@@ -531,7 +558,7 @@ describe('PlanningDetailPage — engine jobs (docs/decisions.md D149)', () => {
       },
     })
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Générer la période 1' }))
     const dialog = await screen.findByRole('dialog')
     const confirm = await within(dialog).findByRole('button', { name: /Générer/ })
     await waitFor(() => expect(confirm).toBeEnabled())
@@ -555,10 +582,10 @@ describe('PlanningDetailPage — engine jobs (docs/decisions.md D149)', () => {
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('La génération du planning a échoué.')
     fireEvent.click(within(alert).getByRole('button', { name: 'Relancer' }))
-    expect(await screen.findByRole('dialog', { name: 'Générer le planning ?' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: 'Générer la période 1 ?' })).toBeInTheDocument()
   })
 
-  it('no longer offers "Générer le planning" once the planning is published', async () => {
+  it('says the period is complete once it is entirely published and covered: nothing to launch or replace', async () => {
     renderPage(
       planning({
         lines: [
@@ -566,33 +593,60 @@ describe('PlanningDetailPage — engine jobs (docs/decisions.md D149)', () => {
           line({ stableId: 'line-2', type: 'SECONDARY', periodStatus: 'PUBLISHED' }),
         ],
       }),
+      { 'GET /api/plannings/plan-1/fill-preview': () => fillPreview([publishedPlan(0)]) },
     )
 
     const period = await screen.findByRole('region', { name: 'Périodes du planning' })
     expect(within(period).getAllByText('Publiée').length).toBeGreaterThan(0)
-    expect(screen.queryByRole('button', { name: 'Générer le planning' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Plus d’actions' })).toBeInTheDocument()
+    await waitFor(() =>
+      expect(within(mainAction()).getByRole('status')).toHaveTextContent('Période complète'),
+    )
+    expect(
+      screen.queryByRole('button', { name: /Générer la période|Compléter la période/ }),
+    ).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Plus d’actions' }))
+    expect(screen.queryByRole('menuitem', { name: /Régénérer/ })).not.toBeInTheDocument()
   })
 
-  it('completes a published planning with a hole asynchronously, and keeps "Republier" as it was', async () => {
-    const queued = job({ kind: 'COMPLETE', status: 'QUEUED', startedAt: null })
-    let latest: unknown = null
-    const duty = {
-      dutyStableId: 'd-1',
-      date: '2026-10-05',
-      startsAt: '2026-10-05T08:00:00+02:00',
-      endsAt: '2026-10-05T20:00:00+02:00',
-      timezone: 'Europe/Brussels',
-      dutyType: { stableId: 't', code: 'G', name: 'Garde' },
-      required: true,
-      grouped: false,
-      groupInstanceStableId: null,
-      groupLabel: null,
-      groupDates: null,
-      covered: false,
-      assignment: null,
-      reasons: [],
-    }
+  const HOLE = {
+    dutyStableId: 'd-1',
+    date: '2026-10-05',
+    startsAt: '2026-10-05T08:00:00+02:00',
+    endsAt: '2026-10-05T20:00:00+02:00',
+    timezone: 'Europe/Brussels',
+    dutyType: { stableId: 't', code: 'G', name: 'Garde' },
+    required: true,
+    grouped: false,
+    groupInstanceStableId: null,
+    groupLabel: null,
+    groupDates: null,
+    covered: false,
+    assignment: null,
+    reasons: [],
+  }
+  const calendarWithHole = (periodStatus: string) => ({
+    'GET /api/plannings/plan-1/result': () => ({
+      planningStableId: 'plan-1',
+      lines: [
+        {
+          lineStableId: 'line-1',
+          lineName: 'Première ligne',
+          lineType: 'PRIMARY',
+          generationStableId: 'g-1',
+          generatedAt: null,
+          coverageStatus: 'INCOMPLETE',
+          requiredDutyCount: 1,
+          coveredRequiredDutyCount: 0,
+          uncoveredRequiredDutyCount: 1,
+          periodStatus,
+          duties: [HOLE],
+        },
+      ],
+    }),
+  })
+
+  it('a published planning with a hole: to attribute by hand, nothing launched, "Republier" as it was', async () => {
     const api = renderPage(
       planning({
         canManageCalendar: true,
@@ -600,24 +654,8 @@ describe('PlanningDetailPage — engine jobs (docs/decisions.md D149)', () => {
         lines: [line({ periodStatus: 'PUBLISHED' })],
       }),
       {
-        'GET /api/plannings/plan-1/jobs/latest': () => ({ job: latest }),
-        'GET /api/plannings/plan-1/result': () => ({
-          planningStableId: 'plan-1',
-          lines: [
-            {
-              lineStableId: 'line-1',
-              lineName: 'Première ligne',
-              lineType: 'PRIMARY',
-              generationStableId: 'g-1',
-              generatedAt: null,
-              coverageStatus: 'INCOMPLETE',
-              requiredDutyCount: 1,
-              coveredRequiredDutyCount: 0,
-              uncoveredRequiredDutyCount: 1,
-              duties: [duty],
-            },
-          ],
-        }),
+        ...calendarWithHole('PUBLISHED'),
+        'GET /api/plannings/plan-1/fill-preview': () => fillPreview([publishedPlan(1)]),
         'GET /api/plannings/plan-1/publication-state': () => ({
           published: true,
           firstPublishedAt: '2026-09-27T08:00:00+00:00',
@@ -627,7 +665,53 @@ describe('PlanningDetailPage — engine jobs (docs/decisions.md D149)', () => {
           changes: [],
           history: [],
         }),
-        'POST /api/plannings/plan-1/complete': () => {
+      },
+    )
+
+    await screen.findByRole('tab', { name: 'Planning' })
+    await waitFor(() =>
+      expect(within(mainAction()).getByRole('status')).toHaveTextContent('1 garde à attribuer à la main'),
+    )
+    fireEvent.click(screen.getByRole('tab', { name: 'Planning' }))
+    // The publication state arrives on its own request: wait for it, never assume it came first.
+    expect(await screen.findByRole('button', { name: 'Republier les modifications' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: /Compléter/ })).not.toBeInTheDocument()
+    expect(api.requests('POST', '/api/plannings/plan-1/fill')).toHaveLength(0)
+  })
+
+  it('completes a period from the header, asynchronously: the page and the calendar say it is running', async () => {
+    const queued = job({ kind: 'FILL', status: 'QUEUED', startedAt: null })
+    let latest: unknown = null
+    const api = renderPage(
+      planning({
+        canManageCalendar: true,
+        canPublish: true,
+        lines: [line({ periodStatus: 'GENERATED' })],
+      }),
+      {
+        ...calendarWithHole('GENERATED'),
+        'GET /api/plannings/plan-1/jobs/latest': () => ({ job: latest }),
+        'GET /api/plannings/plan-1/fill-preview': () =>
+          fillPreview([
+            {
+              ...publishedPlan(1),
+              periodStatus: 'GENERATED',
+              action: 'COMPLETE',
+              reason: null,
+              selectable: true,
+              selectedByDefault: true,
+            },
+          ]),
+        'GET /api/plannings/plan-1/publication-state': () => ({
+          published: false,
+          firstPublishedAt: null,
+          lastPublishedAt: null,
+          lastPublishedBy: null,
+          hasUnpublishedChanges: false,
+          changes: [],
+          history: [],
+        }),
+        'POST /api/plannings/plan-1/fill': () => {
           latest = queued
           return httpStatus(202, { job: queued })
         },
@@ -635,24 +719,22 @@ describe('PlanningDetailPage — engine jobs (docs/decisions.md D149)', () => {
     )
 
     fireEvent.click(await screen.findByRole('tab', { name: 'Planning' }))
-    const complete = await screen.findByRole('button', { name: 'Compléter automatiquement' })
-    // The publication state arrives on its own request: wait for it, never assume it came first.
-    expect(await screen.findByRole('button', { name: 'Republier les modifications' })).toBeDisabled()
-    await waitFor(() => expect(complete).toBeEnabled())
-    fireEvent.click(complete)
+    await screen.findByRole('table')
+    fireEvent.click(within(mainAction()).getByRole('button', { name: 'Compléter la période 1' }))
+    const dialog = await screen.findByRole('dialog')
+    const confirm = await within(dialog).findByRole('button', { name: 'Compléter la période 1' })
+    await waitFor(() => expect(confirm).toBeEnabled())
+    fireEvent.click(confirm)
 
-    expect(await screen.findByRole('status', { name: 'Calcul en cours' })).toHaveTextContent(
-      'Complétion du planning en cours…',
+    expect(await screen.findByRole('status', { name: 'Calcul en cours' })).toBeInTheDocument()
+    expect(api.requests('POST', '/api/plannings/plan-1/fill')).toHaveLength(1)
+    expect(api.requests('POST', '/api/plannings/plan-1/fill')[0].body).toEqual({ lines: ['line-1'] })
+    // Reported in production: a greyed button far below the banner, with no reason in sight. The main action
+    // itself now says a computation is running, and so does the calendar.
+    await waitFor(() =>
+      expect(within(mainAction()).getByRole('status')).toHaveTextContent('Calcul en cours…'),
     )
-    expect(api.requests('POST', '/api/plannings/plan-1/complete')).toHaveLength(1)
-    // Reported in production: a greyed button far below the banner, with no reason in sight. The button itself
-    // now says a completion is running, and so does the calendar.
-    const running = await screen.findByRole('button', { name: 'Complétion en cours…' })
-    expect(running).toBeDisabled()
-    expect(running).toHaveAttribute('aria-busy', 'true')
-    expect(
-      screen.getByText(/Complétion automatique en cours : les gardes non attribuées/),
-    ).toBeInTheDocument()
+    expect(screen.getByText(/Un calcul est en cours sur ce planning/)).toBeInTheDocument()
   })
 })
 

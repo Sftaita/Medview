@@ -2154,3 +2154,78 @@ a.mv-btn {
     flex: 1 1 160px;
   }
 }
+
+/* docs/decisions.md D225: what new dates do, then the three explicit choices. */
+.mv-date-summary {
+  flex: 0 0 auto;
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+  font-size: 0.875rem;
+}
+.mv-confirm-lead {
+  margin: 0 0 12px;
+  font-weight: 600;
+}
+.mv-confirm-title {
+  margin: 12px 0 8px;
+  font-size: 1rem;
+}
+.mv-confirm-list {
+  /* Never squeezed by the scrolling body of the dialog (390 px): the exact duties are the point of this screen. */
+  flex: 0 0 auto;
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.mv-confirm-list li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--mv-line, #e5eaef);
+  font-size: 0.875rem;
+}
+.mv-dialog__foot--three {
+  flex-wrap: wrap;
+}
+
+/* docs/decisions.md D229: a day that cuts a block is possible, and said to be a decision. */
+.mv-bcal__day.is-warned {
+  background: var(--mv-warn-bg, #fdf6e5);
+  border-color: var(--mv-warn-line, #eccf8d);
+  color: var(--mv-warn-ink, #7a5400);
+}
+.mv-bcal__swatch.is-warned {
+  background: var(--mv-warn-bg, #fdf6e5);
+  border: 1px solid var(--mv-warn-line, #eccf8d);
+  color: var(--mv-warn-ink, #7a5400);
+}
+.mv-cut-notice {
+  flex: 0 0 auto;
+  margin-top: 8px;
+}
+.mv-cut-notice p {
+  margin: 0 0 8px;
+}
+.mv-cut-notice__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.mv-confirm-cut {
+  flex: 1 1 100%;
+  font-size: 0.8125rem;
+  color: var(--mv-warn-ink, #7a5400);
+}
+
+/* A short period stays readable: its status is never cut off (acceptance D229). */
+.mv-frise__seg {
+  min-width: 176px;
+}

@@ -39,6 +39,7 @@ const OUTCOMES: Record<string, string> = {
   generation_started: 'la génération a été lancée',
   period_locked: 'la période est validée ou publiée',
   period_over: 'la période est terminée',
+  period_shortened: 'la période a été raccourcie',
   target_passed: 'la date cible était dépassée',
   superseded: 'remplacé par un rappel plus récent',
   no_open_collection: 'aucune collecte ouverte',

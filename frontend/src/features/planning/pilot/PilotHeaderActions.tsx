@@ -1,74 +1,61 @@
 import { useState } from 'react'
+import { HelpTip } from '../../../components/HelpTip'
 import { Icon } from '../../../components/Icon'
 import { WeekStructureModal } from '../../week-structure'
 import { ActionMenu, type ActionMenuItem } from '../detail/ActionMenu'
 import { FillModal } from './FillModal'
 import { GenerationModal, type GenerationPeriod } from './GenerationModal'
-import { PlanningSettingsModal } from './PlanningSettingsModal'
-import { RuleSetModal } from './RuleSetModal'
-import type { CollectionStatus, PlanningJob } from './types'
+import { COMPLETE_HELP, periodAction } from './periodAction'
+import type { FillLinePlan, PlanningJob } from './types'
 
-export type PilotDialog = 'settings' | 'generate' | 'regenerate' | 'fill' | 'week-structure' | 'rule-set'
+export type PilotDialog = 'generate' | 'regenerate' | 'fill' | 'week-structure'
 
 type Props = {
   planningStableId: string
   timezone: string
-  /** The pilot data, once loaded (the deadline lives there). */
-  status: CollectionStatus | null
-  /** The primary line's stableId (docs/decisions.md D136) — its weekly structure
-   * is what "Semaine type" edits. Absent only while the planning itself is still
-   * loading, in which case the entry is not shown. */
-  primaryLineStableId?: string
-  primaryLineName?: string
   /** "Modifier le nom" in the menu, for someone allowed to rename the planning. */
   onRename?: () => void
-  /** "Prolonger la période" in the menu (a planning with a single period, docs/decisions.md D122). */
-  onExtend?: () => void
-  /** The selected period (docs/planning-cycles.md §7.4): what the generation and the deadline apply to. */
+  /** The selected period (docs/planning-cycles.md §7.4): what the main action applies to. */
   period?: GenerationPeriod
-  /** The main button's label — "Générer la période 2" once there are several. */
-  generateLabel?: string
   /** Settings saved or generation created: the page refreshes the pilot data. */
   onChanged: () => void
   /** A generation was accepted (a QUEUED job, docs/decisions.md D149): the page follows it. */
   onLaunched: (job: PlanningJob) => void
-  /** False once the planning is published: no general (re)generation is offered any more — the
-   * server refuses it anyway (PERIOD_LOCKED); hiding the button is never the protection. */
-  canLaunchGeneration?: boolean
+  /** False once the period is entirely published: replacing its calendars is not offered any more. */
+  canRegenerate?: boolean
+  /** May edit the general weekly structure of the planning (docs/decisions.md D227). */
+  canManageStructure?: boolean
   /** A generation or a completion is queued or running: no second launch from here. */
   busy?: boolean
-  /**
-   * docs/decisions.md D222: a line of the period is already generated. The main action then protects what is
-   * assigned ("Générer les postes non pourvus"); replacing calendars is the distinct "Régénérer entièrement…".
-   */
+  /** A line of the period holds a calendar: the main action protects what is assigned (docs/decisions.md D222). */
   hasGeneratedLines?: boolean
-  /** Optional control of the open dialog, so the page can open one from elsewhere (the empty "Planning" tab). */
+  /** What each line of the selected period would receive; undefined while it is being read. */
+  plans?: FillLinePlan[]
+  /** Optional control of the open dialog, so the page can open one from elsewhere. */
   dialog?: PilotDialog | null
   onDialogChange?: (dialog: PilotDialog | null) => void
 }
 
 /**
- * The actions of the planning header for an OWNER/ADMIN: the primary "Générer le
- * planning" and a "⋯" menu — "Modifier le nom", "Paramètres", "Semaine type"
- * (docs/decisions.md D136), "Règles de génération". None is ever disabled by the
- * deadline or by members who have not answered; the deadline itself is shown in
- * the availability follow-up.
+ * The actions of the planning header for someone who generates it
+ * (docs/decisions.md D228): ONE main action, always in the same place and the
+ * same size whatever the period and its state — "Générer la période N",
+ * "Compléter la période N" or what the period already is — and a "⋯" menu for
+ * what concerns the planning itself. Nothing appears or disappears next to it
+ * when another period is chosen.
  */
 export function PilotHeaderActions({
   planningStableId,
   timezone,
-  status,
-  primaryLineStableId,
-  primaryLineName,
   onRename,
-  onExtend,
   period,
-  generateLabel = 'Générer le planning',
   onChanged,
   onLaunched,
-  canLaunchGeneration = true,
+  canRegenerate = true,
+  canManageStructure = false,
   busy = false,
   hasGeneratedLines = false,
+  plans,
   dialog: controlledDialog,
   onDialogChange,
 }: Props) {
@@ -79,17 +66,14 @@ export function PilotHeaderActions({
     onDialogChange?.(next)
   }
 
+  const action = periodAction({ number: period?.number ?? 1, hasGeneratedLines, plans, busy })
+
   const menu: ActionMenuItem[] = [
     ...(onRename ? [{ label: 'Modifier le nom', icon: 'pencil' as const, onSelect: onRename }] : []),
-    ...(onExtend ? [{ label: 'Prolonger la période', icon: 'calendar' as const, onSelect: onExtend }] : []),
-    { label: 'Paramètres', icon: 'settings', onSelect: () => setDialog('settings') },
-    ...(primaryLineStableId
-      ? [
-          { label: 'Semaine type', icon: 'calendar' as const, onSelect: () => setDialog('week-structure') },
-          { label: 'Règles de génération', icon: 'check' as const, onSelect: () => setDialog('rule-set') },
-        ]
+    ...(canManageStructure
+      ? [{ label: 'Semaine type', icon: 'calendar' as const, onSelect: () => setDialog('week-structure') }]
       : []),
-    ...(canLaunchGeneration && hasGeneratedLines
+    ...(canRegenerate && hasGeneratedLines
       ? [
           {
             label: 'Régénérer entièrement…',
@@ -101,57 +85,58 @@ export function PilotHeaderActions({
       : []),
   ]
 
+  const launched = (job: PlanningJob) => {
+    onChanged()
+    onLaunched(job)
+  }
+
   return (
     <div className="pd-head-actions">
-      {canLaunchGeneration && !hasGeneratedLines && (
-        <button
-          type="button"
-          className="pd-btn pd-btn-primary pd-btn-lg pd-grow"
-          onClick={() => setDialog('generate')}
-          disabled={busy}
-          title={busy ? 'Un calcul est déjà en cours sur ce planning' : undefined}
-        >
-          {generateLabel}
-          <Icon name="arrow" size={18} strokeWidth={2.2} />
-        </button>
+      <div className="pd-main-action">
+        {action.kind === 'generate' || action.kind === 'complete' ? (
+          <button
+            type="button"
+            className="pd-btn pd-btn-primary pd-btn-lg pd-main-action__control"
+            onClick={() => setDialog(action.kind === 'generate' ? 'generate' : 'fill')}
+          >
+            {action.label}
+            {action.kind === 'generate' && <Icon name="arrow" size={18} strokeWidth={2.2} />}
+          </button>
+        ) : (
+          <span
+            role="status"
+            className="pd-main-action__control pd-main-action__state"
+            data-kind={action.kind}
+          >
+            {action.kind === 'busy' && <span className="cal-spinner" aria-hidden />}
+            {action.kind === 'done' && <Icon name="check" size={18} strokeWidth={2.4} />}
+            {action.kind === 'manual' && <Icon name="alert" size={18} strokeWidth={2.2} />}
+            {action.label}
+          </span>
+        )}
+        {/* The "?" keeps its place in every state: nothing around it ever moves. */}
+        <span className="pd-main-action__help">
+          {action.kind === 'complete' && <HelpTip label="Compléter la période">{COMPLETE_HELP}</HelpTip>}
+          {action.kind === 'manual' && (
+            <HelpTip label="Gardes à attribuer à la main">
+              Une ligne publiée n’est jamais complétée automatiquement, sauf les nouvelles dates d’une période
+              prolongée. Attribuez ces gardes une à une dans le calendrier, puis republiez.
+            </HelpTip>
+          )}
+        </span>
+      </div>
+      {menu.length > 0 ? (
+        <ActionMenu label="Plus d’actions" items={menu} large />
+      ) : (
+        <span className="pd-menu-placeholder" aria-hidden />
       )}
-      {/* docs/decisions.md D222: complete what is missing, line by line, never touching what is assigned —
-          the main action as soon as a line holds a calendar. */}
-      <button
-        type="button"
-        className={`pd-btn ${hasGeneratedLines ? 'pd-btn-primary pd-grow' : 'pd-btn-secondary'} pd-btn-lg`}
-        onClick={() => setDialog('fill')}
-        disabled={busy}
-        title={busy ? 'Un calcul est déjà en cours sur ce planning' : undefined}
-      >
-        Générer les postes non pourvus
-      </button>
-      <ActionMenu label="Plus d’actions" items={menu} large />
 
-      {dialog === 'settings' && (
-        <PlanningSettingsModal
-          planningStableId={planningStableId}
-          periodStableId={period?.stableId}
-          availabilityDeadline={status?.availabilityDeadline ?? null}
-          onClose={() => setDialog(null)}
-          onSaved={onChanged}
-        />
-      )}
-      {dialog === 'week-structure' && primaryLineStableId && (
+      {dialog === 'week-structure' && (
         <WeekStructureModal
-          lineStableId={primaryLineStableId}
-          lineName={primaryLineName ?? 'Ligne principale'}
+          planningStableId={planningStableId}
+          lineName="du planning"
           onClose={() => setDialog(null)}
           onSaved={onChanged}
-        />
-      )}
-      {dialog === 'rule-set' && primaryLineStableId && (
-        <RuleSetModal
-          lineStableId={primaryLineStableId}
-          lineName={primaryLineName ?? 'Ligne principale'}
-          timezone={timezone}
-          onClose={() => setDialog(null)}
-          onActivated={onChanged}
         />
       )}
       {dialog === 'fill' && (
@@ -160,10 +145,7 @@ export function PilotHeaderActions({
           period={period}
           timezone={timezone}
           onClose={() => setDialog(null)}
-          onLaunched={(job) => {
-            onChanged()
-            onLaunched(job)
-          }}
+          onLaunched={launched}
         />
       )}
       {dialog === 'regenerate' && (
@@ -172,10 +154,7 @@ export function PilotHeaderActions({
           period={period}
           replace
           onClose={() => setDialog(null)}
-          onLaunched={(job) => {
-            onChanged()
-            onLaunched(job)
-          }}
+          onLaunched={launched}
         />
       )}
       {dialog === 'generate' && (
@@ -183,10 +162,7 @@ export function PilotHeaderActions({
           planningStableId={planningStableId}
           period={period}
           onClose={() => setDialog(null)}
-          onLaunched={(job) => {
-            onChanged()
-            onLaunched(job)
-          }}
+          onLaunched={launched}
         />
       )}
     </div>

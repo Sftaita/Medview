@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
@@ -9,7 +9,7 @@ import type {
   PlanningPeriodStatus,
   PlanningPeriodView,
 } from '../features/planning/types'
-import type { CollectionStatus } from '../features/planning/pilot/types'
+import type { CollectionStatus, FillLinePlan, FillPreview } from '../features/planning/pilot/types'
 import { makeStatus } from '../testUtils/pilotFixtures'
 import { status as httpStatus, stubApi, type Route as ApiRoute } from '../testUtils/stubApi'
 import { addDays } from '../features/periods/dates'
@@ -297,9 +297,9 @@ describe('PlanningDetailPage — periods (lot L6)', () => {
     expect(within(renfort).getByText(/Ne bloque ni la génération ni la publication/)).toBeInTheDocument()
 
     // Partly published, a line already generated (Juniors): the main action protects what is assigned (D222) —
-    // "Générer les postes non pourvus"; replacing a calendar is only "Régénérer entièrement…", in the menu.
+    // "Compléter la période 2"; replacing a calendar is only "Régénérer entièrement…", in the menu.
     expect(screen.queryByRole('button', { name: 'Générer la période 2' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Générer les postes non pourvus' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Compléter la période 2' })).toBeInTheDocument()
   })
 
   it('follows the period in the URL, keeps older periods readable and moves back with the browser', async () => {
@@ -486,6 +486,182 @@ describe('PlanningDetailPage — periods (lot L6)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Période suivante' }))
     const steps = await screen.findByRole('region', { name: 'Préparation de la période 3' })
     expect(within(steps).queryByRole('button', { name: /Ouvrir/ })).not.toBeInTheDocument()
+  })
+})
+
+describe('PlanningDetailPage — one main action, whatever the period (docs/decisions.md D228)', () => {
+  /** Period 1 published and complete; period 2 never generated. */
+  const NEVER_GENERATED = period(
+    2,
+    '2026-10-01',
+    '2027-01-31',
+    '2027-01-30',
+    'preparation',
+    [
+      ['sen', 'DRAFT', APPLICABLE],
+      ['jun', 'DRAFT', APPLICABLE],
+      ['ren', 'DRAFT', NO_DEMAND],
+    ],
+    { timeState: 'future', isLast: true },
+  )
+  /** Period 1 generated; period 2 too: both read "Compléter" until their analysis says otherwise. */
+  const GENERATED = (number: number) =>
+    period(
+      number,
+      number === 1 ? '2026-06-01' : '2026-10-01',
+      number === 1 ? '2026-10-01' : '2027-01-31',
+      number === 1 ? '2026-09-30' : '2027-01-30',
+      'generated',
+      [
+        ['sen', 'GENERATED', APPLICABLE],
+        ['jun', 'GENERATED', APPLICABLE],
+        ['ren', 'DRAFT', NO_DEMAND],
+      ],
+      { generatedAt: '2026-05-18T08:00:00+00:00' },
+    )
+
+  const plan = (overrides: Partial<FillLinePlan>): FillLinePlan => ({
+    lineStableId: 'sen',
+    lineName: 'Seniors',
+    lineType: 'PRIMARY',
+    periodStatus: 'GENERATED',
+    generated: true,
+    action: 'NOTHING',
+    reason: null,
+    selectable: false,
+    selectedByDefault: false,
+    requiredDutyCount: 10,
+    coveredRequiredDutyCount: 10,
+    uncoveredRequiredDutyCount: 0,
+    protectedAssignmentCount: 10,
+    blockers: [],
+    warnings: [],
+    afterSource: false,
+    ...overrides,
+  })
+  const answer = (lines: FillLinePlan[]): FillPreview => ({ lines, blockers: [], needsRestPolicy: false })
+  const COVERED = answer([plan({})])
+  const HOLES_TO_COMPLETE = answer([plan({ action: 'COMPLETE', uncoveredRequiredDutyCount: 2 })])
+  const HOLES_PUBLISHED = answer([
+    plan({
+      periodStatus: 'PUBLISHED',
+      action: 'EXCLUDED',
+      reason: 'published',
+      uncoveredRequiredDutyCount: 2,
+    }),
+  ])
+
+  const slots = () => document.querySelectorAll('.pd-main-action')
+  const slot = () => slots()[0] as HTMLElement
+  const head = () => document.querySelector('.pd-head-actions') as HTMLElement
+  const primaryButtons = () => head().querySelectorAll('.pd-btn-primary')
+  const menuEntries = () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Plus d’actions' }))
+    const entries = screen.getAllByRole('menuitem').map((item) => item.textContent)
+    fireEvent.click(screen.getByRole('button', { name: 'Plus d’actions' }))
+    return entries
+  }
+
+  it('going from a complete period to one never generated: same place, same menu, only the label changes', async () => {
+    const api = renderPage(
+      () => planning({ periods: [P1, NEVER_GENERATED], periodCount: 2 }),
+      {
+        'GET /api/plannings/plan-1/fill-preview': ({ query }) =>
+          query.get('period') === 'c1' ? COVERED : answer([plan({ action: 'GENERATE', generated: false })]),
+      },
+      '/plannings/plan-1?periode=1',
+    )
+
+    await screen.findByRole('region', { name: 'Périodes du planning' })
+    await waitFor(() => expect(within(slot()).getByRole('status')).toHaveTextContent('Période complète'))
+    expect(slots()).toHaveLength(1)
+    expect(primaryButtons()).toHaveLength(0)
+    const children = head().children.length
+    const menu = menuEntries()
+    expect(menu).toEqual(['Modifier le nom'])
+
+    fireEvent.click(screen.getByRole('button', { name: 'Période suivante' }))
+
+    // At once, before the analysis of the new period comes back: never two main buttons.
+    expect(slots()).toHaveLength(1)
+    expect(primaryButtons()).toHaveLength(1)
+    expect(within(slot()).getByRole('button', { name: 'Générer la période 2' })).toBeInTheDocument()
+    expect(within(slot()).queryByText('Période complète')).not.toBeInTheDocument()
+    expect(head().children.length).toBe(children)
+
+    await waitFor(() =>
+      expect(
+        api.requests('GET', '/api/plannings/plan-1/fill-preview').map((r) => r.query.get('period')),
+      ).toContain('c2'),
+    )
+    expect(slots()).toHaveLength(1)
+    expect(primaryButtons()).toHaveLength(1)
+    expect(head().children.length).toBe(children)
+    expect(menuEntries()).toEqual(menu)
+    expect(
+      screen.queryByRole('button', { name: /Générer le planning|postes non pourvus/ }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('an answer for the period just left never decides the action of this one', async () => {
+    const held: Record<string, ((value: FillPreview) => void)[]> = { c1: [], c2: [] }
+    let c1Immediate = true
+    renderPage(
+      () => planning({ periods: [GENERATED(1), { ...GENERATED(2), isLast: true }], periodCount: 2 }),
+      {
+        'GET /api/plannings/plan-1/fill-preview': ({ query }) => {
+          const id = query.get('period') ?? ''
+          if (id === 'c1' && c1Immediate) return COVERED
+          return new Promise<FillPreview>((resolve) => held[id].push(resolve))
+        },
+      },
+      '/plannings/plan-1?periode=1',
+    )
+
+    await screen.findByRole('region', { name: 'Périodes du planning' })
+    await waitFor(() => expect(within(slot()).getByRole('status')).toHaveTextContent('Période complète'))
+
+    // Period 2 is still being analysed: what is known of period 1 says nothing of it.
+    fireEvent.click(screen.getByRole('button', { name: 'Période suivante' }))
+    expect(within(slot()).getByRole('button', { name: 'Compléter la période 2' })).toBeInTheDocument()
+    expect(screen.queryByText('Période complète')).not.toBeInTheDocument()
+    await waitFor(() => expect(held.c2.length).toBeGreaterThan(0))
+
+    // Its own answer decides.
+    await act(async () => held.c2.forEach((resolve) => resolve(HOLES_PUBLISHED)))
+    await waitFor(() =>
+      expect(within(slot()).getByRole('status')).toHaveTextContent('2 gardes à attribuer à la main'),
+    )
+
+    // Back on period 1 then away again: period 2 keeps what it knew of itself, and an answer of period 1
+    // arriving late changes nothing.
+    c1Immediate = false
+    fireEvent.click(screen.getByRole('button', { name: 'Période précédente' }))
+    await waitFor(() => expect(held.c1.length).toBeGreaterThan(0))
+    held.c2.length = 0
+    fireEvent.click(screen.getByRole('button', { name: 'Période suivante' }))
+    await waitFor(() => expect(held.c2.length).toBeGreaterThan(0))
+    await act(async () => held.c1.forEach((resolve) => resolve(COVERED)))
+    expect(screen.queryByText('Période complète')).not.toBeInTheDocument()
+    expect(within(slot()).getByRole('status')).toHaveTextContent('2 gardes à attribuer à la main')
+
+    await act(async () => held.c2.forEach((resolve) => resolve(HOLES_TO_COMPLETE)))
+    expect(within(slot()).getByRole('button', { name: 'Compléter la période 2' })).toBeInTheDocument()
+  })
+
+  it('points to the main action from the empty "Gardes" tab, with no button of its own', async () => {
+    renderPage(
+      () => planning({ periods: [P1, NEVER_GENERATED], periodCount: 2 }),
+      {},
+      '/plannings/plan-1?periode=2',
+    )
+
+    await screen.findByRole('region', { name: 'Périodes du planning' })
+    fireEvent.click(screen.getByRole('tab', { name: /Gardes/ }))
+    const empty = screen.getByText('Pas encore de gardes pour la période 2').closest('div')!
+    expect(within(empty).getByText(/Utilisez « Générer la période 2 » en haut de page/)).toBeInTheDocument()
+    expect(within(empty).queryByRole('button')).not.toBeInTheDocument()
+    expect(within(slot()).getByRole('button', { name: 'Générer la période 2' })).toBeInTheDocument()
   })
 })
 
@@ -706,6 +882,40 @@ const WEEKEND = {
   remainderDays: [],
 }
 
+/** docs/decisions.md D225: new dates that touch no calendar. */
+const NOTHING_TO_CONFIRM = {
+  allowed: true,
+  reasons: [],
+  changes: [],
+  retiredDutyCount: 0,
+  retiredAssignedCount: 0,
+  retiredPublishedCount: 0,
+  retiredUnits: [],
+  holders: [],
+  additions: [],
+  collections: [],
+  swapRequestCount: 0,
+  confirmationRequired: false,
+  republishPeriods: [],
+  recipients: [],
+  canNotify: false,
+  notifyBlock: null,
+  pendingChanges: 0,
+  impactHash: 'hash-0',
+}
+
+/** The answer of PATCH period: the period, and what its new dates did. */
+const saved = (overrides = {}) => ({
+  ...P3,
+  endsAt: '2027-04-05',
+  lastDay: '2027-04-04',
+  generationOutdated: false,
+  addedDutyCount: 0,
+  retiredDutyCount: 0,
+  republished: 0,
+  ...overrides,
+})
+
 describe('PlanningDetailPage — choosing the dates of a period on a calendar (D207)', () => {
   it('creates the next period on a possible day, after confirming the cut weekend told upfront', async () => {
     const api = renderPage(() => planning(), {
@@ -755,12 +965,8 @@ describe('PlanningDetailPage — choosing the dates of a period on a calendar (D
       () => planning(),
       {
         'GET /api/plannings/plan-1/periods/date-options': ({ query }) => dateOptions(query),
-        'PATCH /api/plannings/plan-1/periods/c3': () => ({
-          ...P3,
-          endsAt: '2027-04-05',
-          lastDay: '2027-04-04',
-          generationOutdated: false,
-        }),
+        'GET /api/plannings/plan-1/periods/c3/date-change-preview': () => NOTHING_TO_CONFIRM,
+        'PATCH /api/plannings/plan-1/periods/c3': () => saved(),
       },
       '/plannings/plan-1?periode=3',
     )
@@ -769,7 +975,7 @@ describe('PlanningDetailPage — choosing the dates of a period on a calendar (D
     fireEvent.click(within(periodActions()).getByRole('button', { name: /Modifier les dates/ }))
     const dialog = screen.getByRole('dialog', { name: 'Modifier les dates' })
     expect(
-      within(dialog).getByText(/Pour le déplacer, modifiez la fin de la période 2\./),
+      within(dialog).getByText('Le lendemain du dernier jour de la période 2 : les deux bougent ensemble.'),
     ).toBeInTheDocument()
     fireEvent.click(await within(dialog).findByRole('button', { name: /^samedi 3 avril 2027, impossible/ }))
     expect(within(dialog).getByRole('button', { name: 'Enregistrer les dates' })).toBeDisabled()
@@ -785,54 +991,75 @@ describe('PlanningDetailPage — choosing the dates of a period on a calendar (D
     expect(screen.queryByRole('dialog', { name: 'Modifier les dates' })).not.toBeInTheDocument()
   })
 
-  it('corrects the end of a published period from its card, explicitly, with the exclusive end (D211)', async () => {
+  it('confirms new dates that touch a calendar: the plan read and the choice to tell go with the request (D225)', async () => {
     const api = renderPage(
       () => planning(),
       {
-        'GET /api/plannings/plan-1/periods/c2/end-rectification': () => ({
-          period: { stableId: 'c2', number: 2 },
-          startsAt: '2026-10-01',
-          currentLastDay: '2027-01-30',
-          lastDutyDay: '2027-01-28',
-          eligible: true,
-          blockers: [],
-          proposedLastDay: '2027-01-28',
-          reasonMaxLength: 500,
-          days: [
-            { date: '2027-01-28', allowed: true, reasons: [] },
-            { date: '2027-01-29', allowed: false, reasons: [{ code: 'period_boundary_splits_block' }] },
-          ],
+        'GET /api/plannings/plan-1/periods/date-options': ({ query }) => dateOptions(query),
+        'GET /api/plannings/plan-1/periods/c3/date-change-preview': () => ({
+          ...NOTHING_TO_CONFIRM,
+          confirmationRequired: true,
+          impactHash: 'hash-c3',
+          canNotify: true,
+          recipients: ['Alice Bernard'],
         }),
-        'POST /api/plannings/plan-1/periods/c2/end-rectification': () => ({ periods: [] }),
+        'PATCH /api/plannings/plan-1/periods/c3': () => saved({ retiredDutyCount: 2, republished: 1 }),
       },
-      '/plannings/plan-1?periode=2',
+      '/plannings/plan-1?periode=3',
     )
 
     await screen.findByRole('region', { name: 'Périodes du planning' })
-    fireEvent.click(within(periodActions()).getByRole('button', { name: /Corriger la fin/ }))
-    const dialog = screen.getByRole('dialog', { name: 'Corriger la fin de la période' })
-    expect(await within(dialog).findAllByRole('radio')).toHaveLength(2)
-    fireEvent.change(within(dialog).getByLabelText('Raison de la correction'), {
-      target: { value: 'Week-end entier en période 3.' },
-    })
-    fireEvent.click(within(dialog).getByRole('checkbox'))
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Corriger la fin' }))
+    fireEvent.click(within(periodActions()).getByRole('button', { name: /Modifier les dates/ }))
+    const dialog = screen.getByRole('dialog', { name: 'Modifier les dates' })
+    fireEvent.click(await within(dialog).findByRole('button', { name: /^dimanche 4 avril 2027, possible/ }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Enregistrer les dates' }))
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Confirmer et avertir' }))
 
-    await waitFor(() =>
-      expect(api.requests('POST', '/api/plannings/plan-1/periods/c2/end-rectification')).toHaveLength(1),
-    )
-    expect(api.requests('POST', '/api/plannings/plan-1/periods/c2/end-rectification')[0].body).toEqual({
-      endsAt: '2027-01-29',
-      expectedEndsAt: '2027-01-31',
-      reason: 'Week-end entier en période 3.',
-      confirm: true,
+    await waitFor(() => expect(api.requests('PATCH', '/api/plannings/plan-1/periods/c3')).toHaveLength(1))
+    expect(api.requests('PATCH', '/api/plannings/plan-1/periods/c3')[0].body).toEqual({
+      endsAt: '2027-04-05',
+      expectedEndsAt: '2027-05-01',
+      confirmation: 'hash-c3',
+      notify: true,
     })
-    expect(await screen.findByText(/Fin de la période 2 corrigée/)).toBeInTheDocument()
+    expect(
+      api.requests('GET', '/api/plannings/plan-1/periods/c3/date-change-preview')[0].query.get('endsAt'),
+    ).toBe('2027-04-05')
+    expect(
+      await screen.findByText(
+        'Dates enregistrées · planning republié, les personnes concernées sont averties',
+      ),
+    ).toBeInTheDocument()
   })
 
-  it('offers no end correction on the last period, nor on one in preparation', async () => {
-    renderPage(() => planning(), {}, '/plannings/plan-1?periode=3')
-    await screen.findByRole('region', { name: 'Préparation de la période 3' })
+  it('says new duties are waiting, and how to fill them, once the dates are saved', async () => {
+    renderPage(
+      () => planning(),
+      {
+        'GET /api/plannings/plan-1/periods/date-options': ({ query }) => dateOptions(query),
+        'GET /api/plannings/plan-1/periods/c3/date-change-preview': () => NOTHING_TO_CONFIRM,
+        'PATCH /api/plannings/plan-1/periods/c3': () => saved({ addedDutyCount: 14 }),
+      },
+      '/plannings/plan-1?periode=3',
+    )
+
+    await screen.findByRole('region', { name: 'Périodes du planning' })
+    fireEvent.click(within(periodActions()).getByRole('button', { name: /Modifier les dates/ }))
+    const dialog = screen.getByRole('dialog', { name: 'Modifier les dates' })
+    fireEvent.click(await within(dialog).findByRole('button', { name: /^dimanche 4 avril 2027, possible/ }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Enregistrer les dates' }))
+
+    expect(
+      await screen.findByText(
+        'Dates enregistrées · 14 nouvelles gardes à attribuer : utilisez « Compléter la période 3 »',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('has a single way to change dates: no end correction, whatever the period', async () => {
+    renderPage(() => planning(), {}, '/plannings/plan-1?periode=2')
+    await screen.findByRole('region', { name: 'Préparation de la période 2' })
+    expect(within(periodActions()).getByRole('button', { name: /Modifier les dates/ })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Corriger la fin/ })).not.toBeInTheDocument()
   })
 

@@ -12,8 +12,6 @@ type Props = {
   status: CollectionStatus
   /** Refresh the pilot data (a reminder was sent). */
   onChanged: () => void
-  /** Opens the planning settings, where the (informative) deadline is set. */
-  onEditDeadline?: () => void
 }
 
 type Sort = 'name' | 'unavailabilities'
@@ -29,7 +27,7 @@ type Sort = 'name' | 'unavailabilities'
  * confirms anything — without any unavailability, a person is available.
  * Nothing here is ever disabled by the deadline.
  */
-export function CollectionStatusPanel({ status, onChanged, onEditDeadline }: Props) {
+export function CollectionStatusPanel({ status, onChanged }: Props) {
   const { summary, planning } = status
   const [openMember, setOpenMember] = useState<string | null>(null)
   const [confirmingBulk, setConfirmingBulk] = useState(false)
@@ -142,14 +140,6 @@ export function CollectionStatusPanel({ status, onChanged, onEditDeadline }: Pro
               >
                 <Icon name="mail" size={18} strokeWidth={2} />
                 Rappeler les participants
-              </button>
-            )}
-            {onEditDeadline && (
-              <button type="button" className="pd-btn pd-btn-ghost" onClick={onEditDeadline}>
-                <Icon name="calendar" size={18} strokeWidth={2} />
-                {status.availabilityDeadline
-                  ? 'Modifier la date limite indicative'
-                  : 'Fixer une date limite indicative'}
               </button>
             )}
             <AbsenceExportButton

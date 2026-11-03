@@ -55,7 +55,7 @@ final class LiveDemandView implements DemandView
     {
         $group = $duty->getGroupInstance();
 
-        return $this->compute(null !== $group ? array_values($group->getDuties()->toArray()) : [$duty]);
+        return $this->compute(null !== $group ? $group->getActiveDuties() : [$duty]);
     }
 
     /**

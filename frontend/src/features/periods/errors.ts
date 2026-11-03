@@ -99,6 +99,18 @@ export function dateReasonMessage(reason: DateReason): string {
       return reason.cuts && reason.cuts.length > 0
         ? `Couperait le bloc ${reason.cuts.map(describeCut).join(' et le bloc ')} : un bloc ne se partage jamais entre deux périodes.`
         : 'Couperait un bloc de gardes : un bloc ne se partage jamais entre deux périodes.'
+    case 'materialized_block_crosses_boundary':
+      return 'Couperait un bloc de gardes déjà créé : un bloc reste entier, choisissez un jour avant ou après lui.'
+    case 'collection_outside_period':
+      return 'Une collecte des disponibilités se retrouverait entièrement hors de la période.'
+    case 'period_archived':
+      return 'Une période archivée ne change plus.'
+    case 'notify_not_possible':
+      return 'Impossible d’avertir les personnes concernées pour l’instant : rien n’a été modifié.'
+    case 'date_change_confirmation_required':
+      return 'Le calendrier a changé depuis cet aperçu : vérifiez les conséquences à jour avant de confirmer.'
+    case 'job_in_progress':
+      return 'Un calcul est en cours sur ce planning. Attendez sa fin.'
     case 'period_has_generation':
       return 'La période est déjà générée : elle ne peut plus être raccourcie.'
     case 'period_has_duties_after':
@@ -145,8 +157,6 @@ export function dateReasonMessage(reason: DateReason): string {
       return 'La période suivante a déjà une génération, une publication, un calcul ou des gardes préparées : la frontière entre les deux ne bouge plus.'
     case 'period_start_follows_previous':
       return 'Le premier jour suit toujours le dernier jour de la période précédente. Pour le déplacer, modifiez la fin de la période précédente.'
-    case 'job_in_progress':
-      return 'Une génération ou une complétion est en cours. Réessayez quand elle sera terminée.'
     case 'period_management_disabled':
       return 'La gestion des périodes n’est pas activée.'
   }

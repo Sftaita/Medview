@@ -18,15 +18,15 @@ type Props = {
 }
 
 const RUNNING_TITLE: Record<PlanningJob['kind'], string> = {
-  GENERATE: 'Génération du planning en cours…',
-  COMPLETE: 'Complétion du planning en cours…',
-  FILL: 'Génération des postes non pourvus en cours…',
+  GENERATE: 'Génération de la période en cours…',
+  COMPLETE: 'Complétion de la période en cours…',
+  FILL: 'Complétion de la période en cours…',
 }
 
 const FAILED_TITLE: Record<PlanningJob['kind'], string> = {
   GENERATE: 'La génération du planning a échoué.',
   COMPLETE: 'La complétion automatique a échoué.',
-  FILL: 'Les postes non pourvus n’ont pas tous pu être générés.',
+  FILL: 'La période n’a pas pu être complétée entièrement.',
 }
 
 /** Plain-language cause of a failure — from its stable code, never an internal message. */

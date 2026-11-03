@@ -110,6 +110,13 @@ final class PlanningLineFillService
                 $uncovered = ($count->uncoveredRequiredDutyCount ?? 0)
                     + ($this->inheritedReinforcements->inherits($line) ? $this->inheritedReinforcements->plan($period)->newDutyCount() : 0);
                 if (\in_array($status, self::LOCKED_STATUSES, true)) {
+                    // docs/decisions.md D226: the one exception — the duties an extension of the period created. Its
+                    // older holes stay holes, every assignment stays as it is, what it receives waits for a republication.
+                    $added = $this->completionService->extensionHoleCount($line, $cycle);
+                    if ($added > 0) {
+                        $plans[] = new FillLinePlan($line, $status, true, FillLinePlan::COMPLETE, 'extension_days', [] === $globalBlockers, [] === $globalBlockers, $count?->requiredDutyCount, $count->coveredRequiredDutyCount ?? 0, $added, $protected, $globalBlockers, extensionOnly: true, otherUncoveredCount: max(0, $uncovered - $added));
+                        continue;
+                    }
                     // docs/decisions.md D222: a published (or validated) line is never completed by this operation, even
                     // when asked: the new assignments, the publication status, the stored PDF and the members'
                     // notifications must first be made coherent — a separate piece of work. It blocks no other line.
@@ -134,6 +141,18 @@ final class PlanningLineFillService
                 $firstGenerations[(int) $line->getId()] = true;
             }
             $plans[] = $plan;
+        }
+
+        // docs/decisions.md D224, D226: the source line, earlier in resolution order, is about to receive holders.
+        $writing = [];
+        foreach ($plans as $index => $plan) {
+            $source = $plan->writes() ? null : $this->inheritedReinforcements->sourceLineOf($plan->line);
+            if (null !== $source && isset($writing[(int) $source->getId()]) && (FillLinePlan::NOTHING === $plan->action || 'published' === $plan->reason)) {
+                $plans[$index] = $plan->followingSource();
+            }
+            if ($plan->writes()) {
+                $writing[(int) $plan->line->getId()] = true;
+            }
         }
 
         return new FillPreview($plans, $globalBlockers);
@@ -179,12 +198,48 @@ final class PlanningLineFillService
                 };
             }
 
+            // docs/decisions.md D224, D226: an inheriting line is decided by the holders of its source. The holders this run
+            // just gave — on the new dates of a published source too — may call for reinforcements: same run.
+            $results = $this->followInheritingLines($planning, $author, $cycle, $results);
+
             $after = $this->ledger->capture($planning);
 
             return $this->measured($planning, $cycle, $results, $before, $after);
         } finally {
             $this->unlock($planning);
         }
+    }
+
+    /**
+     * @param list<FillLineResult> $results
+     *
+     * @return list<FillLineResult>
+     */
+    private function followInheritingLines(Planning $planning, User $author, PlanningCycle $cycle, array $results): array
+    {
+        $done = [];
+        foreach ($results as $result) {
+            if ('done' === $result->status) {
+                $done[(int) $result->plan->line->getId()] = true;
+            }
+        }
+        if ([] === $done) {
+            return $results;
+        }
+        foreach ($this->preview($planning, $cycle)->lines as $plan) {
+            $source = $this->inheritedReinforcements->sourceLineOf($plan->line);
+            if (FillLinePlan::COMPLETE !== $plan->action || null === $source || !isset($done[(int) $source->getId()]) || isset($done[(int) $plan->line->getId()])) {
+                continue;
+            }
+            $outcome = $this->completeLine($planning, $author, $cycle, $plan);
+            foreach ($results as $index => $result) {
+                if ($result->plan->line === $plan->line) {
+                    $results[$index] = $outcome;
+                }
+            }
+        }
+
+        return $results;
     }
 
     /**
@@ -271,6 +326,7 @@ final class PlanningLineFillService
                 return match ($result->status) {
                     'completed' => new FillLineResult($plan, 'done'),
                     'nothing_to_complete' => new FillLineResult($plan, 'nothing_to_do', 'nothing_to_complete'),
+                    'published' => new FillLineResult($plan, 'excluded', 'published'),
                     default => new FillLineResult($plan, 'failed', $result->status),
                 };
             }

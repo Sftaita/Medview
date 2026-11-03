@@ -7,6 +7,7 @@ namespace App\Service;
 use App\Entity\Duty;
 use App\Entity\DutyDemandType;
 use App\Entity\DutyPattern;
+use App\Entity\PeriodDateChange;
 use App\Entity\PlanningPeriod;
 use App\Entity\PlanningPeriodStatus;
 use App\Repository\DutyPatternRepository;
@@ -120,13 +121,84 @@ final class WeeklyDutyCalendarService
     private ?array $projection = null;
 
     /**
+     * docs/decisions.md D226 — the duties an extension of $period brings, and
+     * only those: the occurrences of its CURRENT weekly structure with a day in
+     * [$from, $to[. Unlike ensureMaterialized(), this works on a published
+     * period: the extension is the explicit decision of a manager (I8's second
+     * exception), the duties are created empty, and each one records the change
+     * that created it. No day before $from is ever materialized — a day left
+     * without duty inside the old dates stays as it was.
+     *
+     * @return list<CoverageSourceAnomaly>
+     */
+    public function materializeExtension(PlanningPeriod $period, \DateTimeImmutable $from, \DateTimeImmutable $to, PeriodDateChange $change): array
+    {
+        $known = [];
+        foreach ($this->dutyRepository->findByPlanningPeriod($period) as $duty) {
+            $known[(int) $duty->getId()] = true;
+        }
+        $this->projection = null;
+        $this->window = [$from, $to];
+        try {
+            $anomalies = $this->run($period, $period->getEndsAt());
+        } finally {
+            $this->window = null;
+        }
+        foreach ($this->dutyRepository->findByPlanningPeriod($period) as $duty) {
+            if (!isset($known[(int) $duty->getId()])) {
+                $duty->markAddedBy($change);
+            }
+        }
+
+        return $anomalies;
+    }
+
+    /**
+     * What materializeExtension() would create if $period had the dates
+     * [$startsAt, $endsAt[ — counted, nothing written. For the "Modifier les
+     * dates" preview, before the period has moved.
+     */
+    public function countExtension(PlanningPeriod $period, \DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt, \DateTimeImmutable $from, \DateTimeImmutable $to, bool $cutConfirmed = false): int
+    {
+        $count = 0;
+        $claimed = [];
+        foreach ($this->patternRepository->findActiveRecurringByTeam($period->getTeam()) as $pattern) {
+            for ($monday = $this->mondayOnOrBefore($startsAt); $monday < $endsAt; $monday = $monday->modify('+7 days')) {
+                $days = [];
+                foreach ($pattern->getComponents() as $component) {
+                    $days[] = $monday->modify(\sprintf('+%d days', $component->getDayOffset()));
+                }
+                if ([] === array_filter($days, static fn (\DateTimeImmutable $day): bool => $day >= $from && $day < $to)) {
+                    continue;
+                }
+                if (!$cutConfirmed && [] !== array_filter($days, static fn (\DateTimeImmutable $day): bool => $day < $startsAt || $day >= $endsAt)) {
+                    continue;
+                }
+                foreach ($days as $day) {
+                    if ($day < $startsAt || $day >= $endsAt || isset($claimed[$day->format('Y-m-d')]) || $this->dutyRepository->existsForPeriodAndLocalDate($period, $day)) {
+                        continue;
+                    }
+                    $claimed[$day->format('Y-m-d')] = true;
+                    ++$count;
+                }
+            }
+        }
+
+        return $count;
+    }
+
+    /** @var array{0: \DateTimeImmutable, 1: \DateTimeImmutable}|null set while materializing an extension */
+    private ?array $window = null;
+
+    /**
      * @return list<CoverageSourceAnomaly>
      */
     private function run(PlanningPeriod $planningPeriod, \DateTimeImmutable $until): array
     {
         // docs/planning-cycles.md I8 (lot L3): a validated, published or archived period never gets a new duty — a
         // weekly structure changed since its publication applies to the periods still to be generated only.
-        if (\in_array($planningPeriod->getStatus(), self::LOCKED_STATUSES, true)) {
+        // docs/decisions.md D226: the one exception, the days an explicit extension added.
+        if (null === $this->window && \in_array($planningPeriod->getStatus(), self::LOCKED_STATUSES, true)) {
             return [];
         }
 
@@ -151,6 +223,9 @@ final class WeeklyDutyCalendarService
         $monday = $this->mondayOnOrBefore($planningPeriod->getStartsAt());
         while ($monday < $periodEnd) {
             foreach ($patterns as $pattern) {
+                if ($this->outsideWindow($pattern, $monday)) {
+                    continue;
+                }
                 array_push($anomalies, ...$this->materializeOccurrence($planningPeriod, $pattern, $monday, $sourcePeriod));
             }
             $monday = $monday->modify('+7 days');
@@ -159,6 +234,21 @@ final class WeeklyDutyCalendarService
         usort($anomalies, static fn (CoverageSourceAnomaly $a, CoverageSourceAnomaly $b): int => $a->localDate <=> $b->localDate);
 
         return $anomalies;
+    }
+
+    private function outsideWindow(DutyPattern $pattern, \DateTimeImmutable $monday): bool
+    {
+        if (null === $this->window) {
+            return false;
+        }
+        foreach ($pattern->getComponents() as $component) {
+            $day = $monday->modify(\sprintf('+%d days', $component->getDayOffset()));
+            if ($day >= $this->window[0] && $day < $this->window[1]) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -249,10 +339,15 @@ final class WeeklyDutyCalendarService
         $coverageSources = [];
         $anomalies = [];
         $earlierDays = [];
+        $laterDays = false;
         foreach ($pattern->getComponents() as $component) {
             $day = $monday->modify(sprintf('+%d days', $component->getDayOffset()));
             if ($day >= $period->getEndsAt()) {
-                return [];
+                // docs/decisions.md D229: only an end the manager confirmed keeps the first days of a block.
+                if (true !== $period->getCycle()?->isEndCutConfirmed()) {
+                    return [];
+                }
+                $laterDays = true;
             }
             if ($day < $period->getStartsAt()) {
                 $earlierDays[] = $day;
@@ -265,15 +360,21 @@ final class WeeklyDutyCalendarService
         if ($remainder && !$this->boundaryGuard->allowsRemainder($period, $earlierDays)) {
             return [];
         }
+        $remainder = $remainder || $laterDays;
 
         foreach ($pattern->getComponents() as $component) {
             $day = $monday->modify(sprintf('+%d days', $component->getDayOffset()));
-            if ($day < $period->getStartsAt()) {
+            if ($day < $period->getStartsAt() || $day >= $period->getEndsAt()) {
                 continue;
             }
 
             if ($this->isTaken($period, $day)) {
-                return [];
+                // docs/decisions.md D229: extending a period ended inside a block: its first days exist, the rest is added.
+                if (null === $this->window) {
+                    return [];
+                }
+                $remainder = true;
+                continue;
             }
 
             $componentLocalTimes[$component->getDayOffset()] = [$day, $day->modify('+1 day')];
@@ -291,6 +392,9 @@ final class WeeklyDutyCalendarService
         // A block is atomic: one day without a unique coverage source leaves the whole occurrence unmaterialized.
         if ([] !== $anomalies) {
             return $anomalies;
+        }
+        if ([] === $componentLocalTimes) {
+            return [];
         }
 
         $demandType = null !== $sourcePeriod ? DutyDemandType::CONDITIONAL : DutyDemandType::REQUIRED;

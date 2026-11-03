@@ -1,11 +1,12 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { makePreflight, makeStatus } from '../../../testUtils/pilotFixtures'
+import { makePreflight } from '../../../testUtils/pilotFixtures'
 import { status as httpStatus, stubApi } from '../../../testUtils/stubApi'
 import { PilotHeaderActions } from './PilotHeaderActions'
 import { ResultBody } from './GenerationModal'
-import type { CollectionStatus, LaunchResult, PlanningJob } from './types'
+import { COMPLETE_HELP } from './periodAction'
+import type { FillLinePlan, LaunchResult, PlanningJob } from './types'
 
 beforeEach(() => localStorage.setItem('medvue.auth.token', 'jwt'))
 afterEach(() => {
@@ -13,23 +14,39 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function renderActions(
-  status: CollectionStatus | null = makeStatus(),
-  handlers = { onChanged: vi.fn(), onLaunched: vi.fn() },
-  lineProps: { primaryLineStableId?: string; primaryLineName?: string } = {},
-) {
-  render(
-    <PilotHeaderActions
-      planningStableId="plan-1"
-      timezone="Europe/Brussels"
-      status={status}
-      onChanged={handlers.onChanged}
-      onLaunched={handlers.onLaunched}
-      {...lineProps}
-    />,
-  )
+type HeaderProps = Partial<Parameters<typeof PilotHeaderActions>[0]>
+
+function renderActions(props: HeaderProps = {}) {
+  const handlers = { onChanged: vi.fn(), onLaunched: vi.fn() }
+  render(<PilotHeaderActions planningStableId="plan-1" timezone="Europe/Brussels" {...handlers} {...props} />)
   return handlers
 }
+
+const PERIOD_2 = { stableId: 'c2', number: 2, startsAt: '2027-05-01', lastDay: '2027-07-31', named: true }
+
+function linePlan(overrides: Partial<FillLinePlan>): FillLinePlan {
+  return {
+    lineStableId: 'l1',
+    lineName: 'Seniors',
+    lineType: 'PRIMARY',
+    periodStatus: 'GENERATED',
+    generated: true,
+    action: 'NOTHING',
+    reason: null,
+    selectable: false,
+    selectedByDefault: false,
+    requiredDutyCount: 10,
+    coveredRequiredDutyCount: 10,
+    uncoveredRequiredDutyCount: 0,
+    protectedAssignmentCount: 10,
+    blockers: [],
+    warnings: [],
+    afterSource: false,
+    ...overrides,
+  }
+}
+
+const slot = () => document.querySelector('.pd-main-action') as HTMLElement
 
 /**
  * The confirm button ("Générer" — "Générer quand même" only with a warning) is rendered — disabled — while the preflight loads: find it,
@@ -48,43 +65,120 @@ function chooseMenu(name: string) {
   fireEvent.click(screen.getByRole('menuitem', { name }))
 }
 
-describe('PilotHeaderActions — buttons and menu', () => {
-  it('offers Générer le planning, and Paramètres in the menu', () => {
-    renderActions(makeStatus({ availabilityDeadline: '2026-09-25' }))
+describe('PilotHeaderActions — one main action (docs/decisions.md D228)', () => {
+  it('nothing generated: "Générer la période N", never "Générer le planning", without a "?"', () => {
+    renderActions({ period: PERIOD_2 })
 
-    expect(screen.getByRole('button', { name: 'Générer le planning' })).toBeEnabled()
-    fireEvent.click(screen.getByRole('button', { name: 'Plus d’actions' }))
-    expect(screen.getByRole('menuitem', { name: 'Paramètres' })).toBeEnabled()
-    // The deadline is shown by the availability follow-up, not by the header.
-    expect(screen.queryByText(/Date limite indicative/)).not.toBeInTheDocument()
+    expect(within(slot()).getByRole('button', { name: 'Générer la période 2' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: 'Générer le planning' })).not.toBeInTheDocument()
+    expect(within(slot()).queryByRole('button', { name: /^Aide/ })).not.toBeInTheDocument()
   })
 
-  it('keeps everything enabled once the deadline is passed', () => {
-    renderActions(makeStatus({ availabilityDeadline: '2026-09-25', deadlineOverdueDays: 3 }))
+  it('offers the generation even before the lines are analysed', () => {
+    renderActions({ plans: undefined })
 
-    expect(screen.getByRole('button', { name: 'Générer le planning' })).toBeEnabled()
-    fireEvent.click(screen.getByRole('button', { name: 'Plus d’actions' }))
-    expect(screen.getByRole('menuitem', { name: 'Paramètres' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Générer la période 1' })).toBeEnabled()
   })
 
-  it('offers the generation even before the pilot data has loaded', () => {
-    renderActions(null)
+  it('a line generated: "Compléter la période N", with a "?" saying what it does', async () => {
+    stubApi({
+      'GET /api/plannings/plan-1/fill-preview': () => ({ lines: [], blockers: [], needsRestPolicy: false }),
+    })
+    renderActions({
+      period: PERIOD_2,
+      hasGeneratedLines: true,
+      plans: [linePlan({ action: 'COMPLETE', uncoveredRequiredDutyCount: 2 })],
+    })
 
-    expect(screen.getByRole('button', { name: 'Générer le planning' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: /^Générer/ })).not.toBeInTheDocument()
+    fireEvent.click(within(slot()).getByRole('button', { name: 'Aide : Compléter la période' }))
+    expect(within(slot()).getByRole('note')).toHaveTextContent(COMPLETE_HELP)
+
+    fireEvent.click(within(slot()).getByRole('button', { name: 'Compléter la période 2' }))
+    expect(await screen.findByRole('dialog', { name: 'Compléter la période 2 ?' })).toBeInTheDocument()
+  })
+
+  it('nothing to launch: says the period is complete, in the same place', () => {
+    renderActions({ period: PERIOD_2, hasGeneratedLines: true, plans: [linePlan({})] })
+
+    expect(within(slot()).getByRole('status')).toHaveTextContent('Période complète')
+    expect(within(slot()).queryByRole('button')).not.toBeInTheDocument()
+  })
+
+  it('only holes of published lines: says how many to attribute by hand, and why, nothing to launch', () => {
+    renderActions({
+      period: PERIOD_2,
+      hasGeneratedLines: true,
+      plans: [
+        linePlan({
+          periodStatus: 'PUBLISHED',
+          action: 'EXCLUDED',
+          reason: 'published',
+          uncoveredRequiredDutyCount: 3,
+        }),
+      ],
+    })
+
+    expect(within(slot()).getByRole('status')).toHaveTextContent('3 gardes à attribuer à la main')
+    expect(within(slot()).queryByRole('button', { name: /Compléter/ })).not.toBeInTheDocument()
+    fireEvent.click(within(slot()).getByRole('button', { name: 'Aide : Gardes à attribuer à la main' }))
+    expect(within(slot()).getByRole('note')).toHaveTextContent(/n’est jamais complétée automatiquement/)
+  })
+
+  it('a computation running: no second launch, in the same place', () => {
+    renderActions({ period: PERIOD_2, busy: true })
+
+    expect(within(slot()).getByRole('status')).toHaveTextContent('Calcul en cours…')
+    expect(screen.queryByRole('button', { name: /Générer|Compléter/ })).not.toBeInTheDocument()
+  })
+
+  it('never shows two main actions: no "Générer les postes non pourvus" next to it', () => {
+    for (const hasGeneratedLines of [false, true]) {
+      renderActions({ period: PERIOD_2, hasGeneratedLines })
+      expect(document.querySelectorAll('.pd-main-action')).toHaveLength(1)
+      expect(within(slot()).getAllByRole('button')).toHaveLength(hasGeneratedLines ? 2 : 1) // the action, its "?"
+      expect(screen.queryByRole('button', { name: /postes non pourvus/ })).not.toBeInTheDocument()
+      cleanup()
+    }
+  })
+
+  it('opens the generation dialog when the page asks for it (controlled)', async () => {
+    stubApi({ 'GET /api/plannings/plan-1/generation-preflight': () => makePreflight() })
+    const onDialogChange = vi.fn()
+    renderActions({ dialog: 'generate', onDialogChange })
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Annuler' }))
+    expect(onDialogChange).toHaveBeenCalledWith(null)
+  })
+})
+
+describe('PilotHeaderActions — the "⋯" menu', () => {
+  const entries = () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Plus d’actions' }))
+    const labels = screen.getAllByRole('menuitem').map((item) => item.textContent)
+    fireEvent.click(screen.getByRole('button', { name: 'Plus d’actions' }))
+    return labels
+  }
+
+  it('holds only what concerns the planning: the name, the general week, and replacing a calendar', () => {
+    renderActions({ onRename: vi.fn(), canManageStructure: true, hasGeneratedLines: true })
+
+    expect(entries()).toEqual(['Modifier le nom', 'Semaine type', 'Régénérer entièrement…'])
+  })
+
+  it('offers "Régénérer entièrement…" only for a period generated and not entirely published', () => {
+    renderActions({ onRename: vi.fn(), hasGeneratedLines: false })
+    expect(entries()).toEqual(['Modifier le nom'])
+    cleanup()
+
+    renderActions({ onRename: vi.fn(), hasGeneratedLines: true, canRegenerate: false })
+    expect(entries()).toEqual(['Modifier le nom'])
   })
 
   it('lists Modifier le nom only when the page allows renaming, and closes the menu on Escape', () => {
     const onRename = vi.fn()
-    render(
-      <PilotHeaderActions
-        planningStableId="plan-1"
-        timezone="Europe/Brussels"
-        status={makeStatus()}
-        onRename={onRename}
-        onChanged={vi.fn()}
-        onLaunched={vi.fn()}
-      />,
-    )
+    renderActions({ onRename })
 
     fireEvent.click(screen.getByRole('button', { name: 'Plus d’actions' }))
     fireEvent.keyDown(window, { key: 'Escape' })
@@ -96,151 +190,49 @@ describe('PilotHeaderActions — buttons and menu', () => {
   })
 
   it('has no Modifier le nom entry without onRename', () => {
-    renderActions()
-    fireEvent.click(screen.getByRole('button', { name: 'Plus d’actions' }))
-    expect(screen.queryByRole('menuitem', { name: 'Modifier le nom' })).not.toBeInTheDocument()
-  })
+    renderActions({ hasGeneratedLines: true })
 
-  it('opens the generation dialog when the page asks for it (controlled)', async () => {
-    stubApi({ 'GET /api/plannings/plan-1/generation-preflight': () => makePreflight() })
-    const onDialogChange = vi.fn()
-    render(
-      <PilotHeaderActions
-        planningStableId="plan-1"
-        timezone="Europe/Brussels"
-        status={makeStatus()}
-        onChanged={vi.fn()}
-        onLaunched={vi.fn()}
-        dialog="generate"
-        onDialogChange={onDialogChange}
-      />,
-    )
-
-    expect(await screen.findByRole('dialog')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Annuler' }))
-    expect(onDialogChange).toHaveBeenCalledWith(null)
+    expect(entries()).not.toContain('Modifier le nom')
   })
 })
 
-describe('Semaine type (docs/decisions.md D136)', () => {
-  it('is not offered before the primary line is known', () => {
-    renderActions()
+describe('Semaine type — the general one of the planning (docs/decisions.md D227)', () => {
+  it('is not offered without the right to manage the structure', () => {
+    renderActions({ onRename: vi.fn() })
     fireEvent.click(screen.getByRole('button', { name: 'Plus d’actions' }))
     expect(screen.queryByRole('menuitem', { name: 'Semaine type' })).not.toBeInTheDocument()
   })
 
-  it('opens, loads the current structure and saves it', async () => {
+  it('opens, loads the structure of the planning and saves it', async () => {
     const api = stubApi({
-      'GET /api/planning-lines/line-1/week-structure': () => ({
+      'GET /api/plannings/plan-1/week-template': () => ({
         blocks: [{ id: 'A', name: 'Week-end', family: 'Week-end', days: ['VEN', 'SAM', 'DIM'] }],
         solo: ['LUN', 'MAR', 'MER', 'JEU'],
         soloFamily: 'Semaine',
         excluded: [],
+        lines: [{ stableId: 'line-1', name: 'Seniors', kind: 'GENERAL', periods: [] }],
       }),
-      'PUT /api/planning-lines/line-1/week-structure': () => ({
+      'PUT /api/plannings/plan-1/week-template': () => ({
         blocks: [],
         solo: ['LUN', 'MAR', 'MER', 'JEU', 'VEN', 'SAM', 'DIM'],
         soloFamily: 'Semaine',
         excluded: [],
+        lines: [],
+        appliedTo: ['line-1'],
       }),
     })
-    const { onChanged } = renderActions(makeStatus(), undefined, {
-      primaryLineStableId: 'line-1',
-      primaryLineName: 'Ligne principale',
-    })
+    const { onChanged } = renderActions({ canManageStructure: true })
 
     chooseMenu('Semaine type')
-    const dialog = await screen.findByRole('dialog', { name: 'Semaine type — Ligne principale' })
+    const dialog = await screen.findByRole('dialog', { name: 'Semaine type du planning' })
     expect(await within(dialog).findByText('Ven · Sam · Dim · 3 jours')).toBeInTheDocument()
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Dissoudre' }))
     fireEvent.click(within(dialog).getByRole('button', { name: 'Enregistrer' }))
 
     await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1))
-    expect(api.requests('PUT', '/api/planning-lines/line-1/week-structure')).toHaveLength(1)
+    expect(api.requests('PUT', '/api/plannings/plan-1/week-template')).toHaveLength(1)
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-  })
-})
-
-describe('PlanningSettingsModal', () => {
-  it('says the deadline is indicative and blocks nothing', () => {
-    renderActions()
-
-    chooseMenu('Paramètres')
-
-    const dialog = screen.getByRole('dialog', { name: 'Paramètres du planning' })
-    expect(
-      within(dialog).getByLabelText('Date limite indicative de déclaration des indisponibilités'),
-    ).toBeInTheDocument()
-    expect(within(dialog).getByText(/ne bloque jamais rien/)).toBeInTheDocument()
-    expect(
-      within(dialog).getByText(/chacun peut encore ajouter ou modifier ses indisponibilités/),
-    ).toBeInTheDocument()
-    expect(within(dialog).getByText(/la génération du planning reste possible/)).toBeInTheDocument()
-  })
-
-  it('changes the deadline, then closes and tells the page', async () => {
-    const api = stubApi({
-      'PATCH /api/plannings/plan-1/settings': () => ({
-        availabilityDeadline: '2026-10-05',
-        deadlineOverdueDays: null,
-        openCollectionCount: 1,
-      }),
-    })
-    const { onChanged } = renderActions(makeStatus({ availabilityDeadline: '2026-09-25' }))
-
-    chooseMenu('Paramètres')
-    const dialog = screen.getByRole('dialog')
-    const input = within(dialog).getByLabelText('Date limite indicative de déclaration des indisponibilités')
-    expect(input).toHaveValue('2026-09-25')
-    // Nothing to save until it changes.
-    expect(within(dialog).getByRole('button', { name: 'Enregistrer' })).toBeDisabled()
-
-    fireEvent.change(input, { target: { value: '2026-10-05' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Enregistrer' }))
-
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(api.requests('PATCH', '/api/plannings/plan-1/settings')[0].body).toEqual({
-      availabilityDeadline: '2026-10-05',
-    })
-    expect(onChanged).toHaveBeenCalledTimes(1)
-  })
-
-  it('can set a first deadline and clear an existing one', async () => {
-    const api = stubApi({
-      'PATCH /api/plannings/plan-1/settings': () => ({
-        availabilityDeadline: null,
-        deadlineOverdueDays: null,
-        openCollectionCount: 1,
-      }),
-    })
-    renderActions(makeStatus({ availabilityDeadline: '2026-09-25' }))
-
-    chooseMenu('Paramètres')
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Effacer la date' }))
-
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(api.requests('PATCH', '/api/plannings/plan-1/settings')[0].body).toEqual({
-      availabilityDeadline: null,
-    })
-  })
-
-  it('explains a refused date and stays open', async () => {
-    stubApi({ 'PATCH /api/plannings/plan-1/settings': () => httpStatus(422, { error: 'validation_failed' }) })
-    renderActions(makeStatus())
-
-    chooseMenu('Paramètres')
-    const dialog = screen.getByRole('dialog')
-    fireEvent.change(
-      within(dialog).getByLabelText('Date limite indicative de déclaration des indisponibilités'),
-      {
-        target: { value: '2020-01-01' },
-      },
-    )
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Enregistrer' }))
-
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent(/déjà passée/)
-    expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 })
 
@@ -310,7 +302,7 @@ describe('GenerationModal', () => {
     })
     renderActions()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 1' }))
 
     const dialog = await screen.findByRole('dialog', { name: 'Générer le planning ?' })
     expect(await within(dialog).findByText(/20 gardes indépendantes à répartir/)).toBeInTheDocument()
@@ -326,7 +318,7 @@ describe('GenerationModal', () => {
     stubApi({ [preflightUrl]: () => makePreflight() })
     renderActions()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 1' }))
 
     const dialog = await screen.findByRole('dialog', { name: 'Générer le planning ?' })
     await within(dialog).findByText('16 membres participent')
@@ -347,7 +339,7 @@ describe('GenerationModal', () => {
     stubApi({ [preflightUrl]: () => makePreflight({ unavailabilityCount: 0 }) })
     renderActions()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 1' }))
 
     const dialog = await screen.findByRole('dialog')
     await within(dialog).findByText('16 membres participent')
@@ -366,7 +358,7 @@ describe('GenerationModal', () => {
     })
     renderActions()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 1' }))
 
     const dialog = await screen.findByRole('dialog')
     await within(dialog).findByText('Date limite indicative : 25 septembre 2026')
@@ -381,17 +373,7 @@ describe('GenerationModal', () => {
       [preflightUrl]: () => makePreflight({ period: { stableId: 'c2', number: 2 } }),
       [launchUrl]: () => httpStatus(202, QUEUED),
     })
-    render(
-      <PilotHeaderActions
-        planningStableId="plan-1"
-        timezone="Europe/Brussels"
-        status={makeStatus()}
-        period={{ stableId: 'c2', number: 2, startsAt: '2027-05-01', lastDay: '2027-07-31', named: true }}
-        generateLabel="Générer la période 2"
-        onChanged={vi.fn()}
-        onLaunched={vi.fn()}
-      />,
-    )
+    renderActions({ period: PERIOD_2 })
 
     fireEvent.click(screen.getByRole('button', { name: 'Générer la période 2' }))
     const dialog = await screen.findByRole('dialog', { name: 'Générer la période 2 ?' })
@@ -432,17 +414,7 @@ describe('GenerationModal', () => {
             }),
       [launchUrl]: () => httpStatus(202, QUEUED),
     })
-    render(
-      <PilotHeaderActions
-        planningStableId="plan-1"
-        timezone="Europe/Brussels"
-        status={makeStatus()}
-        period={{ stableId: 'c2', number: 2, startsAt: '2027-05-01', lastDay: '2027-07-31', named: true }}
-        generateLabel="Générer la période 2"
-        onChanged={vi.fn()}
-        onLaunched={vi.fn()}
-      />,
-    )
+    renderActions({ period: PERIOD_2 })
 
     fireEvent.click(screen.getByRole('button', { name: 'Générer la période 2' }))
     const dialog = await screen.findByRole('dialog')
@@ -487,7 +459,7 @@ describe('GenerationModal', () => {
     })
     const { onLaunched } = renderActions()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 1' }))
     const dialog = await screen.findByRole('dialog')
     const confirm = await enabledConfirm(within(dialog))
     fireEvent.click(confirm)
@@ -506,32 +478,11 @@ describe('GenerationModal', () => {
     expect(onLaunched).toHaveBeenCalledWith(QUEUED.job)
   })
 
-  it('is not offered once the planning is published, and is disabled while a job runs', () => {
-    render(
-      <PilotHeaderActions
-        planningStableId="plan-1"
-        timezone="Europe/Brussels"
-        status={makeStatus()}
-        onChanged={vi.fn()}
-        onLaunched={vi.fn()}
-        canLaunchGeneration={false}
-      />,
-    )
-    expect(screen.queryByRole('button', { name: 'Générer le planning' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Plus d’actions' })).toBeInTheDocument()
-    cleanup()
+  it('is not launched from here while a job runs: the main action says so', () => {
+    renderActions({ busy: true })
 
-    render(
-      <PilotHeaderActions
-        planningStableId="plan-1"
-        timezone="Europe/Brussels"
-        status={makeStatus()}
-        onChanged={vi.fn()}
-        onLaunched={vi.fn()}
-        busy
-      />,
-    )
-    expect(screen.getByRole('button', { name: 'Générer le planning' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: /^Générer/ })).not.toBeInTheDocument()
+    expect(within(slot()).getByRole('status')).toHaveTextContent('Calcul en cours…')
   })
 
   it('reports an incomplete coverage honestly', async () => {
@@ -550,7 +501,7 @@ describe('GenerationModal', () => {
     const api = stubApi({ [preflightUrl]: () => makePreflight() })
     renderActions()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 1' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Annuler' }))
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
@@ -567,12 +518,14 @@ describe('GenerationModal', () => {
     })
     renderActions()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 1' }))
 
     const dialog = await screen.findByRole('dialog')
     const blockers = await within(dialog).findByRole('list', { name: 'Points bloquants' })
     expect(
-      within(blockers).getByText('Ligne « Seniors » : aucune règle de planning n’est active.'),
+      within(blockers).getByText(
+        'Ligne « Seniors » : les règles de génération ne sont pas activées (Paramètres de la ligne).',
+      ),
     ).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: 'Générer' })).toBeDisabled()
   })
@@ -591,7 +544,7 @@ describe('GenerationModal', () => {
     })
     renderActions()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 1' }))
 
     const dialog = await screen.findByRole('dialog')
     const blockers = await within(dialog).findByRole('list', { name: 'Points bloquants' })
@@ -617,7 +570,7 @@ describe('GenerationModal', () => {
     })
     renderActions()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 1' }))
 
     const dialog = await screen.findByRole('dialog')
     const blockers = await within(dialog).findByRole('list', { name: 'Points bloquants' })
@@ -642,7 +595,7 @@ describe('GenerationModal', () => {
     })
     renderActions()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 1' }))
 
     const dialog = await screen.findByRole('dialog')
     const blockers = await within(dialog).findByRole('list', { name: 'Points bloquants' })
@@ -663,7 +616,7 @@ describe('GenerationModal', () => {
     })
     renderActions()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 1' }))
     fireEvent.click(await enabledConfirm())
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/déjà en cours/)
@@ -674,7 +627,7 @@ describe('GenerationModal', () => {
     stubApi({ [preflightUrl]: () => httpStatus(500, {}) })
     renderActions()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 1' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/Impossible de contrôler/)
   })
@@ -683,7 +636,7 @@ describe('GenerationModal', () => {
     stubApi({ [preflightUrl]: () => makePreflight() })
     renderActions()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 1' }))
 
     const dialog = await screen.findByRole('dialog')
     expect(await within(dialog).findByText('20 gardes à répartir — Sans famille')).toBeInTheDocument()
@@ -697,7 +650,7 @@ describe('GenerationModal', () => {
     })
     renderActions()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 1' }))
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(await enabledConfirm(within(dialog)))
 
@@ -717,7 +670,7 @@ describe('GenerationModal', () => {
     })
     renderActions()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 1' }))
     const dialog = await screen.findByRole('dialog')
     fireEvent.click(await within(dialog).findByRole('checkbox', { name: /Repos minimum d’équipe/ }))
     fireEvent.change(within(dialog).getByLabelText('Repos minimum d’équipe, en heures'), {
@@ -879,70 +832,6 @@ describe('GenerationModal', () => {
   })
 })
 
-describe('Règles de génération (docs/decisions.md D137)', () => {
-  it('is not offered before the primary line is known', () => {
-    renderActions()
-    fireEvent.click(screen.getByRole('button', { name: 'Plus d’actions' }))
-    expect(screen.queryByRole('menuitem', { name: 'Règles de génération' })).not.toBeInTheDocument()
-  })
-
-  it('shows the inactive state and lets a manager activate it', async () => {
-    const api = stubApi({
-      'GET /api/planning-lines/line-1/rule-set': () => ({ active: false }),
-      'POST /api/planning-lines/line-1/rule-set/activate': () => ({
-        active: true,
-        activatedAt: '2026-09-24T09:00:00+00:00',
-        effectiveFrom: '2026-09-24',
-      }),
-    })
-    const { onChanged } = renderActions(makeStatus(), undefined, {
-      primaryLineStableId: 'line-1',
-      primaryLineName: 'Seniors',
-    })
-
-    chooseMenu('Règles de génération')
-    const dialog = await screen.findByRole('dialog', { name: 'Règles de génération — Seniors' })
-    expect(await within(dialog).findByText(/Aucune règle de génération n’est active/)).toBeInTheDocument()
-
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Activer' }))
-
-    expect(await within(dialog).findByText(/Règles de génération actives/)).toBeInTheDocument()
-    expect(api.requests('POST', '/api/planning-lines/line-1/rule-set/activate')).toHaveLength(1)
-    expect(onChanged).toHaveBeenCalledTimes(1)
-  })
-
-  it('shows the active state directly, with no Activer button', async () => {
-    stubApi({
-      'GET /api/planning-lines/line-1/rule-set': () => ({
-        active: true,
-        activatedAt: '2026-09-20T08:00:00+00:00',
-        effectiveFrom: '2026-09-20',
-      }),
-    })
-    renderActions(makeStatus(), undefined, { primaryLineStableId: 'line-1', primaryLineName: 'Seniors' })
-
-    chooseMenu('Règles de génération')
-    const dialog = await screen.findByRole('dialog')
-    expect(await within(dialog).findByText(/Règles de génération actives/)).toBeInTheDocument()
-    expect(within(dialog).queryByRole('button', { name: 'Activer' })).not.toBeInTheDocument()
-  })
-
-  it('reports an activation failure and stays open', async () => {
-    stubApi({
-      'GET /api/planning-lines/line-1/rule-set': () => ({ active: false }),
-      'POST /api/planning-lines/line-1/rule-set/activate': () => httpStatus(500, {}),
-    })
-    renderActions(makeStatus(), undefined, { primaryLineStableId: 'line-1', primaryLineName: 'Seniors' })
-
-    chooseMenu('Règles de génération')
-    const dialog = await screen.findByRole('dialog')
-    fireEvent.click(await within(dialog).findByRole('button', { name: 'Activer' }))
-
-    expect(await within(dialog).findByRole('alert')).toHaveTextContent(/Impossible d’activer/)
-    expect(screen.getByRole('dialog')).toBeInTheDocument()
-  })
-})
-
 describe('GenerationModal — SurgicalHub leave (docs/surgicalhub-integration.md §7.5, D8)', () => {
   const preflightUrl = 'GET /api/plannings/plan-1/generation-preflight'
   const launchUrl = 'POST /api/plannings/plan-1/generations'
@@ -971,7 +860,7 @@ describe('GenerationModal — SurgicalHub leave (docs/surgicalhub-integration.md
     })
     renderActions()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 1' }))
 
     const dialog = await screen.findByRole('dialog')
     expect(
@@ -989,7 +878,7 @@ describe('GenerationModal — SurgicalHub leave (docs/surgicalhub-integration.md
     })
     const { onLaunched } = renderActions()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 1' }))
     fireEvent.click(await enabledConfirm())
 
     const alert = await screen.findByRole('alert')
@@ -1025,7 +914,7 @@ describe('GenerationModal — SurgicalHub leave (docs/surgicalhub-integration.md
     })
     renderActions()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 1' }))
     fireEvent.click(await enabledConfirm())
 
     expect(
@@ -1042,7 +931,7 @@ describe('GenerationModal — SurgicalHub leave (docs/surgicalhub-integration.md
     })
     const { onLaunched } = renderActions()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 1' }))
     fireEvent.click(await enabledConfirm())
 
     expect(

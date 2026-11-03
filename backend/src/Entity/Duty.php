@@ -120,6 +120,28 @@ class Duty
     #[ORM\Column]
     private \DateTimeImmutable $updatedAt;
 
+    /**
+     * docs/decisions.md D225: set when a change of the period's dates left
+     * this duty outside its period. The row stays — its assignments, events and
+     * publication entries are history — but it no longer exists for any reader
+     * of the calendar (DutyRepository). Never reversed: extending the period
+     * again creates new duties.
+     */
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $retiredAt = null;
+
+    #[ORM\ManyToOne(targetEntity: PeriodDateChange::class)]
+    #[ORM\JoinColumn(name: 'retired_by_change_id', nullable: true, onDelete: 'RESTRICT')]
+    private ?PeriodDateChange $retiredByChange = null;
+
+    /**
+     * docs/decisions.md D226: the extension of the period that created this
+     * duty. The only duties a published line may receive automatically.
+     */
+    #[ORM\ManyToOne(targetEntity: PeriodDateChange::class)]
+    #[ORM\JoinColumn(name: 'added_by_change_id', nullable: true, onDelete: 'RESTRICT')]
+    private ?PeriodDateChange $addedByChange = null;
+
     public function __construct(
         PlanningPeriod $planningPeriod,
         DutyType $dutyType,
@@ -205,6 +227,36 @@ class Duty
      * coverage source; the policy-level rules (the line is conditional, the
      * source is its policy's source line) are DutyMaterializationService's.
      */
+    public function retire(PeriodDateChange $change, \DateTimeImmutable $at): void
+    {
+        if (null !== $this->retiredAt) {
+            throw new \LogicException('This duty is already retired.');
+        }
+        $this->retiredAt = $at;
+        $this->retiredByChange = $change;
+        $this->updatedAt = new \DateTimeImmutable();
+    }
+
+    public function isRetired(): bool
+    {
+        return null !== $this->retiredAt;
+    }
+
+    public function getRetiredByChange(): ?PeriodDateChange
+    {
+        return $this->retiredByChange;
+    }
+
+    public function markAddedBy(PeriodDateChange $change): void
+    {
+        $this->addedByChange = $change;
+    }
+
+    public function getAddedByChange(): ?PeriodDateChange
+    {
+        return $this->addedByChange;
+    }
+
     private static function assertCoverageSource(PlanningPeriod $planningPeriod, \DateTimeImmutable $startsAt, string $timezone, DutyDemandType $demandType, ?Duty $coverageSource): void
     {
         if ((DutyDemandType::CONDITIONAL === $demandType) !== (null !== $coverageSource)) {

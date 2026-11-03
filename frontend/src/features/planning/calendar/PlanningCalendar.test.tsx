@@ -1,7 +1,6 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError } from '../../../lib/apiClient'
 import { stubApi, type Route } from '../../../testUtils/stubApi'
 import type { PlanningResultDuty, PlanningResultLine, PublicationState } from '../result/types'
 import type { PlanningDetail } from '../types'
@@ -129,13 +128,6 @@ function setup(
   })
 }
 
-/** The completion button once the calendar is read — rendered disabled before, so a click then is ignored. */
-async function completionButton() {
-  const button = await screen.findByRole('button', { name: 'Compléter automatiquement' })
-  await waitFor(() => expect(button).toBeEnabled())
-  return button
-}
-
 describe('PlanningCalendar', () => {
   it('lays out dates vertically with one column per line, weeks, blocks and uncovered duties', async () => {
     setup()
@@ -187,7 +179,7 @@ describe('PlanningCalendar', () => {
 
     await screen.findByRole('table')
     expect(screen.queryByRole('button', { name: /Modifier :/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Compléter automatiquement' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Compléter/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Publier le planning' })).not.toBeInTheDocument()
     // docs/decisions.md D201: the server gives a member published statistics only — the button is no protection.
     expect(screen.getByRole('button', { name: 'Statistiques' })).toBeInTheDocument()
@@ -217,17 +209,13 @@ describe('PlanningCalendar', () => {
     expect(await screen.findByText('Modifier le bloc de garde')).toBeInTheDocument()
   })
 
-  it('requests the completion from the page, which follows the queued job (docs/decisions.md D149)', async () => {
+  it('has no completion button: the summary points to the main action, in the header (docs/decisions.md D228)', async () => {
     setup()
-    let accept: () => void = () => {}
-    const onRequestCompletion = vi.fn(() => new Promise<void>((resolve) => (accept = resolve)))
-    render(<PlanningCalendar planning={MANAGER} onRequestCompletion={onRequestCompletion} />)
+    render(<PlanningCalendar planning={MANAGER} />)
 
-    fireEvent.click(await completionButton())
-    expect(onRequestCompletion).toHaveBeenCalledTimes(1)
-    expect(await screen.findByRole('button', { name: 'Envoi…' })).toBeDisabled()
-    accept()
-    expect(await screen.findByRole('button', { name: 'Compléter automatiquement' })).toBeEnabled()
+    await screen.findByRole('table')
+    expect(screen.queryByRole('button', { name: /Compléter/ })).not.toBeInTheDocument()
+    expect(screen.getByText(/ou utilisez « Compléter la période » en haut de page\.$/)).toBeInTheDocument()
   })
 
   it('offers to publish a line generated since the last diffusion, even without any change (docs/decisions.md D196)', async () => {
@@ -237,26 +225,14 @@ describe('PlanningCalendar', () => {
       lastPublishedAt: '2026-10-01T08:00:00+00:00',
       linesAwaitingPublication: [{ lineStableId: 'l2', lineName: 'Juniors' }],
     })
-    render(<PlanningCalendar planning={MANAGER} onRequestCompletion={vi.fn()} />)
+    render(<PlanningCalendar planning={MANAGER} />)
 
     const button = await screen.findByRole('button', { name: 'Publier les nouvelles lignes' })
     expect(button).toBeEnabled()
     expect(screen.queryByRole('button', { name: 'Republier les modifications' })).not.toBeInTheDocument()
   })
 
-  it('says so when a completion cannot be requested because a job is already running', async () => {
-    setup()
-    const onRequestCompletion = vi.fn(() =>
-      Promise.reject(new ApiError(409, { error: 'job_in_progress' }, 'x')),
-    )
-    render(<PlanningCalendar planning={MANAGER} onRequestCompletion={onRequestCompletion} />)
-
-    fireEvent.click(await completionButton())
-    const message = await screen.findByText(/Une génération ou une complétion est déjà en cours/)
-    expect(message.closest('[role="alert"]')).not.toBeNull()
-  })
-
-  it('disables completion and publication while a job runs', async () => {
+  it('disables the publication while a job runs, and says so next to the calendar', async () => {
     setup({
       ...NOT_PUBLISHED,
       published: true,
@@ -264,36 +240,30 @@ describe('PlanningCalendar', () => {
       hasUnpublishedChanges: true,
       changes: [],
     })
-    render(<PlanningCalendar planning={MANAGER} onRequestCompletion={vi.fn()} jobActive jobKind="COMPLETE" />)
+    render(<PlanningCalendar planning={MANAGER} jobActive jobKind="COMPLETE" />)
 
-    // Said on the button itself — never a greyed "Compléter automatiquement" with no reason in sight.
-    const button = await screen.findByRole('button', { name: 'Complétion en cours…' })
-    expect(button).toBeDisabled()
-    expect(button).toHaveAttribute('aria-busy', 'true')
-    expect(button).toHaveAttribute('title', 'Un calcul est en cours sur ce planning')
-    expect(screen.queryByRole('button', { name: 'Compléter automatiquement' })).not.toBeInTheDocument()
-    // …and next to the calendar, where the manager is looking, not only in the banner at the top of the page.
+    // Next to the calendar, where the manager is looking, not only in the banner at the top of the page.
     expect(screen.getByText(/Complétion automatique en cours/)).toBeInTheDocument()
     // The publication state arrives on its own request: wait for it, never assume it came first.
     expect(await screen.findByRole('button', { name: 'Republier les modifications' })).toBeDisabled()
   })
 
-  it('says "Calcul en cours…" while a generation runs', async () => {
+  it('says a computation is running while a generation runs', async () => {
     setup()
-    render(<PlanningCalendar planning={MANAGER} onRequestCompletion={vi.fn()} jobActive jobKind="GENERATE" />)
+    render(<PlanningCalendar planning={MANAGER} jobActive jobKind="GENERATE" />)
 
-    expect(await screen.findByRole('button', { name: 'Calcul en cours…' })).toBeDisabled()
+    expect(await screen.findByText(/Un calcul est en cours sur ce planning/)).toBeInTheDocument()
   })
 
-  it('is enabled on a PUBLISHED planning with uncovered duties: publication never blocks the completion', async () => {
+  it('points to the header on a published planning with uncovered duties: publication never blocks the completion', async () => {
     setup({ ...NOT_PUBLISHED, published: true, lastPublishedAt: '2026-10-01T08:00:00+00:00' })
-    render(<PlanningCalendar planning={MANAGER} onRequestCompletion={vi.fn()} />)
+    render(<PlanningCalendar planning={MANAGER} />)
 
     expect(await screen.findByText('Planning publié')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Compléter automatiquement' })).toBeEnabled()
+    expect(screen.getByText(/ou utilisez « Compléter la période » en haut de page\.$/)).toBeInTheDocument()
   })
 
-  it('disables "Compléter automatiquement" when nothing is uncovered', async () => {
+  it('says nothing about a completion when nothing is uncovered', async () => {
     setup(
       NOT_PUBLISHED,
       {},
@@ -305,7 +275,7 @@ describe('PlanningCalendar', () => {
     render(<PlanningCalendar planning={MANAGER} />)
 
     await screen.findByRole('table')
-    expect(screen.getByRole('button', { name: 'Compléter automatiquement' })).toBeDisabled()
+    expect(screen.queryByText(/Compléter la période/)).not.toBeInTheDocument()
   })
 
   it('offers "Publier le planning" before the first publication', async () => {

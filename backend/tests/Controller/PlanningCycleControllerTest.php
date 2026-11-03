@@ -269,8 +269,9 @@ final class PlanningCycleControllerTest extends WebTestCase
         $list = $this->periods();
         self::assertSame('published', $list['periods'][0]['status']);
         self::assertNotNull($list['periods'][0]['publishedAt']);
-        self::assertFalse($list['periods'][0]['canEditEnd'], 'a published period never moves');
-        self::assertFalse($list['periods'][0]['canEditStart'], 'nor its start');
+        // docs/decisions.md D225: its dates may change, through an explicit plan; its calendar never silently.
+        self::assertTrue($list['periods'][0]['canEditEnd']);
+        self::assertTrue($list['periods'][0]['canEditStart']);
     }
 
     public function testADoubleSubmissionCreatesOnePeriod(): void
@@ -380,7 +381,7 @@ final class PlanningCycleControllerTest extends WebTestCase
      * A collection someone already touched (a calendar change inside it) keeps its dates (docs/decisions.md D207: only an untouched collection of
      * a blank period follows it — PlanningPeriodDatesTest).
      */
-    public function testTheEndOfTheLastPeriodGrowsKeepingItsCollectionsAndShrinksWhileNothingIsBeyond(): void
+    public function testTheEndOfTheLastPeriodGrowsKeepingItsCollectionsAndShrinksReducingThemOpenly(): void
     {
         $period1 = $this->lastPeriodId();
         $this->api($this->client, 'POST', '/api/me/calendar', ['type' => 'UNAVAILABLE', 'startsAt' => '2027-02-10T00:00:00+01:00', 'endsAt' => '2027-02-12T00:00:00+01:00'], $this->s['alice']);
@@ -397,26 +398,31 @@ final class PlanningCycleControllerTest extends WebTestCase
         self::assertResponseIsSuccessful();
         self::assertSame('2027-05-15', $shrunk['endsAt']);
 
+        // docs/decisions.md D230 (revises D208): an answered collection is reduced, once its impact was seen and confirmed.
         $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period1}", ['endsAt' => '2027-04-15', 'expectedEndsAt' => '2027-05-15'], $this->s['creator']);
-        $this->assertError(409, 'collection_answered'); // D208: the refusal says why it keeps its window
+        $this->assertError(409, 'date_change_confirmation_required');
+        $plan = json_decode((string) $this->client->getResponse()->getContent(), true)['plan'];
+        $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period1}", ['endsAt' => '2027-04-15', 'expectedEndsAt' => '2027-05-15', 'confirmation' => $plan['impactHash']], $this->s['creator']);
+        self::assertResponseIsSuccessful();
+        self::assertSame('2027-04-15', $this->db()->fetchOne('SELECT ends_at FROM availability_collections'));
 
         $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period1}", ['endsAt' => '2027-06-01', 'expectedEndsAt' => '2027-06-01'], $this->s['creator']);
         $this->assertError(409, 'period_changed');
 
         $db = $this->db();
-        self::assertSame(['2027-05-15'], array_values(array_unique($db->fetchFirstColumn('SELECT pp.ends_at FROM planning_periods pp JOIN planning_lines pl ON pl.id = pp.planning_line_id JOIN plannings p ON p.id = pl.planning_id WHERE p.stable_id = ?', [$this->s['planningId']]))));
-        self::assertSame('2027-05-15', $db->fetchOne('SELECT f.ends_at FROM fairness_periods f JOIN planning_periods pp ON pp.fairness_period_id = f.id LIMIT 1'));
-        self::assertSame('2027-05-15', $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}", token: $this->s['creator'])['endsAt']);
+        self::assertSame(['2027-04-15'], array_values(array_unique($db->fetchFirstColumn('SELECT pp.ends_at FROM planning_periods pp JOIN planning_lines pl ON pl.id = pp.planning_line_id JOIN plannings p ON p.id = pl.planning_id WHERE p.stable_id = ?', [$this->s['planningId']]))));
+        self::assertSame('2027-04-15', $db->fetchOne('SELECT f.ends_at FROM fairness_periods f JOIN planning_periods pp ON pp.fairness_period_id = f.id LIMIT 1'));
+        self::assertSame('2027-04-15', $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}", token: $this->s['creator'])['endsAt']);
     }
 
-    public function testGrowingAGeneratedPeriodFlagsItsGenerationAsOutdatedAndShrinkingIsRefused(): void
+    public function testGrowingAGeneratedPeriodFlagsItsGenerationAsOutdatedAndShrinkingAsksConfirmation(): void
     {
         $this->prepareLine($this->s['planningId'], [['2027-01-05', '2027-01-06']]);
         $this->generate($this->client, $this->s);
         $period1 = $this->lastPeriodId();
 
         $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period1}", ['endsAt' => '2027-04-20', 'expectedEndsAt' => '2027-05-01'], $this->s['creator']);
-        $this->assertError(409, 'period_has_generation');
+        $this->assertError(409, 'date_change_confirmation_required');
 
         $grown = $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period1}", ['endsAt' => '2027-06-01', 'expectedEndsAt' => '2027-05-01'], $this->s['creator']);
         self::assertResponseIsSuccessful();
@@ -424,31 +430,30 @@ final class PlanningCycleControllerTest extends WebTestCase
         self::assertSame('generated', $grown['status']);
     }
 
-    public function testShrinkingIsRefusedOverMaterializedDuties(): void
+    public function testShrinkingOverADutyPreparedWithoutCalendarRetiresIt(): void
     {
         $this->prepareLine($this->s['planningId'], [['2027-04-20', '2027-04-21']]);
         $period1 = $this->lastPeriodId();
         $this->db()->executeStatement("UPDATE availability_collections SET ends_at = '2027-04-10'");
 
-        $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period1}", ['endsAt' => '2027-04-15', 'expectedEndsAt' => '2027-05-01'], $this->s['creator']);
-        $this->assertError(409, 'period_has_duties_after');
+        $moved = $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period1}", ['endsAt' => '2027-04-15', 'expectedEndsAt' => '2027-05-01'], $this->s['creator']);
+        self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
+        self::assertSame(1, $moved['retiredDutyCount'], 'nobody holds it; kept, retired');
     }
 
-    public function testOnlyTheLastUnlockedPeriodMoves(): void
+    public function testAPublishedPeriodGrowsThroughTheSamePathAndItsNeighbourFollows(): void
     {
         $this->publishPeriodOne();
         $period1 = $this->lastPeriodId();
 
-        $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period1}", ['endsAt' => '2027-06-01', 'expectedEndsAt' => '2027-05-01'], $this->s['creator']);
-        $this->assertError(409, 'period_locked');
-
+        // docs/decisions.md D225-D226: an extension onto a blank neighbour needs no confirmation, the neighbour follows.
         $this->createPeriod('2027-08-01');
-        // D207: an earlier period's end is the boundary with the next one — never once it is published.
         $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period1}", ['endsAt' => '2027-06-01', 'expectedEndsAt' => '2027-05-01'], $this->s['creator']);
-        $this->assertError(409, 'period_locked');
+        self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
+        self::assertSame('2027-06-01', $this->periods()['periods'][1]['startsAt']);
 
         $period2 = $this->lastPeriodId();
-        $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period2}", ['endsAt' => '2027-05-05', 'expectedEndsAt' => '2027-08-01'], $this->s['creator']);
+        $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period2}", ['endsAt' => '2027-06-05', 'expectedEndsAt' => '2027-08-01'], $this->s['creator']);
         $this->assertError(422, 'period_too_short');
         $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period2}", ['endsAt' => '2027-07-01', 'expectedEndsAt' => '2027-08-01'], $this->s['creator']);
         self::assertResponseIsSuccessful();
@@ -688,32 +693,32 @@ final class PlanningCycleControllerTest extends WebTestCase
 
     // --- lines (F, §5.5) --------------------------------------------------------------------------
 
-    public function testALineStartsAtAPeriodNeverInOneThatIsPublishedOrOver(): void
+    public function testALineJoinsAPeriodWithAPublishedLineNeverOneOverOrArchived(): void
     {
         $this->publishPeriodOne();
         $period1 = $this->lastPeriodId();
         $period2 = $this->createPeriod('2027-08-01')['stableId'];
         $period3 = $this->createPeriod('2027-11-01')['stableId'];
 
-        // Default: the earliest period from which all are open — period 2.
+        // docs/decisions.md D231: a line published locks no other line: the earliest period open is period 1.
         $line = $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/lines", ['name' => 'Renfort'], $this->s['creator']);
         self::assertResponseStatusCodeSame(201);
-        self::assertSame([2, 3], array_column($line['periods'], 'number'));
-        self::assertNull($line['planningPeriodStableId'], 'the default period is period 1 (the next one), where it takes no part');
+        self::assertSame([1, 2, 3], array_column($line['periods'], 'number'));
 
         // From period 3 only.
         $late = $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/lines", ['name' => 'Nuit', 'fromPeriodStableId' => $period3], $this->s['creator']);
         self::assertResponseStatusCodeSame(201);
         self::assertSame([3], array_column($late['periods'], 'number'));
 
+        $this->db()->executeStatement("UPDATE planning_periods SET status = 'ARCHIVED' WHERE planning_cycle_id = ?", [$this->cycleId($period1)]);
         $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/lines", ['name' => 'Jour', 'fromPeriodStableId' => $period1], $this->s['creator']);
         $this->assertError(409, 'period_not_eligible');
         $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/lines", ['name' => 'Jour', 'fromPeriodStableId' => 'not-a-period'], $this->s['creator']);
         $this->assertError(404, 'period_not_found');
 
-        // A later period already published: start later.
+        // A later period archived: start later.
         $cycle3 = $this->cycleId($period3);
-        $this->db()->executeStatement("UPDATE planning_periods SET status = 'PUBLISHED' WHERE planning_cycle_id = ?", [$cycle3]);
+        $this->db()->executeStatement("UPDATE planning_periods SET status = 'ARCHIVED' WHERE planning_cycle_id = ?", [$cycle3]);
         $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/lines", ['name' => 'Jour', 'fromPeriodStableId' => $period2], $this->s['creator']);
         $this->assertError(409, 'later_period_published');
     }
@@ -721,6 +726,8 @@ final class PlanningCycleControllerTest extends WebTestCase
     public function testALineWithNoOpenPeriodWaitsForTheNextOne(): void
     {
         $this->publishPeriodOne();
+        // docs/decisions.md D231: a published line leaves its period open; only an archived period is closed.
+        $this->db()->executeStatement("UPDATE planning_periods SET status = 'ARCHIVED'");
 
         $line = $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/lines", ['name' => 'Renfort'], $this->s['creator']);
         self::assertResponseStatusCodeSame(201);

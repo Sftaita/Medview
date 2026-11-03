@@ -36,7 +36,7 @@ class DutyRepository extends ServiceEntityRepository
      */
     public function findByPlanningPeriod(PlanningPeriod $planningPeriod): array
     {
-        return $this->findBy(['planningPeriod' => $planningPeriod], ['localDate' => 'ASC']);
+        return $this->findBy(['planningPeriod' => $planningPeriod, 'retiredAt' => null], ['localDate' => 'ASC']);
     }
 
     /**
@@ -55,6 +55,7 @@ class DutyRepository extends ServiceEntityRepository
         return null !== $this->findOneBy([
             'planningPeriod' => $planningPeriod,
             'localDate' => $localDate,
+            'retiredAt' => null,
         ]);
     }
 
@@ -65,7 +66,7 @@ class DutyRepository extends ServiceEntityRepository
      */
     public function existsForPeriod(PlanningPeriod $planningPeriod): bool
     {
-        return null !== $this->findOneBy(['planningPeriod' => $planningPeriod]);
+        return null !== $this->findOneBy(['planningPeriod' => $planningPeriod, 'retiredAt' => null]);
     }
 
     /**
@@ -78,7 +79,7 @@ class DutyRepository extends ServiceEntityRepository
      */
     public function findByPeriodAndLocalDate(PlanningPeriod $planningPeriod, \DateTimeImmutable $localDate): array
     {
-        return $this->findBy(['planningPeriod' => $planningPeriod, 'localDate' => $localDate], ['id' => 'ASC']);
+        return $this->findBy(['planningPeriod' => $planningPeriod, 'localDate' => $localDate, 'retiredAt' => null], ['id' => 'ASC']);
     }
 
     /**
@@ -98,7 +99,48 @@ class DutyRepository extends ServiceEntityRepository
 
         return $this->createQueryBuilder('d')
             ->where('d.coverageSource IN (:sources)')
+            ->andWhere('d.retiredAt IS NULL')
             ->setParameter('sources', $sources)
+            ->orderBy('d.localDate', 'ASC')
+            ->addOrderBy('d.id', 'ASC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * docs/decisions.md D225: the duties of $period that new dates would leave
+     * outside it.
+     *
+     * @return list<Duty> by date
+     */
+    public function findOutside(PlanningPeriod $planningPeriod, \DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt): array
+    {
+        return $this->createQueryBuilder('d')
+            ->where('d.planningPeriod = :period')
+            ->andWhere('d.retiredAt IS NULL')
+            ->andWhere('d.localDate < :start OR d.localDate >= :end')
+            ->setParameter('period', $planningPeriod)
+            ->setParameter('start', $startsAt, 'date_immutable')
+            ->setParameter('end', $endsAt, 'date_immutable')
+            ->orderBy('d.localDate', 'ASC')
+            ->addOrderBy('d.id', 'ASC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * docs/decisions.md D226: the duties an extension of $period created —
+     * still in the calendar.
+     *
+     * @return list<Duty> by date
+     */
+    public function findAddedByExtension(PlanningPeriod $planningPeriod): array
+    {
+        return $this->createQueryBuilder('d')
+            ->where('d.planningPeriod = :period')
+            ->andWhere('d.retiredAt IS NULL')
+            ->andWhere('d.addedByChange IS NOT NULL')
+            ->setParameter('period', $planningPeriod)
             ->orderBy('d.localDate', 'ASC')
             ->addOrderBy('d.id', 'ASC')
             ->getQuery()

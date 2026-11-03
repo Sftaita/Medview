@@ -1,4 +1,4 @@
-/* "Générer les postes non pourvus" / "Générer cette ligne" (docs/decisions.md D222). Prefix fill-. Tokens: styles/tokens.css. */
+/* "Compléter la période" / "Générer cette ligne" (docs/decisions.md D222). Prefix fill-. Tokens: styles/tokens.css. */
 
 .fill-intro {
   margin: 0 0 12px;

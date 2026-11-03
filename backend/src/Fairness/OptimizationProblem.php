@@ -112,6 +112,37 @@ final readonly class OptimizationProblem
     }
 
     /**
+     * docs/decisions.md D226: without these units at all — an older hole of a
+     * published line, when only the days its extension added may be completed.
+     * Neither a decision nor a demand of this solve: it stays a hole.
+     *
+     * @param list<string> $dutyUnitStableKeys
+     */
+    public function withoutUnits(array $dutyUnitStableKeys): self
+    {
+        $removed = array_flip($dutyUnitStableKeys);
+        $keep = static fn (DutyUnit $unit): bool => !isset($removed[$unit->getStableKey()]);
+
+        return new self(
+            $this->mode,
+            array_values(array_filter($this->requiredDutyUnits, $keep)),
+            array_values(array_filter($this->optionalDutyUnits, $keep)),
+            $this->requiredDemand,
+            $this->eligibilityMatrix,
+            $this->structurallyForcedLoad,
+            $this->fairnessTargets,
+            $this->dimensionMembership,
+            $this->coveragePolicy,
+            $this->objectivePhases,
+            $this->assignmentConflicts,
+            $this->timeoutSeconds,
+            $this->numWorkers,
+            $this->fixedAssignments,
+            $this->excludedEdges,
+        );
+    }
+
+    /**
      * The same problem, plus LOAD-ONLY units (docs/decisions.md D165): a
      * superfluous reinforcement still held by someone during "Compléter
      * automatiquement". Such a unit is not demand — it stays out of

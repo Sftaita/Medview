@@ -1,13 +1,23 @@
 import { useEffect, useState } from 'react'
 import { Icon } from '../../components/Icon'
 import { Overlay } from '../../components/Overlay'
-import { fetchWeekStructure, saveWeekStructure } from './api'
+import { HelpTip } from '../../components/HelpTip'
+import {
+  fetchWeekStructure,
+  fetchWeekTemplate,
+  saveWeekStructure,
+  saveWeekTemplate,
+  type WeekTemplateLine,
+} from './api'
 import { WeekStructureEditor } from './WeekStructureEditor'
 import { fromPayload, toPayload } from './weeklyStructure'
 import type { WeekStructure } from './weeklyStructure'
 
 type Props = {
-  lineStableId: string
+  /** The weekly structure of one line… */
+  lineStableId?: string
+  /** …or the general one of a planning (docs/decisions.md D227). */
+  planningStableId?: string
   lineName: string
   onClose: () => void
   /** The structure was saved: the caller may want to refresh anything derived from it. */
@@ -21,7 +31,9 @@ type Props = {
  * only ever writes on an explicit "Enregistrer" — never an optimistic
  * write, same convention as `PlanningSettingsModal`.
  */
-export function WeekStructureModal({ lineStableId, lineName, onClose, onSaved }: Props) {
+export function WeekStructureModal({ lineStableId, planningStableId, lineName, onClose, onSaved }: Props) {
+  const general = planningStableId !== undefined
+  const [lines, setLines] = useState<WeekTemplateLine[]>([])
   const [structure, setStructure] = useState<WeekStructure | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -30,7 +42,13 @@ export function WeekStructureModal({ lineStableId, lineName, onClose, onSaved }:
 
   useEffect(() => {
     let cancelled = false
-    fetchWeekStructure(lineStableId)
+    const loaded = planningStableId
+      ? fetchWeekTemplate(planningStableId).then((payload) => {
+          if (!cancelled) setLines(payload.lines)
+          return payload
+        })
+      : fetchWeekStructure(lineStableId ?? '')
+    loaded
       .then((payload) => {
         if (!cancelled) setStructure(fromPayload(payload))
       })
@@ -43,25 +61,31 @@ export function WeekStructureModal({ lineStableId, lineName, onClose, onSaved }:
     return () => {
       cancelled = true
     }
-  }, [lineStableId])
+  }, [lineStableId, planningStableId])
 
   async function save() {
     if (!structure) return
     setSaving(true)
     setError(null)
     try {
-      await saveWeekStructure(lineStableId, toPayload(structure))
+      if (planningStableId) {
+        await saveWeekTemplate(planningStableId, toPayload(structure))
+      } else {
+        await saveWeekStructure(lineStableId ?? '', toPayload(structure))
+      }
       onSaved?.()
       onClose()
     } catch {
-      setError('Impossible d’enregistrer la structure hebdomadaire.')
+      setError(
+        'Impossible d’enregistrer cette semaine type : elle ne doit couper aucun bloc à la limite entre deux périodes.',
+      )
       setSaving(false)
     }
   }
 
   return (
     <Overlay
-      title={`Semaine type — ${lineName}`}
+      title={general ? 'Semaine type du planning' : `Semaine type — ${lineName}`}
       onClose={onClose}
       dismissible={!saving}
       stableLayout
@@ -81,6 +105,15 @@ export function WeekStructureModal({ lineStableId, lineName, onClose, onSaved }:
         </>
       }
     >
+      {general && (
+        <p className="week-template__intro">
+          <span>Quels jours et quels blocs de garde existent ?</span>
+          <HelpTip label="Semaine type">
+            La semaine type définit la structure habituelle des gardes de ce planning. Elle peut être utilisée
+            par toutes les lignes ou personnalisée pour certaines lignes si nécessaire.
+          </HelpTip>
+        </p>
+      )}
       {loading && <p className="muted">Chargement…</p>}
       {!loading && structure && (
         <WeekStructureEditor
@@ -91,9 +124,25 @@ export function WeekStructureModal({ lineStableId, lineName, onClose, onSaved }:
           }}
         />
       )}
+      {general && lines.length > 0 && (
+        <ul className="week-template__lines" aria-label="Ce que chaque ligne utilise">
+          {lines.map((line) => (
+            <li key={line.stableId}>
+              <strong>{line.name}</strong>
+              <span className="muted">
+                {line.kind === 'GENERAL'
+                  ? 'Semaine type générale'
+                  : line.kind === 'INHERITED'
+                    ? 'Blocs hérités de sa ligne source : non concernée'
+                    : 'Semaine type personnalisée : non concernée'}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
       <p className="muted settings-note">
-        Une modification ne s’applique qu’aux prochaines générations — jamais aux plannings déjà générés ou
-        publiés.
+        Une modification ne s’applique qu’aux gardes créées ensuite — jamais aux gardes déjà générées ou
+        publiées, qui restent telles quelles.
       </p>
       {error && (
         <p role="alert" className="alert alert--error">

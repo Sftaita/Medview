@@ -264,7 +264,11 @@ final class PlanningCycleHistoricalBoundaryTest extends WebTestCase
         self::assertResponseIsSuccessful();
         $period2 = $this->periods()[1];
         $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period2['stableId']}", ['endsAt' => '2027-08-08', 'expectedEndsAt' => $period2['endsAt']], $this->s['creator']);
-        self::assertResponseStatusCodeSame(422, 'a new end on a Sunday cuts Saturday → Sunday');
+        // A new end on a Sunday cuts Saturday → Sunday: never refused any more, never done without being seen either (D229).
+        self::assertResponseStatusCodeSame(409, 'a cut needs its confirmation');
+        $refused = json_decode((string) $this->client->getResponse()->getContent(), true);
+        self::assertSame('date_change_confirmation_required', $refused['error']);
+        self::assertSame($period2['endsAt'], $this->periods()[1]['endsAt'], 'nothing moved without the confirmation');
 
         // The end of the last period is the next boundary: a structure never cuts it either.
         $this->api($this->client, 'PATCH', "/api/plannings/{$this->s['planningId']}/periods/{$period2['stableId']}", ['endsAt' => '2027-08-03', 'expectedEndsAt' => $period2['endsAt']], $this->s['creator']);

@@ -12,7 +12,6 @@ import {
 } from './GenerationModal'
 import { NO_REST_POLICY, surgicalHubRefusal } from './generationShared'
 import type {
-  FillLinePlan,
   FillLineResult,
   FillPreview,
   PlanningJob,
@@ -36,12 +35,12 @@ type Props = {
 const plural = (count: number, one: string, many: string) => `${count} ${count > 1 ? many : one}`
 
 /**
- * "Générer les postes non pourvus" and "Générer cette ligne"
- * (docs/decisions.md D222). The preview comes from the server: for each
- * line, what would happen — its first generation, the completion of its
- * holes, or nothing — with the assignments it holds, which are never
- * changed. A published line is offered unticked: completing it is an
- * explicit choice, whose additions are unpublished changes (nothing is
+ * "Compléter la période N" and "Générer cette ligne" (docs/decisions.md D222,
+ * D228). The preview comes from the server: for each line, what would happen —
+ * its first generation, the completion of its holes, or nothing — with the
+ * assignments it holds, which are never changed. The whole period is one action:
+ * every line that can receive something does, a published line only the new dates
+ * of an extension (D226), whose additions are unpublished changes (nothing is
  * republished nor sent). The run is queued (202), the page follows the job.
  */
 export function FillModal({
@@ -104,15 +103,6 @@ export function FillModal({
     .reduce((sum, line) => sum + (line.uncoveredRequiredDutyCount ?? 0), 0)
   const toGenerate = chosen.filter((line) => line.action === 'GENERATE')
 
-  function toggle(line: FillLinePlan) {
-    setSelected((current) => {
-      const next = new Set(current)
-      if (next.has(line.lineStableId)) next.delete(line.lineStableId)
-      else next.add(line.lineStableId)
-      return next
-    })
-  }
-
   async function run() {
     if (inFlight.current || chosen.length === 0) return
     inFlight.current = true
@@ -148,7 +138,8 @@ export function FillModal({
     }
   }
 
-  const title = onlyLineStableId ? 'Générer cette ligne ?' : 'Générer les postes non pourvus ?'
+  const whole = period ? `Compléter la période ${period.number}` : 'Compléter la période'
+  const title = onlyLineStableId ? 'Générer cette ligne ?' : `${whole} ?`
 
   return (
     <Overlay
@@ -178,11 +169,7 @@ export function FillModal({
               }
               aria-busy={launching}
             >
-              {launching
-                ? 'Envoi…'
-                : onlyLineStableId
-                  ? 'Générer cette ligne'
-                  : 'Générer les postes non pourvus'}
+              {launching ? 'Envoi…' : onlyLineStableId ? 'Générer cette ligne' : whole}
             </button>
           </>
         )
@@ -213,7 +200,8 @@ export function FillModal({
         <>
           <p className="fill-intro">
             Les gardes déjà attribuées ne sont jamais modifiées. Seules les gardes sans titulaire sont
-            complétées ; une ligne jamais générée reçoit sa première génération, sans régénérer les autres.
+            complétées, ligne par ligne, chaque groupe avec ses propres règles d’équité. Aucun e-mail n’est
+            envoyé.
           </p>
 
           <ul className="fill-lines" aria-label="Lignes concernées">
@@ -221,17 +209,10 @@ export function FillModal({
               const writable = line.action === 'GENERATE' || line.action === 'COMPLETE'
               return (
                 <li key={line.lineStableId} className="fill-line" data-action={line.action}>
-                  <label className="fill-line__head">
-                    <input
-                      type="checkbox"
-                      checked={selected.has(line.lineStableId)}
-                      disabled={!line.selectable || launching}
-                      onChange={() => toggle(line)}
-                      aria-describedby={`fill-${line.lineStableId}`}
-                    />
+                  <p className="fill-line__head">
                     <strong>{line.lineName}</strong>
-                    {!writable && <span className="muted"> — inchangée</span>}
-                  </label>
+                    {!writable && !line.followsSource && <span className="muted"> — inchangée</span>}
+                  </p>
                   <p id={`fill-${line.lineStableId}`} className="fill-line__text">
                     {fillPlanText(line)}
                   </p>
