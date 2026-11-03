@@ -36,7 +36,7 @@ seulement ; `04` bilan 0 modifiée ; `05` modifications non publiées ; `06` ven
 coupe le bloc) ; `07` « Confirmer et avertir » refusé avec son motif ; `08` les trois choix ; `09` après
 « Confirmer et avertir » ; `10` ce que chaque ligne utilise ; `11` les trois questions dans une ligne ;
 `12` semaine type générale et son `?` ; `13` `14` à 390 px ; `15` les trois choix à 390 px, **avant** le correctif
-de la liste écrasée (hauteur 0, corrigée ensuite) ; `16` période suivante déjà générée.
+de la liste écrasée (hauteur 0, corrigée ensuite) ; `16` période suivante déjà générée ; `17` les trois choix à 390 px, liste visible, après le correctif.
 
 ## Défauts trouvés par cette recette et corrigés
 
