@@ -244,7 +244,7 @@ export function blockingIssues(
         mode === 'publish'
           ? 'une première publication exige que toutes les gardes obligatoires soient couvertes'
           : 'une ligne jamais publiée exige que toutes ses gardes obligatoires soient couvertes',
-      fix: 'Attribuez-les une à une ou utilisez « Compléter automatiquement ».',
+      fix: 'Attribuez-les une à une ou utilisez « Compléter la période » en haut de page.',
       tag: '',
     })
   }

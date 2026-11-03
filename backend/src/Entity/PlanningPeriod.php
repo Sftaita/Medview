@@ -299,6 +299,25 @@ class PlanningPeriod
      * that emptiness under the planning's lock. Only ever earlier; the
      * calendar (duties, assignments, publications) is not touched.
      */
+    /**
+     * docs/decisions.md D225: takes the dates its cycle just received through
+     * "Modifier les dates" — whatever its status: PeriodDateChange records the
+     * explicit decision, and what it touches in the calendar goes through retired
+     * and added duties, never through this row.
+     */
+    public function followCycleDates(): void
+    {
+        if (null === $this->cycle) {
+            throw new \LogicException('Only the period of a line follows its cycle.');
+        }
+        if ($this->cycle->getStartsAt() < $this->fairnessPeriod->getStartsAt() || $this->cycle->getEndsAt() > $this->fairnessPeriod->getEndsAt()) {
+            throw new \InvalidArgumentException('Extend the FairnessPeriod first: a PlanningPeriod must fall entirely within its FairnessPeriod.');
+        }
+        $this->startsAt = $this->cycle->getStartsAt();
+        $this->endsAt = $this->cycle->getEndsAt();
+        $this->touch();
+    }
+
     public function rectifyEnd(\DateTimeImmutable $endsAt): void
     {
         if ($endsAt >= $this->endsAt || $endsAt <= $this->startsAt) {

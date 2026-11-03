@@ -53,6 +53,7 @@ final class PlanningJobService
         private readonly PlanningLineFillService $fillService,
         private readonly PlanningLineOrder $lineOrder,
         private readonly PlanningGenerationRepository $generationRepository,
+        private readonly PlanningCompletionService $completionService,
     ) {
     }
 
@@ -122,7 +123,8 @@ final class PlanningJobService
             $this->lineOrder->activeInCycle($cycle),
             fn (PlanningLine $line): bool => null !== ($period = $line->periodIn($cycle)) && null !== $this->generationRepository->findMostRecentCompletedByPlanningPeriod($period),
         ));
-        $locked = array_values(array_filter($generated, static fn (PlanningLine $line): bool => null !== PlanningCompletionService::lockedReason($line, $cycle)));
+        // docs/decisions.md D226: a published line with duties its extension created still has something to receive.
+        $locked = array_values(array_filter($generated, fn (PlanningLine $line): bool => null !== PlanningCompletionService::lockedReason($line, $cycle) && 0 === $this->completionService->extensionHoleCount($line, $cycle)));
         if ([] !== $locked && \count($locked) === \count($generated)) {
             throw new PublishedLinesNotCompletedException($locked);
         }

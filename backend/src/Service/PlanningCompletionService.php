@@ -91,6 +91,13 @@ use Doctrine\ORM\EntityManagerInterface;
  * The status is checked again under the calendar lock: a line published
  * while the solve ran makes the whole completion stale — nothing written.
  *
+ * The one exception (docs/decisions.md D226): the duties an explicit extension
+ * of the period created (Duty::$addedByChange — a recorded fact, never deduced
+ * from a date). On a published line, those holes and no others are completed:
+ * every other hole leaves the problem, every assignment stays fixed, each new
+ * assignment is an unpublished change (`wasPublished`), nothing is sent. The
+ * flag is read again on each duty under the calendar lock.
+ *
  * Concurrency: the same session lock as the generation launcher (never
  * both at once on a Planning), and the persistence step re-reads the
  * calendar under the CalendarWriteLock — if anything the solve relied on
@@ -227,12 +234,14 @@ final class PlanningCompletionService
                     continue;
                 }
                 $locked = self::lockedReason($line, $cycle);
-                if (null !== $locked) {
+                // docs/decisions.md D226: a published line receives the days its extension added, nothing else.
+                $extensionOnly = 'published' === $locked && $this->extensionHoleCount($line, $cycle) > 0;
+                if (null !== $locked && !$extensionOnly) {
                     // docs/decisions.md D223: left exactly as it is — not read for holes, never written.
                     $results[] = new CompletionLineResult($line, $locked);
                     continue;
                 }
-                $plan = $this->solveLine($line, $cycle, $parameterSet, $virtualCommitments, $liveDemand->withSourceHoldings($virtualHoldings));
+                $plan = $this->solveLine($line, $cycle, $parameterSet, $virtualCommitments, $liveDemand->withSourceHoldings($virtualHoldings), $extensionOnly);
                 if ($plan instanceof CompletionLineResult) {
                     $results[] = $plan;
                     continue;
@@ -262,7 +271,7 @@ final class PlanningCompletionService
      * @param list<PersonCommitment> $virtualCommitments fills planned on the lines solved before this one
      * @param LiveDemandView         $demand             the live demand, holders planned on earlier lines included
      */
-    private function solveLine(PlanningLine $line, PlanningCycle $cycle, SolverParameterSet $parameterSet, array $virtualCommitments, LiveDemandView $demand): CompletionLineResult|array
+    private function solveLine(PlanningLine $line, PlanningCycle $cycle, SolverParameterSet $parameterSet, array $virtualCommitments, LiveDemandView $demand, bool $extensionOnly = false): CompletionLineResult|array
     {
         $this->heartbeat->beat();
         $period = $line->periodIn($cycle) ?? throw new \LogicException('PlanningLineOrder::activeInCycle() only returns lines with a period in the cycle.');
@@ -293,6 +302,15 @@ final class PlanningCompletionService
             ->withLoadOnlyUnits($loadOnly, $this->membershipOf($loadOnly));
 
         [$fixed, $holes] = $this->splitUnits($problem, $currentByDutyId);
+        if ($extensionOnly) {
+            // docs/decisions.md D226: an older hole of a published line stays a hole — out of the problem altogether.
+            $older = array_filter($holes, static fn (DutyUnit $unit): bool => !self::comesFromExtension($unit));
+            $holes = array_diff_key($holes, $older);
+            $problem = $problem->withoutUnits(array_keys($older));
+            if ([] === $holes) {
+                return new CompletionLineResult($line, 'published', undeterminedUnitCount: $undeterminedUnitCount);
+            }
+        }
         if ([] === $holes) {
             return new CompletionLineResult($line, 'nothing_to_complete', undeterminedUnitCount: $undeterminedUnitCount);
         }
@@ -317,7 +335,41 @@ final class PlanningCompletionService
             return new CompletionLineResult($line, 'solver_failed', \count($holes), 0, $this->countRequired($holes), $result->strictSolverStatus, $result->partialSolverStatus, $undeterminedUnitCount);
         }
 
-        return ['line' => $line, 'generation' => $generation, 'snapshot' => $snapshot, 'problem' => $constrained, 'holes' => $holes, 'fixed' => $fixed, 'result' => $result, 'undetermined' => $undeterminedUnitCount];
+        return ['line' => $line, 'generation' => $generation, 'snapshot' => $snapshot, 'problem' => $constrained, 'holes' => $holes, 'fixed' => $fixed, 'result' => $result, 'undetermined' => $undeterminedUnitCount, 'extensionOnly' => $extensionOnly];
+    }
+
+    /**
+     * docs/decisions.md D226: how many duties a published line may still
+     * receive automatically in $cycle: those an extension created, not assigned
+     * — plus the reinforcements their holders now trigger. 0 for anything else.
+     */
+    public function extensionHoleCount(PlanningLine $line, PlanningCycle $cycle): int
+    {
+        $period = $line->periodIn($cycle);
+        $generation = null !== $period ? $this->generationRepository->findMostRecentCompletedByPlanningPeriod($period) : null;
+        if (null === $period || null === $generation) {
+            return 0;
+        }
+        $current = $this->currentByDutyId($generation);
+        $count = 0;
+        foreach ($this->dutyRepository->findAddedByExtension($period) as $duty) {
+            if (!isset($current[(int) $duty->getId()])) {
+                ++$count;
+            }
+        }
+
+        return $count + ($this->inheritedReinforcements->inherits($line) ? $this->inheritedReinforcements->extensionDutyCount($period) : 0);
+    }
+
+    private static function comesFromExtension(DutyUnit $unit): bool
+    {
+        foreach ($unit->getDuties() as $duty) {
+            if (null === $duty->getAddedByChange()) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -470,10 +522,12 @@ final class PlanningCompletionService
 
                 // docs/decisions.md D223: the committed status, read under the lock (D197) — a line published or
                 // validated while the solve ran is never completed: the whole completion is stale, nothing written.
-                if (\in_array($this->periodRepository->statusNow($generation->getPlanningPeriod()), self::LOCKED_STATUSES, true)) {
+                $statusNow = $this->periodRepository->statusNow($generation->getPlanningPeriod());
+                if (\in_array($statusNow, self::LOCKED_STATUSES, true) && (!$plan['extensionOnly'] || PlanningPeriodStatus::ARCHIVED === $statusNow)) {
                     throw new PlanningCompletionStaleException();
                 }
-                $wasPublished = false;
+                // docs/decisions.md D226: an unpublished change of a published line, until it is republished.
+                $wasPublished = $plan['extensionOnly'] && PlanningPeriodStatus::PUBLISHED === $statusNow;
                 // D165: the live demand again, under the lock — what the lines written just before in this
                 // transaction now hold included. A reinforcement the calendar no longer requires is never written.
                 $demandNow = $this->demandViewFactory->forPlanning($planning);
@@ -483,6 +537,10 @@ final class PlanningCompletionService
                     $unit = $plan['holes'][$edge->dutyUnitStableKey] ?? null;
                     if (null === $unit) {
                         continue; // a fixed unit: already exactly this assignee, never rewritten
+                    }
+                    // docs/decisions.md D226: the server's guarantee — nothing but an extension's duty on a published line.
+                    if ($plan['extensionOnly'] && !self::comesFromExtension($unit)) {
+                        throw new PlanningCompletionStaleException();
                     }
 
                     $member = $this->teamMemberRepository->findOneByStableId($edge->sourceTeamMemberStableId);

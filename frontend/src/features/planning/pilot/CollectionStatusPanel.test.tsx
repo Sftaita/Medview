@@ -109,23 +109,10 @@ describe('CollectionStatusPanel — search and sort', () => {
     expect(screen.getByText('Aucun membre ne correspond à « zzz ».')).toBeInTheDocument()
   })
 
-  it('offers to set the informative deadline only when the page can open the settings', () => {
-    const onEditDeadline = vi.fn()
-    const { unmount } = render(
-      <CollectionStatusPanel status={makeStatus()} onChanged={vi.fn()} onEditDeadline={onEditDeadline} />,
-    )
-    fireEvent.click(screen.getByRole('button', { name: 'Fixer une date limite indicative' }))
-    expect(onEditDeadline).toHaveBeenCalledTimes(1)
-    unmount()
-
-    render(
-      <CollectionStatusPanel
-        status={makeStatus({ availabilityDeadline: '2026-09-25' })}
-        onChanged={vi.fn()}
-        onEditDeadline={onEditDeadline}
-      />,
-    )
-    expect(screen.getByRole('button', { name: 'Modifier la date limite indicative' })).toBeInTheDocument()
+  it('shows the informative deadline read-only: nothing here sets it any more', () => {
+    renderPanel({ availabilityDeadline: '2026-09-25' })
+    expect(screen.getByText('Date limite indicative : 25 septembre 2026')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /date limite indicative/ })).not.toBeInTheDocument()
     cleanup()
 
     renderPanel()

@@ -1,14 +1,14 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { makePreflight, makeStatus } from '../../../testUtils/pilotFixtures'
+import { makePreflight } from '../../../testUtils/pilotFixtures'
 import { status as httpStatus, stubApi } from '../../../testUtils/stubApi'
 import { FillModal, FillResultBody } from './FillModal'
 import { fillResultText } from './fillText'
 import { PilotHeaderActions } from './PilotHeaderActions'
 import type { FillLinePlan, FillPreview, PlanningJob } from './types'
 
-// "Générer les postes non pourvus" / "Générer cette ligne" (docs/decisions.md D222).
+// "Compléter la période N" / "Générer cette ligne" (docs/decisions.md D222, D228).
 
 beforeEach(() => localStorage.setItem('medvue.auth.token', 'jwt'))
 afterEach(() => {
@@ -82,6 +82,18 @@ const ARCHIVED = plan({
   protectedAssignmentCount: 4,
 })
 
+/** docs/decisions.md D226: a published line whose period was extended: only its new dates are completed. */
+const SENIORS_EXTENDED = plan({
+  periodStatus: 'PUBLISHED',
+  action: 'COMPLETE',
+  reason: 'extension_days',
+  selectable: true,
+  selectedByDefault: true,
+  uncoveredRequiredDutyCount: 3,
+  otherUncoveredCount: 2,
+  extensionOnly: true,
+})
+
 const preview = (lines: FillLinePlan[]): FillPreview => ({
   lines,
   blockers: [],
@@ -106,6 +118,7 @@ function renderModal(onlyLineStableId?: string) {
   render(
     <FillModal
       planningStableId="plan-1"
+      period={{ stableId: 'c2', number: 2, startsAt: '2027-01-31', lastDay: '2027-05-02', named: true }}
       timezone="Europe/Brussels"
       onlyLineStableId={onlyLineStableId}
       onClose={onClose}
@@ -122,28 +135,35 @@ async function confirmButton(name: string) {
 }
 
 describe('FillModal — the preview', () => {
-  it('shows each line and its protected assignments; a published line can never be ticked', async () => {
-    stubApi({
+  it('shows each line and its protected assignments, with nothing to tick', async () => {
+    const api = stubApi({
       'GET /api/plannings/plan-1/fill-preview': () =>
         preview([SENIORS_PUBLISHED_WITH_HOLES, JUNIORS_NEW, ARCHIVED]),
     })
     renderModal()
 
-    const lines = await screen.findByRole('list', { name: 'Lignes concernées' })
-    const seniors = within(lines).getByRole('checkbox', { name: /Seniors/ })
-    expect(seniors).not.toBeChecked()
-    expect(seniors).toBeDisabled()
-    expect(within(lines).getByRole('checkbox', { name: /Juniors/ })).toBeChecked()
-    expect(within(lines).getByRole('checkbox', { name: /Anciens/ })).toBeDisabled()
+    expect(await screen.findByRole('heading', { name: 'Compléter la période 2 ?' })).toBeInTheDocument()
+    expect(api.requests('GET', '/api/plannings/plan-1/fill-preview')[0].query.get('period')).toBe('c2')
+    const lines = screen.getByRole('list', { name: 'Lignes concernées' })
+    // The whole period is one action: no line to choose.
+    expect(within(lines).queryByRole('checkbox')).not.toBeInTheDocument()
+    const line = (name: string) => within(lines).getByText(name).closest('li')
+    expect(line('Seniors')).toHaveTextContent('— inchangée')
+    expect(line('Juniors')).not.toHaveTextContent('inchangée')
     expect(
       within(lines).getByText(
-        'Publiée : jamais complétée automatiquement (2 gardes non pourvues, à attribuer à la main). Elle n’empêche pas de générer les autres lignes.',
+        'Publiée : conservée telle quelle (2 gardes non pourvues, à attribuer à la main). Les autres lignes sont traitées normalement.',
       ),
     ).toBeInTheDocument()
-    expect(within(lines).getByText(/première génération de cette ligne seule/)).toBeInTheDocument()
+    expect(
+      within(lines).getByText(
+        'Jamais générée : ses gardes seront créées puis attribuées (30 gardes à pourvoir).',
+      ),
+    ).toBeInTheDocument()
     expect(within(lines).getByText('Archivée : jamais modifiée.')).toBeInTheDocument()
     expect(within(lines).getByText('28 gardes attribuées protégées')).toBeInTheDocument()
     expect(screen.getByText(/32 affectations existantes protégées/)).toBeInTheDocument()
+    expect(screen.getByText(/Aucun e-mail n’est envoyé/)).toBeInTheDocument()
     // A first generation is selected: its rest rules are asked for — both unticked, never guessed.
     const rest = screen.getByRole('group', { name: 'Règles de repos' })
     for (const box of within(rest).getAllByRole('checkbox')) expect(box).not.toBeChecked()
@@ -162,11 +182,11 @@ describe('FillModal — the preview', () => {
     const wait = await screen.findByRole('status')
     expect(wait).toHaveTextContent('Analyse des lignes en cours…')
     expect(wait).toHaveTextContent('jusqu’à une vingtaine de secondes')
-    expect(screen.getByRole('button', { name: 'Générer les postes non pourvus' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Compléter la période 2' })).toBeDisabled()
 
     answer(preview([SENIORS_DRAFT_WITH_HOLES]))
     await waitFor(() => expect(screen.queryByText('Analyse des lignes en cours…')).not.toBeInTheDocument())
-    expect(screen.getByRole('button', { name: 'Générer les postes non pourvus' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Compléter la période 2' })).toBeEnabled()
   })
 
   it('says when members who joined after the generation are taken into account', async () => {
@@ -180,26 +200,48 @@ describe('FillModal — the preview', () => {
     ).toBeInTheDocument()
   })
 
-  it('sends exactly the lines ticked — never a published one — then hands the queued job to the page', async () => {
+  it('sends every line that can receive something — never a published one — then hands the queued job to the page', async () => {
     const api = stubApi({
       'GET /api/plannings/plan-1/fill-preview': () =>
         preview([
           SENIORS_DRAFT_WITH_HOLES,
-          JUNIORS_NEW,
+          { ...JUNIORS_NEW, lineStableId: 'l4', action: 'COMPLETE', lineName: 'Juniors' },
           { ...SENIORS_PUBLISHED_WITH_HOLES, lineStableId: 'l9', lineName: 'Publiée' },
         ]),
       'POST /api/plannings/plan-1/fill': () => httpStatus(202, { job: queued }),
     })
     const { onLaunched, onClose } = renderModal()
 
-    fireEvent.click(await screen.findByRole('checkbox', { name: /Juniors/ }))
-    fireEvent.click(await confirmButton('Générer les postes non pourvus'))
+    fireEvent.click(await confirmButton('Compléter la période 2'))
 
     await waitFor(() => expect(onLaunched).toHaveBeenCalledWith(queued))
     expect(onClose).toHaveBeenCalled()
     const [post] = api.requests('POST', '/api/plannings/plan-1/fill')
-    // Only a completion: no rest rule is sent (a completion keeps its generation's own).
-    expect(post.body).toEqual({ lines: ['l1'] })
+    // Only completions: no rest rule is sent (a completion keeps its generation's own).
+    expect(post.body).toEqual({ lines: ['l1', 'l4'] })
+    expect(post.query.get('period')).toBe('c2')
+  })
+
+  it('sends a published line for the new dates of an extension only, and says so; never one merely excluded', async () => {
+    const api = stubApi({
+      'GET /api/plannings/plan-1/fill-preview': () =>
+        preview([
+          SENIORS_EXTENDED,
+          { ...SENIORS_PUBLISHED_WITH_HOLES, lineStableId: 'l9', lineName: 'Ancienne publiée' },
+        ]),
+      'POST /api/plannings/plan-1/fill': () => httpStatus(202, { job: queued }),
+    })
+    const { onLaunched } = renderModal()
+
+    expect(
+      await screen.findByText(
+        'Publiée : 3 gardes des nouvelles dates à attribuer. Les gardes déjà publiées ne changent pas, et 2 anciens postes vacants restent à attribuer à la main. À republier ensuite.',
+      ),
+    ).toBeInTheDocument()
+    fireEvent.click(await confirmButton('Compléter la période 2'))
+
+    await waitFor(() => expect(onLaunched).toHaveBeenCalledWith(queued))
+    expect(api.requests('POST', '/api/plannings/plan-1/fill')[0].body).toEqual({ lines: ['l1'] })
   })
 
   it('with a first generation, sends the rest rules as chosen — unticked by default', async () => {
@@ -209,7 +251,7 @@ describe('FillModal — the preview', () => {
     })
     renderModal()
 
-    fireEvent.click(await confirmButton('Générer les postes non pourvus'))
+    fireEvent.click(await confirmButton('Compléter la période 2'))
 
     await waitFor(() => expect(api.requests('POST', '/api/plannings/plan-1/fill')).toHaveLength(1))
     expect(api.requests('POST', '/api/plannings/plan-1/fill')[0].body).toMatchObject({
@@ -227,19 +269,21 @@ describe('FillModal — the preview', () => {
     renderModal('l2')
 
     expect(await screen.findByRole('heading', { name: 'Générer cette ligne ?' })).toBeInTheDocument()
-    expect(screen.queryByRole('checkbox', { name: /Seniors/ })).not.toBeInTheDocument()
-    fireEvent.click(await confirmButton('Générer cette ligne'))
+    const confirm = await confirmButton('Générer cette ligne')
+    expect(screen.queryByText('Seniors')).not.toBeInTheDocument()
+    expect(screen.getByText('Juniors')).toBeInTheDocument()
+    fireEvent.click(confirm)
 
     await waitFor(() => expect(api.requests('POST', '/api/plannings/plan-1/fill')).toHaveLength(1))
     expect(api.requests('POST', '/api/plannings/plan-1/fill')[0].body).toMatchObject({ lines: ['l2'] })
   })
 
-  it('nothing selectable (only a published line): the button stays disabled', async () => {
+  it('nothing to send (only a published line): the button stays disabled', async () => {
     stubApi({ 'GET /api/plannings/plan-1/fill-preview': () => preview([SENIORS_PUBLISHED_WITH_HOLES]) })
     renderModal()
 
-    expect(await screen.findByText(/Publiée : jamais complétée automatiquement/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Générer les postes non pourvus' })).toBeDisabled()
+    expect(await screen.findByText(/Publiée : conservée telle quelle/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Compléter la période 2' })).toBeDisabled()
   })
 
   it('says in words when the server finds nothing to fill, or a computation already running', async () => {
@@ -250,11 +294,11 @@ describe('FillModal — the preview', () => {
     })
     const { onLaunched } = renderModal()
 
-    fireEvent.click(await confirmButton('Générer les postes non pourvus'))
+    fireEvent.click(await confirmButton('Compléter la période 2'))
     expect(await screen.findByText(/rien n’a été modifié/)).toBeInTheDocument()
 
     answer = httpStatus(409, { error: 'job_in_progress' })
-    fireEvent.click(await confirmButton('Générer les postes non pourvus'))
+    fireEvent.click(await confirmButton('Compléter la période 2'))
     expect(await screen.findByText(/Un calcul est déjà en cours/)).toBeInTheDocument()
     expect(onLaunched).not.toHaveBeenCalled()
   })
@@ -345,7 +389,6 @@ function renderHeader(hasGeneratedLines: boolean) {
     <PilotHeaderActions
       planningStableId="plan-1"
       timezone="Europe/Brussels"
-      status={makeStatus()}
       onChanged={vi.fn()}
       onLaunched={onLaunched}
       hasGeneratedLines={hasGeneratedLines}
@@ -360,25 +403,22 @@ const generatedPreflight = () => {
 }
 
 describe('PilotHeaderActions — protecting what is assigned (docs/decisions.md D222)', () => {
-  it('nothing generated yet: "Générer le planning" stays the main action', () => {
+  it('nothing generated yet: generating is the main action, and nothing can be replaced', () => {
     stubApi({})
     renderHeader(false)
 
-    expect(screen.getByRole('button', { name: 'Générer le planning' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Générer les postes non pourvus' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Plus d’actions' }))
-    expect(screen.queryByRole('menuitem', { name: 'Régénérer entièrement…' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Générer la période 1' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Compléter|postes non pourvus/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Plus d’actions' })).not.toBeInTheDocument()
   })
 
-  it('a line generated: no "Générer le planning" any more — the main action protects, regenerating is apart', async () => {
+  it('a line generated: never "Générer" any more — the main action protects, regenerating is apart', async () => {
     stubApi({ 'GET /api/plannings/plan-1/fill-preview': () => preview([JUNIORS_NEW]) })
     renderHeader(true)
 
-    expect(screen.queryByRole('button', { name: 'Générer le planning' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Générer les postes non pourvus' }))
-    expect(
-      await screen.findByRole('heading', { name: 'Générer les postes non pourvus ?' }),
-    ).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Générer/ })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Compléter la période 1' }))
+    expect(await screen.findByRole('heading', { name: 'Compléter la période ?' })).toBeInTheDocument()
   })
 
   it('"Régénérer entièrement…" requires ticking an explicit confirmation, and only then sends it', async () => {
@@ -416,7 +456,7 @@ describe('PilotHeaderActions — protecting what is assigned (docs/decisions.md 
     })
   })
 
-  it('"Générer le planning" never sends the confirmation, and explains a refusal on a generated line', async () => {
+  it('"Générer la période" never sends the confirmation, and explains a refusal on a generated line', async () => {
     const api = stubApi({
       'GET /api/plannings/plan-1/fill-preview': () => preview([]),
       'GET /api/plannings/plan-1/generation-preflight': () => ({
@@ -427,11 +467,11 @@ describe('PilotHeaderActions — protecting what is assigned (docs/decisions.md 
     })
     renderHeader(false)
 
-    fireEvent.click(screen.getByRole('button', { name: 'Générer le planning' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Générer la période 1' }))
 
     expect(
       await screen.findByText(
-        /déjà générée : « Générer le planning » ne remplace jamais des gardes attribuées/,
+        /déjà générée : ses gardes attribuées ne sont jamais remplacées par défaut\. Utilisez « Compléter la période »/,
       ),
     ).toBeInTheDocument()
     expect(

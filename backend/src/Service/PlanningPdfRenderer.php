@@ -164,6 +164,12 @@ final class PlanningPdfRenderer
         $lines = array_values(array_filter($lineByPeriodId));
         usort($lines, static fn (PlanningLine $a, PlanningLine $b): int => $a->getPosition() <=> $b->getPosition());
         [$first, $last] = self::cycleDays($publication);
+        // docs/decisions.md D225: what was diffused stays what it was, even when the period has since been shortened.
+        foreach (array_keys($byDateAndLine) as $day) {
+            $date = new \DateTimeImmutable($day);
+            $first = min($first, $date);
+            $last = max($last, $date);
+        }
 
         return $this->grid(
             $publication,

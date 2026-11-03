@@ -10401,3 +10401,132 @@ modifié.
   le haut quand sa dernière entrée n'est pas réellement affichée, mesuré à
   chaque ouverture avec `elementFromPoint` plutôt qu'avec la hauteur de la barre
   du bas, parce que la carte qui coupe le menu et la fin de page comptent aussi.
+
+## D225 — « Modifier les dates », une seule action, selon l'état réel de la période
+
+- **Constat (audit, 2026-11-03)** — deux boutons (« Modifier les dates », D207 ;
+  « Corriger la fin… », D211), un troisième pour une période unique (« Prolonger la
+  période », D122), et des refus qui ne laissaient aucun chemin : une période générée
+  ne bougeait plus du tout (`period_has_generation`, `period_not_blank`,
+  `next_period_not_blank`, `period_locked`), alors que les gestionnaires doivent
+  pouvoir prolonger ou raccourcir une période réelle.
+- **Décision** (demande de l'utilisateur, 2026-11-03) — un seul bouton et une seule
+  écriture (`PATCH …/periods/{p}`), qui dépend de l'état :
+  - `PeriodDateRules` ne garde que ce qu'aucune confirmation ne rendrait acceptable :
+    période archivée, calcul en cours, période trop courte (7 jours), frontière qui
+    coupe un bloc — de la semaine type **ou déjà créé**
+    (`materialized_block_crosses_boundary`, même si la structure a changé depuis), et
+    collecte qui se retrouverait entièrement hors de la période.
+  - `PeriodDateChangePlanner` calcule, **sans rien écrire**, le plan : périodes qui
+    bougent (la voisine suit : une période suivante commence toujours le lendemain ; choisir
+    le premier jour d'une période déplace la fin de la précédente), gardes hors période et
+    titulaires, jours gagnés, collectes réduites, demandes d'échange, personnes à avertir.
+    `GET …/date-change-preview`.
+  - **Confirmation** : aucune tant que rien n'est généré, ni pour une prolongation dont la
+    voisine est vierge (les nouveaux jours sont annoncés) ; obligatoire pour raccourcir une
+    période générée, ou dès qu'une voisine générée bouge. Le serveur exige le **hash du plan
+    lu** (`confirmation`) : si le calendrier change entre l'aperçu et l'écriture, 409
+    `date_change_confirmation_required`, rien n'est écrit.
+  - **Une transaction**, sous le verrou de ligne du planning, le verrou du calendrier et le
+    verrou moteur : journal, gardes retirées, dates (période, lignes, registres d'équité,
+    enveloppe), collectes, gardes vides des jours gagnés, republication éventuelle ; les
+    e-mails partent après le commit, depuis la boîte d'envoi (D172).
+  - **Une garde n'est jamais supprimée** : `duties.retired_at` / `retired_by_change_id`. Elle
+    disparaît de toutes les lectures du calendrier (`DutyRepository`) ; son affectation est
+    remplacée par un événement (`previous` → null, `wasPublished`) ; ses entrées de publication
+    et le PDF stocké restent l'historique. Une reprolongation crée de nouvelles gardes.
+  - **Journal append-only** `period_date_changes` (trigger) : auteur, dates avant/après,
+    averti ou non, et le plan confirmé figé.
+- **Raccourcir une période publiée** (choix de l'utilisateur, 2026-11-03) :
+  - **Annuler** : aucune requête.
+  - **Confirmer** : pas de message ; le dernier PDF reste l'historique ; les retraits
+    apparaissent dans « Modifications non publiées » (`PublicationChangeService` les compte
+    désormais) ; une republication ultérieure préviendra leurs titulaires, et eux seuls.
+  - **Confirmer et avertir** : dates et republication **dans la même transaction**
+    (`PlanningPublicationService::republishInTransaction()`), nouveau PDF, e-mail aux seules
+    personnes qui perdent une garde (D172). Refusé, motif affiché, si d'autres modifications
+    attendent (`pending_changes` : elles seraient annoncées sans que personne l'ait choisi), si
+    le calendrier n'est pas republiable, ou si personne n'est à avertir — une garde jamais
+    publiée n'a été vue par personne (D204), aucun membre n'en entend parler.
+- **Révise D208** — une collecte n'est plus un refus : elle est réduite à ce qui reste de sa
+  fenêtre (`clampToCycle`) et **jamais en silence**, le plan la nomme et dit si des participants
+  ont répondu ou ont été sollicités, avant tout enregistrement. Aucun message n'est envoyé,
+  les indisponibilités ne changent pas. La collecte intacte suit toujours ses dates.
+- **Révise I8, et rend D211 sans interface** — une période validée ou publiée change de dates par
+  ce parcours explicite. L'endpoint `end-rectification` et son journal restent (historique,
+  tests), plus aucun écran ne les appelle.
+- **Alternatives écartées** : filtrer par date plutôt que retirer (une reprolongation ressusciterait
+  des gardes sans décision) ; déplacer les gardes d'une période à l'autre (générations, snapshots
+  et publications sont par période) ; e-mail seul pour « avertir » (PDF faux jusqu'à une
+  republication, double message ensuite).
+- **Tests** : `PeriodDateChangeTest` (14, OR-Tools réel, données lues avant/après),
+  `PlanningPeriodDatesTest` (révisé, 15).
+
+## D226 — Exception limitée : compléter les nouvelles dates d'une ligne publiée
+
+- **Contexte** — D223 interdit toute complétion automatique d'une ligne publiée ; le cas réel
+  (période 1 de Trauma Delta, publiée, prolongée du 28 janvier au 4 février) demande pourtant
+  « Compléter la période 1 ». Arbitrage de l'utilisateur (2026-11-03) : exception **limitée à la
+  prolongation**, sécurisée côté serveur.
+- **Décision** :
+  - Prolonger n'attribue rien et n'envoie rien : les gardes des nouveaux jours sont créées
+    **vides** dans la transaction du changement (`WeeklyDutyCalendarService::materializeExtension()`,
+    occurrences touchant la fenêtre ajoutée seulement, jamais un reste de bloc).
+  - Chacune porte `duties.added_by_change_id` : « créée par une prolongation » est un **fait
+    enregistré**, jamais déduit d'une date. Un jour ancien sans garde reste sans garde.
+  - `PlanningCompletionService` : sur une ligne publiée ou validée (jamais archivée), seules ces
+    gardes sont des trous ; les **anciens** postes vacants sortent du problème
+    (`OptimizationProblem::withoutUnits()`) et restent vacants ; toute affectation reste fixée, donc
+    compte dans l'équité. Sous le verrou du calendrier, le statut et le marquage sont relus sur chaque
+    garde : une garde non marquée rend la complétion caduque, rien n'est écrit.
+  - Les nouvelles affectations sont des modifications non publiées (`wasPublished`) : pas de
+    nouvelle publication, PDF stocké identique, aucun e-mail. Républier reste explicite.
+  - Une ligne de renfort qui hérite de sa source (D224) reçoit, **dans le même passage**, les seuls
+    renforts que les nouveaux titulaires de ces gardes déclenchent, marqués à leur tour.
+- **D223 reste vrai pour tout le reste** : plus aucune garde marquée à attribuer → la ligne publiée
+  redevient `EXCLUDED` (`published`), demandée ou non.
+- **Tests** : `PeriodDateChangeTest::testExtendingAPublishedPeriodThenCompletingTouchesOnlyTheNewDays`,
+  `PeriodCompletionAllLinesTest::testAnInheritingLineFollowsItsPublishedSourceOnTheNewDatesOnly`,
+  `PlanningPublishedLineCompletionTest` (inchangé).
+
+## D227 — Semaine type générale, choix par ligne
+
+- **Décision** — `plannings.week_template` (JSON, null tant qu'elle n'a pas été enregistrée : elle se
+  lit alors comme la structure de la ligne principale, aucune reprise de données) et
+  `planning_lines.week_structure_mode` (`GENERAL` / `CUSTOM`, ligne principale `GENERAL` à la migration,
+  les autres gardent ce qu'elles ont). **Une seule représentation moteur** : suivre la structure générale,
+  c'est en recevoir une copie par `WeekStructureService::replace()` — mêmes `DutyPattern` par équipe, même
+  matérialisation, moteur inchangé.
+  - Enregistrer la structure générale la copie aux lignes `GENERAL` actives, tout ou rien ; aucune garde
+    existante n'est touchée (un jour déjà matérialisé reste décidé, D136). Un test compare l'empreinte
+    md5 des gardes, affectations, générations et entrées avant/après.
+  - Une nouvelle ligne part de la structure générale quand il y en a une : elle est générable tout de suite.
+  - Enregistrer la semaine type d'une ligne la rend `CUSTOM`. Une ligne de renfort qui hérite (D224) n'est
+    ni l'une ni l'autre : ses motifs récurrents sont désactivés à la configuration, sa structure est `INHERITED`.
+- **Endpoints** : `GET/PUT /api/plannings/{id}/week-template`, `PUT /api/planning-lines/{id}/week-structure-mode`.
+- **Tests** : `PlanningWeekTemplateTest` (6).
+
+## D228 — Une action principale, un emplacement ; réglages rangés par question
+
+- **Constat** — sur Trauma Delta, passer de la période 1 à la période 2 ajoutait un bouton dans l'en-tête
+  et déplaçait le reste ; « Générer le planning », « Générer les postes non pourvus » et « Compléter
+  automatiquement » (calendrier) faisaient presque la même chose ; « Paramètres du planning » ne contenait
+  qu'une date limite devenue propre à chaque période ; « Règles de génération » ne disait pas ce qu'elles règlent.
+- **Décision** :
+  - Un emplacement unique et de taille fixe (`.pd-main-action`), l'état venant de l'état réel de la période
+    (`periodAction.ts`) : « Générer la période N » / « Compléter la période N » + `?` / « Période complète » /
+    « N gardes à attribuer à la main » (anciens trous d'une ligne publiée) / « Calcul en cours… ». Une réponse
+    tardive pour la période quittée ne décide jamais de l'action de la période affichée.
+  - « Compléter » traite **toutes les lignes** : plus de cases à cocher ; `PlanningLineFillService` (D222) est
+    réutilisé tel quel : une écriture atomique par ligne, l'équité calculée pour chaque groupe séparément, les
+    conflits inter-lignes respectés, diagnostic par ligne. « Générer cette ligne » passe dans le menu « ⋯ » de la
+    ligne ; le bouton du calendrier disparaît, ainsi que celui de l'onglet vide.
+  - Trois questions, trois sections dans « Paramètres de la ligne » : **Semaine type** (quels jours, quels
+    blocs), **Règles de couverture** (quand une garde est nécessaire), **Règles de génération** (comment
+    répartir). L'entrée « Règles de génération » de l'en-tête disparaît ; « Semaine type » y reste, générale, avec
+    `?` et la liste de ce que chaque ligne utilise.
+  - « Paramètres » disparaît : la date limite se règle dans « Préparer la période » (D214, D218). La colonne et
+    l'endpoint `PATCH …/settings` restent, ainsi que l'historique ; aucun écran ne les appelle plus.
+  - « Prolonger la période » disparaît : « Modifier les dates » couvre ce cas. L'endpoint D122 reste, sans écran.
+- **Limite connue** — une ligne nouvelle n'entre pas dans une période dont une ligne est déjà publiée
+  (`isOpenToNewLine`, D196, inchangé) : elle commence à la période suivante.

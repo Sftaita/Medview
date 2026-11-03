@@ -2,7 +2,8 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import { Icon } from '../../../components/Icon'
 import { Overlay } from '../../../components/Overlay'
 import { ApiError } from '../../../lib/apiClient'
-import { WeekStructureModal } from '../../week-structure'
+import { saveWeekStructureMode, WeekStructureModal } from '../../week-structure'
+import { GenerationRulesPanel } from '../pilot/GenerationRulesPanel'
 import { fetchDemandPolicy, saveDemandPolicy } from './api'
 import { CoverageMatrix } from './CoverageMatrix'
 import { DemandPreviewPanel, InheritedStructurePanel, TriggerSummary } from './ReinforcementPanels'
@@ -12,7 +13,13 @@ import { sortWeekdays, weekdayLabel } from './weekdays'
 import './coverage.css'
 
 type Props = {
-  line: { stableId: string; name: string; type: 'PRIMARY' | 'SECONDARY' }
+  line: {
+    stableId: string
+    name: string
+    type: 'PRIMARY' | 'SECONDARY'
+    coverage?: { mode: string; weekStructure?: 'GENERAL' | 'CUSTOM' }
+  }
+  timezone?: string
   onClose: () => void
   /** Something was saved (coverage rules or weekly structure): the caller may refresh what depends on it. */
   onSaved?: () => void
@@ -39,7 +46,12 @@ type Props = {
  * SOURCE's surgeons, who trigger a reinforcement — never this line's members,
  * who hold them. The preview is computed by the server, nothing saved.
  */
-export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
+export function LineSettingsDialog({ line, timezone = 'Europe/Brussels', onClose, onSaved }: Props) {
+  // docs/decisions.md D227: what this line uses — the general weekly structure, or its own.
+  const [weekMode, setWeekMode] = useState<'GENERAL' | 'CUSTOM'>(
+    line.coverage?.weekStructure ?? (line.type === 'PRIMARY' ? 'GENERAL' : 'CUSTOM'),
+  )
+  const [weekModeError, setWeekModeError] = useState<string | null>(null)
   const [view, setView] = useState<DemandPolicyView | null>(null)
   const [draft, setDraft] = useState<CoverageDraft | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -180,6 +192,51 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
           {ownStructure && (
             <section className="cov-section" aria-labelledby={`${sourceId}-week`}>
               <h3 id={`${sourceId}-week`}>Semaine type</h3>
+              <span className="cov-help">Quels jours et quels blocs de garde existent ?</span>
+              <fieldset className="cov-modes" aria-label="Semaine type utilisée">
+                {(['GENERAL', 'CUSTOM'] as const).map((mode) => (
+                  <label key={mode} className="cov-mode">
+                    <input
+                      type="radio"
+                      name={`${sourceId}-week-mode`}
+                      checked={weekMode === mode}
+                      disabled={saving}
+                      onChange={() => {
+                        setWeekModeError(null)
+                        saveWeekStructureMode(line.stableId, mode)
+                          .then(() => {
+                            setWeekMode(mode)
+                            onSaved?.()
+                            load(true)
+                          })
+                          .catch(() =>
+                            setWeekModeError(
+                              'Ce choix n’a pas pu être enregistré : la semaine type générale couperait un bloc à la limite entre deux périodes.',
+                            ),
+                          )
+                      }}
+                    />
+                    <span>
+                      <strong>
+                        {mode === 'GENERAL'
+                          ? 'Semaine type générale du planning'
+                          : 'Semaine type personnalisée'}
+                      </strong>
+                      <span className="cov-help">
+                        {mode === 'GENERAL'
+                          ? 'Commune aux lignes qui l’utilisent ; se modifie dans le menu « ⋯ » du planning.'
+                          : 'Propre à cette ligne. Elle ne suit plus la semaine type générale.'}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+              {weekModeError && (
+                <p role="alert" className="alert alert--error">
+                  <Icon name="alert" size={18} strokeWidth={2} />
+                  <span>{weekModeError}</span>
+                </p>
+              )}
               <p className="cov-help">
                 {!view.targetStructure.configured
                   ? 'Aucune semaine type n’est encore configurée pour cette ligne.'
@@ -187,17 +244,19 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
                     ? 'Une garde chaque jour de la semaine.'
                     : `Pas de garde le ${excluded.map(weekdayLabel).join(', ')}.`}
               </p>
-              <div>
-                <button
-                  type="button"
-                  className="btn btn--secondary btn--sm"
-                  onClick={() => setWeekOpen(true)}
-                  disabled={saving}
-                >
-                  <Icon name="calendar" size={16} strokeWidth={2} />
-                  Modifier la semaine type
-                </button>
-              </div>
+              {weekMode === 'CUSTOM' && (
+                <div>
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--sm"
+                    onClick={() => setWeekOpen(true)}
+                    disabled={saving}
+                  >
+                    <Icon name="calendar" size={16} strokeWidth={2} />
+                    Modifier la semaine type
+                  </button>
+                </div>
+              )}
             </section>
           )}
 
@@ -343,6 +402,7 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
               </ul>
             </section>
           )}
+          <GenerationRulesPanel lineStableId={line.stableId} timezone={timezone} onActivated={onSaved} />
         </div>
       )}
 

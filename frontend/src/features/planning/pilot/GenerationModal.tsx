@@ -46,7 +46,7 @@ type Props = {
 }
 
 /**
- * "Générer le planning" (docs/decisions.md D129). First the preflight — the
+ * "Générer la période N" (docs/decisions.md D129, D228). First the preflight — the
  * period, who confirmed, who did not, how many unavailabilities the period
  * holds, the deadline, warnings — then the explicit confirmation. Members
  * still pending and a passed deadline only ever produce *warnings*; the
@@ -170,7 +170,7 @@ export function GenerationModal({ planningStableId, period, onClose, onLaunched,
       title={
         replace
           ? 'Régénérer entièrement ?'
-          : period?.named
+          : period
             ? `Générer la période ${period.number} ?`
             : 'Générer le planning ?'
       }
@@ -399,7 +399,7 @@ function PreflightBody({
             </p>
             <p>
               Pour garder ces gardes et ne compléter que les postes vacants ou les nouvelles lignes, utilisez
-              « Générer les postes non pourvus ».
+              « Compléter la période ».
             </p>
             <label className="sh-stale__override">
               <input
@@ -741,11 +741,11 @@ function blockerText(issue: PreflightIssue): string {
   const line = issue.lineName ? `Ligne « ${issue.lineName} » : ` : ''
   switch (issue.code) {
     case 'NO_ACTIVE_RULE_SET':
-      return `${line}aucune règle de planning n’est active.`
+      return `${line}les règles de génération ne sont pas activées (Paramètres de la ligne).`
     case 'NO_DUTIES':
       return `${line}aucune garde à répartir sur cette période.`
     case 'REGENERATION_NOT_CONFIRMED':
-      return `${line}déjà générée : « Générer le planning » ne remplace jamais des gardes attribuées. Utilisez « Générer les postes non pourvus », ou « Régénérer entièrement » (menu ⋯) pour remplacer volontairement son calendrier.`
+      return `${line}déjà générée : ses gardes attribuées ne sont jamais remplacées par défaut. Utilisez « Compléter la période », ou « Régénérer entièrement » (menu ⋯) pour remplacer volontairement son calendrier.`
     case 'PERIOD_LOCKED':
       return `${line}la période est publiée ou archivée : une nouvelle génération est impossible.`
     case 'NO_SOLVER_PARAMETER_SET':

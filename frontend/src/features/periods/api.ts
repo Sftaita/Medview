@@ -76,19 +76,95 @@ export function fetchDateOptions(
   return apiFetch<DateOptions>(`/api/plannings/${planningStableId}/periods/date-options?${query}`)
 }
 
-/** New dates for a period: its end, its start (first period only), or both — each with the value it replaces. */
+/**
+ * New dates for a period: its end, its start, or both — each with the value it replaces. `confirmation`: the hash of
+ * the plan the manager read (docs/decisions.md D225); `notify`: "Confirmer et avertir".
+ */
 export type PeriodDatesInput = {
   startsAt?: string
   expectedStartsAt?: string
   endsAt?: string
   expectedEndsAt?: string
+  confirmation?: string
+  notify?: boolean
+}
+
+/** What new dates would do (docs/decisions.md D225), nothing written. */
+export type DateChangePreview = {
+  allowed: boolean
+  reasons: DateReason[]
+  changes: {
+    periodStableId: string
+    periodNumber: number
+    selected: boolean
+    generated: boolean
+    published: boolean
+    from: { startsAt: string; lastDay: string }
+    to: { startsAt: string; lastDay: string }
+  }[]
+  retiredDutyCount: number
+  retiredAssignedCount: number
+  retiredPublishedCount: number
+  retiredUnits: {
+    periodNumber: number
+    line: string
+    block: string | null
+    dates: string[]
+    holder: string | null
+    published: boolean
+  }[]
+  holders: { name: string; dutyCount: number }[]
+  additions: {
+    periodNumber: number
+    line: string
+    firstDay: string
+    lastDay: string
+    /** Null: reinforcements, decided by the holders of the source line. */
+    dutyCount: number | null
+    published: boolean
+  }[]
+  collections: {
+    periodNumber: number
+    startsAt: string
+    lastDay: string
+    newStartsAt: string
+    newLastDay: string
+    contacted: boolean
+    answered: boolean
+  }[]
+  swapRequestCount: number
+  confirmationRequired: boolean
+  republishPeriods: number[]
+  recipients: string[]
+  canNotify: boolean
+  notifyBlock: 'nobody_to_notify' | 'pending_changes' | 'not_republishable' | null
+  pendingChanges: number
+  impactHash: string
+}
+
+export function fetchDateChangePreview(
+  planningStableId: string,
+  periodStableId: string,
+  input: { startsAt?: string; endsAt?: string },
+): Promise<DateChangePreview> {
+  const query = new URLSearchParams(input as Record<string, string>).toString()
+  return apiFetch<DateChangePreview>(
+    `/api/plannings/${planningStableId}/periods/${periodStableId}/date-change-preview?${query}`,
+  )
 }
 
 export function changePeriodDates(
   planningStableId: string,
   periodStableId: string,
   input: PeriodDatesInput,
-): Promise<PlanningPeriodView & { generationOutdated: boolean }> {
+): Promise<
+  PlanningPeriodView & {
+    generationOutdated: boolean
+    addedDutyCount: number
+    retiredDutyCount: number
+    republished: number
+  }
+> {
   return apiFetch(`/api/plannings/${planningStableId}/periods/${periodStableId}`, {
     method: 'PATCH',
     body: input,
@@ -188,35 +264,3 @@ export function savePeriodPreparation(
  * period's end. `days` are candidate last days (inclusive), each allowed or
  * not with its reasons; `proposedLastDay` is the latest allowed one.
  */
-export type EndRectificationOptions = {
-  period: { stableId: string; number: number }
-  startsAt: string
-  currentLastDay: string
-  lastDutyDay: string | null
-  eligible: boolean
-  blockers: DateReason[]
-  proposedLastDay: string | null
-  reasonMaxLength: number
-  days: DayOption[]
-}
-
-export function fetchEndRectification(
-  planningStableId: string,
-  periodStableId: string,
-): Promise<EndRectificationOptions> {
-  return apiFetch<EndRectificationOptions>(
-    `/api/plannings/${planningStableId}/periods/${periodStableId}/end-rectification`,
-  )
-}
-
-/** `endsAt` and `expectedEndsAt` are exclusive, like every period end of the API. */
-export function rectifyPeriodEnd(
-  planningStableId: string,
-  periodStableId: string,
-  input: { endsAt: string; expectedEndsAt: string; reason: string },
-): Promise<unknown> {
-  return apiFetch(`/api/plannings/${planningStableId}/periods/${periodStableId}/end-rectification`, {
-    method: 'POST',
-    body: { ...input, confirm: true },
-  })
-}

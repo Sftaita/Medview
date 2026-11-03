@@ -9,8 +9,6 @@ interface Props {
   onGoLatest: () => void
   /** « Modifier les dates », for the creator (docs/decisions.md D207): the dialog says what may move. */
   onEditDates?: () => void
-  /** docs/decisions.md D211: the exceptional correction of a published period's end (creator, a next period). */
-  onRectifyEnd?: () => void
 }
 
 /**
@@ -19,14 +17,14 @@ interface Props {
  * The notice of a period consulted as history stays, with its way back to
  * the latest period. Nothing at all when there is nothing to do.
  */
-export function PeriodActions({ period, today, latestNumber, onGoLatest, onEditDates, onRectifyEnd }: Props) {
+export function PeriodActions({ period, today, latestNumber, onGoLatest, onEditDates }: Props) {
   // History is a period over, published, with later ones (lot L7): never the current one, never a future one.
   const isHistory =
     timeState(period, today).kind === 'past' &&
     (period.status === 'publiee' || period.status === 'archivee') &&
     period.number < latestNumber
 
-  if (!isHistory && !onEditDates && !onRectifyEnd) return null
+  if (!isHistory && !onEditDates) return null
 
   return (
     <div className="mv-period-actions" role="group" aria-label={`Actions de la période ${period.number}`}>
@@ -43,18 +41,11 @@ export function PeriodActions({ period, today, latestNumber, onGoLatest, onEditD
           </button>
         </p>
       )}
-      {(onEditDates || onRectifyEnd) && (
+      {onEditDates && (
         <div className="mv-period-actions__buttons">
-          {onEditDates && (
-            <button type="button" className="mv-btn mv-btn--secondary mv-btn--sm" onClick={onEditDates}>
-              <Icon name="calendar" size={16} /> Modifier les dates
-            </button>
-          )}
-          {onRectifyEnd && (
-            <button type="button" className="mv-btn mv-btn--secondary mv-btn--sm" onClick={onRectifyEnd}>
-              <Icon name="calendar" size={16} /> Corriger la fin…
-            </button>
-          )}
+          <button type="button" className="mv-btn mv-btn--secondary mv-btn--sm" onClick={onEditDates}>
+            <Icon name="calendar" size={16} /> Modifier les dates
+          </button>
         </div>
       )}
     </div>

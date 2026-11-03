@@ -345,7 +345,7 @@
 .pd-grow {
   flex: 1 1 auto;
   max-width: 320px;
-  /* A long label ("Générer les postes non pourvus", D222) wraps on a narrow phone instead of overflowing the gutter. */
+  /* A long label wraps on a narrow phone instead of overflowing the gutter. */
   min-width: 0;
   height: auto;
   min-height: 48px;
@@ -1145,4 +1145,121 @@
   .history__item {
     grid-template-columns: 1fr;
   }
+}
+
+/* docs/decisions.md D228: one main action, one place — the same box whatever its state or the period's number. */
+.pd-main-action {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  width: 340px;
+  max-width: 100%;
+}
+.pd-main-action__control {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 56px;
+  height: auto;
+  white-space: normal;
+  line-height: 1.2;
+  text-align: center;
+}
+.pd-main-action__state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: var(--radius-md, 12px);
+  border: 1px solid var(--border, #d9e0e7);
+  background: var(--surface-muted, #f3f6f8);
+  color: var(--text-muted, #52606d);
+  font-weight: 600;
+}
+.pd-main-action__state[data-kind='done'] {
+  border-color: var(--success-border, #9fd8bb);
+  background: var(--success-bg, #e9f7f0);
+  color: var(--success-text, #14663f);
+}
+.pd-main-action__state[data-kind='manual'] {
+  border-color: var(--warning-border, #eccf8d);
+  background: var(--warning-bg, #fdf6e5);
+  color: var(--warning-text, #7a5400);
+}
+.pd-menu-placeholder {
+  flex: 0 0 56px;
+  width: 56px;
+}
+.pd-main-action__help {
+  flex: 0 0 32px;
+  width: 32px;
+  display: inline-flex;
+  justify-content: center;
+}
+@media (max-width: 759px) {
+  .pd-head-actions {
+    width: 100%;
+  }
+  .pd-main-action {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+  }
+}
+.help-tip {
+  position: relative;
+  display: inline-flex;
+}
+.help-tip__button {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--border, #cbd5de);
+  background: var(--surface, #fff);
+  color: var(--text-muted, #52606d);
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+.help-tip__button:focus-visible {
+  outline: 2px solid var(--brand, #1f6feb);
+  outline-offset: 2px;
+}
+.help-tip__text {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(320px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border, #cbd5de);
+  background: var(--surface, #fff);
+  color: var(--text, #1f2933);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  font-size: 0.875rem;
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+}
+.week-template__intro {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+.week-template__lines {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.week-template__lines li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
 }

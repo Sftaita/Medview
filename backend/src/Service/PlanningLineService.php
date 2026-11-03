@@ -47,6 +47,7 @@ final class PlanningLineService
     private const LOCKED_STATUSES = [PlanningPeriodStatus::VALIDATED, PlanningPeriodStatus::PUBLISHED, PlanningPeriodStatus::ARCHIVED];
 
     public function __construct(
+        private readonly PlanningWeekTemplateService $weekTemplateService,
         private readonly PlanningLineRepository $planningLineRepository,
         private readonly EntityManagerInterface $entityManager,
         private readonly PlanningLineDemandPolicyRepository $demandPolicyRepository,
@@ -105,6 +106,15 @@ final class PlanningLineService
 
             foreach ($starting as $cycle) {
                 $this->cycleService->createPeriod($line, $cycle);
+            }
+
+            // docs/decisions.md D227: the primary line carries the general weekly structure until one is saved; any
+            // other line starts on it when there is one.
+            if (PlanningLineType::PRIMARY === $type) {
+                $line->changeWeekStructureMode('GENERAL');
+                $this->entityManager->flush();
+            } else {
+                $this->weekTemplateService->adoptOnCreation($line);
             }
 
             return $line;

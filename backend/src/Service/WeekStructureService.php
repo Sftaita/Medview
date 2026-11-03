@@ -149,6 +149,18 @@ final class WeekStructureService
     }
 
     /**
+     * docs/decisions.md D227: a line that starts inheriting its source's blocks
+     * has no structure of its own any more — what it held is deactivated, never
+     * mutated; the duties it already produced keep pointing at it.
+     */
+    public function deactivate(PlanningLine $line): void
+    {
+        foreach ($this->patternRepository->findActiveRecurringByTeam($line->getPlanningTeam()) as $pattern) {
+            $pattern->setActive(false);
+        }
+    }
+
+    /**
      * @throws InvalidWeekStructureException
      */
     private function validate(WeekStructureUpdateRequest $request): void

@@ -140,7 +140,9 @@ const FIVE_STATES = [
 ]
 
 function renfortCell(table: HTMLElement, day: string): HTMLElement {
-  const row = within(table).getByRole('rowheader', { name: new RegExp(`${day}/10`) }).closest('tr')!
+  const row = within(table)
+    .getByRole('rowheader', { name: new RegExp(`${day}/10`) })
+    .closest('tr')!
   return row.querySelectorAll('td')[1] as HTMLElement
 }
 
@@ -171,33 +173,38 @@ describe('PlanningCalendar — reinforcement line (docs/decisions.md D167)', () 
     )
   })
 
-  it('"Compléter automatiquement" is offered for a missing required reinforcement only', async () => {
-    const onRequestCompletion = vi.fn().mockResolvedValue(undefined)
+  it('points to « Compléter la période » for a missing required reinforcement only', async () => {
     stubApi({
       'GET /api/plannings/plan-1/result': () =>
-        result([duty('r7', '2026-10-07', null, 'NOT_REQUIRED_UNASSIGNED'), duty('r9', '2026-10-09', null, 'UNDETERMINED')]),
+        result([
+          duty('r7', '2026-10-07', null, 'NOT_REQUIRED_UNASSIGNED'),
+          duty('r9', '2026-10-09', null, 'UNDETERMINED'),
+        ]),
       'GET /api/plannings/plan-1/publication-state': () => NOT_PUBLISHED,
     })
-    const { unmount } = render(<PlanningCalendar planning={MANAGER} onRequestCompletion={onRequestCompletion} />)
+    const { unmount } = render(<PlanningCalendar planning={MANAGER} />)
     await screen.findByRole('table')
-    expect(screen.getByRole('button', { name: 'Compléter automatiquement' })).toBeDisabled()
+    expect(screen.queryByText(/Compléter la période/)).not.toBeInTheDocument()
     unmount()
 
     stubApi({
-      'GET /api/plannings/plan-1/result': () => result([duty('r6', '2026-10-06', null, 'REQUIRED_UNASSIGNED')]),
+      'GET /api/plannings/plan-1/result': () =>
+        result([duty('r6', '2026-10-06', null, 'REQUIRED_UNASSIGNED')]),
       'GET /api/plannings/plan-1/publication-state': () => NOT_PUBLISHED,
     })
-    render(<PlanningCalendar planning={MANAGER} onRequestCompletion={onRequestCompletion} />)
+    render(<PlanningCalendar planning={MANAGER} />)
     await screen.findByRole('table')
-    fireEvent.click(screen.getByRole('button', { name: 'Compléter automatiquement' }))
-    expect(onRequestCompletion).toHaveBeenCalledOnce()
+    expect(screen.getByText(/ou utilisez « Compléter la période » en haut de page\.$/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Compléter/ })).not.toBeInTheDocument()
   })
 
   it('after a source replacement, tells what it did to the reinforcements (dependentImpacts)', async () => {
     const view: ReassignmentCandidatesView = {
       groupInstanceStableId: null,
       groupLabel: null,
-      blockDuties: [{ dutyStableId: 'p9', date: '2026-10-09', startsAt: '', endsAt: '', dutyTypeName: 'Garde' }],
+      blockDuties: [
+        { dutyStableId: 'p9', date: '2026-10-09', startsAt: '', endsAt: '', dutyTypeName: 'Garde' },
+      ],
       generationStableId: 'g-l1',
       currentTeamMemberStableId: 'm-Bob',
       currentAssignee: { teamMemberStableId: 'm-Bob', firstName: 'Bob', lastName: 'Claes' },
@@ -235,21 +242,35 @@ describe('PlanningCalendar — reinforcement line (docs/decisions.md D167)', () 
     render(<PlanningCalendar planning={MANAGER} />)
     const table = await screen.findByRole('table')
 
-    const main = within(table).getByRole('rowheader', { name: /09\/10/ }).closest('tr')!.querySelectorAll('td')[0]
+    const main = within(table)
+      .getByRole('rowheader', { name: /09\/10/ })
+      .closest('tr')!
+      .querySelectorAll('td')[0]
     fireEvent.click(within(main as HTMLElement).getByRole('button'))
     fireEvent.click(await screen.findByRole('button', { name: 'Choisir' }))
     fireEvent.click(screen.getByRole('button', { name: 'Remplacer' }))
 
     expect(await screen.findByText(/Conséquence sur les renforts :/)).toBeInTheDocument()
-    expect(screen.getAllByText(/Renfort, ven\. 9 oct\. : renfort désormais requis — non attribué/).length).toBeGreaterThanOrEqual(1)
+    expect(
+      screen.getAllByText(/Renfort, ven\. 9 oct\. : renfort désormais requis — non attribué/).length,
+    ).toBeGreaterThanOrEqual(1)
   })
 })
 
 describe('presentDuty', () => {
   it('reads each state from the backend — an intrinsic duty as before', () => {
     expect(presentDuty(duty('x', '2026-10-05', null))).toMatchObject({ gap: 'Non attribué', tone: 'missing' })
-    expect(presentDuty(duty('x', '2026-10-05', 'Anne Admin'))).toMatchObject({ gap: null, tag: null, tone: 'normal' })
-    expect(presentDuty(duty('x', '2026-10-05', null, 'UNDETERMINED'))).toMatchObject({ gap: 'Renfort non évalué', tone: 'undetermined' })
-    expect(presentDuty(duty('x', '2026-10-05', 'Dave Evrard', 'UNDETERMINED'))).toMatchObject({ tag: 'Renfort non évalué' })
+    expect(presentDuty(duty('x', '2026-10-05', 'Anne Admin'))).toMatchObject({
+      gap: null,
+      tag: null,
+      tone: 'normal',
+    })
+    expect(presentDuty(duty('x', '2026-10-05', null, 'UNDETERMINED'))).toMatchObject({
+      gap: 'Renfort non évalué',
+      tone: 'undetermined',
+    })
+    expect(presentDuty(duty('x', '2026-10-05', 'Dave Evrard', 'UNDETERMINED'))).toMatchObject({
+      tag: 'Renfort non évalué',
+    })
   })
 })

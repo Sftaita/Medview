@@ -59,6 +59,15 @@ class Planning
     #[ORM\Column(length: 64)]
     private string $timezone;
 
+    /**
+     * docs/decisions.md D227: the general "Semaine type" — null until it is
+     * saved once, when it reads as the primary line's structure.
+     *
+     * @var array{blocks: list<array{name: string, days: list<string>, family: string}>, solo: list<string>, soloFamily: string, excluded: list<string>}|null
+     */
+    #[ORM\Column(type: 'json', nullable: true, options: ['jsonb' => true])]
+    private ?array $weekTemplate = null;
+
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
@@ -147,6 +156,22 @@ class Planning
      * PlanningCycleService, together with the cycle that changes (creation,
      * new end, deletion of the last cycle).
      */
+    /**
+     * @return array{blocks: list<array{name: string, days: list<string>, family: string}>, solo: list<string>, soloFamily: string, excluded: list<string>}|null
+     */
+    public function getWeekTemplate(): ?array
+    {
+        return $this->weekTemplate;
+    }
+
+    /**
+     * @param array{blocks: list<array{name: string, days: list<string>, family: string}>, solo: list<string>, soloFamily: string, excluded: list<string>} $template
+     */
+    public function changeWeekTemplate(array $template): void
+    {
+        $this->weekTemplate = $template;
+    }
+
     public function changeEnvelope(\DateTimeImmutable $startsAt, \DateTimeImmutable $endsAt): void
     {
         if ($endsAt <= $startsAt) {

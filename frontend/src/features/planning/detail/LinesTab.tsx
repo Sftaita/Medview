@@ -20,10 +20,8 @@ type Props = {
   onManageMembers: (line: PlanningLineSummary) => void
   onDeleteLine: (lineStableId: string) => void
   onConfigureLine?: (line: PlanningLineSummary) => void
-  /** "Règles de génération" of this line (docs/decisions.md D222) — every line, not only the primary one. */
-  onLineRules?: (line: PlanningLineSummary) => void
   /**
-   * What "Générer les postes non pourvus" would do with each line, by line stable id (docs/decisions.md D222):
+   * What "Compléter la période" would do with each line, by line stable id (docs/decisions.md D222):
    * its counters, and "Générer cette ligne" when it has something to receive. Managers only.
    */
   fillPlans?: Record<string, FillLinePlan>
@@ -46,7 +44,6 @@ export function LinesTab({
   onManageMembers,
   onDeleteLine,
   onConfigureLine,
-  onLineRules,
   fillPlans,
   onGenerateLine,
   busy = false,
@@ -100,13 +97,7 @@ export function LinesTab({
                   line={line}
                   onConfigure={canConfigure && onConfigureLine ? () => onConfigureLine(line) : undefined}
                 />
-                {fillPlans?.[line.stableId] && (
-                  <LineFillState
-                    plan={fillPlans[line.stableId]}
-                    busy={busy}
-                    onGenerate={onGenerateLine ? () => onGenerateLine(line) : undefined}
-                  />
-                )}
+                {fillPlans?.[line.stableId] && <LineFillState plan={fillPlans[line.stableId]} />}
               </div>
               <div className="pd-line-actions">
                 <button
@@ -117,7 +108,10 @@ export function LinesTab({
                   <Icon name="users" size={17} strokeWidth={2} />
                   Membres
                 </button>
-                {((canConfigure && (onConfigureLine || onLineRules)) ||
+                {((canConfigure && onConfigureLine) ||
+                  (fillPlans?.[line.stableId] &&
+                    onGenerateLine &&
+                    lineCanReceive(fillPlans[line.stableId])) ||
                   (canManage && line.type === 'SECONDARY')) && (
                   <ActionMenu
                     label={`Actions pour ${line.name}`}
@@ -131,12 +125,15 @@ export function LinesTab({
                             },
                           ]
                         : []),
-                      ...(canConfigure && onLineRules
+                      ...(fillPlans?.[line.stableId] &&
+                      onGenerateLine &&
+                      !busy &&
+                      lineCanReceive(fillPlans[line.stableId])
                         ? [
                             {
-                              label: 'Règles de génération',
-                              icon: 'check' as const,
-                              onSelect: () => onLineRules(line),
+                              label: 'Générer cette ligne',
+                              icon: 'arrow' as const,
+                              onSelect: () => onGenerateLine(line),
                             },
                           ]
                         : []),
@@ -242,7 +239,16 @@ function LineCoverageState({ line, onConfigure }: { line: PlanningLineSummary; o
       </div>
     )
   }
-  if (line.type === 'SECONDARY' && !coverage.hasWeekStructure) {
+  if (coverage.hasWeekStructure) {
+    return (
+      <div className="pd-line-coverage">
+        <span>
+          {coverage.weekStructure === 'GENERAL' ? 'Semaine type générale' : 'Semaine type personnalisée'}
+        </span>
+      </div>
+    )
+  }
+  if (line.type === 'SECONDARY') {
     return (
       <div className="pd-line-coverage pd-line-coverage--todo">
         <span>
@@ -260,21 +266,17 @@ function LineCoverageState({ line, onConfigure }: { line: PlanningLineSummary; o
   return null
 }
 
+function lineCanReceive(plan: FillLinePlan): boolean {
+  return (plan.action === 'GENERATE' || plan.action === 'COMPLETE') && plan.selectable
+}
+
 /**
- * One line's counters and "Générer cette ligne" (docs/decisions.md D222): how
- * many duties it holds and misses, and the action when it has something to
- * receive — otherwise, why not, in words.
+ * One line's counters (docs/decisions.md D222): how many duties it holds and
+ * misses and, when it cannot receive anything, why not, in words. What it would
+ * receive is "Compléter la période", in the header; this line alone is in its menu.
  */
-function LineFillState({
-  plan,
-  busy,
-  onGenerate,
-}: {
-  plan: FillLinePlan
-  busy: boolean
-  onGenerate?: () => void
-}) {
-  const writable = (plan.action === 'GENERATE' || plan.action === 'COMPLETE') && plan.selectable
+function LineFillState({ plan }: { plan: FillLinePlan }) {
+  const writable = lineCanReceive(plan)
   const uncovered = plan.uncoveredRequiredDutyCount ?? 0
   return (
     <div className="pd-line-fill">
@@ -294,18 +296,8 @@ function LineFillState({
             ` · ${plan.requiredDutyCount} garde${plan.requiredDutyCount > 1 ? 's' : ''} à pourvoir`}
         </span>
       )}
-      {writable && onGenerate ? (
-        <button
-          type="button"
-          className="pd-btn pd-btn-secondary"
-          onClick={onGenerate}
-          disabled={busy}
-          title={busy ? 'Un calcul est déjà en cours sur ce planning' : fillPlanText(plan)}
-        >
-          Générer cette ligne
-        </button>
-      ) : (
-        plan.action !== 'NOTHING' && <span className="pd-line-fill__why">{fillPlanText(plan)}</span>
+      {(writable ? plan.extensionOnly : plan.action !== 'NOTHING') && (
+        <span className="pd-line-fill__why">{fillPlanText(plan)}</span>
       )}
     </div>
   )

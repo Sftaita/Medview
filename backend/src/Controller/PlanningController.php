@@ -379,6 +379,8 @@ final class PlanningController
             return [
                 'mode' => 'INDEPENDENT',
                 'hasWeekStructure' => [] !== $this->patternRepository->findActiveRecurringByTeam($line->getPlanningTeam()),
+                // docs/decisions.md D227: GENERAL or CUSTOM.
+                'weekStructure' => $line->getWeekStructureMode(),
             ];
         }
 

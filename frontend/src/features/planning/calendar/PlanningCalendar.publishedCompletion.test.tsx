@@ -1,7 +1,6 @@
 import '@testing-library/jest-dom/vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiError } from '../../../lib/apiClient'
 import { stubApi } from '../../../testUtils/stubApi'
 import type { PlanningResultDuty, PlanningResultLine, PublicationState } from '../result/types'
 import type { PlanningDetail, PlanningPeriodStatus } from '../types'
@@ -9,9 +8,9 @@ import { buildCalendar } from './calendarModel'
 import { PlanningCalendar } from './PlanningCalendar'
 
 /**
- * docs/decisions.md D223 — "Compléter automatiquement" never acts on a
- * published (validated, archived) line: unavailable when only such a line
- * has holes, with the reason said next to it; manual editing stays.
+ * docs/decisions.md D223, D228 — the completion never acts on a published
+ * (validated, archived) line: the calendar says so next to it, manual editing
+ * stays. Launching it is « Compléter la période N », in the header only.
  */
 
 beforeEach(() => {
@@ -115,7 +114,7 @@ function setup(lines: PlanningResultLine[]) {
   })
 }
 
-describe('"Compléter automatiquement" and published lines (docs/decisions.md D223)', () => {
+describe('The calendar, the completion and published lines (docs/decisions.md D223, D228)', () => {
   it('counts only the holes of lines that may be completed', () => {
     const model = buildCalendar(
       [
@@ -131,52 +130,40 @@ describe('"Compléter automatiquement" and published lines (docs/decisions.md D2
     expect(model.lockedLinesWithHoles).toEqual(['Seniors', 'Ancienne'])
   })
 
-  it('is unavailable, and says why, when only a published line has holes — editing a duty stays possible', async () => {
+  it('says why when only a published line has holes — editing a duty stays possible', async () => {
     setup([SENIORS_WITH_HOLE])
-    const onRequestCompletion = vi.fn()
-    render(<PlanningCalendar planning={MANAGER} onRequestCompletion={onRequestCompletion} />)
+    render(<PlanningCalendar planning={MANAGER} />)
 
-    const button = await screen.findByRole('button', { name: 'Compléter automatiquement' })
-    expect(
-      await screen.findByText(/Seniors est publiée : elle n’est jamais complétée automatiquement/),
-    ).toBeInTheDocument()
-    expect(button).toBeDisabled()
-    expect(button).toHaveAccessibleDescription(
+    const notice = await screen.findByText(
+      /Seniors est publiée : elle n’est jamais complétée automatiquement/,
+    )
+    expect(notice.closest('#cal-complete-locked')).toHaveTextContent(
       /jamais complétée automatiquement.*Attribuez ses gardes une à une, puis republiez/,
     )
-    fireEvent.click(button)
-    expect(onRequestCompletion).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: /Compléter/ })).not.toBeInTheDocument()
     expect(screen.getByText(/— attribuez-la\.$/)).toBeInTheDocument()
     // The manual workflow is untouched: the hole of the published line can still be edited.
     expect(screen.getByRole('button', { name: /^Modifier : .*2026-10-06/ })).toBeEnabled()
   })
 
-  it('stays available for a draft line next to a published one, and tells which line it leaves alone', async () => {
+  it('points to the header for a draft line next to a published one, and tells which line it leaves alone', async () => {
     setup([SENIORS_WITH_HOLE, line('l2', 'Juniors', 'GENERATED', [duty('j6', '2026-10-06', null)])])
-    const onRequestCompletion = vi.fn(() => Promise.resolve())
-    render(<PlanningCalendar planning={MANAGER} onRequestCompletion={onRequestCompletion} />)
-
-    const button = await screen.findByRole('button', { name: 'Compléter automatiquement' })
-    await vi.waitFor(() => expect(button).toBeEnabled())
-    expect(screen.getByText(/Seniors est publiée/)).toBeInTheDocument()
-    fireEvent.click(button)
-    expect(onRequestCompletion).toHaveBeenCalledTimes(1)
-  })
-
-  it('says why when the server refuses (the screen was out of date)', async () => {
-    setup([line('l1', 'Seniors', 'GENERATED', [duty('s6', '2026-10-06', null)])])
-    const onRequestCompletion = vi.fn(() =>
-      Promise.reject(new ApiError(409, { error: 'published_lines_not_completed' }, 'x')),
+    render(
+      <PlanningCalendar
+        planning={MANAGER}
+        period={{
+          stableId: 'c3',
+          number: 3,
+          startsAt: '2026-10-01',
+          endsAt: '2026-11-01',
+          lastDay: '2026-10-31',
+        }}
+      />,
     )
-    render(<PlanningCalendar planning={MANAGER} onRequestCompletion={onRequestCompletion} />)
 
-    const button = await screen.findByRole('button', { name: 'Compléter automatiquement' })
-    await vi.waitFor(() => expect(button).toBeEnabled())
-    fireEvent.click(button)
-    expect(
-      await screen.findByText(
-        'Une ligne publiée n’est jamais complétée automatiquement : attribuez ses gardes une à une, puis republiez.',
-      ),
-    ).toBeInTheDocument()
+    expect(await screen.findByText(/Seniors est publiée/)).toBeInTheDocument()
+    expect(screen.getByText(/ou utilisez « Compléter la période 3 » en haut de page\.$/)).toBeInTheDocument()
+    // The only way is the header: no second button down here.
+    expect(screen.queryByRole('button', { name: /Compléter/ })).not.toBeInTheDocument()
   })
 })

@@ -176,23 +176,25 @@ final class PlanningPeriodDatesTest extends WebTestCase
         $this->assertAuditClean();
     }
 
-    public function testAnAnsweredCollectionBoundsTheFirstPeriodAndAStaleViewIsRefused(): void
+    public function testAnAnsweredCollectionIsReducedOpenlyAndAStaleViewIsRefused(): void
     {
         $period1 = $this->periods()[0]['stableId'];
         // Touched: a calendar change inside its window (D214: no confirmation any more).
         $this->api($this->client, 'POST', '/api/me/calendar', ['type' => 'UNAVAILABLE', 'startsAt' => '2027-02-10T00:00:00+01:00', 'endsAt' => '2027-02-12T00:00:00+01:00'], $this->s['alice']);
         self::assertResponseIsSuccessful();
 
+        // docs/decisions.md D225 (revises D208): never silent — the preview names it, and says people answered.
+        $preview = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/periods/{$period1}/date-change-preview?startsAt=2027-01-15", token: $this->s['creator']);
+        self::assertTrue($preview['allowed']);
+        self::assertSame([[1, '2027-01-01', '2027-01-15', true]], array_map(static fn (array $c): array => [$c['periodNumber'], $c['startsAt'], $c['newStartsAt'], $c['answered']], $preview['collections']));
         $this->patch($period1, ['startsAt' => '2027-01-15', 'expectedStartsAt' => '2027-01-01']);
-        $this->assertError(409, 'collection_answered');
-        $options = self::reasonsByDay($this->options($period1, 'start', '2026-12-30', '2027-01-03'));
-        self::assertSame([], $options['2026-12-30'], 'earlier: the answered collection stays inside');
-        self::assertSame(['collection_answered'], $options['2027-01-02']);
+        self::assertResponseIsSuccessful();
+        self::assertSame([['number' => 1, 's' => '2027-01-15', 'e' => '2027-05-01']], $this->dates()['collections']);
 
-        $grown = $this->patch($period1, ['startsAt' => '2026-12-01', 'expectedStartsAt' => '2027-01-01']);
+        $grown = $this->patch($period1, ['startsAt' => '2026-12-01', 'expectedStartsAt' => '2027-01-15']);
         self::assertResponseIsSuccessful();
         self::assertSame('2026-12-01', $grown['startsAt']);
-        self::assertSame([['number' => 1, 's' => '2027-01-01', 'e' => '2027-05-01']], $this->dates()['collections'], 'an answered collection keeps its window');
+        self::assertSame([['number' => 1, 's' => '2027-01-15', 'e' => '2027-05-01']], $this->dates()['collections'], 'growing never resizes an answered collection');
 
         $this->patch($period1, ['startsAt' => '2026-11-01', 'expectedStartsAt' => '2027-01-01']);
         $this->assertError(409, 'period_changed');
@@ -202,25 +204,27 @@ final class PlanningPeriodDatesTest extends WebTestCase
         $this->assertError(422, 'invalid_request');
     }
 
-    public function testTheStartOfTheFirstPeriodNeverMovesOnceItHasDutiesNorEverForAFollowingPeriod(): void
+    public function testTheStartOfAFollowingPeriodIsTheEndOfThePreviousOne(): void
     {
         $this->prepareLine($this->s['planningId'], [['2027-01-05', '2027-01-06']]);
         $period1 = $this->periods()[0]['stableId'];
 
+        // docs/decisions.md D225: no calendar yet — a duty prepared is not a calendar: nothing to confirm.
         $this->patch($period1, ['startsAt' => '2026-12-01', 'expectedStartsAt' => '2027-01-01']);
-        $this->assertError(409, 'period_not_blank');
-        $options = $this->options($period1, 'start', '2026-12-01', '2026-12-05');
-        self::assertFalse($options['editable']);
-        self::assertSame(['period_not_blank'], array_column($options['blockers'], 'code'));
+        self::assertResponseIsSuccessful();
+        self::assertTrue($this->options($period1, 'start', '2026-11-01', '2026-11-05')['editable']);
 
-        // Its end, the last one, still grows as before (lot L2).
         $this->patch($period1, ['endsAt' => '2027-06-01', 'expectedEndsAt' => '2027-05-01']);
         self::assertResponseIsSuccessful();
 
+        // Choosing the first day of period 2 moves the end of period 1 with it — the same boundary.
         $period2 = $this->createPeriod('2027-07-01');
         $this->patch($period2, ['startsAt' => '2027-06-15', 'expectedStartsAt' => '2027-06-01']);
-        $this->assertError(409, 'period_start_follows_previous');
-        self::assertSame(['period_start_follows_previous'], array_column($this->options($period2, 'start', '2027-06-01', '2027-06-02')['blockers'], 'code'));
+        self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
+        self::assertSame([['number' => 1, 's' => '2026-12-01', 'e' => '2027-06-15'], ['number' => 2, 's' => '2027-06-15', 'e' => '2027-07-01']], $this->dates()['cycles']);
+        $this->patch($period2, ['startsAt' => '2027-06-28', 'expectedStartsAt' => '2027-06-15']);
+        $this->assertError(422, 'next_period_too_short');
+        $this->assertAuditClean();
     }
 
     // --- 2. the boundary between two periods -------------------------------------------------------
@@ -252,16 +256,17 @@ final class PlanningPeriodDatesTest extends WebTestCase
         self::assertSame([['number' => 1, 's' => '2027-01-01', 'e' => '2027-06-01'], ['number' => 2, 's' => '2027-06-01', 'e' => '2027-08-01']], $this->dates()['cycles']);
         self::assertSame([['number' => 1, 's' => '2027-01-01', 'e' => '2027-04-01']], $this->dates()['collections']);
         $this->patch($period1, ['endsAt' => '2027-03-01', 'expectedEndsAt' => '2027-06-01']);
-        $this->assertError(409, 'collection_answered');
+        self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
+        self::assertSame([['number' => 1, 's' => '2027-01-01', 'e' => '2027-03-01']], $this->dates()['collections'], 'reduced, said by the preview (D225)');
         $this->assertAuditClean();
 
         // Period 2 keeps 7 days at least.
-        $this->patch($period1, ['endsAt' => '2027-07-28', 'expectedEndsAt' => '2027-06-01']);
+        $this->patch($period1, ['endsAt' => '2027-07-28', 'expectedEndsAt' => '2027-03-01']);
         $this->assertError(422, 'next_period_too_short');
         self::assertSame(['next_period_too_short'], self::reasonsByDay($this->options($period1, 'end', '2027-07-27', '2027-07-27'))['2027-07-27']);
     }
 
-    public function testTheBoundaryNeverMovesOnceEitherPeriodHasHistory(): void
+    public function testAPreparedDutyWithoutCalendarLeavesWithTheDaysItIsOn(): void
     {
         $period1 = $this->periods()[0]['stableId'];
         $period2 = $this->createPeriod('2027-08-01');
@@ -270,24 +275,28 @@ final class PlanningPeriodDatesTest extends WebTestCase
         $seniors = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0];
         $this->createDuty($container->get(DutyMaterializationService::class), $seniors->periodIn($planning->getCycles()[1]), $this->createDutyType($container->get(EntityManagerInterface::class), $seniors->getPlanningTeam(), 'P2'), '2027-06-10', '2027-06-11');
 
+        // docs/decisions.md D225: not generated, so nothing to confirm — and nobody holds that duty.
         $this->patch($period1, ['endsAt' => '2027-05-08', 'expectedEndsAt' => '2027-05-01']);
-        $this->assertError(409, 'next_period_not_blank');
-        self::assertSame(['next_period_not_blank'], array_column($this->options($period1, 'end', '2027-05-01', '2027-05-10')['blockers'], 'code'));
+        self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
+        self::assertSame(0, (int) $this->db()->fetchOne('SELECT COUNT(*) FROM duties WHERE retired_at IS NOT NULL'));
+        $moved = $this->patch($period1, ['endsAt' => '2027-07-01', 'expectedEndsAt' => '2027-05-08']);
+        self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
+        self::assertSame(1, $moved['retiredDutyCount']);
+        self::assertSame(1, (int) $this->db()->fetchOne('SELECT COUNT(*) FROM duties WHERE retired_at IS NOT NULL'), 'kept, retired');
         // The last period's own end still moves.
         $this->patch($period2, ['endsAt' => '2027-09-01', 'expectedEndsAt' => '2027-08-01']);
         self::assertResponseIsSuccessful();
     }
 
-    public function testTheBoundaryNeverMovesOnceThePeriodBeforeHasHistory(): void
+    public function testADutyPreparedInThePeriodBeforeNoLongerFreezesTheBoundary(): void
     {
         $this->prepareLine($this->s['planningId'], [['2027-01-05', '2027-01-06']]);
         $period1 = $this->periods()[0]['stableId'];
         $this->createPeriod('2027-08-01');
 
         $this->patch($period1, ['endsAt' => '2027-04-01', 'expectedEndsAt' => '2027-05-01']);
-        $this->assertError(409, 'period_not_blank');
-        self::assertSame(['period_not_blank'], array_column($this->options($period1, 'end', '2027-04-01', '2027-04-02')['blockers'], 'code'));
-        self::assertSame([['number' => 1, 's' => '2027-01-01', 'e' => '2027-05-01'], ['number' => 2, 's' => '2027-05-01', 'e' => '2027-08-01']], $this->dates()['cycles']);
+        self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
+        self::assertSame([['number' => 1, 's' => '2027-01-01', 'e' => '2027-04-01'], ['number' => 2, 's' => '2027-04-01', 'e' => '2027-08-01']], $this->dates()['cycles']);
     }
 
     // --- 3. blocks ---------------------------------------------------------------------------------
@@ -342,14 +351,12 @@ final class PlanningPeriodDatesTest extends WebTestCase
         $period2 = $this->createPeriod('2027-05-03', acceptHistorical: true);
         $period1Before = $this->db()->fetchOne('SELECT md5(string_agg(ROW(pp.*)::text, \'|\' ORDER BY pp.id)) FROM planning_periods pp JOIN planning_cycles c ON c.id = pp.planning_cycle_id WHERE c.number = 1');
 
-        // Its start: always the day after period 1, which is published.
+        // docs/decisions.md D225: moving its start touches published period 1 — confirmed against the plan, or refused.
         $this->patch($period2, ['startsAt' => '2027-02-01', 'expectedStartsAt' => '2027-01-31']);
-        $this->assertError(409, 'period_start_follows_previous');
-        $this->patch($period1, ['endsAt' => '2027-02-07', 'expectedEndsAt' => '2027-01-31']);
-        $this->assertError(409, 'period_locked');
-        $locked = $this->options($period1, 'end', '2027-02-07', '2027-02-08');
-        self::assertFalse($locked['editable']);
-        self::assertSame(['2027-02-07' => ['period_locked'], '2027-02-08' => ['period_locked']], self::reasonsByDay($locked), 'no day is offered while the period is locked');
+        $this->assertError(409, 'date_change_confirmation_required');
+        $published = $this->options($period1, 'end', '2027-02-07', '2027-02-08');
+        self::assertTrue($published['editable']);
+        self::assertSame(['2027-02-07' => [], '2027-02-08' => []], self::reasonsByDay($published));
 
         // Its end, while it is blank: on any day but a Friday or a Saturday (the weekend block).
         $byDay = self::reasonsByDay($this->options($period2, 'end', '2027-02-01', '2027-02-07'));
@@ -404,27 +411,28 @@ final class PlanningPeriodDatesTest extends WebTestCase
 
     // --- 5. the intact collection (D207, completed by D208) ------------------------------------------
 
-    public function testACollectionPeopleWereWrittenToIsNeverResizedAndTheRefusalSaysWhy(): void
+    public function testACollectionPeopleWereWrittenToIsNeverReducedSilently(): void
     {
         $period1 = $this->periods()[0]['stableId'];
         $sent = $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/reminders/participants", [], $this->s['creator']);
         self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
         self::assertGreaterThan(0, $sent['sentCount']);
-        $before = $this->dates();
 
+        // docs/decisions.md D225 (revises D208): what was a refusal is said before saving, and done only then.
+        $preview = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/periods/{$period1}/date-change-preview?endsAt=2027-04-01", token: $this->s['creator']);
+        self::assertTrue($preview['allowed']);
+        self::assertTrue($preview['collections'][0]['contacted']);
+        self::assertSame('2027-03-31', $preview['collections'][0]['newLastDay']);
+        self::assertSame([['number' => 1, 's' => '2027-01-01', 'e' => '2027-05-01']], $this->dates()['collections'], 'the preview writes nothing');
         $this->patch($period1, ['endsAt' => '2027-04-01', 'expectedEndsAt' => '2027-05-01']);
-        $this->assertError(409, 'collection_announced');
-        $this->patch($period1, ['startsAt' => '2027-01-15', 'expectedStartsAt' => '2027-01-01']);
-        $this->assertError(409, 'collection_announced');
-        self::assertSame(['collection_announced'], self::reasonsByDay($this->options($period1, 'end', '2027-03-31', '2027-03-31'))['2027-03-31']);
-        self::assertSame(['collection_announced'], self::reasonsByDay($this->options($period1, 'start', '2027-01-15', '2027-01-15'))['2027-01-15']);
-        self::assertSame($before, $this->dates(), 'nothing moved');
-
-        // Growing never resizes it either: the window people were asked about stays, the added days are uncovered (§5.2).
-        $grown = $this->patch($period1, ['endsAt' => '2027-06-01', 'expectedEndsAt' => '2027-05-01']);
         self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
-        self::assertSame([['number' => 1, 's' => '2027-01-01', 'e' => '2027-05-01']], $this->dates()['collections']);
-        self::assertSame(31, $grown['collections']['uncoveredDays']);
+        self::assertSame([['number' => 1, 's' => '2027-01-01', 'e' => '2027-04-01']], $this->dates()['collections']);
+
+        // Growing never resizes it: the window people were asked about stays, the added days are uncovered (§5.2).
+        $grown = $this->patch($period1, ['endsAt' => '2027-05-01', 'expectedEndsAt' => '2027-04-01']);
+        self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
+        self::assertSame([['number' => 1, 's' => '2027-01-01', 'e' => '2027-04-01']], $this->dates()['collections']);
+        self::assertSame(30, $grown['collections']['uncoveredDays']);
     }
 
     public function testAReminderSentBeforePeriodsExistedCountsOnlyOnceTheCollectionWasOpen(): void
@@ -445,11 +453,11 @@ final class PlanningPeriodDatesTest extends WebTestCase
         self::assertSame([['number' => 1, 's' => '2027-01-01', 'e' => '2027-04-01']], $this->dates()['collections'], 'a reminder older than the collection is about something else');
 
         $legacyReminder($this->db(), (new \DateTimeImmutable($openedAt))->modify('+1 hour')->format('Y-m-d H:i:s'));
-        $this->patch($period1, ['endsAt' => '2027-03-01', 'expectedEndsAt' => '2027-04-01']);
-        $this->assertError(409, 'collection_announced');
+        $preview = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/periods/{$period1}/date-change-preview?endsAt=2027-03-01", token: $this->s['creator']);
+        self::assertTrue($preview['collections'][0]['contacted'], 'a reminder sent after the collection opened counts');
     }
 
-    public function testAnyRecordedChangeOrAClosedCollectionKeepsItsWindow(): void
+    public function testARecordedChangeOrAClosedCollectionIsReducedOpenly(): void
     {
         $period1 = $this->periods()[0]['stableId'];
 
@@ -458,18 +466,18 @@ final class PlanningPeriodDatesTest extends WebTestCase
         $this->db()->executeStatement('UPDATE availability_collection_responses SET last_availability_change_at = NULL');
         $this->api($this->client, 'DELETE', "/api/me/calendar/{$absence['stableId']}", token: $this->s['alice']);
         self::assertResponseIsSuccessful();
-        $this->patch($period1, ['endsAt' => '2027-04-01', 'expectedEndsAt' => '2027-05-01']);
-        $this->assertError(409, 'collection_answered');
+        $preview = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/periods/{$period1}/date-change-preview?endsAt=2027-04-01", token: $this->s['creator']);
+        self::assertTrue($preview['collections'][0]['answered']);
 
-        // Nobody answered, but the collection was closed: frozen history, never resized.
+        // Closed: it keeps what is left of its window — never more than the period.
         $this->db()->executeStatement('UPDATE availability_collection_responses SET last_availability_change_at = NULL');
         $this->patch($period1, ['endsAt' => '2027-04-01', 'expectedEndsAt' => '2027-05-01']);
         self::assertResponseIsSuccessful('intact again: it follows');
         $this->api($this->client, 'POST', "/api/availability-collections/{$this->s['collectionId']}/close", [], $this->s['creator']);
         self::assertResponseIsSuccessful();
         $this->patch($period1, ['endsAt' => '2027-03-01', 'expectedEndsAt' => '2027-04-01']);
-        $this->assertError(409, 'collection_beyond_end');
-        self::assertSame([['number' => 1, 's' => '2027-01-01', 'e' => '2027-04-01']], $this->dates()['collections']);
+        self::assertResponseIsSuccessful();
+        self::assertSame([['number' => 1, 's' => '2027-01-01', 'e' => '2027-03-01']], $this->dates()['collections']);
     }
 
     // --- 6. what the period view announces -----------------------------------------------------------
@@ -490,15 +498,15 @@ final class PlanningPeriodDatesTest extends WebTestCase
             return $flags;
         };
 
-        // Both blank: the boundary moves (the end of period 1, no longer the last one); only the first start moves.
-        self::assertSame([[true, true], [false, true]], $announced());
+        // docs/decisions.md D225: every date can move as long as nothing refuses it for good.
+        self::assertSame([[true, true], [true, true]], $announced());
 
-        // A duty in period 2: the boundary is fixed, the last end still moves.
+        // A duty in period 2 changes nothing to that.
         $container = static::getContainer();
         $planning = $container->get(PlanningRepository::class)->findOneByStableId($this->s['planningId']);
         $seniors = $container->get(PlanningLineRepository::class)->findByPlanning($planning)[0];
         $this->createDuty($container->get(DutyMaterializationService::class), $seniors->periodIn($planning->getCycles()[1]), $this->createDutyType($container->get(EntityManagerInterface::class), $seniors->getPlanningTeam(), 'P2'), '2027-06-10', '2027-06-11');
-        self::assertSame([[true, false], [false, true]], $announced());
+        self::assertSame([[true, true], [true, true]], $announced());
     }
 
     // --- 7. one move, all or nothing -----------------------------------------------------------------

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from '../../../components/Icon'
-import { ApiError } from '../../../lib/apiClient'
 import { Sheet } from '../detail/Sheet'
 import { ExportModal } from '../export/ExportModal'
 import {
@@ -43,21 +42,11 @@ type Props = {
   showPeriodNumber?: boolean
   /** A publication changed the planning's status: the page re-reads it. */
   onPublished?: () => void
-  /**
-   * "Compléter automatiquement" — queued by the page, which follows the job
-   * (docs/decisions.md D149). Resolves once the request was accepted, never
-   * once the completion is done; rejects with the API error when refused.
-   */
-  onRequestCompletion?: () => Promise<void>
   /** A generation or a completion is queued or running on this planning. */
   jobActive?: boolean
   /** Which one — said on the disabled button, so it never reads as simply unavailable. */
   jobKind?: 'GENERATE' | 'COMPLETE' | 'FILL' | null
 }
-
-/** docs/decisions.md D223 — said wherever "Compléter automatiquement" cannot act on a published line. */
-const LOCKED_COMPLETION_TEXT =
-  'Une ligne publiée n’est jamais complétée automatiquement : attribuez ses gardes une à une, puis republiez.'
 
 const MONTH = new Intl.DateTimeFormat('fr-BE', { month: 'long', year: 'numeric', timeZone: 'UTC' })
 const DAY = new Intl.DateTimeFormat('fr-BE', {
@@ -119,7 +108,6 @@ export function PlanningCalendar({
   period,
   showPeriodNumber = false,
   onPublished,
-  onRequestCompletion,
   jobActive = false,
   jobKind = null,
 }: Props) {
@@ -131,7 +119,6 @@ export function PlanningCalendar({
   const [month, setMonth] = useState<string | undefined>(undefined)
   const [editing, setEditing] = useState<string | null>(null)
   const [dialog, setDialog] = useState<'stats' | 'publish' | 'republish' | 'export' | null>(null)
-  const [completing, setCompleting] = useState(false)
   const [notice, setNotice] = useState<{ tone: 'success' | 'error' | 'info'; text: string } | null>(null)
   const [statsKey, setStatsKey] = useState(0)
   const [preflight, setPreflight] = useState<PublicationPreflight | null>(null)
@@ -203,7 +190,6 @@ export function PlanningCalendar({
   const to = period?.endsAt ?? planning.endsAt
   const model = useMemo(() => (result ? buildCalendar(result.lines, from, to) : null), [result, from, to])
   // docs/decisions.md D223: holes only on published lines — the button is unavailable, and says why.
-  const lockedHolesOnly = model !== null && model.uncoveredCount > 0 && model.completableCount === 0
   const monthKeys = useMemo(() => model?.months.map((m) => m.key) ?? [], [model])
   const shownMonth = month && monthKeys.includes(month) ? month : initialMonth(monthKeys)
   const monthIndex = shownMonth ? monthKeys.indexOf(shownMonth) : -1
@@ -243,28 +229,6 @@ export function PlanningCalendar({
     })
     return () => window.cancelAnimationFrame(frame)
   }, [located, shownMonth])
-
-  async function handleComplete() {
-    if (!onRequestCompletion) return
-    setCompleting(true)
-    setNotice(null)
-    try {
-      await onRequestCompletion()
-    } catch (err) {
-      const code = err instanceof ApiError ? (err.body as { error?: string } | null)?.error : undefined
-      setNotice({
-        tone: 'error',
-        text:
-          code === 'job_in_progress'
-            ? 'Une génération ou une complétion est déjà en cours sur ce planning.'
-            : code === 'published_lines_not_completed'
-              ? LOCKED_COMPLETION_TEXT
-              : 'La complétion automatique n’a pas pu être lancée.',
-      })
-    } finally {
-      setCompleting(false)
-    }
-  }
 
   async function handleDownload() {
     try {
@@ -343,36 +307,6 @@ export function PlanningCalendar({
           )}
         </div>
         <div className="cal-actions">
-          {canEdit && (
-            <button
-              type="button"
-              className="pd-btn pd-btn-secondary"
-              onClick={handleComplete}
-              disabled={completing || jobActive || !model || model.completableCount === 0}
-              aria-busy={completing || jobActive}
-              aria-describedby={lockedHolesOnly ? 'cal-complete-locked' : undefined}
-              title={
-                jobActive
-                  ? 'Un calcul est en cours sur ce planning'
-                  : model?.uncoveredCount === 0
-                    ? 'Aucune garde non attribuée'
-                    : lockedHolesOnly
-                      ? LOCKED_COMPLETION_TEXT
-                      : undefined
-              }
-            >
-              {jobActive ? (
-                <span className="cal-busy">
-                  <span className="cal-spinner" aria-hidden />
-                  {jobKind === 'COMPLETE' ? 'Complétion en cours…' : 'Calcul en cours…'}
-                </span>
-              ) : completing ? (
-                'Envoi…'
-              ) : (
-                'Compléter automatiquement'
-              )}
-            </button>
-          )}
           <button type="button" className="pd-btn pd-btn-secondary" onClick={() => setDialog('stats')}>
             Statistiques
           </button>
@@ -555,7 +489,9 @@ export function PlanningCalendar({
           </span>
           {canEdit &&
             `${model.uncoveredCount === 1 ? ' — attribuez-la' : ' — attribuez-les une à une'}${
-              model.completableCount > 0 ? ' ou utilisez « Compléter automatiquement ».' : '.'
+              model.completableCount > 0
+                ? ` ou utilisez « Compléter la période${period ? ` ${period.number}` : ''} » en haut de page.`
+                : '.'
             }`}
         </p>
       )}

@@ -14,12 +14,15 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-const RENFORT_LINE: { stableId: string; name: string; type: 'PRIMARY' | 'SECONDARY' } = {
+type Line = Parameters<typeof LineSettingsDialog>[0]['line']
+
+const RENFORT_LINE: Line = {
   stableId: RENFORT,
   name: 'Renfort',
   type: 'SECONDARY',
 }
 const POLICY = `/api/planning-lines/${RENFORT}/demand-policy`
+const ACTIVE_RULES = { active: true, activatedAt: '2026-09-20T08:00:00+00:00', effectiveFrom: '2026-09-20' }
 
 function setup(
   view: DemandPolicyView,
@@ -28,6 +31,8 @@ function setup(
   extra: Record<string, Route> = {},
 ) {
   const api = stubApi({
+    // The rules of the line close the dialog (docs/decisions.md D228): read on every opening.
+    [`GET /api/planning-lines/${line.stableId}/rule-set`]: () => ACTIVE_RULES,
     ...extra,
     [`GET /api/planning-lines/${line.stableId}/demand-policy`]: () => view,
     [`PUT /api/planning-lines/${line.stableId}/demand-policy`]: ({ body }) => save(body),
@@ -63,7 +68,9 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
     ).toBeInTheDocument()
     expect(screen.queryByText('Renfort conditionnel')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Enregistrer' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Modifier la semaine type/ })).toBeInTheDocument()
+    // The primary line follows the general weekly structure unless told otherwise (docs/decisions.md D227).
+    expect(screen.getByRole('radio', { name: /Semaine type générale du planning/ })).toBeChecked()
+    expect(screen.queryByRole('button', { name: /Modifier la semaine type/ })).not.toBeInTheDocument()
   })
 
   it('a secondary line chooses between an independent duty and a reinforcement', async () => {
@@ -149,6 +156,7 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
     // Two loads under StrictMode, answered in the reverse order: the older one arrives last.
     const answers: ((view: DemandPolicyView) => void)[] = []
     stubApi({
+      [`GET /api/planning-lines/${RENFORT}/rule-set`]: () => ACTIVE_RULES,
       [`GET /api/planning-lines/${RENFORT}/demand-policy`]: () =>
         new Promise<DemandPolicyView>((resolve) => answers.push(resolve)),
     })
@@ -438,5 +446,131 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
       expect(button).toHaveAccessibleName()
     }
     expect(screen.getByLabelText('Ligne à renforcer').tagName).toBe('SELECT')
+  })
+})
+
+describe('LineSettingsDialog — the weekly structure this line uses (docs/decisions.md D227)', () => {
+  const MODE = `/api/planning-lines/${RENFORT}/week-structure-mode`
+  const line = (weekStructure: 'GENERAL' | 'CUSTOM'): Line => ({
+    ...RENFORT_LINE,
+    coverage: { mode: 'INDEPENDENT', weekStructure },
+  })
+
+  it('offers "Modifier la semaine type" only for a structure of its own', async () => {
+    setup(policyView(), undefined, line('GENERAL'))
+
+    expect(await screen.findByRole('radio', { name: /Semaine type générale du planning/ })).toBeChecked()
+    expect(screen.getByRole('radio', { name: /Semaine type personnalisée/ })).not.toBeChecked()
+    expect(screen.queryByRole('button', { name: /Modifier la semaine type/ })).not.toBeInTheDocument()
+    cleanup()
+
+    setup(policyView(), undefined, line('CUSTOM'))
+
+    expect(await screen.findByRole('radio', { name: /Semaine type personnalisée/ })).toBeChecked()
+    expect(screen.getByRole('button', { name: /Modifier la semaine type/ })).toBeInTheDocument()
+  })
+
+  it('saves the choice at once, then offers the editor and tells the page', async () => {
+    const { api, onSaved } = setup(policyView(), undefined, line('GENERAL'), {
+      [`PUT ${MODE}`]: () => ({}),
+    })
+
+    fireEvent.click(await screen.findByRole('radio', { name: /Semaine type personnalisée/ }))
+
+    expect(await screen.findByRole('button', { name: /Modifier la semaine type/ })).toBeInTheDocument()
+    expect(screen.getByRole('radio', { name: /Semaine type personnalisée/ })).toBeChecked()
+    expect(api.requests('PUT', MODE)).toHaveLength(1)
+    expect(api.requests('PUT', MODE)[0].body).toEqual({ mode: 'CUSTOM' })
+    expect(onSaved).toHaveBeenCalledOnce()
+  })
+
+  it('goes back to the general structure the same way: the editor disappears', async () => {
+    const { api } = setup(policyView(), undefined, line('CUSTOM'), { [`PUT ${MODE}`]: () => ({}) })
+
+    fireEvent.click(await screen.findByRole('radio', { name: /Semaine type générale du planning/ }))
+
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: /Modifier la semaine type/ })).not.toBeInTheDocument(),
+    )
+    expect(api.requests('PUT', MODE)[0].body).toEqual({ mode: 'GENERAL' })
+  })
+
+  it('says why a choice is refused and keeps the previous one', async () => {
+    const { onSaved } = setup(policyView(), undefined, line('CUSTOM'), {
+      [`PUT ${MODE}`]: () => status(422, { error: 'period_boundary_splits_block' }),
+    })
+
+    fireEvent.click(await screen.findByRole('radio', { name: /Semaine type générale du planning/ }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      /la semaine type générale couperait un bloc à la limite entre deux périodes/,
+    )
+    expect(screen.getByRole('radio', { name: /Semaine type personnalisée/ })).toBeChecked()
+    expect(onSaved).not.toHaveBeenCalled()
+  })
+
+  it('is not offered to a reinforcement line, which inherits its blocks (D224)', async () => {
+    setup(conditionalView())
+
+    await screen.findByLabelText('Structure des blocs héritée de Seniors')
+    expect(screen.queryByRole('radio', { name: /Semaine type/ })).not.toBeInTheDocument()
+  })
+})
+
+describe('LineSettingsDialog — the generation rules of the line (docs/decisions.md D228)', () => {
+  const RULES = `/api/planning-lines/${RENFORT}/rule-set`
+  const section = async () =>
+    (await screen.findByRole('heading', { name: 'Règles de génération' })).closest('section') as HTMLElement
+
+  it('shows the active state at the end of the dialog, with no Activer button', async () => {
+    setup(policyView())
+
+    const rules = await section()
+    expect(await within(rules).findByText(/Actives depuis le 20\/09\/2026/)).toBeInTheDocument()
+    expect(within(rules).queryByRole('button', { name: 'Activer' })).not.toBeInTheDocument()
+    // Never a form of inert parameters: what the engine does is said in words.
+    expect(within(rules).getByText(/entre les membres de cette ligne seulement/)).toBeInTheDocument()
+    expect(within(rules).queryByRole('textbox')).not.toBeInTheDocument()
+    expect(document.querySelector('.cov-sections')?.lastElementChild).toBe(rules)
+  })
+
+  it('shows the inactive state and lets a manager activate the rules, telling the page', async () => {
+    const { api, onSaved } = setup(policyView(), undefined, undefined, {
+      [`GET ${RULES}`]: () => ({ active: false }),
+      [`POST ${RULES}/activate`]: () => ACTIVE_RULES,
+    })
+
+    const rules = await section()
+    expect(await within(rules).findByText(/Pas encore activées/)).toBeInTheDocument()
+    fireEvent.click(within(rules).getByRole('button', { name: 'Activer' }))
+
+    expect(await within(rules).findByText(/Actives depuis le/)).toBeInTheDocument()
+    expect(within(rules).queryByText(/Pas encore activées/)).not.toBeInTheDocument()
+    expect(api.requests('POST', `${RULES}/activate`)).toHaveLength(1)
+    expect(onSaved).toHaveBeenCalledOnce()
+  })
+
+  it('reports an activation failure: the rules stay inactive, the dialog stays open', async () => {
+    const { onSaved } = setup(policyView(), undefined, undefined, {
+      [`GET ${RULES}`]: () => ({ active: false }),
+      [`POST ${RULES}/activate`]: () => status(500),
+    })
+
+    const rules = await section()
+    fireEvent.click(await within(rules).findByRole('button', { name: 'Activer' }))
+
+    expect(await within(rules).findByRole('alert')).toHaveTextContent(/Impossible d’activer/)
+    expect(within(rules).getByRole('button', { name: 'Activer' })).toBeEnabled()
+    expect(screen.getByText('Paramètres — Renfort')).toBeInTheDocument()
+    expect(onSaved).not.toHaveBeenCalled()
+  })
+
+  it('says so when the rules cannot be read', async () => {
+    setup(policyView(), undefined, undefined, { [`GET ${RULES}`]: () => status(500) })
+
+    const rules = await section()
+    expect(await within(rules).findByRole('alert')).toHaveTextContent(
+      'Impossible de charger les règles de génération.',
+    )
   })
 })

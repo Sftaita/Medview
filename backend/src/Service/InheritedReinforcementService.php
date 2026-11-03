@@ -93,6 +93,14 @@ final class InheritedReinforcementService
         return null !== $sourcePeriod ? [$policy->toRules(), $sourcePeriod, $source] : null;
     }
 
+    /** The line whose blocks and holders $line follows — null when it does not inherit. */
+    public function sourceLineOf(PlanningLine $line): ?PlanningLine
+    {
+        $policy = $this->policyRepository->findActiveForLine($line);
+
+        return null !== $policy && $policy->toRules()->inheritsStructure() ? $policy->getSourceLine() : null;
+    }
+
     public function inherits(PlanningLine $line): bool
     {
         return true === $this->policyRepository->findActiveForLine($line)?->toRules()->inheritsStructure();
@@ -231,19 +239,60 @@ final class InheritedReinforcementService
      */
     public function materialize(PlanningPeriod $target, ?array $plannedHolders = null): int
     {
-        if (\in_array($target->getStatus(), self::LOCKED_STATUSES, true)) {
+        $locked = \in_array($target->getStatus(), self::LOCKED_STATUSES, true);
+        if (PlanningPeriodStatus::ARCHIVED === $target->getStatus()) {
             return 0;
         }
         $plan = $this->plan($target, $plannedHolders);
         $created = 0;
         foreach ($plan->units as $unit) {
-            $created += \count($this->create($target, $unit));
+            // docs/decisions.md D226: on a published line, only what an extension of the period added.
+            if ($locked && !self::onlyFromExtension($unit)) {
+                continue;
+            }
+            foreach ($this->create($target, $unit) as $duty) {
+                $change = $duty->getCoverageSource()?->getAddedByChange();
+                if (null !== $change) {
+                    $duty->markAddedBy($change);
+                }
+                ++$created;
+            }
         }
         if ($created > 0) {
             $this->entityManager->flush();
         }
 
         return $created;
+    }
+
+    /**
+     * docs/decisions.md D226: how many reinforcement duties a published line
+     * may still receive — triggered by source duties an extension created.
+     */
+    public function extensionDutyCount(PlanningPeriod $target): int
+    {
+        $count = 0;
+        foreach ($this->plan($target)->units as $unit) {
+            if (self::onlyFromExtension($unit)) {
+                $count += \count($unit->sourceDuties);
+            }
+        }
+
+        return $count;
+    }
+
+    private static function onlyFromExtension(PlannedReinforcement $unit): bool
+    {
+        if ($unit->joinsExistingBlock()) {
+            return false;
+        }
+        foreach ($unit->sourceDuties as $source) {
+            if (null === $source->getAddedByChange()) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

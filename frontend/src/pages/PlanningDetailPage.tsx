@@ -6,10 +6,9 @@ import { useAuth } from '../features/auth/useAuth'
 import {
   changePeriodDates,
   createPeriod,
+  fetchDateChangePreview,
   fetchDateOptions,
-  fetchEndRectification,
   openPeriodCollection,
-  rectifyPeriodEnd,
 } from '../features/periods/api'
 import { CreatePeriodDialog } from '../features/periods/components/CreatePeriodDialog'
 import { EditPeriodDatesDialog } from '../features/periods/components/EditPeriodDatesDialog'
@@ -19,8 +18,7 @@ import { PeriodSelector } from '../features/periods/components/PeriodSelector'
 import { PeriodTabs } from '../features/periods/components/PeriodTabs'
 import { PeriodPreparationPanel } from '../features/periods/components/PeriodPreparationPanel'
 import { PreparationSteps } from '../features/periods/components/PreparationSteps'
-import { RectifyPeriodEndDialog } from '../features/periods/components/RectifyPeriodEndDialog'
-import { addDays, formatDate, formatRange } from '../features/periods/dates'
+import { addDays, formatRange } from '../features/periods/dates'
 import { collectionOpeningMessage, periodCreationError, periodDatesError } from '../features/periods/errors'
 import { defaultPeriodNumber, hasReadableCalendar, lineStates, toPeriod } from '../features/periods/model'
 import '../features/periods/periodes.css'
@@ -41,7 +39,6 @@ import { MembersSheet } from '../features/planning/detail/MembersSheet'
 import { LineSettingsDialog } from '../features/planning/coverage/LineSettingsDialog'
 import { Sheet } from '../features/planning/detail/Sheet'
 import '../features/planning/detail/planningDetail.css'
-import { ExtendPlanningForm } from '../features/planning/ExtendPlanningForm'
 import { PlanningJobBanner } from '../features/planning/jobs/PlanningJobBanner'
 import { usePlanningJob } from '../features/planning/jobs/usePlanningJob'
 import { PersonalPlanningView } from '../features/planning/PersonalPlanningView'
@@ -50,7 +47,6 @@ import { fetchFillPreview } from '../features/planning/pilot/api'
 import { FillModal, FillResultBody } from '../features/planning/pilot/FillModal'
 import { ResultBody } from '../features/planning/pilot/GenerationModal'
 import { PilotHeaderActions, type PilotDialog } from '../features/planning/pilot/PilotHeaderActions'
-import { RuleSetModal } from '../features/planning/pilot/RuleSetModal'
 import type {
   CollectionStatus,
   FillLinePlan,
@@ -97,10 +93,8 @@ export function PlanningDetailPage() {
 
   const [renameOpen, setRenameOpen] = useState(false)
   const [newName, setNewName] = useState('')
-  const [extendOpen, setExtendOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [editDatesOpen, setEditDatesOpen] = useState(false)
-  const [rectifyOpen, setRectifyOpen] = useState(false)
   const [toast, setToast] = useState<string | null>(null)
   const toastTimer = useRef<number | undefined>(undefined)
   const [membersLine, setMembersLine] = useState<PlanningLineSummary | null>(null)
@@ -108,8 +102,11 @@ export function PlanningDetailPage() {
   const [pilotDialog, setPilotDialog] = useState<PilotDialog | null>(null)
   // docs/decisions.md D222: "Générer cette ligne", "Règles de génération" of any line, and each line's counters.
   const [fillLine, setFillLine] = useState<PlanningLineSummary | null>(null)
-  const [rulesLine, setRulesLine] = useState<PlanningLineSummary | null>(null)
-  const [fillPlans, setFillPlans] = useState<Record<string, FillLinePlan>>({})
+  // Read per period: an answer for the period just left never decides the main action of this one.
+  const [fillPreview, setFillPreview] = useState<{
+    period: string | undefined
+    plans: FillLinePlan[]
+  } | null>(null)
   // The per-collection detail (history, close) is one click away for a manager, not the first thing they see.
   const [showCollectionHistory, setShowCollectionHistory] = useState(false)
   // Bumped after an extension so the availability follow-up shows the collection it just opened.
@@ -131,11 +128,6 @@ export function PlanningDetailPage() {
   const periodView = periodViews.find((p) => p.number === selectedNumber)
   const period = periods.find((p) => p.number === selectedNumber)
   const periodStableId = periodView?.stableId
-  // docs/decisions.md D211: stable, so that the dialog loads its options once per opening.
-  const loadRectification = useCallback(
-    () => fetchEndRectification(planningId ?? '', periodStableId ?? ''),
-    [planningId, periodStableId],
-  )
   const single = periods.length <= 1
 
   // docs/decisions.md D222: each line's counters (assigned / not filled) and whether "Générer cette ligne" applies —
@@ -143,18 +135,16 @@ export function PlanningDetailPage() {
   const canGenerate = planning?.canGenerate === true
   useEffect(() => {
     if (!planningId || !canGenerate) {
-      setFillPlans({})
+      setFillPreview(null)
       return
     }
     let cancelled = false
     fetchFillPreview(planningId, periodStableId)
       .then((preview) => {
-        if (!cancelled) {
-          setFillPlans(Object.fromEntries(preview.lines.map((line) => [line.lineStableId, line])))
-        }
+        if (!cancelled) setFillPreview({ period: periodStableId, plans: preview.lines })
       })
       .catch(() => {
-        if (!cancelled) setFillPlans({})
+        if (!cancelled) setFillPreview(null)
       })
     return () => {
       cancelled = true
@@ -249,37 +239,36 @@ export function PlanningDetailPage() {
     showToast(`Période ${created.number} créée · ${formatRange(created.startsAt, created.lastDay)}`)
   }
 
-  /** docs/decisions.md D207: the dialog shows the last day included, the API takes the exclusive end. */
-  async function handleChangeDates(dates: { start?: ISODate; end?: ISODate }) {
+  /** docs/decisions.md D207, D225: the dialog shows the last day included, the API takes the exclusive end. */
+  async function handleChangeDates(dates: {
+    start?: ISODate
+    end?: ISODate
+    confirmation?: string
+    notify?: boolean
+  }) {
     if (!planningId || !periodView) return
+    let saved
     try {
-      await changePeriodDates(planningId, periodView.stableId, {
+      saved = await changePeriodDates(planningId, periodView.stableId, {
         ...(dates.start ? { startsAt: dates.start, expectedStartsAt: periodView.startsAt } : {}),
         ...(dates.end ? { endsAt: addDays(dates.end, 1), expectedEndsAt: periodView.endsAt } : {}),
+        ...(dates.confirmation ? { confirmation: dates.confirmation } : {}),
+        ...(dates.notify ? { notify: true } : {}),
       })
     } catch (err) {
       throw new Error(periodDatesError(err))
     }
     setEditDatesOpen(false)
+    setGenerationVersion((count) => count + 1)
     await load()
-    showToast(`Dates de la période ${periodView.number} enregistrées`)
-  }
-
-  /** docs/decisions.md D211: the dialog shows last days (inclusive), the API takes the exclusive end. */
-  async function handleRectifyEnd(lastDay: ISODate, reason: string) {
-    if (!planningId || !periodView) return
-    try {
-      await rectifyPeriodEnd(planningId, periodView.stableId, {
-        endsAt: addDays(lastDay, 1),
-        expectedEndsAt: periodView.endsAt,
-        reason,
-      })
-    } catch (err) {
-      throw new Error(periodDatesError(err))
-    }
-    setRectifyOpen(false)
-    await load()
-    showToast(`Fin de la période ${periodView.number} corrigée · dernier jour le ${formatDate(lastDay)}`)
+    void pilot.reload()
+    showToast(
+      saved.addedDutyCount > 0
+        ? `Dates enregistrées · ${saved.addedDutyCount} ${saved.addedDutyCount > 1 ? 'nouvelles gardes' : 'nouvelle garde'} à attribuer : utilisez « Compléter la période ${periodView.number} »`
+        : saved.republished > 0
+          ? 'Dates enregistrées · planning republié, les personnes concernées sont averties'
+          : `Dates de la période ${periodView.number} enregistrées`,
+    )
   }
 
   async function handleOpenCollection() {
@@ -417,7 +406,6 @@ export function PlanningDetailPage() {
     )
   }
 
-  const primaryLine = planning.lines.find((line) => line.type === 'PRIMARY')
   // The selected period's own state — never the planning's other periods (docs/planning-cycles.md §4.2).
   // docs/decisions.md D204: a plain member reads the published lines only — a draft period has nothing to show them.
   const generated = periodView
@@ -443,8 +431,6 @@ export function PlanningDetailPage() {
         setRenameOpen(true)
       }
     : undefined
-  // Extending the planning (docs/decisions.md D122) only means something while it has a single period.
-  const onExtend = planning.canManage && single ? () => setExtendOpen(true) : undefined
   const tabs: { id: DetailTab; label: string; short: string; narrow?: string; count?: number }[] = [
     { id: 'lines', label: 'Lignes de garde', short: 'Lignes', count: planning.lines.length },
     {
@@ -503,11 +489,8 @@ export function PlanningDetailPage() {
             <PilotHeaderActions
               planningStableId={planning.stableId}
               timezone={planning.timezone}
-              status={pilot.status}
-              primaryLineStableId={primaryLine?.stableId}
-              primaryLineName={primaryLine?.name}
               onRename={onRename}
-              onExtend={onExtend}
+              canManageStructure={planning.canManageLineStructure === true}
               period={
                 periodView
                   ? {
@@ -520,29 +503,26 @@ export function PlanningDetailPage() {
                     }
                   : undefined
               }
-              generateLabel={single ? 'Générer le planning' : `Générer la période ${selectedNumber}`}
-              onChanged={() => void pilot.reload()}
+              onChanged={() => {
+                setGenerationVersion((count) => count + 1)
+                void load()
+                void pilot.reload()
+              }}
               onLaunched={(job) => jobs.track(job)}
-              canLaunchGeneration={!fullyPublished}
+              canRegenerate={!fullyPublished}
               hasGeneratedLines={hasGeneratedLines}
+              plans={fillPreview?.period === periodStableId ? fillPreview?.plans : undefined}
               busy={jobs.active}
               dialog={pilotDialog}
               onDialogChange={setPilotDialog}
             />
           ) : (
-            (onRename || onExtend) && (
+            onRename && (
               <div className="pd-head-actions">
                 <ActionMenu
                   label="Plus d’actions"
                   large
-                  items={[
-                    ...(onRename
-                      ? [{ label: 'Modifier le nom', icon: 'pencil' as const, onSelect: onRename }]
-                      : []),
-                    ...(onExtend
-                      ? [{ label: 'Prolonger la période', icon: 'calendar' as const, onSelect: onExtend }]
-                      : []),
-                  ]}
+                  items={[{ label: 'Modifier le nom', icon: 'pencil' as const, onSelect: onRename }]}
                 />
               </div>
             )
@@ -634,13 +614,6 @@ export function PlanningDetailPage() {
             latestNumber={latest.number}
             onGoLatest={() => selectPeriod(latest.number)}
             onEditDates={canCreatePeriod ? () => setEditDatesOpen(true) : undefined}
-            onRectifyEnd={
-              canCreatePeriod &&
-              selectedIndex < periods.length - 1 &&
-              (period.status === 'publiee' || period.status === 'partielle' || period.status === 'archivee')
-                ? () => setRectifyOpen(true)
-                : undefined
-            }
           />
         </section>
       )}
@@ -682,8 +655,11 @@ export function PlanningDetailPage() {
               onManageMembers={setMembersLine}
               onDeleteLine={handleDeleteLine}
               onConfigureLine={setSettingsLine}
-              onLineRules={planning.canGenerate ? setRulesLine : undefined}
-              fillPlans={planning.canGenerate ? fillPlans : undefined}
+              fillPlans={
+                planning.canGenerate && fillPreview && fillPreview.period === periodStableId
+                  ? Object.fromEntries(fillPreview.plans.map((line) => [line.lineStableId, line]))
+                  : undefined
+              }
               onGenerateLine={planning.canGenerate ? setFillLine : undefined}
               busy={jobs.active}
               onAddLine={handleAddLine}
@@ -705,11 +681,7 @@ export function PlanningDetailPage() {
                   </p>
                 )}
                 {pilot.status && (
-                  <CollectionStatusPanel
-                    status={pilot.status}
-                    onChanged={() => void pilot.reload()}
-                    onEditDeadline={planning.canGenerate ? () => setPilotDialog('settings') : undefined}
-                  />
+                  <CollectionStatusPanel status={pilot.status} onChanged={() => void pilot.reload()} />
                 )}
                 <div>
                   <button
@@ -778,7 +750,6 @@ export function PlanningDetailPage() {
                     period={calendarPeriod}
                     showPeriodNumber={!single}
                     onPublished={() => void load()}
-                    onRequestCompletion={requestCompletion}
                     jobActive={jobs.active}
                     jobKind={jobs.active ? (jobs.job?.kind ?? null) : null}
                   />
@@ -792,24 +763,13 @@ export function PlanningDetailPage() {
                   <Icon name="calendar" size={24} strokeWidth={1.9} />
                 </span>
                 <strong>
-                  {single
-                    ? 'Pas encore de planning'
-                    : `Pas encore de gardes pour la période ${selectedNumber}`}
+                  {single ? 'Pas encore de gardes' : `Pas encore de gardes pour la période ${selectedNumber}`}
                 </strong>
                 <span>
                   {planning.canGenerate
-                    ? 'Lancez la génération : les gardes de chaque membre s’afficheront ici, mois par mois.'
+                    ? `Utilisez « Générer la période ${selectedNumber} » en haut de page : les gardes de chaque membre s’afficheront ici, mois par mois.`
                     : 'Les gardes s’afficheront ici dès que la période aura été générée et publiée.'}
                 </span>
-                {planning.canGenerate && !fullyPublished && (
-                  <button
-                    type="button"
-                    className="pd-btn pd-btn-primary"
-                    onClick={() => setPilotDialog('generate')}
-                  >
-                    {single ? 'Générer le planning' : `Générer la période ${selectedNumber}`}
-                  </button>
-                )}
               </div>
             ))}
         </PeriodTabs>
@@ -836,20 +796,14 @@ export function PlanningDetailPage() {
           loadOptions={(edge, from, to) =>
             fetchDateOptions(planningId, { period: period.id, edge, from, to })
           }
+          loadPreview={(dates) =>
+            fetchDateChangePreview(planningId, period.id, {
+              ...(dates.start ? { startsAt: dates.start } : {}),
+              ...(dates.end ? { endsAt: addDays(dates.end, 1) } : {}),
+            })
+          }
           onSave={handleChangeDates}
           onCancel={() => setEditDatesOpen(false)}
-        />
-      )}
-
-      {canCreatePeriod && period && planningId && periods[selectedIndex + 1] && (
-        <RectifyPeriodEndDialog
-          key={`rectify-${period.id}`}
-          open={rectifyOpen}
-          period={period}
-          next={periods[selectedIndex + 1]}
-          loadOptions={loadRectification}
-          onConfirm={handleRectifyEnd}
-          onCancel={() => setRectifyOpen(false)}
         />
       )}
 
@@ -915,19 +869,6 @@ export function PlanningDetailPage() {
           }}
         />
       )}
-      {rulesLine && (
-        <RuleSetModal
-          lineStableId={rulesLine.stableId}
-          lineName={rulesLine.name}
-          timezone={planning.timezone}
-          onClose={() => setRulesLine(null)}
-          onActivated={() => {
-            void load()
-            void pilot.reload()
-          }}
-        />
-      )}
-
       {renameOpen && (
         <Sheet title="Modifier le nom" onClose={() => setRenameOpen(false)}>
           <form
@@ -955,23 +896,10 @@ export function PlanningDetailPage() {
         </Sheet>
       )}
 
-      {extendOpen && (
-        <Sheet title="Prolonger la période" onClose={() => setExtendOpen(false)}>
-          <ExtendPlanningForm
-            planning={planning}
-            onCancel={() => setExtendOpen(false)}
-            onExtended={() => {
-              setCollectionsReload((count) => count + 1)
-              void pilot.reload()
-              void load()
-            }}
-          />
-        </Sheet>
-      )}
-
       {settingsLine && (
         <LineSettingsDialog
           line={settingsLine}
+          timezone={planning.timezone}
           onClose={() => setSettingsLine(null)}
           onSaved={() => {
             void load()

@@ -88,6 +88,9 @@ class PlanningLine
      * attached to that cycle — or null when no cycle can take it yet
      * (docs/planning-cycles.md §5.5): it gets one in the next cycle created.
      */
+    #[ORM\Column(length: 10, options: ['default' => 'CUSTOM'])]
+    private string $weekStructureMode = 'CUSTOM';
+
     public function __construct(
         Planning $planning,
         PlanningTeam $planningTeam,
@@ -128,6 +131,20 @@ class PlanningLine
     public function getStableId(): Uuid
     {
         return $this->stableId;
+    }
+
+    /** docs/decisions.md D227: GENERAL (follows the planning's "Semaine type") or CUSTOM (its own). */
+    public function getWeekStructureMode(): string
+    {
+        return $this->weekStructureMode;
+    }
+
+    public function changeWeekStructureMode(string $mode): void
+    {
+        if (!\in_array($mode, ['GENERAL', 'CUSTOM'], true)) {
+            throw new \InvalidArgumentException('A line follows the general weekly structure, or has its own.');
+        }
+        $this->weekStructureMode = $mode;
     }
 
     public function getPlanning(): Planning

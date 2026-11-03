@@ -9,7 +9,6 @@ import type {
   MemberStatusDetail,
   ParticipantRemindersResult,
   PlanningHistory,
-  PlanningSettingsResult,
   ReminderSent,
   RestPolicyChoice,
   RuleSetStatus,
@@ -35,21 +34,6 @@ export function fetchMemberStatus(
       `/api/plannings/${planningStableId}/members/${memberStableId}/availability-status`,
       periodStableId,
     ),
-  )
-}
-
-/** `null` clears the deadline. It is informative: it never blocks anything. */
-export function updatePlanningSettings(
-  planningStableId: string,
-  availabilityDeadline: string | null,
-  periodStableId?: string,
-): Promise<PlanningSettingsResult> {
-  return apiFetch<PlanningSettingsResult>(
-    withPeriod(`/api/plannings/${planningStableId}/settings`, periodStableId),
-    {
-      method: 'PATCH',
-      body: { availabilityDeadline },
-    },
   )
 }
 
@@ -118,13 +102,13 @@ export function launchGeneration(
   )
 }
 
-/** What "Générer les postes non pourvus" would do with each line of the period (docs/decisions.md D222). */
+/** What "Compléter la période" would do with each line of the period (docs/decisions.md D222). */
 export function fetchFillPreview(planningStableId: string, periodStableId?: string): Promise<FillPreview> {
   return apiFetch<FillPreview>(withPeriod(`/api/plannings/${planningStableId}/fill-preview`, periodStableId))
 }
 
 /**
- * "Générer les postes non pourvus" / "Générer cette ligne": the lines asked
+ * "Compléter la période" / "Générer cette ligne": the lines asked
  * for, queued like a generation (202 + a job). `restPolicy` applies only to
  * the lines given their first generation — a completion keeps its own.
  */

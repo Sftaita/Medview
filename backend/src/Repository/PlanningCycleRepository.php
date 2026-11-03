@@ -85,7 +85,7 @@ class PlanningCycleRepository extends ServiceEntityRepository
     /** Duties already materialized in $cycle on or after $day. */
     public function countDutiesFrom(PlanningCycle $cycle, \DateTimeImmutable $day): int
     {
-        return $this->count0('SELECT COUNT(*) FROM duties d JOIN planning_periods p ON p.id = d.planning_period_id WHERE p.planning_cycle_id = :cycle AND d.local_date >= :day', $cycle, ['day' => $day->format('Y-m-d')]);
+        return $this->count0('SELECT COUNT(*) FROM duties d JOIN planning_periods p ON p.id = d.planning_period_id WHERE p.planning_cycle_id = :cycle AND d.retired_at IS NULL AND d.local_date >= :day', $cycle, ['day' => $day->format('Y-m-d')]);
     }
 
     /** Collections of $cycle whose window ends after $day (exclusive end). */
@@ -142,9 +142,9 @@ class PlanningCycleRepository extends ServiceEntityRepository
               (SELECT COUNT(*) FROM planning_generations g JOIN planning_periods p ON p.id = g.planning_period_id WHERE p.planning_cycle_id = :cycle) AS generations,
               (SELECT COUNT(*) FROM planning_publications WHERE planning_cycle_id = :cycle) AS publications,
               (SELECT COUNT(*) FROM planning_jobs WHERE planning_cycle_id = :cycle) AS jobs,
-              (SELECT COUNT(*) FROM duties d JOIN planning_periods p ON p.id = d.planning_period_id WHERE p.planning_cycle_id = :cycle) AS duties,
-              (SELECT MIN(d.local_date)::text FROM duties d JOIN planning_periods p ON p.id = d.planning_period_id WHERE p.planning_cycle_id = :cycle) AS first_duty_day,
-              (SELECT MAX(d.local_date)::text FROM duties d JOIN planning_periods p ON p.id = d.planning_period_id WHERE p.planning_cycle_id = :cycle) AS last_duty_day,
+              (SELECT COUNT(*) FROM duties d JOIN planning_periods p ON p.id = d.planning_period_id WHERE p.planning_cycle_id = :cycle AND d.retired_at IS NULL) AS duties,
+              (SELECT MIN(d.local_date)::text FROM duties d JOIN planning_periods p ON p.id = d.planning_period_id WHERE p.planning_cycle_id = :cycle AND d.retired_at IS NULL) AS first_duty_day,
+              (SELECT MAX(d.local_date)::text FROM duties d JOIN planning_periods p ON p.id = d.planning_period_id WHERE p.planning_cycle_id = :cycle AND d.retired_at IS NULL) AS last_duty_day,
               (SELECT COUNT(*) FROM availability_collections WHERE planning_cycle_id = :cycle) AS collections,
               (SELECT MIN(starts_at)::text FROM availability_collections WHERE planning_cycle_id = :cycle) AS first_collection_start,
               (SELECT MAX(ends_at)::text FROM availability_collections WHERE planning_cycle_id = :cycle) AS last_collection_end,
@@ -181,6 +181,49 @@ class PlanningCycleRepository extends ServiceEntityRepository
             'untouchedCollectionId' => $blank && !$row['collection_answered'] && !$row['collection_contacted'] && null !== ($row['sole_collection_id'] ?? null)
                 ? (int) $row['sole_collection_id'] : null,
         ];
+    }
+
+    /**
+     * The window of each collection of $cycle.
+     *
+     * @return list<array{start: string, end: string}>
+     */
+    public function collectionWindows(PlanningCycle $cycle): array
+    {
+        /* @var list<array{start: string, end: string}> */
+        return $this->getEntityManager()->getConnection()->fetchAllAssociative(
+            'SELECT starts_at::text AS start, ends_at::text AS "end" FROM availability_collections WHERE planning_cycle_id = :cycle',
+            ['cycle' => $cycle->getId()],
+        );
+    }
+
+    /** docs/decisions.md D225: a line of $cycle holds a calendar — a COMPLETED generation. */
+    public function hasCompletedGeneration(PlanningCycle $cycle): bool
+    {
+        return $this->count0("SELECT COUNT(*) FROM planning_generations g JOIN planning_periods p ON p.id = g.planning_period_id WHERE p.planning_cycle_id = :cycle AND p.planning_line_id IS NOT NULL AND g.status = 'COMPLETED'", $cycle) > 0;
+    }
+
+    /**
+     * docs/decisions.md D225: the first and last day of each block actually
+     * materialized in $cycle — what a new boundary must never fall inside,
+     * whatever the weekly structure has become since.
+     *
+     * @return list<array{name: string, line: string, first: string, last: string}>
+     */
+    public function materializedBlocks(PlanningCycle $cycle): array
+    {
+        /* @var list<array{name: string, line: string, first: string, last: string}> */
+        return $this->getEntityManager()->getConnection()->fetchAllAssociative(<<<'SQL'
+            SELECT COALESCE(dp.name, 'Bloc') AS name, pl.name AS line, MIN(d.local_date)::text AS first, MAX(d.local_date)::text AS last
+            FROM duties d
+            JOIN duty_group_instances gi ON gi.id = d.group_instance_id
+            JOIN duty_patterns dp ON dp.id = gi.pattern_id
+            JOIN planning_periods pp ON pp.id = d.planning_period_id
+            JOIN planning_lines pl ON pl.id = pp.planning_line_id
+            WHERE pp.planning_cycle_id = :cycle AND d.retired_at IS NULL
+            GROUP BY gi.id, dp.name, pl.name
+            HAVING MIN(d.local_date) < MAX(d.local_date)
+        SQL, ['cycle' => $cycle->getId()]);
     }
 
     /**

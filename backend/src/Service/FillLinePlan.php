@@ -19,8 +19,10 @@ use App\Entity\PlanningPeriodStatus;
  * - EXCLUDED — never touched, `$reason` says why (archived, nothing
  *   demanded, a blocker of its first generation…).
  *
- * A published (or validated) line is always EXCLUDED (`published`), never
- * completed by this operation; it never blocks the other lines.
+ * A published (or validated) line is EXCLUDED (`published`), never completed by
+ * this operation, and never blocks the other lines — except for the duties an
+ * extension of the period created (docs/decisions.md D226): COMPLETE with
+ * `$extensionOnly`, those duties alone.
  */
 final readonly class FillLinePlan
 {
@@ -53,6 +55,10 @@ final readonly class FillLinePlan
         public bool $afterSource = false,
         /** Members who joined after the line's generation, taken into account by its completion. */
         public int $lateMemberCount = 0,
+        /** docs/decisions.md D226: a published line, only the duties its extension created. */
+        public bool $extensionOnly = false,
+        /** docs/decisions.md D226: its older holes, never completed automatically. */
+        public int $otherUncoveredCount = 0,
     ) {
     }
 
@@ -84,6 +90,8 @@ final readonly class FillLinePlan
             'warnings' => $this->warnings,
             'afterSource' => $this->afterSource,
             'lateMemberCount' => $this->lateMemberCount,
+            'extensionOnly' => $this->extensionOnly,
+            'otherUncoveredCount' => $this->otherUncoveredCount,
         ];
     }
 }

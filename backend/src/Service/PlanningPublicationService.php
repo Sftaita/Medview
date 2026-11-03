@@ -148,7 +148,37 @@ final class PlanningPublicationService
     {
         $cycle ??= $planning->getOnlyCycle();
 
-        return $this->locked($planning, fn (): PublicationOutcome => $this->record($planning, $cycle, $publishedBy, function (PublicationPreflight $preflight) use ($planning, $cycle, $newLineStableIds): array {
+        return $this->locked($planning, fn (): PublicationOutcome => $this->record($planning, $cycle, $publishedBy, $this->republishDecision($planning, $cycle, $newLineStableIds)));
+    }
+
+    /**
+     * docs/decisions.md D225 — "Confirmer et avertir": the republication of
+     * $cycle written inside the caller's transaction, so that the new dates,
+     * the retired duties, the publication, its PDF and its notifications are
+     * committed together or not at all. The caller holds the calendar lock, and
+     * sends the notifications after its own commit (sendNotifications()).
+     *
+     * @throws NoUnpublishedChangesException
+     * @throws PlanningNotPublishableException
+     */
+    public function republishInTransaction(Planning $planning, User $publishedBy, PlanningCycle $cycle): PlanningPublication
+    {
+        return $this->recordInOpenTransaction($planning, $cycle, $publishedBy, $this->republishDecision($planning, $cycle, []))[0];
+    }
+
+    public function sendNotifications(PlanningPublication $publication): void
+    {
+        $this->notificationSender->sendForPublication($publication);
+    }
+
+    /**
+     * @param list<string> $newLineStableIds
+     *
+     * @return callable(PublicationPreflight): array{0: ?PlanningPublication, 1: list<PlanningLine>, 2: bool}
+     */
+    private function republishDecision(Planning $planning, PlanningCycle $cycle, array $newLineStableIds): callable
+    {
+        return function (PublicationPreflight $preflight) use ($planning, $cycle, $newLineStableIds): array {
             $reference = $this->publicationRepository->findLatestForCycle($cycle);
             if (null === $reference) {
                 throw new PlanningNotYetPublishedException();
@@ -162,7 +192,7 @@ final class PlanningPublicationService
             }
 
             return [$reference, $firstLines, true];
-        }));
+        };
     }
 
     /**
@@ -292,7 +322,25 @@ final class PlanningPublicationService
         $connection->beginTransaction();
         try {
             $this->calendarWriteLock->acquire($planning);
+            [$publication, $results] = $this->recordInOpenTransaction($planning, $cycle, $publishedBy, $decide);
+            $connection->commit();
+        } catch (\Throwable $exception) {
+            $connection->rollBack();
+            throw $exception;
+        }
 
+        $delivery = $this->notificationSender->sendForPublication($publication);
+
+        return new PublicationOutcome($publication, $results, $delivery['recipientCount'], $delivery['sentCount']);
+    }
+
+    /**
+     * @param callable(PublicationPreflight): array{0: ?PlanningPublication, 1: list<PlanningLine>, 2: bool} $decide
+     *
+     * @return array{0: PlanningPublication, 1: list<PublicationLineResult>}
+     */
+    private function recordInOpenTransaction(Planning $planning, PlanningCycle $cycle, User $publishedBy, callable $decide): array
+    {
             $preflight = $this->preflightService->check($planning, $cycle);
             [$reference, $firstLines, $announceChanges] = $decide($preflight);
             $publishedBefore = array_map(static fn (PublicationLineReadiness $line): PlanningLine => $line->line, $preflight->publishedLines());
@@ -372,15 +420,7 @@ final class PlanningPublicationService
             $this->entityManager->persist($this->pdfRenderer->document($publication, $now));
             $this->entityManager->flush();
 
-            $connection->commit();
-        } catch (\Throwable $exception) {
-            $connection->rollBack();
-            throw $exception;
-        }
-
-        $delivery = $this->notificationSender->sendForPublication($publication);
-
-        return new PublicationOutcome($publication, $results, $delivery['recipientCount'], $delivery['sentCount']);
+            return [$publication, $results];
     }
 
     /**

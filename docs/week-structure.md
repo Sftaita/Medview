@@ -264,3 +264,11 @@ largeurs — les tests tournent au palier `s`).
    modification de la semaine type n'a plus d'effet sur cette période, et un
    changement de mode ou de source de la politique de demande est refusé
    (`line_already_materialized`). Non refondu dans ce chantier.
+
+## Semaine type générale et choix par ligne (D227)
+
+La semaine type générale d'un planning (`plannings.week_template`, menu « ⋯ » de l'en-tête) définit
+la structure habituelle. Chaque ligne, dans « Paramètres de la ligne », utilise soit la générale
+(elle en reçoit une copie : mêmes `DutyPattern` par équipe, moteur inchangé), soit la sienne ; une
+ligne de renfort hérite des blocs de sa source (D224). Une modification n'atteint que les gardes créées
+ensuite : aucune garde générée ou publiée n'est modifiée, un jour déjà matérialisé reste décidé.

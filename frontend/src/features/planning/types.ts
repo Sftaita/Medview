@@ -127,7 +127,7 @@ export type PlanningLineSummary = {
   memberCount?: number
   /** docs/decisions.md D224 — when this line's duties are needed (never a recomputation of the demand). */
   coverage?:
-    | { mode: 'INDEPENDENT'; hasWeekStructure: boolean }
+    | { mode: 'INDEPENDENT'; hasWeekStructure: boolean; weekStructure?: 'GENERAL' | 'CUSTOM' }
     | {
         mode: 'CONDITIONAL_ON_SOURCE_ASSIGNMENT'
         structureSource: 'OWN' | 'INHERITED'

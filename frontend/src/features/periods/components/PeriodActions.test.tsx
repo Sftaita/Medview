@@ -15,7 +15,7 @@ const period = (start: string, end: string, status: Period['status'] = 'publiee'
   collecte: { state: 'cloturee' },
 })
 
-function renderActions(p: Period, actions: { onEditDates?: () => void; onRectifyEnd?: () => void } = {}) {
+function renderActions(p: Period, actions: { onEditDates?: () => void } = {}) {
   const onGoLatest = vi.fn()
   const { container } = render(
     <PeriodActions period={p} today="2026-10-19" latestNumber={3} onGoLatest={onGoLatest} {...actions} />,
@@ -41,15 +41,13 @@ describe('PeriodActions — history notice (lot L7)', () => {
 })
 
 describe('PeriodActions — what can be done, nothing repeated from the cards', () => {
-  it('offers « Modifier les dates » and, when allowed, « Corriger la fin… »', () => {
+  it('offers « Modifier les dates », the one way to change them (docs/decisions.md D225)', () => {
     const onEditDates = vi.fn()
-    const onRectifyEnd = vi.fn()
-    renderActions(period('2026-10-05', '2027-01-30'), { onEditDates, onRectifyEnd })
+    renderActions(period('2026-10-05', '2027-01-30'), { onEditDates })
 
     fireEvent.click(screen.getByRole('button', { name: /Modifier les dates/ }))
-    fireEvent.click(screen.getByRole('button', { name: /Corriger la fin/ }))
     expect(onEditDates).toHaveBeenCalled()
-    expect(onRectifyEnd).toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: /Corriger la fin/ })).not.toBeInTheDocument()
     // The cards above are the place for these: never repeated here.
     expect(
       screen.queryByText(/Premier jour|Dernier jour inclus|Durée|Nouvelle période/),
