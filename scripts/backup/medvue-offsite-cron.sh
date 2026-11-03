@@ -19,7 +19,7 @@
 #   MEDVUE_OFFSITE_BACKUP_MAX_AGE_HOURS  default 6: how recent the local backup must be
 #   MEDVUE_OFFSITE_ALERT_TO      default: the platform administrators, else SUPPORT_EMAIL
 #   MEDVUE_DOCKER                default docker
-set -uo pipefail
+set -euo pipefail
 export PATH="$HOME/bin:$PATH"
 
 BACKUP_ROOT="${MEDVUE_BACKUP_ROOT:-/home/deploy/backups/medvue}"
@@ -37,7 +37,7 @@ LOG="$BACKUP_ROOT/backup.log"
 STATUS_DIR="$BACKUP_ROOT/status"
 
 umask 077
-log() { printf '[%s] [offsite-cron] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$LOG"; }
+log() { printf '[%s] [offsite-cron] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$LOG" || true; } # a journal that cannot be written must never stop the alert
 
 write_status() { # write_status RESULT STAMP
   [[ -d "$STATUS_DIR" ]] || return 0
@@ -64,7 +64,7 @@ alert_recipients() {
 fail() { # fail REASON — logs, records, alerts, and always exits 1
   local reason="$1" sent=0 to from
   log "ERROR: $reason"
-  write_status failure "${newest:-}"
+  write_status failure "${newest:-}" || true
   from=$("$DOCKER" exec medvue-backend printenv SUPPORT_EMAIL 2>/dev/null) || from=""
   while IFS= read -r to; do
     [[ -n "$to" ]] || continue
@@ -102,7 +102,7 @@ finished_at=$(date -u -d "$finished" +%s 2>/dev/null) || fail "unreadable date i
 age=$(($(date -u +%s) - finished_at))
 [[ "$age" -le $((MAX_AGE_HOURS * 3600)) ]] || fail "local backup older than ${MAX_AGE_HOURS} h ($finished), nothing sent"
 
-newest_dump=$(find "$BACKUP_ROOT/postgres" -maxdepth 1 -type f -name 'medvue_*.dump' -printf '%f\n' | sort | tail -n 1)
+newest_dump=$(find "$BACKUP_ROOT/postgres" -maxdepth 1 -type f -name 'medvue_*.dump' -printf '%f\n' | sort | tail -n 1) || newest_dump=""
 newest=${newest_dump#medvue_}
 newest=${newest%.dump}
 [[ -n "$newest" ]] || fail "no local dump found"
@@ -111,7 +111,9 @@ newest=${newest%.dump}
 "$OFFSITE" || fail "medvue-offsite.sh exited with status $?"
 
 # --- 3. the newest set is on the remote ---------------------------------------
-"$RCLONE" lsf "$REMOTE/daily/$newest" 2>/dev/null | grep -q '\.gpg$' || fail "set $newest not found on the remote after the run"
+# Listed first: `lsf | grep -q` under pipefail could fail on a SIGPIPE although the set is there.
+listing=$("$RCLONE" lsf "$REMOTE/daily/$newest" 2>/dev/null) || listing=""
+grep -q '\.gpg$' <<<"$listing" || fail "set $newest not found on the remote after the run"
 
-write_status success "$newest"
+write_status success "$newest" || fail "cannot record the result in $STATUS_DIR"
 log "done: set $newest on the remote"

@@ -3,7 +3,7 @@
 # medvue-offsite.sh, rclone and docker are stand-ins: no network, no container, nothing outside its temporary directory.
 #
 # Usage: medvue-offsite-cron.test.sh       Exit 0 only if every check passes.
-set -uo pipefail
+set -euo pipefail
 
 here=$(cd "$(dirname "$0")" && pwd)
 cron="$here/../medvue-offsite-cron.sh"
@@ -47,9 +47,9 @@ status() { # status RESULT FAILURES AGE_SECONDS
 }
 reset() { rm -f "$root/offsite.runs" "$root/mails" "$root/offsite.fail" "$root/offsite.lazy" "$root/smtp.fail" "$B/status/offsite.json"; rm -rf "$R"; mkdir -p "$R"; status success 0 600; }
 run() {
+  rc=0
   MEDVUE_BACKUP_ROOT="$B" MEDVUE_OFFSITE_SCRIPT="$BIN/offsite" MEDVUE_OFFSITE_REMOTE="remote:" MEDVUE_OFFSITE_RCLONE="$BIN/rclone" MEDVUE_DOCKER="$BIN/docker" \
-    bash "$cron" >"$root/out" 2>&1
-  rc=$?
+    bash "$cron" >"$root/out" 2>&1 || rc=$?
 }
 runs() { [[ -f "$root/offsite.runs" ]] && wc -l <"$root/offsite.runs" || echo 0; }
 mails() { [[ -f "$root/mails" ]] && wc -l <"$root/mails" || echo 0; }
@@ -90,6 +90,18 @@ check "alert not delivered: said in the log, still exit 1" '[[ $rc -eq 1 ]] && g
 
 reset; exec 9>"$B/.offsite-cron.lock"; flock -n 9; run; flock -u 9; exec 9>&-
 check "concurrent run: refused without sending" '[[ $rc -eq 1 && $(runs) -eq 0 && $(mails) -eq 1 ]]'
+
+reset; mv "$B/postgres" "$B/postgres.away"; run; mv "$B/postgres.away" "$B/postgres"
+check "no dump directory: nothing sent, alert" '[[ $(runs) -eq 0 && $rc -eq 1 && $(mails) -eq 1 ]]'
+
+reset; mkdir "$B/status/.offsite.json.partial"; touch "$root/offsite.fail"; run
+check "status not writable: the alert still leaves" '[[ $rc -eq 1 && $(mails) -eq 1 ]]'
+rm -f "$root/offsite.fail"; run
+check "status not writable after a good run: exit 1 and alert" '[[ $rc -eq 1 && $(mails) -eq 2 ]]'
+rmdir "$B/status/.offsite.json.partial"
+
+reset; mv "$B/backup.log" "$B/backup.log.away"; mkdir "$B/backup.log"; touch "$root/offsite.fail"; run; rmdir "$B/backup.log"; mv "$B/backup.log.away" "$B/backup.log"
+check "journal not writable: the alert still leaves" '[[ $rc -eq 1 && $(mails) -eq 1 ]]'
 
 reset; run
 check "after the lock is released: runs again" '[[ $rc -eq 0 && $(runs) -eq 1 ]]'
