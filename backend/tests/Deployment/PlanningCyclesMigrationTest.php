@@ -192,7 +192,9 @@ final class PlanningCyclesMigrationTest extends WebTestCase
     public function testL2DownRefusesALineWithoutPeriod(): void
     {
         $client = static::getClient();
-        // Added after the publication: no period can take it (docs/planning-cycles.md §5.5).
+        // Added once the period is archived: no period can take it (docs/planning-cycles.md §5.5). A published period
+        // takes a new line since docs/decisions.md D231; an archived one never does.
+        $this->db->executeStatement("UPDATE planning_periods SET status = 'ARCHIVED'");
         $this->api($client, 'POST', "/api/plannings/{$this->scenario['planningId']}/lines", ['name' => 'Tardive'], $this->scenario['creator']);
         self::assertResponseStatusCodeSame(201);
 

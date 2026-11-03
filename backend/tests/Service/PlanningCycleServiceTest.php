@@ -66,6 +66,7 @@ final class PlanningCycleServiceTest extends WebTestCase
             new NullLogger(),
             $container->get(PeriodPreparationRepository::class),
             $container->get(\App\Service\PeriodDateChangePlanner::class),
+            $container->get(\App\Repository\PeriodPreparationReminderRepository::class),
             $container->get(\App\Service\PlanningLineOrder::class),
             $container->get(\App\Repository\DutyRepository::class),
             $container->get(\App\Service\CalendarWriteLock::class),
