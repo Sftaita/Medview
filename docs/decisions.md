@@ -10547,7 +10547,11 @@ modifié.
   bloc partiel, des deux côtés de cette limite précise : première génération d'une période coupée (ses
   premiers jours), reste du bloc dans la période suivante (`allowsRemainder`), reprolongation (les jours manquants
   deviennent une unité distincte, le titulaire déjà en place ne change pas). Déplacer la limite décide à nouveau.
-- **Limite** : les deux parties d'un bloc coupé sont deux unités distinctes et peuvent avoir deux titulaires.
+- **Décision de l'utilisateur (2026-11-03)** : les deux parties d'un bloc coupé volontairement sont deux unités distinctes
+  et peuvent avoir deux titulaires (Basile garde le vendredi, Alix reçoit le samedi et le dimanche de la période suivante) ;
+  aucun même titulaire n'est imposé entre deux périodes indépendantes. Les jours conservés gardent leurs affectations, les
+  jours transférés suivent les règles de la nouvelle période, le reste est attribué atomiquement, historiques et
+  publications sont préservés, et le gestionnaire est averti avant de confirmer.
 - **Tests** : `PeriodBoundaryCutTest`.
 
 ## D230 — Collectes et préparation : tout est montré avant confirmation
