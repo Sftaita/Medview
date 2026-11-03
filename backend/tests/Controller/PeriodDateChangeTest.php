@@ -526,4 +526,27 @@ final class PeriodDateChangeTest extends WebTestCase
         $this->expectException(\Doctrine\Migrations\Exception\AbortMigration::class);
         (new \DoctrineMigrations\Version20261104090000($this->db(), new \Psr\Log\NullLogger()))->down(new \Doctrine\DBAL\Schema\Schema());
     }
+
+    /**
+     * The new dates come after the generation: its frozen snapshot knows nothing of an absence declared since, on days
+     * it never covered. The completion reads them live.
+     */
+    public function testTheNewDatesRespectAnAbsenceDeclaredAfterTheGeneration(): void
+    {
+        $period1 = $this->generatedPeriodOne(publish: true);
+        $this->patch($period1, ['endsAt' => '2027-02-08', 'expectedEndsAt' => '2027-02-01']);
+        self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
+        $this->declareRange($this->client, $this->s['alice'], '2027-02-01', '2027-02-08');
+        $alice = (int) $this->db()->fetchOne("SELECT tm.id FROM planning_team_members tm JOIN users u ON u.id = tm.user_id WHERE u.email = 'alice@example.com'");
+        $held = $this->rows("SELECT COUNT(*) FROM duty_assignments a JOIN duties d ON d.id = a.duty_id WHERE a.current AND a.team_member_id = {$alice} AND d.local_date < '2027-02-01'");
+        self::assertGreaterThan(0, $held, 'she holds older duties: they stay');
+
+        $plan = $this->fillPreview($this->client, $this->s)['lines'][0];
+        $job = $this->fillNow($this->client, $this->s, [$plan['lineStableId']]);
+        self::assertSame('SUCCEEDED', $job['status'], json_encode($job));
+
+        self::assertSame(7, $this->rows("SELECT COUNT(*) FROM duty_assignments a JOIN duties d ON d.id = a.duty_id WHERE a.current AND d.local_date >= '2027-02-01'"), 'all attributed, to the others');
+        self::assertSame(0, $this->rows("SELECT COUNT(*) FROM duty_assignments a JOIN duties d ON d.id = a.duty_id WHERE a.current AND a.team_member_id = {$alice} AND d.local_date >= '2027-02-01'"));
+        self::assertSame($held, $this->rows("SELECT COUNT(*) FROM duty_assignments a JOIN duties d ON d.id = a.duty_id WHERE a.current AND a.team_member_id = {$alice} AND d.local_date < '2027-02-01'"));
+    }
 }
