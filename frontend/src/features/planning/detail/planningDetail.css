@@ -214,6 +214,11 @@
   border-radius: 12px;
   box-shadow: var(--shadow-lg);
 }
+/* Not enough room below (bottom bar, clipping card, end of the page): it opens upward. */
+.pd-menu--up {
+  top: auto;
+  bottom: calc(100% + 8px);
+}
 .pd-menu-item {
   display: flex;
   align-items: center;

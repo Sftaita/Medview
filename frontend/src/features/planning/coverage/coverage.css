@@ -214,15 +214,29 @@
   margin: 0;
   padding-left: 20px;
 }
+/* Section titles: at least the size of the text they introduce (390 px check). */
 .cov-summary h4,
 .cov-preview__period h4,
 .cov-matrix-title {
   margin: 12px 0 4px;
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
+}
+.cov-summary h4 {
+  margin-top: 0;
+}
+.cov-inherited__lead {
+  margin: 0;
+  font-weight: 600;
 }
 .cov-preview {
   align-items: flex-start;
 }
 .cov-preview > div {
   width: 100%;
+}
+/* Its long label wraps on a phone (390 px) instead of overflowing the dialog. */
+.cov-preview > .btn {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
 }

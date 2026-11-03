@@ -23,9 +23,9 @@ function day(date: string): string {
   return DATE.format(new Date(`${date}T00:00:00Z`))
 }
 
-function list(days: string[]): string {
+function list(days: string[], last = 'et'): string {
   if (days.length <= 1) return days.join('')
-  return `${days.slice(0, -1).join(', ')} et ${days[days.length - 1]}`
+  return `${days.slice(0, -1).join(', ')} ${last} ${days[days.length - 1]}`
 }
 
 /**
@@ -61,11 +61,14 @@ export function InheritedStructurePanel({
           {solo.length > 0 && <li>Gardes isolées : {list(solo.map(weekdayLabel))}</li>}
         </ul>
       )}
+      <p className="cov-inherited__lead">
+        Automatique, rien à régler : les horaires et les blocs viennent de {sourceName}.
+      </p>
       <p className="cov-help">
-        Un renfort n’est créé que les jours qui le déclenchent, aux mêmes horaires que la garde renforcée.
-        Dans un bloc, les jours déclenchés forment un bloc attribué à une seule personne (vendredi, samedi et
-        dimanche, ou vendredi et dimanche) ; un seul jour déclenché reste une garde isolée. Aucun renfort
-        n’est ajouté pour compléter un bloc.
+        Un renfort n’est créé que les jours cochés ci-dessous, aux mêmes horaires que la garde de {sourceName}
+        . Les jours cochés d’un même bloc sont confiés à une seule personne (par exemple vendredi, samedi et
+        dimanche, ou vendredi et dimanche) ; un seul jour coché reste une garde isolée. Aucun renfort n’est
+        ajouté pour compléter un bloc.
       </p>
     </div>
   )
@@ -76,10 +79,12 @@ export function TriggerSummary({
   rows,
   selection,
   lineName,
+  sourceName,
 }: {
   rows: MatrixRow[]
   selection: Selection
   lineName: string
+  sourceName: string
 }) {
   const configured = rows.filter((row) => (selection[row.userStableId] ?? []).length > 0)
   return (
@@ -91,17 +96,22 @@ export function TriggerSummary({
           <span>Aucune condition : aucune garde de renfort ne sera demandée.</span>
         </p>
       ) : (
-        <ul>
-          {configured.map((row) => (
-            <li key={row.userStableId}>
-              <strong>
-                {row.firstName} {row.lastName}
-              </strong>{' '}
-              de garde : un renfort {lineName} le{' '}
-              {list(sortWeekdays(selection[row.userStableId]).map(weekdayLabel))}.
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul>
+            {configured.map((row) => (
+              <li key={row.userStableId}>
+                Quand{' '}
+                <strong>
+                  {row.firstName} {row.lastName}
+                </strong>{' '}
+                est de garde sur {sourceName} le{' '}
+                {list(sortWeekdays(selection[row.userStableId]).map(weekdayLabel), 'ou')} : un renfort{' '}
+                {lineName}.
+              </li>
+            ))}
+          </ul>
+          <p className="cov-help">Chaque renfort est assuré par un membre de {lineName}.</p>
+        </>
       )}
     </div>
   )
@@ -188,6 +198,7 @@ export function DemandPreviewPanel({
                       {entry.generated &&
                         ' — période déjà générée : ses règles restent celles de sa génération.'}
                     </p>
+                    {blocks > 0 && <p className="cov-help">Chaque bloc est confié à une seule personne.</p>}
                     {entry.units.length > 0 && (
                       <ul className="cov-preview__units">
                         {entry.units.slice(0, 12).map((unit) => (

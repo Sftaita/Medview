@@ -65,8 +65,67 @@ Camille vendredi + dimanche.
 Bilan affiché : « 9 gardes attribuées, 28 affectations existantes conservées,
 0 modifiée ».
 
+## 3. Contrôle à 390 px (téléphone, 2026-11-03, `app_uat_ri`, Chrome)
+
+Second planning, « Recette D224 mobile » (mars 2027), mêmes personnes : Première
+ligne publiée (28 gardes), Fell/Ass vierge. Parcours complet à 390 px, de la
+configuration à la génération, cases cochées par de vrais clics.
+
+| Capture | Ce qu'elle montre |
+|---|---|
+| `09-390-menu-ouvert-vers-le-haut.jpg` | Menu « ⋯ » de la dernière ligne, ouvert vers le haut : les 3 entrées atteignables |
+| `10-390-regles-de-couverture.jpg` | Ligne vierge : semaine type et règles de couverture |
+| `11-390-blocs-herites.jpg` | « Automatique, rien à régler : les horaires et les blocs viennent de Première ligne », déclencheurs, membres Fell/Ass exclus de la matrice |
+| `12-390-matrice-cochee.jpg` | Chirurgiens × jours : 21 cases nommées, 48 × 55 px |
+| `13-390-resume-previsualisation.jpg` | Résumé en phrases, aperçu : 9 gardes dont 3 blocs |
+| `14-390-enregistre.jpg` | Confirmation amenée à l'écran |
+| `15-390-generer-cette-ligne.jpg` | « Jamais générée · 9 gardes à pourvoir », bouton entier |
+| `16-390-dialogue-generation.jpg` | Générer cette ligne : Fell/Ass seule, Première ligne non proposée |
+| `17-390-calendrier.jpg` | Deux colonnes lisibles : bloc de 3 jours d'une seule personne, samedi seul |
+
+Mesures : aucun débordement horizontal (page 390 = 390, corps des dialogues
+`scrollWidth` = `clientWidth`).
+
+Défauts trouvés à cette largeur, corrigés et couverts par un test (mutation
+vérifiée pour le menu, la confirmation et la réponse tardive) :
+
+1. **Coche effacée toute seule** : une réponse de chargement arrivée après la
+   première action écrasait le brouillon (mesuré : clic à 7,7 s, sélection
+   effacée à 15,8 s). Provoqué ici par le double chargement de `StrictMode`,
+   donc en développement ; seule la dernière réponse compte désormais.
+2. **« Supprimer la ligne » inatteignable** sur la dernière ligne : sous la barre
+   du bas et coupé par la carte, page déjà en bas. Antérieur à D224 (D140). Le
+   menu s'ouvre vers le haut si sa dernière entrée n'est pas réellement affichée.
+3. **Bouton « Prévisualiser… »** : 10 px de débordement, le libellé passe à la ligne.
+4. **Confirmation d'enregistrement** sous le pli : amenée à l'écran.
+5. **Titres** plus petits que le texte qu'ils introduisent : agrandis.
+
+Textes clarifiés : qui déclenche (« Quand X est de garde sur Première ligne le
+vendredi, samedi ou dimanche : un renfort Fell/Ass »), qui assure (« Chaque
+renfort est assuré par un membre de Fell/Ass »), d'où viennent horaires et blocs
+(« Automatique, rien à régler »), plus de « ligne source » dans le choix du mode,
+plus de « à couvrir chaque jour » sur l'onglet Lignes.
+
+Résultat en base : 9 gardes exactement sur les jours déclenchés, 3 blocs d'un seul
+titulaire chacun (Eli 3 jours, Fanny vendredi + dimanche, Dora 3 jours) et un samedi
+isolé (Fanny), mêmes horaires que la source ; Première ligne : même empreinte avant
+et après (`dc6a061b…`) ; bilan affiché « 9 gardes attribuées, 28 affectations
+existantes conservées, 0 modifiée ».
+
+Sur le premier planning, modifier puis rétablir une règle n'a changé aucune garde
+ni affectation (empreintes identiques), seule une version de règle s'ajoute.
+
+**Non vérifié** : un vrai téléphone (Chrome, cadre de 390 px, souris) ; le tactile
+réel et le clavier virtuel n'ont pas été exercés.
+
+## 4. Production, contrôle en lecture seule (2026-11-03)
+
+Transaction `READ ONLY` : migration `Version20261102090000` (D224 non appliquée),
+120 affectations courantes sur la Première ligne de Trauma Delta, 0 garde Fell/Ass,
+0 job de génération depuis le déploiement du 2026-11-02 (dernier : 2026-09-29).
+
 ## Bases conservées
 
-`app_test_ri` (tests automatisés de la branche), `app_uat_ri` (cette recette),
+`app_test_ri` (tests automatisés de la branche), `app_uat_ri` (cette recette, les deux plannings),
 avec celles de D222 (`app_test_lg`, `app_test_lg2`, `app_uat_lg`, `app_uat_lg2`,
 `app_uat_lg3`).

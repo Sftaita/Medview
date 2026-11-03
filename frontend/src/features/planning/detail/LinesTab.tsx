@@ -66,7 +66,7 @@ export function LinesTab({
   return (
     <div className="pd-stack">
       <p className="pd-help">
-        Chaque ligne est un rôle de garde à couvrir chaque jour. La ligne principale est remplie en priorité.
+        Chaque ligne est un rôle de garde. La ligne principale est remplie en priorité.
       </p>
       <ul className="pd-card pd-list" aria-label="Lignes de garde">
         {lines.map((line) => {

@@ -48,17 +48,33 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
   const [notice, setNotice] = useState<string | null>(null)
   const [weekOpen, setWeekOpen] = useState(false)
   const inFlight = useRef(false)
+  const outcomeRef = useRef<HTMLParagraphElement>(null)
+
+  // The outcome of "Enregistrer" is written below the form: on a phone it would sit below the fold,
+  // unseen (390 px check, D224) — bring it into view.
+  useEffect(() => {
+    if (notice || saveError) outcomeRef.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+  }, [notice, saveError])
   const sourceId = useId()
 
+  // Only the latest load counts: a late response must never overwrite what has been ticked since
+  // (found at 390 px, D224 — the box unticked itself seconds after the tap).
+  const latestLoad = useRef(0)
   const load = useCallback(
     (keepDraft: boolean) => {
+      const request = ++latestLoad.current
       fetchDemandPolicy(line.stableId)
         .then((value) => {
+          if (request !== latestLoad.current) return
           setView(value)
           setDraft((current) => (keepDraft && current ? current : draftFromView(value)))
           setLoadError(null)
         })
-        .catch(() => setLoadError('Impossible de charger la configuration de cette ligne.'))
+        .catch(() => {
+          if (request === latestLoad.current) {
+            setLoadError('Impossible de charger la configuration de cette ligne.')
+          }
+        })
     },
     [line.stableId],
   )
@@ -231,7 +247,7 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
                       <strong>Renfort conditionnel</strong>
                       <span className="cov-help">
                         Une garde n’est nécessaire que certains jours, selon le chirurgien de garde sur une
-                        autre ligne (la ligne source), dont cette ligne reprend les blocs.
+                        autre ligne. Les horaires et les blocs viennent de cette autre ligne.
                       </span>
                     </span>
                   </label>
@@ -297,6 +313,7 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
                         rows={matrixRows(view, draft)}
                         selection={draft.selection}
                         lineName={line.name}
+                        sourceName={source?.name ?? 'la ligne source'}
                       />
                       <DemandPreviewPanel
                         lineStableId={line.stableId}
@@ -330,13 +347,13 @@ export function LineSettingsDialog({ line, onClose, onSaved }: Props) {
       )}
 
       {notice && (
-        <p role="status" className="alert alert--success">
+        <p ref={outcomeRef} role="status" className="alert alert--success">
           <Icon name="check" size={18} strokeWidth={2} />
           <span>{notice}</span>
         </p>
       )}
       {saveError && (
-        <p role="alert" className="alert alert--error">
+        <p ref={outcomeRef} role="alert" className="alert alert--error">
           <Icon name="alert" size={18} strokeWidth={2} />
           <span>{saveError}</span>
         </p>

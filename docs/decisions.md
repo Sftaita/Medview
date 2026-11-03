@@ -10395,3 +10395,9 @@ modifié.
   différemment par période (configuration unique, décision de
   l'utilisateur) ; les conflits entre deux plannings différents ne sont
   toujours pas contrôlés (antérieur, D161).
+- **Contrôle à 390 px** (`docs/recette/d224/README.md` §3) : dans « Paramètres de
+  la ligne », seule la dernière réponse de chargement compte (une réponse
+  tardive effaçait les cases cochées) ; le menu « ⋯ » (`ActionMenu`) s'ouvre vers
+  le haut quand sa dernière entrée n'est pas réellement affichée, mesuré à
+  chaque ouverture avec `elementFromPoint` plutôt qu'avec la hauteur de la barre
+  du bas, parce que la carte qui coupe le menu et la fin de page comptent aussi.

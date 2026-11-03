@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom/vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { StrictMode } from 'react'
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { status, stubApi, type Route } from '../../../testUtils/stubApi'
 import { conditionalView, DR_A, DR_B, DR_C, policyView, RENFORT, SENIORS } from './coverageTestData'
 import { STACKED_BELOW } from './CoverageMatrix'
@@ -141,6 +142,56 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
     const sent = api.requests('PUT', POLICY)[0].body as { triggers: { userStableId: string }[] }
     expect(sent.triggers.map((t) => t.userStableId)).not.toContain(DR_A.userStableId) // no day: no trigger at all
     expect(await screen.findByText(/Configuration enregistrée/)).toBeInTheDocument()
+  })
+
+  it('a late response never overwrites what has been ticked since (D224, 390 px)', async () => {
+    desktopWidth()
+    // Two loads under StrictMode, answered in the reverse order: the older one arrives last.
+    const answers: ((view: DemandPolicyView) => void)[] = []
+    stubApi({
+      [`GET /api/planning-lines/${RENFORT}/demand-policy`]: () =>
+        new Promise<DemandPolicyView>((resolve) => answers.push(resolve)),
+    })
+    render(
+      <StrictMode>
+        <LineSettingsDialog line={RENFORT_LINE} onClose={vi.fn()} />
+      </StrictMode>,
+    )
+    await waitFor(() => expect(answers).toHaveLength(2))
+
+    await act(async () => answers[1](conditionalView()))
+    const alice = box('Alice Bernard', 'lundi')
+    expect(alice).toBeChecked()
+    fireEvent.click(alice)
+    expect(alice).not.toBeChecked()
+
+    await act(async () => answers[0](conditionalView()))
+    expect(box('Alice Bernard', 'lundi')).not.toBeChecked() // the tap is still there
+    expect(screen.getByRole('button', { name: 'Enregistrer' })).toBeEnabled()
+  })
+
+  it('brings the outcome of "Enregistrer" into view — below the fold on a phone (D224, 390 px)', async () => {
+    const scrolled: string[] = []
+    const original = HTMLElement.prototype.scrollIntoView
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement) {
+      scrolled.push(this.textContent ?? '')
+    }
+    onTestFinished(() => {
+      HTMLElement.prototype.scrollIntoView = original
+    })
+    setup(conditionalView(), () =>
+      conditionalView({
+        policy: { stableId: 'policy-2', version: 2, createdAt: '2026-12-02T10:00:00+00:00' },
+      }),
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Aucun jour pour Alice Bernard' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Enregistrer' }))
+
+    await screen.findByText(/Configuration enregistrée/)
+    await waitFor(() =>
+      expect(scrolled.some((text) => text.includes('Configuration enregistrée'))).toBe(true),
+    )
   })
 
   it('never loses a change: several edits in the same tick all apply (functional updates)', async () => {
@@ -287,6 +338,9 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
     const inherited = await screen.findByLabelText('Structure des blocs héritée de Seniors')
     expect(inherited).toHaveTextContent('Bloc « Week-end » : vendredi, samedi et dimanche')
     expect(inherited).toHaveTextContent('Aucun renfort n’est ajouté pour compléter un bloc')
+    expect(inherited).toHaveTextContent(
+      'Automatique, rien à régler : les horaires et les blocs viennent de Seniors.',
+    )
     expect(
       screen.queryByText(/tout le bloc est considéré comme nécessitant un renfort/),
     ).not.toBeInTheDocument()
@@ -301,10 +355,13 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
     setup(conditionalView())
 
     const summary = await screen.findByLabelText('Résumé des conditions de renfort')
-    expect(summary).toHaveTextContent('Alice Bernard de garde : un renfort Renfort le lundi')
     expect(summary).toHaveTextContent(
-      'Bob Claes de garde : un renfort Renfort le vendredi, samedi et dimanche.',
+      'Quand Alice Bernard est de garde sur Seniors le lundi, mardi, mercredi, jeudi, vendredi, samedi ou dimanche : un renfort Renfort.',
     )
+    expect(summary).toHaveTextContent(
+      'Quand Bob Claes est de garde sur Seniors le vendredi, samedi ou dimanche : un renfort Renfort.',
+    )
+    expect(summary).toHaveTextContent('Chaque renfort est assuré par un membre de Renfort.')
     fireEvent.click(screen.getByRole('button', { name: 'Aucun jour pour Alice Bernard' }))
     fireEvent.click(screen.getByRole('button', { name: 'Aucun jour pour Bob Claes' }))
     expect(summary).toHaveTextContent('Aucune condition : aucune garde de renfort ne sera demandée.')
@@ -344,6 +401,7 @@ describe('LineSettingsDialog (docs/decisions.md D167)', () => {
     expect(result).toHaveTextContent('5 gardes de renfort dont 2 blocs')
     expect(result).toHaveTextContent('Période 1 — jeu. 1 oct. au jeu. 28 janv.') // end exclusive: the last day shown
     expect(result).toHaveTextContent('Bob Claes de garde')
+    expect(result).toHaveTextContent('Chaque bloc est confié à une seule personne.')
     expect(result).toHaveTextContent('n’est pas encore générée sur cette période')
     const sent = api.requests('POST', `${POLICY}/preview`)[0].body as { triggers: { userStableId: string }[] }
     expect(sent.triggers.map((t) => t.userStableId)).toEqual([DR_C.userStableId]) // the draft, unsaved
