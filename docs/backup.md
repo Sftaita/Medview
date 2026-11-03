@@ -199,8 +199,21 @@ sauvegarde hors site est indéchiffrable.**
    ```bash
    crontab -l > ~/backups/cron/crontab-avant-offsite-$(date +%Y%m%d).txt
    ( crontab -l; echo ''; echo '# MedVue — copie hors site chiffrée (docs/backup.md §2 ter)'; echo 'CRON_TZ=UTC'
-     echo '30 4 * * * /opt/stack/apps/medvue/scripts/backup/medvue-offsite.sh >> /home/deploy/backups/medvue/cron.log 2>&1' ) | crontab -
+     echo '30 4 * * * /opt/stack/apps/medvue/scripts/backup/medvue-offsite-cron.sh >> /home/deploy/backups/medvue/cron.log 2>&1' ) | crontab -
    ```
+
+**Tâche quotidienne, 04:30 UTC** : `medvue-offsite-cron.sh` lance `medvue-offsite.sh` sans le modifier et ajoute ce qu'il
+faut à un cron :
+
+- rien n'est envoyé si la sauvegarde locale n'a pas réussi (`status/backup.json` : `success`, 0 échec, moins de 6 h) ;
+- après l'envoi, l'ensemble le plus récent doit être présent sur le distant ;
+- résultat dans `status/offsite.json`, journal dans `backup.log` et `cron.log` ;
+- **alerte par e-mail** à chaque échec, aux administrateurs de la plateforme (à défaut `SUPPORT_EMAIL`), par
+  `mailer:test` dans `medvue-backend` ; un envoi impossible est écrit `ALERT NOT DELIVERED` dans le journal ;
+- deux exécutions ne se chevauchent jamais (`flock`).
+
+**Limite** : si le cron lui-même ne se lance pas ou si le serveur est arrêté, aucune alerte ne part ; seule l'ancienneté
+de `status/offsite.json` le montre.
 
 **Tests** : `scripts/backup/tests/medvue-offsite.test.sh` vérifie le
 comportement sur une arborescence jetable, avec le vrai rclone (serveur) ou
@@ -212,7 +225,10 @@ comportement sur une arborescence jetable, avec le vrai rclone (serveur) ou
 - la récupération, avec refus d'un fichier altéré et d'une autre phrase de
   passe.
 
-`backend/tests/Deployment/BackupScriptsTest.php` le lance, et garantit
+`scripts/backup/tests/medvue-offsite-cron.test.sh` vérifie la tâche quotidienne (sauvegarde en échec, trop ancienne ou
+absente, échec d'envoi, ensemble absent, alerte non délivrée, exécution concurrente).
+
+`backend/tests/Deployment/BackupScriptsTest.php` les lance, et garantit
 statiquement les règles ci-dessus.
 
 ## 3. Vérifier
