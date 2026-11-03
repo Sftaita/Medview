@@ -97,7 +97,6 @@ final class PeriodCompletionAllLinesTest extends WebTestCase
         return $byLine;
     }
 
-    /** @param array<string, list<array<string, mixed>>> $byLine @return array<int, int> per member: how many duties */
     private static function loadOf(array $rows): array
     {
         $load = [];

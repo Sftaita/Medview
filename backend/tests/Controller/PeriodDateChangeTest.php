@@ -234,7 +234,7 @@ final class PeriodDateChangeTest extends WebTestCase
         self::assertSame($publications, $this->rows('SELECT COUNT(*) FROM planning_publications'));
         self::assertSame($notifications, $this->rows('SELECT COUNT(*) FROM planning_publication_notifications'));
         self::assertSame($document, $this->db()->fetchOne('SELECT md5(string_agg(ROW(d.*)::text, \'|\' ORDER BY d.id)) FROM planning_publication_documents d'));
-        self::assertSame(7, $this->rows("SELECT COUNT(*) FROM duty_assignment_events e JOIN duties d ON d.id = e.duty_id WHERE e.was_published AND e.new_assignment_id IS NOT NULL AND d.added_by_change_id IS NOT NULL"), 'unpublished changes of a published line');
+        self::assertSame(7, $this->rows('SELECT COUNT(*) FROM duty_assignment_events e JOIN duties d ON d.id = e.duty_id WHERE e.was_published AND e.new_assignment_id IS NOT NULL AND d.added_by_change_id IS NOT NULL'), 'unpublished changes of a published line');
 
         // They wait for an explicit republication.
         $state = $this->api($this->client, 'GET', "/api/plannings/{$this->s['planningId']}/publication-state?period={$period1}", token: $this->s['creator']);
@@ -366,7 +366,7 @@ final class PeriodDateChangeTest extends WebTestCase
         $this->api($this->client, 'POST', "/api/plannings/{$this->s['planningId']}/republish", [], $this->s['creator']);
         self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
         self::assertSame($publications + 1, $this->rows('SELECT COUNT(*) FROM planning_publications'));
-        self::assertSame(0, $this->rows("SELECT COUNT(*) FROM planning_publication_entries e JOIN duties d ON d.id = e.duty_id JOIN planning_publications p ON p.id = e.publication_id WHERE d.retired_at IS NOT NULL AND p.id = (SELECT MAX(id) FROM planning_publications)"));
+        self::assertSame(0, $this->rows('SELECT COUNT(*) FROM planning_publication_entries e JOIN duties d ON d.id = e.duty_id JOIN planning_publications p ON p.id = e.publication_id WHERE d.retired_at IS NOT NULL AND p.id = (SELECT MAX(id) FROM planning_publications)'));
         $this->assertAuditClean();
     }
 
@@ -391,7 +391,7 @@ final class PeriodDateChangeTest extends WebTestCase
         self::assertSame($notifications + \count($concerned), $this->rows('SELECT COUNT(*) FROM planning_publication_notifications'));
         self::assertTrue((bool) $this->db()->fetchOne('SELECT notified FROM period_date_changes ORDER BY id DESC LIMIT 1'));
         self::assertSame(2, $this->rows('SELECT COUNT(*) FROM planning_publication_documents') - ($publications - 1), 'one stored PDF per diffusion');
-        self::assertSame(0, $this->rows("SELECT COUNT(*) FROM planning_publication_entries e JOIN duties d ON d.id = e.duty_id WHERE d.retired_at IS NOT NULL AND e.publication_id = (SELECT MAX(id) FROM planning_publications)"));
+        self::assertSame(0, $this->rows('SELECT COUNT(*) FROM planning_publication_entries e JOIN duties d ON d.id = e.duty_id WHERE d.retired_at IS NOT NULL AND e.publication_id = (SELECT MAX(id) FROM planning_publications)'));
         $this->assertAuditClean();
     }
 
@@ -467,7 +467,7 @@ final class PeriodDateChangeTest extends WebTestCase
         self::assertResponseIsSuccessful((string) $this->client->getResponse()->getContent());
         self::assertSame($retired, $moved['addedDutyCount'], 'the same days, new empty duties');
         self::assertSame($retired, $this->rows('SELECT COUNT(*) FROM duties WHERE retired_at IS NOT NULL'));
-        self::assertSame(0, $this->rows("SELECT COUNT(*) FROM (SELECT d.local_date FROM duties d WHERE d.retired_at IS NULL GROUP BY d.local_date HAVING COUNT(*) > 1) x"), 'never two duties a day');
+        self::assertSame(0, $this->rows('SELECT COUNT(*) FROM (SELECT d.local_date FROM duties d WHERE d.retired_at IS NULL GROUP BY d.local_date HAVING COUNT(*) > 1) x'), 'never two duties a day');
     }
 
     public function testTheJournalIsAppendOnlyAndOnlyTheCreatorMovesDates(): void

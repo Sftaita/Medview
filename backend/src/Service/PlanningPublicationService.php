@@ -341,86 +341,86 @@ final class PlanningPublicationService
      */
     private function recordInOpenTransaction(Planning $planning, PlanningCycle $cycle, User $publishedBy, callable $decide): array
     {
-            $preflight = $this->preflightService->check($planning, $cycle);
-            [$reference, $firstLines, $announceChanges] = $decide($preflight);
-            $publishedBefore = array_map(static fn (PublicationLineReadiness $line): PlanningLine => $line->line, $preflight->publishedLines());
+        $preflight = $this->preflightService->check($planning, $cycle);
+        [$reference, $firstLines, $announceChanges] = $decide($preflight);
+        $publishedBefore = array_map(static fn (PublicationLineReadiness $line): PlanningLine => $line->line, $preflight->publishedLines());
 
-            $results = [];
-            foreach ($preflight->lines as $readiness) {
-                $isFirst = \in_array($readiness->line, $firstLines, true);
-                if ($isFirst) {
-                    $period = $readiness->line->periodIn($cycle) ?? throw new \LogicException('A line of the preflight has a period in the cycle.');
-                    if (PlanningPeriodStatus::GENERATED === $period->getStatus()) {
-                        $this->lifecycleService->transition($period, PlanningPeriodStatus::VALIDATED);
-                    }
-                    $this->lifecycleService->transition($period, PlanningPeriodStatus::PUBLISHED);
+        $results = [];
+        foreach ($preflight->lines as $readiness) {
+            $isFirst = \in_array($readiness->line, $firstLines, true);
+            if ($isFirst) {
+                $period = $readiness->line->periodIn($cycle) ?? throw new \LogicException('A line of the preflight has a period in the cycle.');
+                if (PlanningPeriodStatus::GENERATED === $period->getStatus()) {
+                    $this->lifecycleService->transition($period, PlanningPeriodStatus::VALIDATED);
                 }
+                $this->lifecycleService->transition($period, PlanningPeriodStatus::PUBLISHED);
             }
+        }
 
-            $published = [...$publishedBefore, ...$firstLines];
-            $cells = $this->calendarReader->read($planning, static fn (PlanningLine $line): bool => \in_array($line, $published, true), $cycle);
-            $changes = null !== $reference && $announceChanges
-                ? array_values(array_filter($this->changeService->changesSince($reference, $cells), static fn (PublicationChange $change): bool => \in_array($change->line, $publishedBefore, true)))
-                : [];
-            if ($announceChanges && [] === $changes && [] === $firstLines) {
-                // Reverted between the client's look and the lock: nothing to announce — rolls the transaction back.
-                throw new NoUnpublishedChangesException();
+        $published = [...$publishedBefore, ...$firstLines];
+        $cells = $this->calendarReader->read($planning, static fn (PlanningLine $line): bool => \in_array($line, $published, true), $cycle);
+        $changes = null !== $reference && $announceChanges
+            ? array_values(array_filter($this->changeService->changesSince($reference, $cells), static fn (PublicationChange $change): bool => \in_array($change->line, $publishedBefore, true)))
+            : [];
+        if ($announceChanges && [] === $changes && [] === $firstLines) {
+            // Reverted between the client's look and the lock: nothing to announce — rolls the transaction back.
+            throw new NoUnpublishedChangesException();
+        }
+
+        $publication = new PlanningPublication(
+            $planning,
+            null === $reference ? PlanningPublicationKind::FIRST : PlanningPublicationKind::UPDATE,
+            $publishedBy,
+            \count($changes),
+            new \DateTimeImmutable(),
+            $this->isCycleComplete($preflight, $published),
+        );
+        // Before the first write: planning_publications is append-only.
+        $publication->assignToCycle($cycle);
+        $this->entityManager->persist($publication);
+
+        $entriesByLine = [];
+        foreach ($cells as $cell) {
+            // docs/decisions.md D166: a conditional duty nobody needs and nobody holds is not part of what is
+            // published — never recorded, so the publication PDF can never show it as "Non attribué".
+            if (!$cell->isShown()) {
+                continue;
             }
+            $this->entityManager->persist(new PlanningPublicationEntry($publication, $cell->duty, $cell->member));
+            $entriesByLine[(int) $cell->line->getId()] = ($entriesByLine[(int) $cell->line->getId()] ?? 0) + 1;
+        }
 
-            $publication = new PlanningPublication(
-                $planning,
-                null === $reference ? PlanningPublicationKind::FIRST : PlanningPublicationKind::UPDATE,
-                $publishedBy,
-                \count($changes),
-                new \DateTimeImmutable(),
-                $this->isCycleComplete($preflight, $published),
-            );
-            // Before the first write: planning_publications is append-only.
-            $publication->assignToCycle($cycle);
-            $this->entityManager->persist($publication);
-
-            $entriesByLine = [];
-            foreach ($cells as $cell) {
-                // docs/decisions.md D166: a conditional duty nobody needs and nobody holds is not part of what is
-                // published — never recorded, so the publication PDF can never show it as "Non attribué".
-                if (!$cell->isShown()) {
-                    continue;
-                }
-                $this->entityManager->persist(new PlanningPublicationEntry($publication, $cell->duty, $cell->member));
-                $entriesByLine[(int) $cell->line->getId()] = ($entriesByLine[(int) $cell->line->getId()] ?? 0) + 1;
+        $changedByLine = [];
+        foreach ($changes as $change) {
+            $changedByLine[(int) $change->line->getId()] = ($changedByLine[(int) $change->line->getId()] ?? 0) + 1;
+        }
+        foreach ($preflight->lines as $readiness) {
+            $line = $readiness->line;
+            $kind = match (true) {
+                \in_array($line, $firstLines, true) => PlanningPublicationLineKind::FIRST_FOR_LINE,
+                isset($changedByLine[(int) $line->getId()]) => PlanningPublicationLineKind::UPDATED,
+                default => null, // never an artificial UPDATED
+            };
+            if (null !== $kind) {
+                $period = $line->periodIn($cycle) ?? throw new \LogicException('A line of the preflight has a period in the cycle.');
+                $this->entityManager->persist(new PlanningPublicationLine($publication, $period, $line, $kind, $entriesByLine[(int) $line->getId()] ?? 0, $changedByLine[(int) $line->getId()] ?? 0));
             }
+            $results[] = new PublicationLineResult($line, $line->periodIn($cycle)?->getStatus() ?? $readiness->periodStatus, $readiness->isPublished(), $kind);
+        }
 
-            $changedByLine = [];
-            foreach ($changes as $change) {
-                $changedByLine[(int) $change->line->getId()] = ($changedByLine[(int) $change->line->getId()] ?? 0) + 1;
-            }
-            foreach ($preflight->lines as $readiness) {
-                $line = $readiness->line;
-                $kind = match (true) {
-                    \in_array($line, $firstLines, true) => PlanningPublicationLineKind::FIRST_FOR_LINE,
-                    isset($changedByLine[(int) $line->getId()]) => PlanningPublicationLineKind::UPDATED,
-                    default => null, // never an artificial UPDATED
-                };
-                if (null !== $kind) {
-                    $period = $line->periodIn($cycle) ?? throw new \LogicException('A line of the preflight has a period in the cycle.');
-                    $this->entityManager->persist(new PlanningPublicationLine($publication, $period, $line, $kind, $entriesByLine[(int) $line->getId()] ?? 0, $changedByLine[(int) $line->getId()] ?? 0));
-                }
-                $results[] = new PublicationLineResult($line, $line->periodIn($cycle)?->getStatus() ?? $readiness->periodStatus, $readiness->isPublished(), $kind);
-            }
+        $now = $this->clock->now();
+        foreach ($this->recipients($cycle, $firstLines, $changes) as ['user' => $user, 'changes' => $personal, 'firstLines' => $lineNames]) {
+            $this->entityManager->persist(new PlanningPublicationNotification($publication, $user, $personal, $now, $lineNames));
+        }
+        $this->entityManager->flush();
 
-            $now = $this->clock->now();
-            foreach ($this->recipients($cycle, $firstLines, $changes) as ['user' => $user, 'changes' => $personal, 'firstLines' => $lineNames]) {
-                $this->entityManager->persist(new PlanningPublicationNotification($publication, $user, $personal, $now, $lineNames));
-            }
-            $this->entityManager->flush();
+        // docs/decisions.md D173: the PDF of this version, rendered now from the entries just written and
+        // stored — every email of this publication, retries included, attaches these bytes, whatever changes
+        // later (an extension, a rename). Inside the transaction: a publication never exists without its PDF.
+        $this->entityManager->persist($this->pdfRenderer->document($publication, $now));
+        $this->entityManager->flush();
 
-            // docs/decisions.md D173: the PDF of this version, rendered now from the entries just written and
-            // stored — every email of this publication, retries included, attaches these bytes, whatever changes
-            // later (an extension, a rename). Inside the transaction: a publication never exists without its PDF.
-            $this->entityManager->persist($this->pdfRenderer->document($publication, $now));
-            $this->entityManager->flush();
-
-            return [$publication, $results];
+        return [$publication, $results];
     }
 
     /**
