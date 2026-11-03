@@ -83,6 +83,8 @@ configuration à la génération, cases cochées par de vrais clics.
 | `16-390-dialogue-generation.jpg` | Générer cette ligne : Fell/Ass seule, Première ligne non proposée |
 | `17-390-calendrier.jpg` | Deux colonnes lisibles : bloc de 3 jours d'une seule personne, samedi seul |
 
+Captures 10 et 11 prises avant la dernière retouche des textes : la 10 montre encore « la ligne source » dans le choix du mode ; la 11 vient du premier planning.
+
 Mesures : aucun débordement horizontal (page 390 = 390, corps des dialogues
 `scrollWidth` = `clientWidth`).
 
