@@ -113,7 +113,7 @@ export function CoverageStartSection({ lineStableId, onSaved }: Props) {
         <input
           id={inputId}
           type="date"
-          className="input"
+          className="mv-input"
           value={value}
           disabled={busy || saved === undefined}
           onChange={(event) => {

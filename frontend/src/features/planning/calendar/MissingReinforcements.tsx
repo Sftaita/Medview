@@ -65,9 +65,8 @@ export function MissingReinforcements({ units, periodStableId, canEdit, onCreate
                 : `${lineUnits.length} renforts devenus nécessaires n’ont pas de titulaire`}
             </strong>
             <span className="preflight-issue__rule">
-              Un changement de titulaire sur la ligne source les a rendus nécessaires. Ces postes ne sont pas
-              encore créés : créez-les, attribuez-les, puis{' '}
-              {lineUnits[0].linePublished ? 'republiez' : 'publiez'}.
+              Un changement de titulaire sur la ligne source a créé ce besoin. Ces gardes n’existent pas
+              encore : créez-les, attribuez-les, puis {lineUnits[0].linePublished ? 'republiez' : 'publiez'}.
             </span>
             <ul
               className="uncovered-posts__list"
