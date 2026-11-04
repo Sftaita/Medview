@@ -15,8 +15,8 @@ use App\Entity\PlanningLine;
 final readonly class LineCoverageStartPlan
 {
     /**
-     * @param list<Duty>                $retired the duties before the date nobody holds: retired from the active calendar
-     * @param list<array{duty: Duty, holderFirstName: string, holderLastName: string}> $kept the duties before the date someone holds: untouched
+     * @param list<Duty>                                                               $retired the duties before the date nobody holds: retired from the active calendar
+     * @param list<array{duty: Duty, holderFirstName: string, holderLastName: string}> $kept    the duties before the date someone holds: untouched
      */
     public function __construct(
         public PlanningLine $line,

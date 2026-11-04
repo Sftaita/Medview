@@ -245,7 +245,7 @@ final class LineCoverageStartTest extends WebTestCase
         $this->confirmStart($start, $this->s['primaryLineId']);
         $this->fillNow($this->client, $this->s, [$this->s['primaryLineId']]);
 
-        $dates = $this->db()->fetchFirstColumn("SELECT d.local_date FROM duties d JOIN planning_periods p ON p.id = d.planning_period_id JOIN planning_lines l ON l.id = p.planning_line_id WHERE l.stable_id = ? AND d.retired_at IS NULL ORDER BY 1", [$this->s['primaryLineId']]);
+        $dates = $this->db()->fetchFirstColumn('SELECT d.local_date FROM duties d JOIN planning_periods p ON p.id = d.planning_period_id JOIN planning_lines l ON l.id = p.planning_line_id WHERE l.stable_id = ? AND d.retired_at IS NULL ORDER BY 1', [$this->s['primaryLineId']]);
         self::assertNotEmpty($dates);
         self::assertGreaterThanOrEqual($start, $dates[0], 'The weekly structure creates nothing before the date.');
         self::assertSame([], $this->preflight()['uncoveredDuties']);
