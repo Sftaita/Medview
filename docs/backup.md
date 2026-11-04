@@ -168,6 +168,8 @@ modèle de la sauvegarde MedClick.
   25 Mo au total avec `reserved/`. Le Drive (100 Gio) a plus de 55 Gio libres,
   donc aucun surcoût.
 
+**Envoi manuel sans purge pendant un déploiement** : ne pas remplacer `medvue-offsite-retention.sh` par un script qui ne renvoie rien. La sortie de la rétention sert aussi à écarter les ensembles à ne pas envoyer : vide, elle fait envoyer tous les ensembles locaux absents du Drive (2026-11-04 : 58 ensembles, 35 min, aucune perte). Elle doit lister les ensembles locaux anciens absents du Drive, et jamais un ensemble présent sur le Drive.
+
 **Récupérer un ensemble** (dans un dossier neuf, rien n'est restauré) :
 
 ```bash
