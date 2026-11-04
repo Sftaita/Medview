@@ -1,6 +1,6 @@
 # Plan de déploiement : blocs hérités et refonte des périodes (PR #34, #35)
 
-**Non exécuté. Le déploiement attend l'autorisation explicite de l'utilisateur.** Preuves de la répétition :
+**Exécuté le 2026-11-03 (`v2026.11.03-prod`, journal : `docs/deployment.md` §6).** Preuves de la répétition :
 `docs/recette/production-20261103/`. Séquence générale : `docs/deployment.md` §3.
 
 ## Périmètre
@@ -69,7 +69,7 @@ Enfin : tag `v<date>-prod`, ligne dans `docs/deployment.md` §6, statut dans `CL
 
 Avant le premier changement de dates réel, le retour arrière reste simple ; c'est le moment où il faut avoir fini de vérifier.
 
-## Non vérifié à ce stade
+## Non vérifié à la date du déploiement
 
 - L'interface sur les vraies données de production (vérifiée en recette et sur la pile de dev).
 - Un vrai SMTP et un vrai téléphone pour les nouveaux parcours.
