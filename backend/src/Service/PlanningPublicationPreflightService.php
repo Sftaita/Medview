@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Demand\DemandReason;
 use App\Demand\LiveCoverageState;
 use App\Demand\LiveDemandView;
+use App\Demand\Weekday;
 use App\Eligibility\ExclusionReason;
 use App\Entity\Duty;
 use App\Entity\DutyAssignment;
@@ -21,6 +23,7 @@ use App\Repository\DutyRepository;
 use App\Repository\PlanningGenerationRepository;
 use App\Repository\PlanningLineDemandPolicyRepository;
 use App\Repository\PlanningLineRepository;
+use App\Repository\PlanningTeamMemberRepository;
 
 /**
  * Whether the current calendar (docs/decisions.md D133) — never the
@@ -50,6 +53,8 @@ final class PlanningPublicationPreflightService
         private readonly LiveDemandViewFactory $demandViewFactory,
         private readonly LineApplicabilityService $applicability,
         private readonly PlanningLineDemandPolicyRepository $policyRepository,
+        private readonly InheritedReinforcementService $inheritedReinforcements,
+        private readonly PlanningTeamMemberRepository $teamMemberRepository,
     ) {
     }
 
@@ -68,6 +73,7 @@ final class PlanningPublicationPreflightService
         $undeterminedDuties = [];
         $superfluousCoverages = [];
         $neutralLines = [];
+        $uncoveredUnits = [];
         $demand = $this->demandViewFactory->forPlanning($planning);
 
         foreach ($this->lineRepository->findByPlanning($planning) as $line) {
@@ -111,6 +117,17 @@ final class PlanningPublicationPreflightService
                 if ([] !== $issues['uncovered'] && !$basic->isPublished()) {
                     $blockers[] = PublicationLineReadiness::UNCOVERED_DUTIES;
                 }
+                // docs/decisions.md D232: what these lines still need, said with its dates, source holders and reasons,
+                // including a reinforcement required since a reassignment, whose duty does not exist yet (D224).
+                if (!$basic->isPublished()) {
+                    $source = $this->conditionalSourceOf($line, $cycle);
+                    array_push($uncoveredUnits, ...$this->uncoveredUnits($line, $source, $generation, $demand, $issues['uncovered']));
+                    $missing = $this->missingReinforcements($line, $source, $period, $demand);
+                    if ([] !== $missing) {
+                        $blockers[] = PublicationLineReadiness::MISSING_REINFORCEMENTS;
+                        array_push($uncoveredUnits, ...$missing);
+                    }
+                }
                 foreach (['inconsistent' => PublicationLineReadiness::INCONSISTENT_GROUPS, 'invalid' => PublicationLineReadiness::INVALID_ASSIGNMENTS, 'conflicts' => PublicationLineReadiness::CONFLICTS, 'undetermined' => PublicationLineReadiness::UNDETERMINED_REINFORCEMENTS] as $key => $code) {
                     if ([] !== $issues[$key]) {
                         $blockers[] = $code;
@@ -142,6 +159,7 @@ final class PlanningPublicationPreflightService
             $neutralLines,
             $cycle,
             $this->earlierUnpublished($planning, $cycle),
+            $uncoveredUnits,
         );
     }
 
@@ -169,6 +187,138 @@ final class PlanningPublicationPreflightService
         }
 
         return $numbers;
+    }
+
+    /**
+     * The uncovered duties of a line, one unit per block, each with why it is required and why it is empty.
+     *
+     * @param list<UncoveredPublicationDuty> $uncovered
+     *
+     * @return list<PublicationUncoveredUnit>
+     */
+    private function uncoveredUnits(PlanningLine $line, ?PlanningLine $source, PlanningGeneration $generation, LiveDemandView $demand, array $uncovered): array
+    {
+        if ([] === $uncovered) {
+            return [];
+        }
+
+        $currentByDutyId = [];
+        foreach ($this->assignmentRepository->findForGenerations([$generation]) as $assignment) {
+            $currentByDutyId[(int) $assignment->getDuty()->getId()] = $assignment;
+        }
+
+        $byUnit = [];
+        foreach ($uncovered as $item) {
+            $byUnit[(string) ($item->duty->getGroupInstance()?->getStableId() ?? $item->duty->getStableId())][] = $item->duty;
+        }
+
+        $units = [];
+        foreach ($byUnit as $duties) {
+            $days = array_map(static function (Duty $duty) use ($demand): PublicationUncoveredDay {
+                $dutyDemand = $demand->forDuty($duty);
+
+                return new PublicationUncoveredDay(
+                    $duty->getLocalDate(),
+                    Weekday::ofDate($duty->getLocalDate()),
+                    $dutyDemand->reason,
+                    $duty,
+                    $dutyDemand->ownDay?->sourceDuty,
+                    $dutyDemand->ownDay?->sourceHolderUserStableId,
+                );
+            }, $duties);
+
+            $units[] = new PublicationUncoveredUnit($line, $source, $duties[0]->isConditional(), true, $days, $this->vacancyOf($generation, $duties, $currentByDutyId));
+        }
+
+        return $units;
+    }
+
+    /**
+     * Same reinforcement days as the completion would create (docs/decisions.md D224), read with the rules of the live
+     * demand: a post required by a source holder of today, with no duty yet, is required all the same.
+     *
+     * @return list<PublicationUncoveredUnit>
+     */
+    private function missingReinforcements(PlanningLine $line, ?PlanningLine $source, PlanningPeriod $period, LiveDemandView $demand): array
+    {
+        $rules = $demand->rulesOf($period);
+        if (!$rules->inheritsStructure()) {
+            return [];
+        }
+
+        $units = [];
+        foreach ($this->inheritedReinforcements->plan($period, null, $rules)->units as $unit) {
+            $holders = $this->inheritedReinforcements->currentHolders($unit->sourceDuties[0]->getPlanningPeriod()) ?? [];
+            $days = array_map(static fn (Duty $sourceDuty): PublicationUncoveredDay => new PublicationUncoveredDay(
+                $sourceDuty->getLocalDate(),
+                Weekday::ofDate($sourceDuty->getLocalDate()),
+                DemandReason::TRIGGERED,
+                null,
+                $sourceDuty,
+                $holders[(int) $sourceDuty->getId()] ?? null,
+            ), $unit->sourceDuties);
+            $units[] = new PublicationUncoveredUnit($line, $source, true, false, $days, new PublicationVacancy(PublicationVacancy::NOT_CREATED));
+        }
+
+        return $units;
+    }
+
+    /**
+     * Why these duties have nobody, with the same check as the candidate list and the save.
+     *
+     * @param non-empty-list<Duty>       $duties
+     * @param array<int, DutyAssignment> $currentByDutyId
+     */
+    private function vacancyOf(PlanningGeneration $generation, array $duties, array $currentByDutyId): PublicationVacancy
+    {
+        $block = $this->candidateService->blockDuties($duties[0]);
+        $members = $this->teamMemberRepository->findByTeam($duties[0]->getTeam());
+
+        $onDates = array_values(array_filter($members, static function (PlanningTeamMember $member) use ($duties): bool {
+            foreach ($duties as $duty) {
+                if (!$member->isActiveAt($duty->getLocalDate())) {
+                    return false;
+                }
+            }
+
+            return true;
+        }));
+
+        if ([] === $onDates) {
+            $lastDay = max(array_map(static fn (Duty $duty): \DateTimeImmutable => $duty->getLocalDate(), $duties));
+            $later = array_values(array_filter(
+                array_map(static fn (PlanningTeamMember $member): \DateTimeImmutable => $member->getMembershipStart(), $members),
+                static fn (\DateTimeImmutable $start): bool => $start > $lastDay,
+            ));
+
+            return new PublicationVacancy(PublicationVacancy::NO_MEMBER_ON_DATE, \count($members), 0, [] !== $later ? min($later) : null);
+        }
+
+        $assignable = 0;
+        $reasons = [];
+        foreach ($onDates as $member) {
+            $error = $this->candidateService->assignabilityError($generation, $block, $member, [], ReassignmentCandidateService::heldBy($block, $currentByDutyId, $member));
+            if (null === $error) {
+                ++$assignable;
+                continue;
+            }
+            $reasons[$error] = ($reasons[$error] ?? 0) + 1;
+        }
+
+        return new PublicationVacancy(
+            $assignable > 0 ? PublicationVacancy::ASSIGNABLE_MEMBERS : PublicationVacancy::NO_ELIGIBLE_MEMBER,
+            \count($members),
+            $assignable,
+            null,
+            array_map(fn (string $code, int $count): array => ['code' => $code, 'label' => $this->vacancyLabel($code), 'count' => $count], array_keys($reasons), array_values($reasons)),
+        );
+    }
+
+    private function vacancyLabel(string $code): string
+    {
+        $reason = ExclusionReason::tryFrom($code);
+
+        return null !== $reason ? $this->reasonLabeler->label($reason) : 'ne fait pas partie de cette génération';
     }
 
     /** The line $line reinforces in $cycle (its demand policy in force is conditional, D162), null otherwise. */

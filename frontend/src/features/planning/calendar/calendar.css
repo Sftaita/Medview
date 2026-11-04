@@ -399,6 +399,36 @@ button.cal-block:hover {
   flex: none;
   align-self: center;
 }
+.uncovered-posts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-block: 8px;
+}
+.uncovered-posts__group {
+  align-items: flex-start;
+}
+.uncovered-posts__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.uncovered-posts__list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-subtle);
+}
+.uncovered-posts__list li > div {
+  flex: 1 1 200px;
+  min-width: 0;
+}
 .cal-issues {
   display: flex;
   flex-direction: column;

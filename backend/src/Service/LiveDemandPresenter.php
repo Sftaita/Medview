@@ -134,7 +134,7 @@ final class LiveDemandPresenter implements ResetInterface
     /**
      * @return array{userStableId: string, firstName: string, lastName: string}|null
      */
-    private function person(string $userStableId): ?array
+    public function person(string $userStableId): ?array
     {
         if (!\array_key_exists($userStableId, $this->people)) {
             $user = $this->userRepository->findOneByStableId($userStableId);

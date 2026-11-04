@@ -20,6 +20,8 @@ final readonly class PublicationLineReadiness
     /** A real demand whose configuration is incomplete (LineApplicability INCOMPLETE, D194). */
     public const INCOMPLETE = 'INCOMPLETE';
     public const UNCOVERED_DUTIES = 'UNCOVERED_DUTIES';
+    /** D232: a reinforcement required since a reassignment of its source, its duty not created yet (D224). */
+    public const MISSING_REINFORCEMENTS = 'MISSING_REINFORCEMENTS';
     public const INCONSISTENT_GROUPS = 'INCONSISTENT_GROUPS';
     public const INVALID_ASSIGNMENTS = 'INVALID_ASSIGNMENTS';
     public const CONFLICTS = 'CONFLICTS';

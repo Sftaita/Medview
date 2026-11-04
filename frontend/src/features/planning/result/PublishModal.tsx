@@ -4,6 +4,7 @@ import { Overlay } from '../../../components/Overlay'
 import { ApiError } from '../../../lib/apiClient'
 import { fetchPublicationPreflight, publishPlanning } from './api'
 import { NewLinesChooser } from '../calendar/NewLinesChooser'
+import { UncoveredPostsList } from '../calendar/UncoveredPostsList'
 import { PreflightIssueList } from '../calendar/PreflightIssueList'
 import { blockingIssues } from '../calendar/preflightIssues'
 import { undeliveredMessage } from './publicationDelivery'
@@ -273,6 +274,7 @@ function PreflightBody({
           </li>
         )}
       </ul>
+      <UncoveredPostsList units={preflight.uncoveredUnits} onLocate={onLocate} />
       {/* Each refused assignment on its own — duty or block, person, rule, fix — never a count and a first reason. */}
       <PreflightIssueList
         issues={blockingIssues(preflight, 'publish').filter(

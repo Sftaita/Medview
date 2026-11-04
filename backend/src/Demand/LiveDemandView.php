@@ -6,6 +6,7 @@ namespace App\Demand;
 
 use App\Eligibility\DutyUnit;
 use App\Entity\Duty;
+use App\Entity\PlanningPeriod;
 
 /**
  * The LIVE DemandView (docs/decisions.md D163): the demand of the current
@@ -38,6 +39,12 @@ final class LiveDemandView implements DemandView
     public function withSourceHoldings(array $holdingBySourceDuty): self
     {
         return new self($this->calculator, $this->rulesByPeriodId, array_replace($this->holdingBySourceDuty, $holdingBySourceDuty));
+    }
+
+    /** The rules this view reads $period with: those its generation froze once generated (D164). */
+    public function rulesOf(PlanningPeriod $period): DemandRules
+    {
+        return $this->rulesByPeriodId[(int) $period->getId()] ?? DemandRules::independent();
     }
 
     public function forDuty(Duty $duty): DutyDemand

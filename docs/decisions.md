@@ -10582,3 +10582,32 @@ modifié.
 - **Conséquence visible** : une période « complète » redevient « Compléter la période N » dès qu'une ligne y est ajoutée.
 - **Aussi** : une nouvelle ligne dont la structure générale couperait une limite existante est créée « à configurer » au lieu
   de faire échouer sa création.
+
+## D232 — Le précontrôle de publication dit quels postes requis sont vacants et pourquoi, y compris un renfort pas encore créé
+
+- **Constat (production, 2026-11-04, Trauma Delta, lecture seule)** : « Fell/Ass » était refusée à la première publication
+  avec « des gardes obligatoires ne sont pas couvertes », sans autre détail. L'analyse montre que **ces 19 gardes sont bien
+  requises** au sens de la règle : leur titulaire source a un déclencheur actif ce jour-là (les 5 chirurgiens sans
+  déclencheur n'ont aucune garde Fell/Ass). Elles sont vacantes parce qu'elles tombent du 2 au 29 octobre 2026 et que les
+  6 membres de la ligne n'y sont rattachés que depuis le 1er novembre 2026 (date d'acceptation de l'invitation ou d'ajout) :
+  le solveur a exclu chaque membre pour `MEMBERSHIP_OUT_OF_RANGE` (78 exclusions, 13 postes × 6 membres). **La protection de
+  publication n'est pas modifiée.** Le traitement de ces 19 postes attend une décision métier.
+- **Écart réel trouvé** : le précontrôle ne regardait que les gardes existantes. Un renfort devenu requis après une
+  réattribution de la source (D224 : sa garde n'est créée que par la prochaine complétion) ne bloquait donc pas la première
+  publication, alors que « Compléter la période » le comptait déjà.
+- **Décision** :
+  - Nouveau blocage `MISSING_REINFORCEMENTS` (première publication seulement) : mêmes jours que ceux que la complétion
+    créerait (`InheritedReinforcementService::plan`), mais lus avec les **règles de la demande live** (`LiveDemandView::rulesOf`,
+    figées par la génération, D164) : un déclencheur ajouté après la génération attend la prochaine génération.
+  - `uncoveredUnits` dans `GET publication-preflight` : pour chaque poste, un bloc une seule fois, dates, titulaire source,
+    raison (`DemandReason`) et cause de la vacance (`PublicationVacancy`) : `NOT_CREATED`, `NO_MEMBER_ON_DATE` (avec la première
+    date d'adhésion suivante), `NO_ELIGIBLE_MEMBER` (raisons comptées) ou `ASSIGNABLE_MEMBERS`, lues avec le contrôle de la liste
+    des candidats et de l'enregistrement (`assignabilityError`). `uncoveredDuties` reste inchangé.
+  - Dialogues (`UncoveredPostsList`) : postes groupés par cause, une phrase par cause, une rangée par poste. Aucun calcul côté
+    frontend.
+- **Une ligne déjà publiée n'est pas concernée** (D143, D222, D223) : un poste vacant n'y bloque pas la republication, et un
+  renfort devenu requis n'y est jamais créé automatiquement. **Limite connue** : ce dernier cas n'est toujours pas signalé par le
+  précontrôle de republication.
+- **Limite connue** : `InheritedReinforcementService::materialize` lit la politique en vigueur, alors que la demande live lit
+  les règles figées. Une complétion faite après un changement de matrice peut créer une garde que la demande figée ne requiert
+  pas. Antérieur à cette décision, non modifié.

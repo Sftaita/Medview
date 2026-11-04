@@ -340,6 +340,7 @@ export type PublicationLineBlocker =
   | 'NOT_GENERATED'
   | 'INCOMPLETE'
   | 'UNCOVERED_DUTIES'
+  | 'MISSING_REINFORCEMENTS'
   | 'INCONSISTENT_GROUPS'
   | 'INVALID_ASSIGNMENTS'
   | 'CONFLICTS'
@@ -359,6 +360,37 @@ export type PublicationMemberRef = {
   teamMemberStableId: string
   firstName: string
   lastName: string
+}
+
+/** Why a required post is still empty (docs/decisions.md D232): the check behind the candidate list and the save. */
+export type PublicationVacancy = {
+  code: 'NOT_CREATED' | 'NO_MEMBER_ON_DATE' | 'NO_ELIGIBLE_MEMBER' | 'ASSIGNABLE_MEMBERS'
+  memberCount: number
+  assignableCount: number
+  /** NO_MEMBER_ON_DATE: the first day a member joins the line after these dates. */
+  firstMembershipStart: string | null
+  reasons: { code: string; label: string; count: number }[]
+}
+
+/** One required post keeping a line from its first publication (docs/decisions.md D232), a block once. */
+export type PublicationUncoveredUnit = {
+  lineStableId: string
+  lineName: string
+  sourceLineName: string | null
+  conditional: boolean
+  /** False: required since a reassignment, the duty is not created yet. */
+  materialized: boolean
+  dates: string[]
+  dutyStableIds: string[]
+  days: {
+    date: string
+    weekday: string
+    reason: string
+    dutyStableId: string | null
+    sourceDutyStableId: string | null
+    sourceHolder: { userStableId: string; firstName: string; lastName: string } | null
+  }[]
+  vacancy: PublicationVacancy
 }
 
 /**
@@ -401,6 +433,8 @@ export type PublicationPreflight = {
   republishable: boolean
   lines: PublicationLineReadiness[]
   uncoveredDuties: PublicationDutyRef[]
+  /** Dates, source holders and reasons of each required post without holder (D232). Older servers do not send it. */
+  uncoveredUnits?: PublicationUncoveredUnit[]
   inconsistentGroups: InconsistentPublicationGroup[]
   invalidAssignments: InvalidPublicationAssignment[]
   conflicts: PublicationConflict[]

@@ -220,6 +220,64 @@ describe('RepublishModal — new lines (docs/decisions.md D196)', () => {
     expect(renfort).toBeDisabled()
   })
 
+  it('a line refused for vacant posts lists their dates, source holders and reasons (D232)', async () => {
+    const api = stubApi({
+      'GET /api/plannings/plan-1/publication-preflight': () => ({
+        ...PREFLIGHT,
+        republishable: true,
+        lines: [SENIORS, { ...JUNIORS, firstPublishable: false, blockers: ['UNCOVERED_DUTIES'] }],
+        uncoveredDuties: [
+          {
+            dutyStableId: 'r1',
+            date: '2026-10-05',
+            dutyTypeName: 'Garde',
+            lineStableId: 'l2',
+            lineName: 'Juniors',
+            conditional: true,
+          },
+        ],
+        uncoveredUnits: [
+          {
+            lineStableId: 'l2',
+            lineName: 'Juniors',
+            sourceLineName: 'Seniors',
+            conditional: true,
+            materialized: true,
+            dates: ['2026-10-05'],
+            dutyStableIds: ['r1'],
+            days: [
+              {
+                date: '2026-10-05',
+                weekday: 'MONDAY',
+                reason: 'TRIGGERED',
+                dutyStableId: 'r1',
+                sourceDutyStableId: 's1',
+                sourceHolder: { userStableId: 'u1', firstName: 'Stephane', lastName: 'Urgyan' },
+              },
+            ],
+            vacancy: {
+              code: 'NO_MEMBER_ON_DATE',
+              memberCount: 6,
+              assignableCount: 0,
+              firstMembershipStart: '2026-11-01',
+              reasons: [],
+            },
+          },
+        ],
+      }),
+    })
+    render(
+      <RepublishModal planningStableId="plan-1" changes={[]} onClose={vi.fn()} onRepublished={vi.fn()} />,
+    )
+
+    expect(await screen.findByText('Juniors — 1 garde requise sans titulaire')).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: /Juniors/ })).toBeDisabled()
+    expect(screen.getByText('Lundi 5 octobre')).toBeInTheDocument()
+    expect(screen.getByText(/Stephane Urgyan tient « Seniors » et déclenche ce renfort/)).toBeInTheDocument()
+    expect(screen.getByText(/les adhésions commencent le 1(er)? novembre 2026/)).toBeInTheDocument()
+    expect(api.requests('POST', '/api/plannings/plan-1/republish')).toHaveLength(0)
+  })
+
   it('only the published lines decide whether the republication can go out', async () => {
     open([
       SENIORS,

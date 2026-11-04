@@ -6,6 +6,7 @@ import { fetchPublicationPreflight, republishPlanning } from '../result/api'
 import { undeliveredMessage } from '../result/publicationDelivery'
 import type { PublicationChange, PublicationPreflight, PublicationResult } from '../result/types'
 import { NewLinesChooser } from './NewLinesChooser'
+import { UncoveredPostsList } from './UncoveredPostsList'
 import { PreflightIssueList } from './PreflightIssueList'
 import { blockingIssues } from './preflightIssues'
 
@@ -186,6 +187,7 @@ export function RepublishModal({
             legend="Nouvelles lignes à publier"
             disabled={sending}
           />
+          <UncoveredPostsList units={preflight?.uncoveredUnits} onLocate={onLocate} />
           {newLines.size > 0 && (
             <p className="muted">
               Les membres des lignes cochées recevront le planning en PDF, comme pour une première
