@@ -182,6 +182,25 @@ final class BackupScriptsTest extends TestCase
         self::assertContains('RESULT: PASS', $output);
     }
 
+    /**
+     * Runs scripts/backup/tests/medvue-offsite-cron.test.sh: nothing sent without a good local backup, alert on every
+     * failure, no overlap. medvue-offsite.sh, rclone and docker are stand-ins.
+     */
+    public function testOffsiteCronBehaviourOnAThrowawayTree(): void
+    {
+        if ('Windows' === \PHP_OS_FAMILY) {
+            self::markTestSkipped('Needs a Linux shell (flock, GNU date).');
+        }
+        if ('' === trim((string) shell_exec('command -v bash 2>/dev/null'))) {
+            self::markTestSkipped('bash is not available.');
+        }
+
+        exec('bash '.escapeshellarg($this->root.'/scripts/backup/tests/medvue-offsite-cron.test.sh').' 2>&1', $output, $status);
+
+        self::assertSame(0, $status, implode("\n", $output));
+        self::assertContains('RESULT: PASS', $output);
+    }
+
     public function testDocumentationStatesTheProductionRules(): void
     {
         $backup = (string) file_get_contents($this->root.'/docs/backup.md');
