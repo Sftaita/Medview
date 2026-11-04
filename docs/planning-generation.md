@@ -1308,3 +1308,19 @@ dans `PlanningCompletionService` lui-même.
   `date_change_confirmation_required` avec le plan à jour), `notify` (« Confirmer et avertir », 409
   `notify_not_possible` si impossible).
 - Détail et compromis : `docs/decisions.md` D225-D228.
+
+## 41. Postes requis sans titulaire au précontrôle de publication (docs/decisions.md D232)
+
+`GET /api/plannings/{id}/publication-preflight` expose `uncoveredUnits` pour les lignes jamais publiées : dates, titulaire source,
+raison du besoin et cause de la vacance (`NOT_CREATED`, `NO_MEMBER_ON_DATE`, `NO_ELIGIBLE_MEMBER`, `ASSIGNABLE_MEMBERS`).
+
+| Déclencheur actif du titulaire source | Garde de renfort | Titulaire | Résultat au précontrôle |
+|---|---|---|---|
+| Non | absente ou présente | aucun | rien : ni demandée, ni non pourvue |
+| Non | présente | oui | avertissement « superflu » (D165) |
+| Oui | présente | oui | rien |
+| Oui | présente | aucun | `UNCOVERED_DUTIES` |
+| Oui | pas encore créée | aucun | `MISSING_REINFORCEMENTS` |
+| Titulaire source inconnu | présente | indifférent | `UNDETERMINED_REINFORCEMENTS` |
+
+Les règles lues sont celles de la demande live : figées par la génération (D164), avec les titulaires actuels.

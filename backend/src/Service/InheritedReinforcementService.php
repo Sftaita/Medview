@@ -112,14 +112,17 @@ final class InheritedReinforcementService
      *
      * @param array<int, string>|null $plannedHolders the source's planned holders by duty id, in a launch that also
      *                                                generates the source (D191); null = its current calendar
+     * @param DemandRules|null        $rules          the rules to read with: the publication preflight passes those of
+     *                                                the live demand (frozen by the generation, D164); null = the policy in force
      */
-    public function plan(PlanningPeriod $target, ?array $plannedHolders = null): ReinforcementPlan
+    public function plan(PlanningPeriod $target, ?array $plannedHolders = null, ?DemandRules $rules = null): ReinforcementPlan
     {
         $context = $this->contextOf($target);
         if (null === $context) {
             return new ReinforcementPlan(false, false, [], 0, 0);
         }
-        [$rules, $sourcePeriod] = $context;
+        [$inForce, $sourcePeriod] = $context;
+        $rules ??= $inForce;
 
         $holders = $plannedHolders ?? $this->currentHolders($sourcePeriod);
         if (null === $holders) {

@@ -4,6 +4,7 @@ const BLOCKERS: Record<PublicationLineBlocker, string> = {
   NOT_GENERATED: 'pas encore générée',
   INCOMPLETE: 'configuration incomplète',
   UNCOVERED_DUTIES: 'des gardes obligatoires ne sont pas couvertes',
+  MISSING_REINFORCEMENTS: 'des renforts devenus nécessaires ne sont pas encore créés',
   INCONSISTENT_GROUPS: 'un bloc est réparti entre plusieurs personnes',
   INVALID_ASSIGNMENTS: 'des affectations ne sont plus valides',
   CONFLICTS: 'des affectations sont en conflit',

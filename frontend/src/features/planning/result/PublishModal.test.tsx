@@ -75,6 +75,53 @@ describe('PublishModal', () => {
     expect(screen.queryByRole('button', { name: 'Publier' })).not.toBeInTheDocument()
   })
 
+  it('lists the dates, source holder and reason of a required reinforcement without holder (docs/decisions.md D232)', async () => {
+    stubPreflight(
+      preflight({
+        publishable: false,
+        uncoveredDuties: [
+          { dutyStableId: 'r1', date: '2026-10-05', dutyTypeName: 'Garde', conditional: true },
+        ],
+        uncoveredUnits: [
+          {
+            lineStableId: 'l2',
+            lineName: 'Fell/Ass',
+            sourceLineName: 'Première ligne',
+            conditional: true,
+            materialized: true,
+            dates: ['2026-10-05'],
+            dutyStableIds: ['r1'],
+            days: [
+              {
+                date: '2026-10-05',
+                weekday: 'MONDAY',
+                reason: 'TRIGGERED',
+                dutyStableId: 'r1',
+                sourceDutyStableId: 's1',
+                sourceHolder: { userStableId: 'u1', firstName: 'Stephane', lastName: 'Urgyan' },
+              },
+            ],
+            vacancy: {
+              code: 'NO_MEMBER_ON_DATE',
+              memberCount: 6,
+              assignableCount: 0,
+              firstMembershipStart: '2026-11-01',
+              reasons: [],
+            },
+          },
+        ],
+      }),
+    )
+    renderModal()
+
+    expect(await screen.findByText('Fell/Ass — 1 garde requise sans titulaire')).toBeInTheDocument()
+    expect(screen.getByText('Lundi 5 octobre')).toBeInTheDocument()
+    expect(
+      screen.getByText(/Stephane Urgyan tient « Première ligne » et déclenche ce renfort/),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Publier' })).not.toBeInTheDocument()
+  })
+
   it('shows a superfluous reinforcement as a warning next to a publishable calendar (docs/decisions.md D166)', async () => {
     stubPreflight(
       preflight({

@@ -38,6 +38,8 @@ use App\Service\PublicationLineResult;
 use App\Service\PublicationNeutralLine;
 use App\Service\PublicationOutcome;
 use App\Service\PublicationPreflight;
+use App\Service\PublicationUncoveredDay;
+use App\Service\PublicationUncoveredUnit;
 use App\Service\UncoveredPublicationDuty;
 use Symfony\Component\HttpFoundation\HeaderUtils;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -364,6 +366,8 @@ final class PlanningPublicationController
                 ? [['code' => PublicationPreflight::EARLIER_PERIOD_UNPUBLISHED, 'periodNumbers' => $preflight->earlierUnpublished]]
                 : [],
             'uncoveredDuties' => array_map($this->uncoveredDutyToArray(...), $preflight->uncoveredDuties),
+            // docs/decisions.md D232: each required post keeping a line from its first publication: dates, source holders, reasons.
+            'uncoveredUnits' => array_map($this->uncoveredUnitToArray(...), $preflight->uncoveredUnits),
             'inconsistentGroups' => array_map($this->inconsistentGroupToArray(...), $preflight->inconsistentGroups),
             'invalidAssignments' => array_map($this->invalidAssignmentToArray(...), $preflight->invalidAssignments),
             'conflicts' => array_map($this->conflictToArray(...), $preflight->conflicts),
@@ -446,6 +450,37 @@ final class PlanningPublicationController
     private function uncoveredDutyToArray(UncoveredPublicationDuty $item): array
     {
         return $this->dutyToArray($item->duty);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function uncoveredUnitToArray(PublicationUncoveredUnit $unit): array
+    {
+        return [
+            'lineStableId' => (string) $unit->line->getStableId(),
+            'lineName' => $unit->line->getName(),
+            'sourceLineName' => $unit->sourceLine?->getName(),
+            'conditional' => $unit->conditional,
+            'materialized' => $unit->materialized,
+            'dates' => array_map(static fn (PublicationUncoveredDay $day): string => $day->date->format('Y-m-d'), $unit->days),
+            'dutyStableIds' => array_values(array_filter(array_map(static fn (PublicationUncoveredDay $day): ?string => null !== $day->duty ? (string) $day->duty->getStableId() : null, $unit->days))),
+            'days' => array_map(fn (PublicationUncoveredDay $day): array => [
+                'date' => $day->date->format('Y-m-d'),
+                'weekday' => $day->weekday->value,
+                'reason' => $day->reason->value,
+                'dutyStableId' => null !== $day->duty ? (string) $day->duty->getStableId() : null,
+                'sourceDutyStableId' => null !== $day->sourceDuty ? (string) $day->sourceDuty->getStableId() : null,
+                'sourceHolder' => null !== $day->sourceHolderUserStableId ? $this->demandPresenter->person($day->sourceHolderUserStableId) : null,
+            ], $unit->days),
+            'vacancy' => [
+                'code' => $unit->vacancy->code,
+                'memberCount' => $unit->vacancy->memberCount,
+                'assignableCount' => $unit->vacancy->assignableCount,
+                'firstMembershipStart' => $unit->vacancy->firstMembershipStart?->format('Y-m-d'),
+                'reasons' => $unit->vacancy->reasons,
+            ],
+        ];
     }
 
     /**
