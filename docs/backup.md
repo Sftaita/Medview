@@ -213,7 +213,18 @@ faut à un cron :
 - deux exécutions ne se chevauchent jamais (`flock`).
 
 **Limite** : si le cron lui-même ne se lance pas ou si le serveur est arrêté, aucune alerte ne part ; seule l'ancienneté
-de `status/offsite.json` le montre.
+de `status/offsite.json` le montre, et rien ne lit ce fichier aujourd'hui : **un arrêt de plusieurs jours passerait
+inaperçu**. Contrôle indépendant proposé, pas installé : un script Google Apps Script du compte qui porte le Drive,
+déclenché chaque jour, lit le nom du dossier le plus récent de `daily/` et envoie un e-mail s'il a plus de 36 h. Il ne
+dépend ni du serveur, ni du crontab, ni de MedVue.
+
+**Installation réelle (depuis le 2026-11-03)** : le crontab lance `/home/deploy/scripts/medvue-offsite-cron.sh`, copie du
+script de la PR #37, car `v2026.11.03-prod` ne le contient pas. Il retrouve `medvue-offsite.sh` dans
+`/opt/stack/apps/medvue/scripts/backup/`. Le chemin du point 4 s'appliquera après un déploiement qui contient le script.
+
+**Avant un lancement manuel** : `medvue-offsite.sh` applique la rétention, et un ensemble `daily/` plus ancien du même
+jour est retiré du Drive. Simuler `medvue-offsite-retention.sh` sur les ensembles distants et locaux. Un point de
+restauration à garder sur le Drive va dans `reserved/` (§2 bis), qu'aucun script ne purge.
 
 **Tests** : `scripts/backup/tests/medvue-offsite.test.sh` vérifie le
 comportement sur une arborescence jetable, avec le vrai rclone (serveur) ou
@@ -363,6 +374,7 @@ Aucun chemin, aucun secret. Ce répertoire est monté **en lecture seule** dans
   *Mise à jour 2026-10-24* : la copie hors site chiffrée existe (§2 ter) ;
   la tâche quotidienne n'est activée qu'une fois confirmée la copie de la
   phrase de passe hors du serveur.
+  *Mise à jour 2026-11-03* : tâche quotidienne activée, premier passage réussi le 2026-11-04.
 - **Serveur partagé, hors MedVue** (2026-10-23) :
   - `/home/deploy/scripts/rotate_backups.sh` ne supprimait jamais les dumps
     MySQL (précédence de `-o` dans `find`). C'est corrigé, et l'original est
