@@ -395,7 +395,8 @@ final class PlanningCompletionService
         $loadOnly = [];
         $undetermined = 0;
         foreach ($this->dutyUnitFactory->fromDuties($this->dutyRepository->findByPlanningPeriod($period)) as $unit) {
-            if (!$unit->getDuties()[0]->isConditional() || isset($inMatrix[$unit->getStableKey()])) {
+            // An intrinsic unit out of the matrix is entirely before the coverage start of its line (D233).
+            if (isset($inMatrix[$unit->getStableKey()])) {
                 continue;
             }
 

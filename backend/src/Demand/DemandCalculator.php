@@ -54,7 +54,7 @@ final class DemandCalculator
         }
 
         if (!$conditional) {
-            return $this->intrinsic($unitDuties);
+            return $this->intrinsic($unitDuties, $rules->coverageStartsOn);
         }
 
         $days = array_map(fn (Duty $duty): DayDemand => $this->day($duty, $rules, $holdingOf), $unitDuties);
@@ -87,10 +87,10 @@ final class DemandCalculator
 
         $duties = array_map(static fn (DayDemand $day): DutyDemand => new DutyDemand(
             $day->duty,
-            $inherited ? $day->isTriggered() : $required,
+            $inherited ? $day->isTriggered() : $required && !$day->reason->isOutOfCoverage(),
             match (true) {
                 $day->isTriggered() => DemandReason::TRIGGERED,
-                $required && !$inherited => DemandReason::TRIGGERED_BY_BLOCK,
+                $required && !$inherited && !$day->reason->isOutOfCoverage() => DemandReason::TRIGGERED_BY_BLOCK,
                 default => $day->reason,
             },
             $day,
@@ -104,17 +104,23 @@ final class DemandCalculator
     /**
      * @param list<Duty> $unitDuties
      */
-    public function intrinsic(array $unitDuties): UnitDemand
+    public function intrinsic(array $unitDuties, ?\DateTimeImmutable $coverageStartsOn = null): UnitDemand
     {
-        $duties = array_map(static fn (Duty $duty): DutyDemand => new DutyDemand(
-            $duty,
-            DutyDemandType::REQUIRED === $duty->getDemandType(),
-            DutyDemandType::REQUIRED === $duty->getDemandType() ? DemandReason::INTRINSIC_REQUIRED : DemandReason::INTRINSIC_OPTIONAL,
-            null,
-            [],
-        ), $unitDuties);
+        $duties = array_map(static function (Duty $duty) use ($coverageStartsOn): DutyDemand {
+            if (!DemandRules::coverageIncludes($coverageStartsOn, $duty->getLocalDate())) {
+                return new DutyDemand($duty, false, DemandReason::BEFORE_COVERAGE_START, null, []);
+            }
 
-        return new UnitDemand($duties[0]->required, $duties, []);
+            return new DutyDemand(
+                $duty,
+                DutyDemandType::REQUIRED === $duty->getDemandType(),
+                DutyDemandType::REQUIRED === $duty->getDemandType() ? DemandReason::INTRINSIC_REQUIRED : DemandReason::INTRINSIC_OPTIONAL,
+                null,
+                [],
+            );
+        }, $unitDuties);
+
+        return new UnitDemand([] !== array_filter($duties, static fn (DutyDemand $d): bool => $d->required), $duties, []);
     }
 
     /**
@@ -124,6 +130,13 @@ final class DemandCalculator
     {
         $source = $duty->getCoverageSource() ?? throw new \LogicException('A conditional duty always has a coverage source.');
         $weekday = Weekday::ofDate($duty->getLocalDate());
+
+        if (!$rules->covers($duty->getLocalDate())) {
+            return new DayDemand($duty, $source, $weekday, null, null, DemandReason::BEFORE_COVERAGE_START);
+        }
+        if ($source->isRetired()) {
+            return new DayDemand($duty, $source, $weekday, null, null, DemandReason::SOURCE_RETIRED);
+        }
 
         if (!$rules->mode->isConditional()) {
             return new DayDemand($duty, $source, $weekday, null, null, DemandReason::LINE_NOT_CONDITIONAL);

@@ -63,6 +63,10 @@ final class ConditionalCoverageService
         $view = $this->demandViewFactory->forPlanning($this->planningOf($block[0]));
         foreach ($block as $duty) {
             $demand = $view->forDuty($duty);
+            // docs/decisions.md D233: a day before the coverage start, kept in a block someone held, decides nothing.
+            if ($demand->reason->isOutOfCoverage()) {
+                continue;
+            }
             if (!$demand->determined) {
                 throw new CoverageUndeterminedException();
             }

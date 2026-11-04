@@ -17,7 +17,8 @@ final readonly class SingleDutyUnit implements DutyUnit
      */
     public function __construct(private Duty $duty, private ?bool $demandRequired = null)
     {
-        if (null !== $demandRequired && !$duty->isConditional()) {
+        // false also marks an intrinsic LOAD-ONLY unit: held before the coverage start of its line (docs/decisions.md D233).
+        if (true === $demandRequired && !$duty->isConditional()) {
             throw new \InvalidArgumentException('Only a conditional unit carries a demand decision.');
         }
     }
@@ -44,6 +45,9 @@ final readonly class SingleDutyUnit implements DutyUnit
 
     public function isRequired(): bool
     {
+        if (false === $this->demandRequired) {
+            return false;
+        }
         if ($this->duty->isConditional()) {
             return $this->demandRequired ?? throw new \LogicException('A conditional unit built without its demand decision has no answer: build it through a DemandView (docs/decisions.md D164).');
         }

@@ -68,6 +68,7 @@ final class InheritedReinforcementService
         private readonly DutyPatternRepository $patternRepository,
         private readonly AllocationFamilyRepository $familyRepository,
         private readonly EntityManagerInterface $entityManager,
+        private readonly LineDemandRulesReader $rulesReader,
         private readonly DemandTriggerEvaluator $evaluator = new DemandTriggerEvaluator(),
     ) {
     }
@@ -93,6 +94,20 @@ final class InheritedReinforcementService
         return null !== $sourcePeriod ? [$policy->toRules(), $sourcePeriod, $source] : null;
     }
 
+    /**
+     * @return array{0: DemandRules, 1: PlanningPeriod}|null the rules the current calendar of $target is read with
+     */
+    private function currentContextOf(PlanningPeriod $target): ?array
+    {
+        $line = $this->lineRepository->findOneByPlanningPeriod($target);
+        if (null === $line) {
+            return null;
+        }
+        [$rules, $sourcePeriod] = $this->rulesReader->forPeriod($line, $target);
+
+        return $rules->inheritsStructure() && null !== $sourcePeriod ? [$rules, $sourcePeriod] : null;
+    }
+
     /** The line whose blocks and holders $line follows — null when it does not inherit. */
     public function sourceLineOf(PlanningLine $line): ?PlanningLine
     {
@@ -110,19 +125,21 @@ final class InheritedReinforcementService
      * What $target's reinforcement duties are, and which are still to
      * create — read only.
      *
+     * The current calendar is read with the rules of LineDemandRulesReader:
+     * those frozen by its generation once generated (D164), the very rules of
+     * the live demand and of the publication preflight. Only a launch, which
+     * creates the NEXT generation, reads the policy in force ($forNextGeneration).
+     *
      * @param array<int, string>|null $plannedHolders the source's planned holders by duty id, in a launch that also
      *                                                generates the source (D191); null = its current calendar
-     * @param DemandRules|null        $rules          the rules to read with: the publication preflight passes those of
-     *                                                the live demand (frozen by the generation, D164); null = the policy in force
      */
-    public function plan(PlanningPeriod $target, ?array $plannedHolders = null, ?DemandRules $rules = null): ReinforcementPlan
+    public function plan(PlanningPeriod $target, ?array $plannedHolders = null, bool $forNextGeneration = false): ReinforcementPlan
     {
-        $context = $this->contextOf($target);
+        $context = $forNextGeneration ? $this->contextOf($target) : $this->currentContextOf($target);
         if (null === $context) {
             return new ReinforcementPlan(false, false, [], 0, 0);
         }
-        [$inForce, $sourcePeriod] = $context;
-        $rules ??= $inForce;
+        [$rules, $sourcePeriod] = $context;
 
         $holders = $plannedHolders ?? $this->currentHolders($sourcePeriod);
         if (null === $holders) {
@@ -223,7 +240,7 @@ final class InheritedReinforcementService
 
         return array_values(array_filter(
             $sources,
-            fn (Duty $source): bool => $this->evaluator->isTriggered($rules, $holders[(int) $source->getId()] ?? null, Weekday::ofDate($source->getLocalDate())),
+            fn (Duty $source): bool => $rules->covers($source->getLocalDate()) && $this->evaluator->isTriggered($rules, $holders[(int) $source->getId()] ?? null, Weekday::ofDate($source->getLocalDate())),
         ));
     }
 
@@ -240,13 +257,13 @@ final class InheritedReinforcementService
      *
      * @return int the number of duties created
      */
-    public function materialize(PlanningPeriod $target, ?array $plannedHolders = null): int
+    public function materialize(PlanningPeriod $target, ?array $plannedHolders = null, bool $forNextGeneration = false): int
     {
         $locked = \in_array($target->getStatus(), self::LOCKED_STATUSES, true);
         if (PlanningPeriodStatus::ARCHIVED === $target->getStatus()) {
             return 0;
         }
-        $plan = $this->plan($target, $plannedHolders);
+        $plan = $this->plan($target, $plannedHolders, $forNextGeneration);
         $created = 0;
         foreach ($plan->units as $unit) {
             // docs/decisions.md D226: on a published line, only what an extension of the period added.
@@ -262,6 +279,30 @@ final class InheritedReinforcementService
             }
         }
         if ($created > 0) {
+            $this->entityManager->flush();
+        }
+
+        return $created;
+    }
+
+    /**
+     * docs/decisions.md D233: every reinforcement the current calendar requires
+     * and that does not exist yet, on a manager's explicit request, whatever
+     * the status of the period (I8's third exception: created empty, nothing is
+     * assigned or sent). Not for an archived period.
+     *
+     * @return list<Duty> the duties created
+     */
+    public function materializeRequested(PlanningPeriod $target): array
+    {
+        if (PlanningPeriodStatus::ARCHIVED === $target->getStatus()) {
+            return [];
+        }
+        $created = [];
+        foreach ($this->plan($target)->units as $unit) {
+            array_push($created, ...$this->create($target, $unit));
+        }
+        if ([] !== $created) {
             $this->entityManager->flush();
         }
 

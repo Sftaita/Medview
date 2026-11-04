@@ -21,7 +21,8 @@ final readonly class DutyGroupUnit implements DutyUnit
         private array $duties,
         private ?bool $demandRequired = null,
     ) {
-        if (null !== $demandRequired && !$duties[0]->isConditional()) {
+        // false also marks an intrinsic LOAD-ONLY unit: held before the coverage start of its line (docs/decisions.md D233).
+        if (true === $demandRequired && !$duties[0]->isConditional()) {
             throw new \InvalidArgumentException('Only a conditional unit carries a demand decision.');
         }
     }
@@ -56,6 +57,9 @@ final readonly class DutyGroupUnit implements DutyUnit
      */
     public function isRequired(): bool
     {
+        if (false === $this->demandRequired) {
+            return false;
+        }
         // A conditional block is atomic: one decision for the whole unit (docs/decisions.md D163/D164).
         if ($this->duties[0]->isConditional()) {
             return $this->demandRequired ?? throw new \LogicException('A conditional unit built without its demand decision has no answer: build it through a DemandView (docs/decisions.md D164).');

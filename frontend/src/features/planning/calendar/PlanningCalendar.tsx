@@ -16,6 +16,7 @@ import { StatisticsPanel } from '../result/StatisticsPanel'
 import type { PlanningResult, PublicationPreflight, PublicationState } from '../result/types'
 import type { PlanningDetail } from '../types'
 import { buildCalendar, type CalendarItem, presentDuty } from './calendarModel'
+import { MissingReinforcements } from './MissingReinforcements'
 import { PreflightIssueList } from './PreflightIssueList'
 import { blockingIssues, issuesByDuty, type PreflightIssue } from './preflightIssues'
 import { RepublishModal } from './RepublishModal'
@@ -477,6 +478,14 @@ export function PlanningCalendar({
           </span>
           <PreflightIssueList issues={assignmentIssues} onLocate={locate} label="Affectations à corriger" />
         </section>
+      )}
+      {canPublish && (
+        <MissingReinforcements
+          units={preflight?.uncoveredUnits}
+          periodStableId={preflight?.period?.stableId}
+          canEdit={canEdit}
+          onCreated={reload}
+        />
       )}
       {model && model.uncoveredCount > 0 && (
         <p className="cal-summary">

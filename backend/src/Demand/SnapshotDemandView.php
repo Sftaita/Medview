@@ -34,6 +34,8 @@ final class SnapshotDemandView implements DemandView
         private readonly DemandCalculator $calculator,
         ?DemandRules $frozenRules,
         private readonly array $decisionsByDutyId,
+        /** docs/decisions.md D233: the coverage start this generation froze. */
+        private readonly ?\DateTimeImmutable $coverageStartsOn = null,
     ) {
         // docs/decisions.md D224: read with the block rule the generation itself used.
         $this->inherited = true === $frozenRules?->inheritsStructure();
@@ -62,7 +64,7 @@ final class SnapshotDemandView implements DemandView
     private function compute(array $duties): UnitDemand
     {
         if (!$duties[0]->isConditional()) {
-            return $this->calculator->intrinsic($duties);
+            return $this->calculator->intrinsic($duties, $this->coverageStartsOn);
         }
 
         usort($duties, static fn (Duty $a, Duty $b): int => [$a->getLocalDate(), (string) $a->getStableId()] <=> [$b->getLocalDate(), (string) $b->getStableId()]);

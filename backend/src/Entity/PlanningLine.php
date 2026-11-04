@@ -91,6 +91,14 @@ class PlanningLine
     #[ORM\Column(length: 10, options: ['default' => 'CUSTOM'])]
     private string $weekStructureMode = 'CUSTOM';
 
+    /**
+     * docs/decisions.md D233: from when a duty of this line is needed, null =
+     * from the start of each period. Independent of its members' memberships,
+     * and it may fall in the middle of a period.
+     */
+    #[ORM\Column(type: 'date_immutable', nullable: true)]
+    private ?\DateTimeImmutable $coverageStartsOn = null;
+
     public function __construct(
         Planning $planning,
         PlanningTeam $planningTeam,
@@ -134,6 +142,18 @@ class PlanningLine
     }
 
     /** docs/decisions.md D227: GENERAL (follows the planning's "Semaine type") or CUSTOM (its own). */
+    public function getCoverageStartsOn(): ?\DateTimeImmutable
+    {
+        return $this->coverageStartsOn;
+    }
+
+    /** Only LineCoverageStartService, which journals the decision and what it retires. */
+    public function changeCoverageStart(?\DateTimeImmutable $startsOn): void
+    {
+        $this->coverageStartsOn = $startsOn;
+        $this->touch();
+    }
+
     public function getWeekStructureMode(): string
     {
         return $this->weekStructureMode;

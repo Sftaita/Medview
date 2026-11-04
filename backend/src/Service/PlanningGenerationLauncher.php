@@ -472,7 +472,7 @@ final class PlanningGenerationLauncher
     private function projectedDutyCount(PlanningPeriod $period, ?ProjectedMaterialization $projected, bool $inherits): int
     {
         $existing = \count($this->dutyRepository->findByPlanningPeriod($period));
-        $inherited = $inherits ? $this->inheritedReinforcements->plan($period)->newDutyCount() : 0;
+        $inherited = $inherits ? $this->inheritedReinforcements->plan($period, null, true)->newDutyCount() : 0;
 
         return $existing + ($projected?->dutyCount ?? 0) + $inherited;
     }
@@ -518,7 +518,7 @@ final class PlanningGenerationLauncher
         $context = $this->inheritedReinforcements->contextOf($period);
         if (null !== $context) {
             $sourcePeriod = $context[1];
-            $this->inheritedReinforcements->materialize($period, $planned->covers($sourcePeriod) ? $planned->holdersOf($sourcePeriod) : null);
+            $this->inheritedReinforcements->materialize($period, $planned->covers($sourcePeriod) ? $planned->holdersOf($sourcePeriod) : null, true);
         }
 
         try {

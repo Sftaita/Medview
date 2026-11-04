@@ -14,9 +14,7 @@ use App\Entity\PlanningPeriod;
 use App\Repository\DutyAssignmentRepository;
 use App\Repository\DutyRepository;
 use App\Repository\PlanningGenerationRepository;
-use App\Repository\PlanningLineDemandPolicyRepository;
 use App\Repository\PlanningLineRepository;
-use App\Repository\PlanningSnapshotRepository;
 
 /**
  * Loads the LIVE DemandView of a Planning (docs/decisions.md D163): each
@@ -40,12 +38,11 @@ final class LiveDemandViewFactory
 {
     public function __construct(
         private readonly PlanningLineRepository $lineRepository,
-        private readonly PlanningLineDemandPolicyRepository $policyRepository,
         private readonly PlanningGenerationRepository $generationRepository,
         private readonly DutyAssignmentRepository $assignmentRepository,
         private readonly DutyRepository $dutyRepository,
         private readonly DemandCalculator $calculator,
-        private readonly PlanningSnapshotRepository $snapshotRepository,
+        private readonly LineDemandRulesReader $rulesReader,
     ) {
     }
 
@@ -73,7 +70,7 @@ final class LiveDemandViewFactory
      */
     private function readPeriod(PlanningLine $line, PlanningPeriod $period, array &$rulesByPeriodId, array &$holdings, array &$loadedSourcePeriods): void
     {
-        [$rules, $sourcePeriod] = $this->rulesOf($line, $period);
+        [$rules, $sourcePeriod] = $this->rulesReader->forPeriod($line, $period);
         $rulesByPeriodId[(int) $period->getId()] = $rules;
 
         if (null === $sourcePeriod || isset($loadedSourcePeriods[(int) $sourcePeriod->getId()])) {
@@ -92,42 +89,5 @@ final class LiveDemandViewFactory
         foreach ($this->assignmentRepository->findForGenerations([$generation]) as $assignment) {
             $holdings[(int) $assignment->getDuty()->getId()] = new SourceHolding(true, (string) $assignment->getTeamMember()->getUser()->getStableId());
         }
-    }
-
-    /**
-     * The rules the live calendar reads $line with, and its source line's
-     * period (null for an independent line).
-     *
-     * @return array{0: DemandRules, 1: ?PlanningPeriod}
-     */
-    private function rulesOf(PlanningLine $line, PlanningPeriod $period): array
-    {
-        $generation = $this->generationRepository->findMostRecentCompletedByPlanningPeriod($period);
-        $snapshot = null !== $generation ? $this->snapshotRepository->findOneByGeneration($generation) : null;
-        if (null !== $snapshot) {
-            $frozen = $snapshot->getDemandPolicy();
-            if (null === $frozen) {
-                // Generated as an independent line: its duties are intrinsic whatever policy exists since.
-                return [DemandRules::independent(), null];
-            }
-            $sourceLine = $this->lineRepository->findOneByStableId((string) $frozen->getSourceLineStableId());
-
-            return [$frozen->toRules(), $this->sourcePeriodIn($sourceLine, $period)];
-        }
-
-        $policy = $this->policyRepository->findActiveForLine($line);
-        if (null === $policy || !$policy->getMode()->isConditional()) {
-            return [DemandRules::independent(), null];
-        }
-
-        return [$policy->toRules(), $this->sourcePeriodIn($policy->getSourceLine(), $period)];
-    }
-
-    /** docs/planning-cycles.md §5.6: the source line's period in the same cycle as $period. */
-    private function sourcePeriodIn(?PlanningLine $sourceLine, PlanningPeriod $period): ?PlanningPeriod
-    {
-        $cycle = $period->getCycle();
-
-        return null !== $sourceLine && null !== $cycle ? $sourceLine->periodIn($cycle) : null;
     }
 }

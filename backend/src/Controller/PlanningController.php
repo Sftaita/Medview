@@ -381,6 +381,7 @@ final class PlanningController
                 'hasWeekStructure' => [] !== $this->patternRepository->findActiveRecurringByTeam($line->getPlanningTeam()),
                 // docs/decisions.md D227: GENERAL or CUSTOM.
                 'weekStructure' => $line->getWeekStructureMode(),
+                'startsOn' => $line->getCoverageStartsOn()?->format('Y-m-d'),
             ];
         }
 
@@ -389,6 +390,7 @@ final class PlanningController
             'structureSource' => $policy->getStructureSource()->value,
             'source' => null === $policy->getSourceLine() ? null : ['lineStableId' => (string) $policy->getSourceLine()->getStableId(), 'name' => $policy->getSourceLine()->getName()],
             'triggerCount' => \count($policy->getTriggers()),
+            'startsOn' => $line->getCoverageStartsOn()?->format('Y-m-d'),
         ];
     }
 

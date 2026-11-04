@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Service;
 
 use App\Demand\DemandView;
+use App\Demand\DutyDemand;
 use App\Eligibility\DutyGroupUnit;
 use App\Eligibility\DutyUnit;
 use App\Eligibility\SingleDutyUnit;
@@ -73,7 +74,8 @@ final class DutyUnitFactory
      * solver. A unit whose demand could not be determined is absent too, and
      * so is a PARTIAL inherited block (docs/decisions.md D224): some of its
      * days stopped triggering since it was created — never given to the
-     * solver as a whole, it is left to a person.
+     * solver as a whole, it is left to a person. An intrinsic unit entirely
+     * before the coverage start of its line is absent too (docs/decisions.md D233).
      *
      * @param list<DutyUnit> $units
      *
@@ -84,7 +86,9 @@ final class DutyUnitFactory
         $kept = [];
         foreach ($units as $unit) {
             if (!$unit->getDuties()[0]->isConditional()) {
-                $kept[] = $unit;
+                if ([] !== array_filter($demand->forUnit($unit)->duties, static fn (DutyDemand $d): bool => !$d->reason->isOutOfCoverage())) {
+                    $kept[] = $unit;
+                }
                 continue;
             }
             $unitDemand = $demand->forUnit($unit);

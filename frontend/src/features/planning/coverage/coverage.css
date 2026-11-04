@@ -240,3 +240,33 @@
   white-space: normal;
   text-align: left;
 }
+
+/* docs/decisions.md D233 */
+.cov-start__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.cov-start__row .input {
+  width: auto;
+  max-width: 100%;
+}
+.cov-start__plan {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+}
+.cov-start__plan ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.cov-start__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}

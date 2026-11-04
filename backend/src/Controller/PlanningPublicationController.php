@@ -419,6 +419,10 @@ final class PlanningPublicationController
             return \sprintf('La garde source du %s n’a pas de titulaire : impossible de savoir si ce renfort est requis.', $sourceDate);
         }
 
+        if (\App\Demand\DemandReason::BEFORE_COVERAGE_START === $item->dutyDemand->ownDay->reason) {
+            return \sprintf('Renfort non requis : le %s précède le début de couverture de cette ligne. Son titulaire reste affecté ; son retrait n’est pas obligatoire.', $sourceDate);
+        }
+
         $holder = null !== $item->holder ? $item->holder->getUser()->getFirstName().' '.$item->holder->getUser()->getLastName() : '';
         $source = null !== $sourceHolder ? $sourceHolder['firstName'].' '.$sourceHolder['lastName'] : 'le titulaire actuel';
 
@@ -463,6 +467,7 @@ final class PlanningPublicationController
             'sourceLineName' => $unit->sourceLine?->getName(),
             'conditional' => $unit->conditional,
             'materialized' => $unit->materialized,
+            'linePublished' => $unit->linePublished,
             'dates' => array_map(static fn (PublicationUncoveredDay $day): string => $day->date->format('Y-m-d'), $unit->days),
             'dutyStableIds' => array_values(array_filter(array_map(static fn (PublicationUncoveredDay $day): ?string => null !== $day->duty ? (string) $day->duty->getStableId() : null, $unit->days))),
             'days' => array_map(fn (PublicationUncoveredDay $day): array => [

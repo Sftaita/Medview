@@ -380,6 +380,8 @@ export type PublicationUncoveredUnit = {
   conditional: boolean
   /** False: required since a reassignment, the duty is not created yet. */
   materialized: boolean
+  /** docs/decisions.md D233: told before the republication, never a blocker. Older servers do not send it. */
+  linePublished?: boolean
   dates: string[]
   dutyStableIds: string[]
   days: {
