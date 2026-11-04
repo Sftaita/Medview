@@ -119,14 +119,15 @@ final class PlanningPublicationPreflightService
                 }
                 // docs/decisions.md D232: what these lines still need, said with its dates, source holders and reasons,
                 // including a reinforcement required since a reassignment, whose duty does not exist yet (D224).
-                if (!$basic->isPublished()) {
-                    $source = $this->conditionalSourceOf($line, $cycle);
-                    array_push($uncoveredUnits, ...$this->uncoveredUnits($line, $source, $generation, $demand, $issues['uncovered']));
-                    $missing = $this->missingReinforcements($line, $source, $period, $demand);
-                    if ([] !== $missing) {
+                // On a published line they never block (D143): they are told before the republication.
+                $source = $this->conditionalSourceOf($line, $cycle);
+                array_push($uncoveredUnits, ...$this->uncoveredUnits($line, $source, $generation, $demand, $issues['uncovered'], $basic->isPublished()));
+                $missing = $this->missingReinforcements($line, $source, $period, $basic->isPublished());
+                if ([] !== $missing) {
+                    if (!$basic->isPublished()) {
                         $blockers[] = PublicationLineReadiness::MISSING_REINFORCEMENTS;
-                        array_push($uncoveredUnits, ...$missing);
                     }
+                    array_push($uncoveredUnits, ...$missing);
                 }
                 foreach (['inconsistent' => PublicationLineReadiness::INCONSISTENT_GROUPS, 'invalid' => PublicationLineReadiness::INVALID_ASSIGNMENTS, 'conflicts' => PublicationLineReadiness::CONFLICTS, 'undetermined' => PublicationLineReadiness::UNDETERMINED_REINFORCEMENTS] as $key => $code) {
                     if ([] !== $issues[$key]) {
@@ -196,7 +197,7 @@ final class PlanningPublicationPreflightService
      *
      * @return list<PublicationUncoveredUnit>
      */
-    private function uncoveredUnits(PlanningLine $line, ?PlanningLine $source, PlanningGeneration $generation, LiveDemandView $demand, array $uncovered): array
+    private function uncoveredUnits(PlanningLine $line, ?PlanningLine $source, PlanningGeneration $generation, LiveDemandView $demand, array $uncovered, bool $linePublished): array
     {
         if ([] === $uncovered) {
             return [];
@@ -227,27 +228,23 @@ final class PlanningPublicationPreflightService
                 );
             }, $duties);
 
-            $units[] = new PublicationUncoveredUnit($line, $source, $duties[0]->isConditional(), true, $days, $this->vacancyOf($generation, $duties, $currentByDutyId));
+            $units[] = new PublicationUncoveredUnit($line, $source, $duties[0]->isConditional(), true, $days, $this->vacancyOf($generation, $duties, $currentByDutyId), $linePublished);
         }
 
         return $units;
     }
 
     /**
-     * Same reinforcement days as the completion would create (docs/decisions.md D224), read with the rules of the live
-     * demand: a post required by a source holder of today, with no duty yet, is required all the same.
+     * The same reinforcement days as the completion would create (docs/decisions.md D224), with the same rules as the
+     * live demand (LineDemandRulesReader): a post required by a source holder of today, with no duty yet, is required
+     * all the same.
      *
      * @return list<PublicationUncoveredUnit>
      */
-    private function missingReinforcements(PlanningLine $line, ?PlanningLine $source, PlanningPeriod $period, LiveDemandView $demand): array
+    private function missingReinforcements(PlanningLine $line, ?PlanningLine $source, PlanningPeriod $period, bool $linePublished): array
     {
-        $rules = $demand->rulesOf($period);
-        if (!$rules->inheritsStructure()) {
-            return [];
-        }
-
         $units = [];
-        foreach ($this->inheritedReinforcements->plan($period, null, $rules)->units as $unit) {
+        foreach ($this->inheritedReinforcements->plan($period)->units as $unit) {
             $holders = $this->inheritedReinforcements->currentHolders($unit->sourceDuties[0]->getPlanningPeriod()) ?? [];
             $days = array_map(static fn (Duty $sourceDuty): PublicationUncoveredDay => new PublicationUncoveredDay(
                 $sourceDuty->getLocalDate(),
@@ -257,7 +254,7 @@ final class PlanningPublicationPreflightService
                 $sourceDuty,
                 $holders[(int) $sourceDuty->getId()] ?? null,
             ), $unit->sourceDuties);
-            $units[] = new PublicationUncoveredUnit($line, $source, true, false, $days, new PublicationVacancy(PublicationVacancy::NOT_CREATED));
+            $units[] = new PublicationUncoveredUnit($line, $source, true, false, $days, new PublicationVacancy(PublicationVacancy::NOT_CREATED), $linePublished);
         }
 
         return $units;

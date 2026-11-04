@@ -119,6 +119,11 @@ final class SnapshotHasher
             $canonical['externalCommitments'] = $externalCommitments;
         }
 
+        // Same rule (D233): only a snapshot with a coverage start adds a key.
+        if (null !== $snapshot->getCoverageStartsOn()) {
+            $canonical['coverageStartsOn'] = $snapshot->getCoverageStartsOn()->format('Y-m-d');
+        }
+
         // Same rule (D164): only a conditional line's snapshot has a frozen demand; every other hash is unchanged.
         $demandPolicy = $snapshot->getDemandPolicy();
         if (null !== $demandPolicy) {

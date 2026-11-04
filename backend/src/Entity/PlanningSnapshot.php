@@ -72,9 +72,14 @@ class PlanningSnapshot
     #[ORM\Column]
     private \DateTimeImmutable $createdAt;
 
-    public function __construct(PlanningGeneration $generation)
+    /** docs/decisions.md D233: the coverage start of the line when this generation was launched. */
+    #[ORM\Column(type: 'date_immutable', nullable: true)]
+    private ?\DateTimeImmutable $coverageStartsOn;
+
+    public function __construct(PlanningGeneration $generation, ?\DateTimeImmutable $coverageStartsOn = null)
     {
         $this->generation = $generation;
+        $this->coverageStartsOn = $coverageStartsOn;
         $this->members = new ArrayCollection();
         $this->externalCommitments = new ArrayCollection();
         $this->demandPolicies = new ArrayCollection();
@@ -170,6 +175,11 @@ class PlanningSnapshot
         if (!$this->demandDecisions->contains($decision)) {
             $this->demandDecisions->add($decision);
         }
+    }
+
+    public function getCoverageStartsOn(): ?\DateTimeImmutable
+    {
+        return $this->coverageStartsOn;
     }
 
     public function getCreatedAt(): \DateTimeImmutable

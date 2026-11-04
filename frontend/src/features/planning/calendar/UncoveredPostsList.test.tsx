@@ -122,7 +122,7 @@ describe('UncoveredPostsList (docs/decisions.md D232)', () => {
     )
 
     expect(screen.getByText(/ces gardes ne sont pas encore créées/)).toBeInTheDocument()
-    expect(screen.getByText(/Utilisez « Compléter la période »/)).toBeInTheDocument()
+    expect(screen.getByText(/utilisez « Compléter la période »/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Voir dans le calendrier' })).not.toBeInTheDocument()
   })
 
@@ -156,6 +156,40 @@ describe('UncoveredPostsList (docs/decisions.md D232)', () => {
 
     expect(screen.getByText(/Aucun membre ne peut les assurer : indisponible \(2\)/)).toBeInTheDocument()
     expect(screen.getByText(/Des membres peuvent les assurer/)).toBeInTheDocument()
+  })
+
+  it('on a published line it warns without blocking, and says the next step is a republication (D233)', () => {
+    render(
+      <UncoveredPostsList
+        units={[
+          unit({
+            linePublished: true,
+            materialized: false,
+            dutyStableIds: [],
+            dates: ['2027-01-05'],
+            days: [{ ...day('2027-01-05', 'TUESDAY'), dutyStableId: null }],
+            vacancy: {
+              code: 'NOT_CREATED',
+              memberCount: 0,
+              assignableCount: 0,
+              firstMembershipStart: null,
+              reasons: [],
+            },
+          }),
+        ]}
+      />,
+    )
+
+    expect(screen.getByText(/Ligne déjà publiée : cela n’empêche pas de republier/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/Créez ces postes depuis le calendrier, attribuez-les, puis republiez/),
+    ).toBeInTheDocument()
+  })
+
+  it('points at the coverage start when nobody can hold the post (D233)', () => {
+    render(<UncoveredPostsList units={[unit()]} />)
+
+    expect(screen.getByText(/réglez le « Début de couverture de cette ligne »/)).toBeInTheDocument()
   })
 
   it('locates a post in the calendar', () => {

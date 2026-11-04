@@ -45,6 +45,15 @@ function capitalize(text: string): string {
 export function datesLabel(dates: string[]): string {
   if (dates.length === 0) return ''
   if (dates.length === 1) return capitalize(day(dates[0]))
+  // docs/decisions.md D224: an inherited block can skip a day: a range would announce a day that is not concerned.
+  const consecutive = dates.every(
+    (date, index) =>
+      index === 0 ||
+      Date.parse(`${date}T00:00:00Z`) - Date.parse(`${dates[index - 1]}T00:00:00Z`) === 86_400_000,
+  )
+  if (!consecutive) {
+    return capitalize(`${dates.slice(0, -1).map(day).join(', ')} et ${day(dates[dates.length - 1])}`)
+  }
   return `Du ${day(dates[0])} au ${day(dates[dates.length - 1])}`
 }
 

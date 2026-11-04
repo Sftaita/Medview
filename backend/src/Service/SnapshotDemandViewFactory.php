@@ -31,6 +31,6 @@ final class SnapshotDemandViewFactory
             );
         }
 
-        return new SnapshotDemandView($this->calculator, $snapshot->getDemandPolicy()?->toRules(), $decisions);
+        return new SnapshotDemandView($this->calculator, $snapshot->getDemandPolicy()?->toRules(), $decisions, $snapshot->getCoverageStartsOn());
     }
 }

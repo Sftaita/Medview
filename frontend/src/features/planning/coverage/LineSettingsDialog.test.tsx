@@ -35,6 +35,7 @@ function setup(
     [`GET /api/planning-lines/${line.stableId}/rule-set`]: () => ACTIVE_RULES,
     ...extra,
     [`GET /api/planning-lines/${line.stableId}/demand-policy`]: () => view,
+    [`GET /api/planning-lines/${line.stableId}/coverage-start`]: () => ({ coverageStartsOn: null }),
     [`PUT /api/planning-lines/${line.stableId}/demand-policy`]: ({ body }) => save(body),
     [`GET /api/planning-lines/${line.stableId}/week-structure`]: () => ({
       blocks: [],
@@ -56,6 +57,23 @@ function desktopWidth() {
 const box = (who: string, day: string) => screen.getByRole('checkbox', { name: `${who} — ${day}` })
 
 describe('LineSettingsDialog (docs/decisions.md D167)', () => {
+  it('offers the coverage start on a reinforcement line and on the primary line (D233)', async () => {
+    setup(conditionalView())
+    expect(
+      await screen.findByRole('heading', { name: 'Début de couverture de cette ligne' }),
+    ).toBeInTheDocument()
+    cleanup()
+
+    setup(policyView({ line: { stableId: SENIORS, name: 'Seniors', type: 'PRIMARY' } }), undefined, {
+      stableId: SENIORS,
+      name: 'Seniors',
+      type: 'PRIMARY',
+    })
+    expect(
+      await screen.findByRole('heading', { name: 'Début de couverture de cette ligne' }),
+    ).toBeInTheDocument()
+  })
+
   it('never offers the reinforcement mode for the primary line', async () => {
     setup(policyView({ line: { stableId: SENIORS, name: 'Seniors', type: 'PRIMARY' } }), undefined, {
       stableId: SENIORS,

@@ -6,6 +6,7 @@ import { saveWeekStructureMode, WeekStructureModal } from '../../week-structure'
 import { GenerationRulesPanel } from '../pilot/GenerationRulesPanel'
 import { fetchDemandPolicy, saveDemandPolicy } from './api'
 import { CoverageMatrix } from './CoverageMatrix'
+import { CoverageStartSection } from './CoverageStartSection'
 import { DemandPreviewPanel, InheritedStructurePanel, TriggerSummary } from './ReinforcementPanels'
 import { draftFromView, isDirty, matrixRows, toInput, type CoverageDraft } from './coverageModel'
 import type { DemandPolicyView } from './types'
@@ -259,6 +260,8 @@ export function LineSettingsDialog({ line, timezone = 'Europe/Brussels', onClose
               )}
             </section>
           )}
+
+          <CoverageStartSection lineStableId={line.stableId} onSaved={onSaved} />
 
           {line.type === 'PRIMARY' ? (
             <section className="cov-section">

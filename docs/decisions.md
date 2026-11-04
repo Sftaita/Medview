@@ -10607,7 +10607,43 @@ modifié.
     frontend.
 - **Une ligne déjà publiée n'est pas concernée** (D143, D222, D223) : un poste vacant n'y bloque pas la republication, et un
   renfort devenu requis n'y est jamais créé automatiquement. **Limite connue** : ce dernier cas n'est toujours pas signalé par le
-  précontrôle de republication.
+  précontrôle de republication. Corrigé par D233.
 - **Limite connue** : `InheritedReinforcementService::materialize` lit la politique en vigueur, alors que la demande live lit
   les règles figées. Une complétion faite après un changement de matrice peut créer une garde que la demande figée ne requiert
-  pas. Antérieur à cette décision, non modifié.
+  pas. Antérieur à cette décision, corrigé par D233.
+
+## D233 — Début de couverture d'une ligne ; une seule lecture des règles ; un besoin né après publication est annoncé
+
+- **Contexte (décision de l'utilisateur, 2026-11-04)** : option A de l'audit D232. Trauma Delta : 19 gardes Fell/Ass requises en
+  octobre, aucun membre avant le 1er novembre. Une garde ne doit pas être requise avant que la ligne existe, sans modifier
+  les dates d'adhésion ni aucune affectation.
+- **Décision — `planning_lines.coverage_starts_on`** (« Début de couverture de cette ligne », toute ligne, peut tomber au milieu
+  d'une période) :
+  - avant la date, rien n'est demandé (`DemandReason::BEFORE_COVERAGE_START`, ni requis ni indéterminé) ; à partir d'elle,
+    déclencheurs, blocs et équité s'appliquent normalement. Un bloc coupé par la date garde ses jours suivants comme une unité.
+  - **Pas une règle figée comme les déclencheurs** : c'est une décision explicite sur le calendrier actif, appliquée aussitôt, y
+    compris à une période déjà générée. Une génération lancée ensuite la fige (`planning_snapshots.coverage_starts_on`), sans
+    changer l'empreinte des snapshots sans date.
+  - Aperçu sans écriture, puis confirmation contre le hash du plan lu (comme D225). Une transaction, sous les verrous du planning,
+    du moteur et du calendrier : journal append-only `planning_line_coverage_changes`, gardes retirées, date.
+  - **Seules les gardes sans titulaire sont retirées** (`duties.retired_by_coverage_change_id`, ligne conservée : événements,
+    décision figée, entrées de publication). Une garde avec titulaire n'est jamais retirée ni réattribuée : elle n'est plus requise
+    (avertissement « superflu », charge réelle toujours comptée). Reculer la date ne ressuscite rien : le besoin réapparaît,
+    annoncé, et la garde sera une nouvelle garde.
+  - Les dates d'adhésion ne sont ni lues pour décider ni modifiées.
+- **Décision — une seule lecture des règles** (`LineDemandRulesReader`) : demande live, complétion, comptage de « Compléter »,
+  précontrôle lisent le calendrier courant avec les déclencheurs figés par sa génération. Seul un lancement, qui prépare la
+  génération suivante, lit la politique en vigueur (`forNextGeneration`). **Corrige** la limite notée en D232 : une complétion
+  pouvait créer une garde que la demande figée ne requérait pas.
+- **Décision — un besoin né après publication** (corrige l'autre limite de D232) : le précontrôle signale aussi, sur une ligne publiée,
+  les renforts requis sans garde et les postes vacants (`uncoveredUnits[].linePublished`), jamais comme blocage (D143) : le dialogue
+  de republication les annonce, le calendrier les montre. **Troisième exception à I8** : `POST …/missing-reinforcements`, sur demande
+  explicite du gestionnaire, crée les gardes vides, journalisées ; rien n'est attribué, publié ni envoyé. Le précontrôle et la
+  réattribution de la source n'écrivent jamais rien sur la ligne de renfort.
+- **Migration** `Version20261105090000`, additive, aucune ligne existante écrite ; `down()` refusé dès qu'une date ou un journal existe.
+- **Alternatives écartées** : considérer non requise toute garde sans membre à sa date (un oubli d'ajout passerait inaperçu) ; figer la
+  date comme les déclencheurs (il faudrait régénérer et risquer les 61 affectations) ; créer automatiquement le renfort à la
+  réattribution (une écriture sur une ligne publiée que personne n'a demandée).
+- **Limites** : une date par ligne, pas par période ; la régularisation de Trauma Delta reste à décider et n'est pas faite.
+- **Tests** : `LineCoverageStartTest`, `PublicationRequiredReinforcementTest`, `CoverageStartSection.test`, `MissingReinforcements.test`,
+  recette sur copie isolée (`docs/recette/d233/`).

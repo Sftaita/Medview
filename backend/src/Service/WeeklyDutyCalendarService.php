@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Demand\DemandRules;
 use App\Entity\Duty;
 use App\Entity\DutyDemandType;
 use App\Entity\DutyPattern;
@@ -236,6 +237,11 @@ final class WeeklyDutyCalendarService
         return $anomalies;
     }
 
+    private function beforeCoverage(PlanningPeriod $period, \DateTimeImmutable $day): bool
+    {
+        return !DemandRules::coverageIncludes($this->lineRepository->findOneByPlanningPeriod($period)?->getCoverageStartsOn(), $day);
+    }
+
     private function outsideWindow(DutyPattern $pattern, \DateTimeImmutable $monday): bool
     {
         if (null === $this->window) {
@@ -295,7 +301,7 @@ final class WeeklyDutyCalendarService
         }
 
         $day = $monday->modify(sprintf('+%d days', $component->getDayOffset()));
-        if ($day < $period->getStartsAt() || $day >= $period->getEndsAt()) {
+        if ($day < $period->getStartsAt() || $day >= $period->getEndsAt() || $this->beforeCoverage($period, $day)) {
             return [];
         }
 
@@ -365,6 +371,11 @@ final class WeeklyDutyCalendarService
         foreach ($pattern->getComponents() as $component) {
             $day = $monday->modify(sprintf('+%d days', $component->getDayOffset()));
             if ($day < $period->getStartsAt() || $day >= $period->getEndsAt()) {
+                continue;
+            }
+            // docs/decisions.md D233: nothing before the coverage start of the line; the rest of the block is a remainder.
+            if ($this->beforeCoverage($period, $day)) {
+                $remainder = true;
                 continue;
             }
 

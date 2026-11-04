@@ -1,5 +1,5 @@
 import { Icon } from '../../../components/Icon'
-import type { PublicationUncoveredUnit, PublicationVacancy } from '../result/types'
+import type { PublicationUncoveredUnit } from '../result/types'
 import { datesLabel } from './preflightIssues'
 
 type Props = {
@@ -20,19 +20,23 @@ function fullDate(date: string): string {
 }
 
 /** Why these posts are empty, and what can be done about it — in the words of the check behind the calendar. */
-function vacancyText(vacancy: PublicationVacancy, lineName: string): { why: string; next: string } {
+function vacancyText(unit: PublicationUncoveredUnit): { why: string; next: string } {
+  const { vacancy, lineName, linePublished } = unit
+  const afterwards = linePublished ? 'puis republiez' : 'puis publiez'
   switch (vacancy.code) {
     case 'NO_MEMBER_ON_DATE':
       return {
         why: vacancy.firstMembershipStart
           ? `Aucun membre de « ${lineName} » à ces dates : les adhésions commencent le ${fullDate(vacancy.firstMembershipStart)}.`
           : `Aucun membre de « ${lineName} » à ces dates.`,
-        next: 'Ni la complétion ni une attribution manuelle ne peuvent les pourvoir tant qu’aucun membre n’est rattaché à la ligne à ces dates.',
+        next: 'Ni la complétion ni une attribution manuelle ne peuvent les pourvoir. Si aucune garde n’est nécessaire à ces dates, réglez le « Début de couverture de cette ligne » dans ses paramètres.',
       }
     case 'NOT_CREATED':
       return {
         why: 'Renforts devenus nécessaires après la génération (titulaire de la ligne source modifié) : ces gardes ne sont pas encore créées.',
-        next: 'Utilisez « Compléter la période » en haut de page pour les créer.',
+        next: linePublished
+          ? `Créez ces postes depuis le calendrier, attribuez-les, ${afterwards}.`
+          : 'Créez-les depuis le calendrier ou utilisez « Compléter la période » en haut de page.',
       }
     case 'NO_ELIGIBLE_MEMBER':
       return {
@@ -42,7 +46,9 @@ function vacancyText(vacancy: PublicationVacancy, lineName: string): { why: stri
     case 'ASSIGNABLE_MEMBERS':
       return {
         why: 'Des membres peuvent les assurer : personne n’a encore été désigné.',
-        next: 'Attribuez-les depuis le calendrier ou utilisez « Compléter la période » en haut de page.',
+        next: linePublished
+          ? `Attribuez-les depuis le calendrier, ${afterwards}.`
+          : 'Attribuez-les depuis le calendrier ou utilisez « Compléter la période » en haut de page.',
       }
   }
 }
@@ -80,8 +86,8 @@ function count(units: PublicationUncoveredUnit[]): string {
 }
 
 /**
- * Every required post keeping a line from its first publication
- * (docs/decisions.md D232): its dates, the source holder who triggers it, and
+ * Every required post without holder (docs/decisions.md D232, D233), keeping a
+ * line from its first publication or told before a republication: its dates, the source holder who triggers it, and
  * why it is empty. The backend decides all of it: nothing is computed here.
  */
 export function UncoveredPostsList({ units, onLocate }: Props) {
@@ -95,7 +101,7 @@ export function UncoveredPostsList({ units, onLocate }: Props) {
   return (
     <div className="uncovered-posts">
       {[...groups.entries()].map(([key, group]) => {
-        const { why, next } = vacancyText(group[0].vacancy, group[0].lineName)
+        const { why, next } = vacancyText(group[0])
         return (
           <section key={key} className="alert alert--warning uncovered-posts__group">
             <Icon name="alert" size={18} strokeWidth={2} />
@@ -103,6 +109,11 @@ export function UncoveredPostsList({ units, onLocate }: Props) {
               <strong>
                 {group[0].lineName} — {count(group)} sans titulaire
               </strong>
+              {group[0].linePublished && (
+                <span>
+                  Ligne déjà publiée : cela n’empêche pas de republier, mais ces postes resteront vacants.
+                </span>
+              )}
               <span>{why}</span>
               <span className="preflight-issue__rule">{next}</span>
               <ul className="uncovered-posts__list" aria-label={`Postes de ${group[0].lineName}`}>

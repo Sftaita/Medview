@@ -28,7 +28,7 @@ final readonly class PublicationPreflight
      * @param list<ConditionalPublicationDuty>   $superfluousCoverages docs/decisions.md D165 — a warning, never a blocker
      * @param list<PublicationNeutralLine>       $neutralLines         docs/decisions.md D194 — active lines with nothing demanded: neither checked nor published, never a blocker
      * @param list<int>                          $earlierUnpublished   docs/decisions.md D196 — numbers of earlier periods with a line still to publish: a warning, never a blocker
-     * @param list<PublicationUncoveredUnit>     $uncoveredUnits       docs/decisions.md D232 — every required post keeping a line from its first publication: dates, source holders, reasons
+     * @param list<PublicationUncoveredUnit>     $uncoveredUnits       docs/decisions.md D232 — every required post without holder: dates, source holders, reasons (D233: published lines too)
      */
     public function __construct(
         /** All or nothing (historical meaning): nothing published in the period yet, and every line that counts ready. */

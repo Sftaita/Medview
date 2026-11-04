@@ -112,7 +112,7 @@ final class PlanningSnapshotService
         $fromInstant = new \DateTimeImmutable($planningPeriod->getStartsAt()->format('Y-m-d').' 00:00:00', $timezone);
         $toInstant = new \DateTimeImmutable($planningPeriod->getEndsAt()->format('Y-m-d').' 00:00:00', $timezone);
 
-        $snapshot = new PlanningSnapshot($generation);
+        $snapshot = new PlanningSnapshot($generation, $this->lineRepository->findOneByPlanningPeriod($planningPeriod)?->getCoverageStartsOn());
         $this->entityManager->persist($snapshot);
 
         $relevantMembers = $this->teamMemberRepository->findIntersecting(
@@ -307,7 +307,7 @@ final class PlanningSnapshotService
             }
         }
         $holdingOf = static fn (Duty $source): SourceHolding => new SourceHolding(true, $holders[(int) $source->getId()] ?? null);
-        $rules = $frozenPolicy->toRules();
+        $rules = $frozenPolicy->toRules()->withCoverageStart($snapshot->getCoverageStartsOn());
 
         foreach ($this->dutyUnitFactory->fromDuties($this->dutyRepository->findByPlanningPeriod($period)) as $unit) {
             if (!$unit->getDuties()[0]->isConditional()) {
@@ -324,7 +324,7 @@ final class PlanningSnapshotService
                     null !== $day->sourceHolderUserStableId ? Uuid::fromString($day->sourceHolderUserStableId) : null,
                     null !== $day->trigger?->triggerStableId ? Uuid::fromString($day->trigger->triggerStableId) : null,
                     $day->reason,
-                    $demand->determined ? $demand->required : null,
+                    $demand->determined ? $demand->required && !$day->reason->isOutOfCoverage() : null,
                     $dutyDemand->reason,
                 ));
             }

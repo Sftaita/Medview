@@ -35,6 +35,16 @@ const DUTY = {
 }
 const MEMBER = { teamMemberStableId: 'm1', firstName: 'Membre', lastName: 'Un' }
 
+describe('datesLabel', () => {
+  it('gives a range for consecutive days, and never announces a day that is not concerned (D224)', () => {
+    expect(datesLabel(['2027-01-15'])).toBe('Vendredi 15 janvier')
+    expect(datesLabel(['2027-01-15', '2027-01-16', '2027-01-17'])).toBe(
+      'Du vendredi 15 janvier au dimanche 17 janvier',
+    )
+    expect(datesLabel(['2027-01-15', '2027-01-17'])).toBe('Vendredi 15 janvier et dimanche 17 janvier')
+  })
+})
+
 describe('blockingIssues', () => {
   it('names the duty, the line, the person, the rule and the fix of an invalid assignment', () => {
     const [issue] = blockingIssues(

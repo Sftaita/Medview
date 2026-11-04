@@ -31,6 +31,11 @@ namespace App\Demand;
  * UNDETERMINED, never "not required": nobody knows yet whether the
  * reinforcement is needed (UnitDemand::$determined).
  *
+ * Outside the coverage of the line (docs/decisions.md D233), neither required
+ * nor undetermined, whatever the triggers say:
+ * - BEFORE_COVERAGE_START: the day is before the coverage start of its line;
+ * - SOURCE_RETIRED: its source duty was retired from the active calendar.
+ *
  * And at the level of a whole block (a conditional block is atomic):
  * - TRIGGERED_BY_BLOCK: this day is not triggered itself, but another day
  *   of its block is — the whole block is required.
@@ -47,6 +52,14 @@ enum DemandReason: string
     case WEEKDAY_NOT_TRIGGERED = 'WEEKDAY_NOT_TRIGGERED';
     case LINE_NOT_CONDITIONAL = 'LINE_NOT_CONDITIONAL';
     case NOT_IN_SNAPSHOT = 'NOT_IN_SNAPSHOT';
+    case BEFORE_COVERAGE_START = 'BEFORE_COVERAGE_START';
+    case SOURCE_RETIRED = 'SOURCE_RETIRED';
+
+    /** The line demands nothing on this day: a block's other days never make it required (D233). */
+    public function isOutOfCoverage(): bool
+    {
+        return self::BEFORE_COVERAGE_START === $this || self::SOURCE_RETIRED === $this;
+    }
 
     /** The day could not be evaluated: nobody holds (or held) its source duty. */
     public function isUndetermined(): bool

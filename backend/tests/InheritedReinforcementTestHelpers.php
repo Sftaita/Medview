@@ -112,7 +112,7 @@ trait InheritedReinforcementTestHelpers
             FROM duties d
             JOIN planning_periods p ON p.id = d.planning_period_id
             JOIN planning_lines l ON l.id = p.planning_line_id AND l.name = 'Fell/Ass'
-            JOIN duties s ON s.id = d.coverage_source_id
+            JOIN duties s ON s.id = d.coverage_source_id AND d.retired_at IS NULL
             LEFT JOIN duty_assignments ha ON ha.duty_id = d.id AND ha.current
             LEFT JOIN planning_team_members hm ON hm.id = ha.team_member_id LEFT JOIN users hu ON hu.id = hm.user_id
             LEFT JOIN duty_assignments sa ON sa.duty_id = s.id AND sa.current

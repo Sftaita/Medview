@@ -221,6 +221,7 @@ class PlanningLineDemandPolicy
             null !== $this->sourceLineStableId ? (string) $this->sourceLineStableId : null,
             array_values(array_map(static fn (DemandTrigger $t) => $t->toRule(), $this->triggers->toArray())),
             $this->structureSource,
+            $this->targetLine->getCoverageStartsOn(),
         );
     }
 

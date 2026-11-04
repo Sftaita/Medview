@@ -134,6 +134,11 @@ class Duty
     #[ORM\JoinColumn(name: 'retired_by_change_id', nullable: true, onDelete: 'RESTRICT')]
     private ?PeriodDateChange $retiredByChange = null;
 
+    /** docs/decisions.md D233: retired because nobody held it before the coverage start of its line. */
+    #[ORM\ManyToOne(targetEntity: PlanningLineCoverageChange::class)]
+    #[ORM\JoinColumn(name: 'retired_by_coverage_change_id', nullable: true, onDelete: 'RESTRICT')]
+    private ?PlanningLineCoverageChange $retiredByCoverageChange = null;
+
     /**
      * docs/decisions.md D226: the extension of the period that created this
      * duty. The only duties a published line may receive automatically.
@@ -235,6 +240,21 @@ class Duty
         $this->retiredAt = $at;
         $this->retiredByChange = $change;
         $this->updatedAt = new \DateTimeImmutable();
+    }
+
+    public function retireFromCoverage(PlanningLineCoverageChange $change, \DateTimeImmutable $at): void
+    {
+        if (null !== $this->retiredAt) {
+            throw new \LogicException('This duty is already retired.');
+        }
+        $this->retiredAt = $at;
+        $this->retiredByCoverageChange = $change;
+        $this->updatedAt = new \DateTimeImmutable();
+    }
+
+    public function getRetiredByCoverageChange(): ?PlanningLineCoverageChange
+    {
+        return $this->retiredByCoverageChange;
     }
 
     public function isRetired(): bool

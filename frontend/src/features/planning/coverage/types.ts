@@ -85,3 +85,24 @@ export type DemandPolicyInput = {
   source: { lineStableId: string } | null
   triggers: { userStableId: string; weekdays: ApiWeekday[]; increment: number }[]
 }
+
+/** What a coverage start would do (docs/decisions.md D233). */
+export type CoverageStartPlan = {
+  previousStartsOn: string | null
+  newStartsOn: string | null
+  changesAnything: boolean
+  confirmationRequired: boolean
+  /** The hash of this plan: what is confirmed is what is done. */
+  confirmation: string
+  /** Duties before the date nobody holds: retired from the active calendar. */
+  retired: { dutyStableId: string; date: string }[]
+  /** Duties before the date someone holds: never touched. */
+  kept: { dutyStableId: string; date: string; holder: { firstName: string; lastName: string } }[]
+}
+
+export type CoverageStartOutcome = {
+  coverageStartsOn: string | null
+  changed: boolean
+  retiredDutyCount: number
+  keptDutyCount: number
+}
