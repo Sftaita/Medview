@@ -111,6 +111,14 @@
 .cal-unfillable p {
   margin: 0;
 }
+/* 390 px: the label wraps inside the box instead of overflowing it. */
+.cal-unfillable .btn {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+  height: auto;
+  padding-block: 6px;
+}
 
 /* docs/decisions.md D223: a published line is never completed automatically - said next to the button. */
 .cal-locked {
