@@ -5,7 +5,7 @@ import { WeekStructureModal } from '../../week-structure'
 import { ActionMenu, type ActionMenuItem } from '../detail/ActionMenu'
 import { FillModal } from './FillModal'
 import { GenerationModal, type GenerationPeriod } from './GenerationModal'
-import { COMPLETE_HELP, periodAction } from './periodAction'
+import { COMPLETE_HELP, periodAction, UNFILLABLE_HELP } from './periodAction'
 import type { FillLinePlan, PlanningJob } from './types'
 
 export type PilotDialog = 'generate' | 'regenerate' | 'fill' | 'week-structure'
@@ -110,13 +110,18 @@ export function PilotHeaderActions({
           >
             {action.kind === 'busy' && <span className="cal-spinner" aria-hidden />}
             {action.kind === 'done' && <Icon name="check" size={18} strokeWidth={2.4} />}
-            {action.kind === 'manual' && <Icon name="alert" size={18} strokeWidth={2.2} />}
+            {(action.kind === 'manual' || action.kind === 'unfillable') && (
+              <Icon name="alert" size={18} strokeWidth={2.2} />
+            )}
             {action.label}
           </span>
         )}
         {/* The "?" keeps its place in every state: nothing around it ever moves. */}
         <span className="pd-main-action__help">
           {action.kind === 'complete' && <HelpTip label="Compléter la période">{COMPLETE_HELP}</HelpTip>}
+          {action.kind === 'unfillable' && (
+            <HelpTip label="Gardes sans membre éligible">{UNFILLABLE_HELP}</HelpTip>
+          )}
           {action.kind === 'manual' && (
             <HelpTip label="Gardes à attribuer à la main">
               Une ligne publiée n’est jamais complétée automatiquement, sauf les nouvelles dates d’une période

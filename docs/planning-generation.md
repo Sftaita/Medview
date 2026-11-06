@@ -1324,3 +1324,18 @@ raison du besoin et cause de la vacance (`NOT_CREATED`, `NO_MEMBER_ON_DATE`, `NO
 | Titulaire source inconnu | présente | indifférent | `UNDETERMINED_REINFORCEMENTS` |
 
 Les règles lues sont celles de la demande live : figées par la génération (D164), avec les titulaires actuels.
+
+## 42. Postes que personne ne peut pourvoir (docs/decisions.md D234)
+
+`GET /api/plannings/{id}/fill-preview` ajoute à chaque ligne `unfillable` (`dutyCount`, `noMemberOnDateCount`,
+`noEligibleMemberCount`, `firstMembershipStart`, `from`, `to`), lu avec le contrôle de la liste des candidats
+(`VacancyAnalyzer`, le même que le précontrôle). Le précontrôle expose `uncoveredUnits[].vacancy.unfillable`.
+
+| Trous de la ligne | Plan | Action principale | Calendrier |
+|---|---|---|---|
+| tous complétables | `COMPLETE` | « Compléter la période N » | « … ou utilisez Compléter » |
+| complétables + impossibles | `COMPLETE` (impossibles comptés à part) | « Compléter la période N » | les deux, séparés |
+| tous impossibles | `NOTHING` / `no_eligible_member` | « N gardes sans membre éligible » | cause par ligne, « Vérifier le début de couverture de la ligne » si personne n'est rattaché à ces dates |
+
+Rien n'est supprimé ni re-daté automatiquement : un poste impossible reste requis et vacant jusqu'à une décision du
+gestionnaire (début de couverture, ajout d'un membre, levée d'un empêchement).

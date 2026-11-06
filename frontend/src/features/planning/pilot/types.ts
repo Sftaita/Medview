@@ -313,6 +313,23 @@ export type FillLinePlan = {
   extensionOnly?: boolean
   /** Its older holes, which are never completed automatically. */
   otherUncoveredCount?: number
+  /**
+   * docs/decisions.md D234 — the holes nobody can fill (no member on these
+   * dates, or none eligible), counted apart. A line whose holes are all such is
+   * NOTHING `no_eligible_member`: « Compléter » is never offered for them alone.
+   */
+  unfillable?: FillVacancies | null
+}
+
+export type FillVacancies = {
+  dutyCount: number
+  /** Of which: no member of the line on these dates. */
+  noMemberOnDateCount: number
+  noEligibleMemberCount: number
+  /** The first day a member joins the line after those dates. */
+  firstMembershipStart: string | null
+  from: string | null
+  to: string | null
 }
 
 export type FillPreview = {

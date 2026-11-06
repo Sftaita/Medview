@@ -278,6 +278,67 @@ describe('FillModal — the preview', () => {
     expect(api.requests('POST', '/api/plannings/plan-1/fill')[0].body).toMatchObject({ lines: ['l2'] })
   })
 
+  it('counts only the posts that can be completed; the impossible ones apart, never "à compléter" (D234)', async () => {
+    stubApi({
+      'GET /api/plannings/plan-1/fill-preview': () =>
+        preview([
+          plan({
+            lineStableId: 'l2',
+            lineName: 'Fell/Ass',
+            action: 'COMPLETE',
+            selectable: true,
+            selectedByDefault: true,
+            uncoveredRequiredDutyCount: 21,
+            unfillable: {
+              dutyCount: 19,
+              noMemberOnDateCount: 19,
+              noEligibleMemberCount: 0,
+              firstMembershipStart: '2026-11-01',
+              from: '2026-10-02',
+              to: '2026-10-29',
+            },
+          }),
+        ]),
+    })
+    renderModal()
+
+    expect(await screen.findByText('2 gardes non pourvues à compléter')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        /19 gardes sans membre éligible : aucune attribution possible, elles resteront vacantes/,
+      ),
+    ).toBeInTheDocument()
+    expect(await confirmButton('Compléter la période 2')).toBeEnabled()
+  })
+
+  it('only impossible posts: nothing to send, the cause said (D234)', async () => {
+    stubApi({
+      'GET /api/plannings/plan-1/fill-preview': () =>
+        preview([
+          plan({
+            lineStableId: 'l2',
+            lineName: 'Fell/Ass',
+            action: 'NOTHING',
+            reason: 'no_eligible_member',
+            uncoveredRequiredDutyCount: 19,
+            unfillable: {
+              dutyCount: 19,
+              noMemberOnDateCount: 19,
+              noEligibleMemberCount: 0,
+              firstMembershipStart: '2026-11-01',
+              from: '2026-10-02',
+              to: '2026-10-29',
+            },
+          }),
+        ]),
+    })
+    renderModal()
+
+    expect(await screen.findByText(/n’est éligible pour 19 gardes/)).toBeInTheDocument()
+    expect(screen.queryByText(/à compléter/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Compléter la période 2' })).toBeDisabled()
+  })
+
   it('nothing to send (only a published line): the button stays disabled', async () => {
     stubApi({ 'GET /api/plannings/plan-1/fill-preview': () => preview([SENIORS_PUBLISHED_WITH_HOLES]) })
     renderModal()

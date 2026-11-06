@@ -23,7 +23,6 @@ use App\Repository\DutyRepository;
 use App\Repository\PlanningGenerationRepository;
 use App\Repository\PlanningLineDemandPolicyRepository;
 use App\Repository\PlanningLineRepository;
-use App\Repository\PlanningTeamMemberRepository;
 
 /**
  * Whether the current calendar (docs/decisions.md D133) — never the
@@ -54,7 +53,7 @@ final class PlanningPublicationPreflightService
         private readonly LineApplicabilityService $applicability,
         private readonly PlanningLineDemandPolicyRepository $policyRepository,
         private readonly InheritedReinforcementService $inheritedReinforcements,
-        private readonly PlanningTeamMemberRepository $teamMemberRepository,
+        private readonly VacancyAnalyzer $vacancyAnalyzer,
     ) {
     }
 
@@ -228,7 +227,7 @@ final class PlanningPublicationPreflightService
                 );
             }, $duties);
 
-            $units[] = new PublicationUncoveredUnit($line, $source, $duties[0]->isConditional(), true, $days, $this->vacancyOf($generation, $duties, $currentByDutyId), $linePublished);
+            $units[] = new PublicationUncoveredUnit($line, $source, $duties[0]->isConditional(), true, $days, $this->vacancyAnalyzer->vacancyOf($generation, $duties, $currentByDutyId), $linePublished);
         }
 
         return $units;
@@ -258,64 +257,6 @@ final class PlanningPublicationPreflightService
         }
 
         return $units;
-    }
-
-    /**
-     * Why these duties have nobody, with the same check as the candidate list and the save.
-     *
-     * @param non-empty-list<Duty>       $duties
-     * @param array<int, DutyAssignment> $currentByDutyId
-     */
-    private function vacancyOf(PlanningGeneration $generation, array $duties, array $currentByDutyId): PublicationVacancy
-    {
-        $block = $this->candidateService->blockDuties($duties[0]);
-        $members = $this->teamMemberRepository->findByTeam($duties[0]->getTeam());
-
-        $onDates = array_values(array_filter($members, static function (PlanningTeamMember $member) use ($duties): bool {
-            foreach ($duties as $duty) {
-                if (!$member->isActiveAt($duty->getLocalDate())) {
-                    return false;
-                }
-            }
-
-            return true;
-        }));
-
-        if ([] === $onDates) {
-            $lastDay = max(array_map(static fn (Duty $duty): \DateTimeImmutable => $duty->getLocalDate(), $duties));
-            $later = array_values(array_filter(
-                array_map(static fn (PlanningTeamMember $member): \DateTimeImmutable => $member->getMembershipStart(), $members),
-                static fn (\DateTimeImmutable $start): bool => $start > $lastDay,
-            ));
-
-            return new PublicationVacancy(PublicationVacancy::NO_MEMBER_ON_DATE, \count($members), 0, [] !== $later ? min($later) : null);
-        }
-
-        $assignable = 0;
-        $reasons = [];
-        foreach ($onDates as $member) {
-            $error = $this->candidateService->assignabilityError($generation, $block, $member, [], ReassignmentCandidateService::heldBy($block, $currentByDutyId, $member));
-            if (null === $error) {
-                ++$assignable;
-                continue;
-            }
-            $reasons[$error] = ($reasons[$error] ?? 0) + 1;
-        }
-
-        return new PublicationVacancy(
-            $assignable > 0 ? PublicationVacancy::ASSIGNABLE_MEMBERS : PublicationVacancy::NO_ELIGIBLE_MEMBER,
-            \count($members),
-            $assignable,
-            null,
-            array_map(fn (string $code, int $count): array => ['code' => $code, 'label' => $this->vacancyLabel($code), 'count' => $count], array_keys($reasons), array_values($reasons)),
-        );
-    }
-
-    private function vacancyLabel(string $code): string
-    {
-        $reason = ExclusionReason::tryFrom($code);
-
-        return null !== $reason ? $this->reasonLabeler->label($reason) : 'ne fait pas partie de cette génération';
     }
 
     /** The line $line reinforces in $cycle (its demand policy in force is conditional, D162), null otherwise. */

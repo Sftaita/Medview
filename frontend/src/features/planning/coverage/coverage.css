@@ -18,6 +18,12 @@
   padding-block: var(--space-4);
   border-top: 1px solid var(--border-subtle);
 }
+/* docs/decisions.md D234: opened from « Vérifier le début de couverture de la ligne ». */
+.cov-section--focused {
+  scroll-margin-top: var(--space-4);
+  box-shadow: inset 3px 0 0 var(--warning-border, #eccf8d);
+  padding-inline-start: var(--space-3);
+}
 .cov-section:first-child {
   border-top: 0;
   padding-top: 0;

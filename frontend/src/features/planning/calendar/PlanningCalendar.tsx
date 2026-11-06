@@ -20,6 +20,7 @@ import { MissingReinforcements } from './MissingReinforcements'
 import { PreflightIssueList } from './PreflightIssueList'
 import { blockingIssues, issuesByDuty, type PreflightIssue } from './preflightIssues'
 import { RepublishModal } from './RepublishModal'
+import { unfillableGroups, type UnfillableGroup } from './unfillable'
 import './calendar.css'
 
 /** The period shown (docs/planning-cycles.md §7.4). `endsAt` is exclusive, `lastDay` included. */
@@ -47,6 +48,11 @@ type Props = {
   jobActive?: boolean
   /** Which one — said on the disabled button, so it never reads as simply unavailable. */
   jobKind?: 'GENERATE' | 'COMPLETE' | 'FILL' | null
+  /**
+   * docs/decisions.md D234 — « Vérifier le début de couverture de la ligne »:
+   * opens the settings of that line on its coverage start. Absent: not offered.
+   */
+  onCheckCoverage?: (lineStableId: string) => void
 }
 
 const MONTH = new Intl.DateTimeFormat('fr-BE', { month: 'long', year: 'numeric', timeZone: 'UTC' })
@@ -111,6 +117,7 @@ export function PlanningCalendar({
   onPublished,
   jobActive = false,
   jobKind = null,
+  onCheckCoverage,
 }: Props) {
   const canEdit = planning.canManageCalendar === true
   const canPublish = planning.canPublish === true
@@ -202,6 +209,8 @@ export function PlanningCalendar({
     [preflight, published],
   )
   const cellIssues = useMemo(() => issuesByDuty(issues), [issues])
+  // docs/decisions.md D234: the posts nobody can fill, said apart — never offered to the completion.
+  const unfillable = useMemo(() => unfillableGroups(preflight?.uncoveredUnits), [preflight])
   const assignmentIssues = useMemo(
     () => issues.filter((issue) => issue.kind === 'assignment' || issue.kind === 'inconsistent'),
     [issues],
@@ -487,23 +496,43 @@ export function PlanningCalendar({
           onCreated={reload}
         />
       )}
-      {model && model.uncoveredCount > 0 && (
-        <p className="cal-summary">
-          <span className="cal-uncovered">
-            ⚠{' '}
-            {summaryText(
-              model.uncoveredCount - model.missingReinforcementCount,
-              model.missingReinforcementCount,
-            )}
-          </span>
-          {canEdit &&
-            `${model.uncoveredCount === 1 ? ' — attribuez-la' : ' — attribuez-les une à une'}${
-              model.completableCount > 0
-                ? ` ou utilisez « Compléter la période${period ? ` ${period.number}` : ''} » en haut de page.`
-                : '.'
-            }`}
-        </p>
-      )}
+      {model &&
+        (() => {
+          // docs/decisions.md D234: what can be completed and what nobody can fill, never in one sentence.
+          const impossible = unfillable.reduce((sum, group) => sum + group.dayCount, 0)
+          const impossibleReinforcements = unfillable.reduce(
+            (sum, group) => sum + group.reinforcementCount,
+            0,
+          )
+          const impossibleUnlocked = unfillable
+            .filter((group) => !group.linePublished)
+            .reduce((sum, group) => sum + group.dayCount, 0)
+          const reinforcements = Math.max(0, model.missingReinforcementCount - impossibleReinforcements)
+          const fillable = Math.max(0, model.uncoveredCount - impossible)
+          if (fillable === 0) return null
+          return (
+            <p className="cal-summary">
+              <span className="cal-uncovered">
+                ⚠ {summaryText(fillable - reinforcements, reinforcements)}
+              </span>
+              {canEdit &&
+                `${fillable === 1 ? ' — attribuez-la' : ' — attribuez-les une à une'}${
+                  model.completableCount - impossibleUnlocked > 0
+                    ? ` ou utilisez « Compléter la période${period ? ` ${period.number}` : ''} » en haut de page.`
+                    : '.'
+                }`}
+            </p>
+          )
+        })()}
+      {model &&
+        unfillable.map((group) => (
+          <UnfillableSummary
+            key={group.lineStableId}
+            group={group}
+            canEdit={canEdit}
+            onCheckCoverage={onCheckCoverage}
+          />
+        ))}
       {canEdit && model && model.lockedLinesWithHoles.length > 0 && (
         <p className="cal-summary cal-locked" id="cal-complete-locked">
           <Icon name="lock" size={14} strokeWidth={2.2} />
@@ -754,6 +783,77 @@ function DutyCell({
   ) : (
     <div className={className} data-duty={duty.dutyStableId} tabIndex={located ? -1 : undefined}>
       {content}
+    </div>
+  )
+}
+
+const LONG_DATE = new Intl.DateTimeFormat('fr-BE', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+  timeZone: 'UTC',
+})
+
+/** "le 2 octobre 2026" or "du 2 octobre 2026 au 29 octobre 2026": the span of the posts, never every date. */
+function span(dates: string[]): string {
+  const first = LONG_DATE.format(utc(dates[0]))
+  const last = LONG_DATE.format(utc(dates[dates.length - 1]))
+  return first === last ? `le ${first}` : `du ${first} au ${last}`
+}
+
+/**
+ * docs/decisions.md D234 — posts of one line that nobody can fill: the cause,
+ * the fact that « Compléter » cannot help, and — when nobody belongs to the
+ * line on their dates — the one useful check, the coverage start of the line.
+ * Nothing is removed and no date is changed automatically.
+ */
+function UnfillableSummary({
+  group,
+  canEdit,
+  onCheckCoverage,
+}: {
+  group: UnfillableGroup
+  canEdit: boolean
+  onCheckCoverage?: (lineStableId: string) => void
+}) {
+  const duties = group.dayCount - group.reinforcementCount
+  const what = [
+    duties > 0 ? `${duties} garde${duties > 1 ? 's' : ''}` : null,
+    group.reinforcementCount > 0
+      ? `${group.reinforcementCount} renfort${group.reinforcementCount > 1 ? 's' : ''} requis`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(' et ')
+  return (
+    <div
+      className="cal-summary cal-unfillable"
+      role="note"
+      aria-label={`Postes impossibles à pourvoir — ${group.lineName}`}
+    >
+      <p>
+        <span className="cal-uncovered">⚠ {what} sans membre éligible</span> — {span(group.dates)}.
+      </p>
+      <p>
+        {group.noMemberOnDate
+          ? `Aucun membre de ${group.lineName} n’est éligible à ces dates${
+              group.firstMembershipStart
+                ? ` (adhésions à partir du ${LONG_DATE.format(utc(group.firstMembershipStart))})`
+                : ''
+            }.`
+          : `Aucun membre de ${group.lineName} ne peut assurer ces gardes à ces dates (indisponibilité, repos ou conflit).`}{' '}
+        {canEdit &&
+          'La complétion ne peut pas les pourvoir : elles restent obligatoires et attendent votre intervention.'}
+      </p>
+      {canEdit && group.noMemberOnDate && onCheckCoverage && (
+        <button
+          type="button"
+          className="btn btn--sm btn--secondary"
+          onClick={() => onCheckCoverage(group.lineStableId)}
+        >
+          Vérifier le début de couverture de la ligne
+        </button>
+      )}
     </div>
   )
 }

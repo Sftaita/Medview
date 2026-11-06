@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { PublicationPreflight } from '../result/types'
+import type { PublicationPreflight, PublicationUncoveredUnit } from '../result/types'
 import { blockingIssues, datesLabel, issuesByDuty } from './preflightIssues'
 
 // Anonymised shape of the case found in production (2026-09-29): a published line, one duty whose holder declared
@@ -156,6 +156,52 @@ describe('blockingIssues', () => {
       uncoveredDuties: [{ ...uncovered[0], lineStableId: 'l2', lineName: 'Ligne B' }],
     })
     expect(blockingIssues(neverPublished, 'republish')).toHaveLength(1)
+  })
+
+  it('never offers « Compléter » for posts nobody can fill; both fixes when mixed (D234)', () => {
+    const uncovered = ['d6', 'd7'].map((id, index) => ({
+      dutyStableId: id,
+      date: `2026-10-0${6 + index}`,
+      dutyTypeName: 'Garde',
+      lineStableId: 'l1',
+      lineName: 'Ligne A',
+    }))
+    const unit = (id: string, unfillable: boolean): PublicationUncoveredUnit => ({
+      lineStableId: 'l1',
+      lineName: 'Ligne A',
+      sourceLineName: null,
+      conditional: false,
+      materialized: true,
+      dates: ['2026-10-06'],
+      dutyStableIds: [id],
+      days: [],
+      vacancy: {
+        code: unfillable ? 'NO_MEMBER_ON_DATE' : 'ASSIGNABLE_MEMBERS',
+        memberCount: 2,
+        assignableCount: unfillable ? 0 : 1,
+        firstMembershipStart: null,
+        reasons: [],
+        unfillable,
+      },
+    })
+
+    const impossible = blockingIssues(
+      preflight({ uncoveredDuties: uncovered, uncoveredUnits: [unit('d6', true), unit('d7', true)] }),
+      'publish',
+    )[0]
+    expect(impossible.fix).toMatch(/^Pour ces gardes, aucun membre n’est éligible à leurs dates/)
+    expect(impossible.fix).not.toMatch(/utilisez « Compléter/)
+
+    const mixed = blockingIssues(
+      preflight({ uncoveredDuties: uncovered, uncoveredUnits: [unit('d6', true), unit('d7', false)] }),
+      'publish',
+    )[0]
+    expect(mixed.fix).toMatch(/^Attribuez-les une à une ou utilisez « Compléter la période »/)
+    expect(mixed.fix).toContain('Pour 1 d’entre elles, aucun membre n’est éligible')
+
+    expect(blockingIssues(preflight({ uncoveredDuties: uncovered }), 'publish')[0].fix).toBe(
+      'Attribuez-les une à une ou utilisez « Compléter la période » en haut de page.',
+    )
   })
 
   it('never marks an uncovered duty as an assignment to fix', () => {

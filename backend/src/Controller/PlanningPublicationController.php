@@ -484,6 +484,8 @@ final class PlanningPublicationController
                 'assignableCount' => $unit->vacancy->assignableCount,
                 'firstMembershipStart' => $unit->vacancy->firstMembershipStart?->format('Y-m-d'),
                 'reasons' => $unit->vacancy->reasons,
+                // docs/decisions.md D234: nobody can fill it, neither the completion nor a manual assignment.
+                'unfillable' => $unit->vacancy->isUnfillable(),
             ],
         ];
     }

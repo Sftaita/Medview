@@ -10647,3 +10647,47 @@ modifié.
 - **Limites** : une date par ligne, pas par période ; la régularisation de Trauma Delta reste à décider et n'est pas faite.
 - **Tests** : `LineCoverageStartTest`, `PublicationRequiredReinforcementTest`, `CoverageStartSection.test`, `MissingReinforcements.test`,
   recette sur copie isolée (`docs/recette/d233/`).
+
+## D234 — Le tableau de bord ne rappelle que ce qui sert encore ; « Compléter » n'est jamais proposé pour des postes que personne ne peut pourvoir
+
+- **Constat (production, 2026-11-05, Trauma Delta, après la régularisation de Fell/Ass)** :
+  - le tableau de bord affichait toujours « Indisponibilités à indiquer pour du 1 octobre 2026 au 28 janvier 2027 » alors que
+    les lignes de la période 1 sont publiées. `GET /api/me/availability-collections` rendait **toute collecte `OPEN`** dont
+    la personne est participante (seule exception : annonce encore programmée, D214) ; une collecte n'est jamais close
+    automatiquement (D230) — elle restait donc affichée indéfiniment. Le texte disait aussi « pour du … ».
+  - à la première génération de Fell/Ass, « 19 renforts requis non attribués — attribuez-les une à une ou utilisez Compléter
+    la période 1 » : aucun membre n'était rattaché à ces dates (adhésions au 1er novembre), la complétion n'a rien attribué.
+    Le précontrôle de publication savait déjà le dire (D232, `NO_MEMBER_ON_DATE`), mais ni l'aperçu de « Compléter » ni le
+    résumé du calendrier ne l'utilisaient.
+- **Décision — rappels (`CollectionReminderService`, lecture seule)** : une collecte ouverte n'est rappelée que si, **à partir
+  d'aujourd'hui**, un jour de sa fenêtre tombe dans une ligne de sa période à laquelle la personne appartient ce jour-là et
+  qui attend encore le moteur :
+  - ligne non générée (`DRAFT`), à partir de son début de couverture (D233) ; une ligne sans demande (D194) est neutre dès
+    qu'une autre ligne de la période est générée, mais compte dans une période où rien n'est généré (structure pas encore
+    configurée) ;
+  - ou ligne générée/publiée dont une prolongation a créé des gardes encore sans titulaire (D226).
+  Une ligne générée ou publiée ne demande plus rien (une indisponibilité ajoutée après la génération n'est jamais appliquée,
+  D216) ; une autre ligne publiée ne masque jamais une ligne qui attend. Rien n'est écrit : la collecte reste `OPEN`, la
+  vue gestionnaire et les règles de collecte, d'éligibilité, de génération et de publication sont inchangées. La réponse
+  porte `pending` (`from`, `lastDay`, `lines`, `reason` `NOT_GENERATED` / `NEW_DATES`) ; le bandeau ne parle que de ces
+  jours (« Des absences du … au … ? », lignes nommées, jamais « pour du … »). Une collecte annoncée par un ancien lien
+  qui n'attend plus rien le dit sur la page du calendrier.
+- **Décision — postes impossibles à pourvoir** : `VacancyAnalyzer` (extrait du précontrôle, inchangé) classe chaque poste
+  vacant ; `PublicationVacancy::isUnfillable()` = aucun membre à ces dates, ou membres présents mais tous empêchés — sauf
+  si l'un d'eux est seulement absent du snapshot (arrivé après la génération, la complétion le prend en compte). Un poste
+  pas encore créé n'est jamais dit impossible.
+  - `fill-preview` : `unfillable` par ligne (nombre, dont « aucun membre à ces dates », première adhésion suivante, dates).
+    Une ligne dont **tous** les trous sont impossibles devient `NOTHING` / `no_eligible_member` (non sélectionnable ; l'API
+    répond déjà 409 `nothing_to_fill` si on la demande) ; **mixte** : `COMPLETE`, la complétion pourvoit ce qui peut l'être,
+    les postes impossibles restent vacants et requis.
+  - Action principale : « N gardes sans membre éligible » (état, avec aide) au lieu de « Compléter » quand il n'y a rien
+    d'autre ; le calendrier sépare les postes complétables (« … ou utilisez Compléter ») des postes impossibles (cause par
+    ligne, « Aucun membre de Fell/Ass n'est éligible à ces dates »), avec « Vérifier le début de couverture de la ligne »
+    quand personne n'est rattaché à ces dates : ouvre « Paramètres de la ligne » sur la date, mise au point. Le précontrôle
+    expose `vacancy.unfillable` ; la consigne des dialogues de publication ne propose plus « Compléter » pour ces postes.
+  - Jamais de suppression automatique d'une garde obligatoire ni de changement automatique de la date de couverture.
+- **Limites** : un poste requis pas encore créé (`NOT_CREATED`) est toujours compté complétable ; les jours d'une prolongation
+  non couverts par une collecte (`not_extended`, D230) ne sont rappelés qu'une fois une collecte ouverte pour eux.
+- **Tests** : `CollectionReminderTest`, `FillUnfillableHolesTest`, `PublicationVacancyTest`, `AvailabilityCollectionControllerTest`
+  (inchangé), `DashboardPage.test`, `collectionFormat.test`, `periodAction.test`, `fillText.test`, `FillModal.test`,
+  `PlanningCalendarUnfillable.test`, `preflightIssues.test`, `CoverageStartSection.test`, `PlanningDetailPage.test`.

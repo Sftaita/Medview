@@ -7,6 +7,8 @@ import {
   formatMoment,
   formatWindow,
   formatWindowShort,
+  lineNames,
+  windowPhrase,
 } from './collectionFormat'
 
 describe('formatWindow', () => {
@@ -33,6 +35,30 @@ describe('formatWindow', () => {
 
   it('capitalizes for a history row', () => {
     expect(formatWindowShort('2026-09-01', '2026-12-31')).toBe('Septembre–décembre 2026')
+  })
+})
+
+describe('formatWindow — a single day (D234)', () => {
+  it('names the day instead of a range from a day to itself', () => {
+    expect(formatWindow('2027-02-03', '2027-02-03')).toBe('le 3 février 2027')
+  })
+})
+
+describe('windowPhrase', () => {
+  it('keeps "du … au …" and "le …", and puts "en" before months', () => {
+    expect(windowPhrase(formatWindow('2026-11-05', '2027-01-28'))).toBe(
+      'du 5 novembre 2026 au 28 janvier 2027',
+    )
+    expect(windowPhrase(formatWindow('2027-02-03', '2027-02-03'))).toBe('le 3 février 2027')
+    expect(windowPhrase(formatWindow('2027-01-01', '2027-03-31'))).toBe('en janvier–mars 2027')
+  })
+})
+
+describe('lineNames', () => {
+  it('quotes and joins the names', () => {
+    expect(lineNames([])).toBe('')
+    expect(lineNames(['Juniors'])).toBe('« Juniors »')
+    expect(lineNames(['A', 'B', 'C'])).toBe('« A », « B » et « C »')
   })
 })
 

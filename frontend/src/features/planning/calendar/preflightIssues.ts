@@ -253,12 +253,31 @@ export function blockingIssues(
         mode === 'publish'
           ? 'une première publication exige que toutes les gardes obligatoires soient couvertes'
           : 'une ligne jamais publiée exige que toutes ses gardes obligatoires soient couvertes',
-      fix: 'Attribuez-les une à une ou utilisez « Compléter la période » en haut de page.',
+      fix: fixForUncovered(preflight, uncovered),
       tag: '',
     })
   }
 
   return issues
+}
+
+/**
+ * docs/decisions.md D234: never "utilisez Compléter" for posts nobody can fill — the server says which
+ * (`vacancy.unfillable`). Some of each: both are said.
+ */
+function fixForUncovered(preflight: PublicationPreflight, uncovered: { dutyStableId: string }[]): string {
+  const impossible = new Set(
+    (preflight.uncoveredUnits ?? [])
+      .filter((unit) => unit.vacancy.unfillable === true)
+      .flatMap((unit) => unit.dutyStableIds),
+  )
+  const count = uncovered.filter((duty) => impossible.has(duty.dutyStableId)).length
+  const usual = 'Attribuez-les une à une ou utilisez « Compléter la période » en haut de page.'
+  if (count === 0) return usual
+  const cause =
+    'aucun membre n’est éligible à leurs dates : la complétion ne peut pas les pourvoir. Vérifiez le début de couverture de la ligne dans ses paramètres, ses membres ou leurs indisponibilités.'
+  if (count === uncovered.length) return `${count === 1 ? 'Pour cette garde, ' : 'Pour ces gardes, '}${cause}`
+  return `${usual} Pour ${count === 1 ? '1 d’entre elles' : `${count} d’entre elles`}, ${cause}`
 }
 
 /** An issue of a line not named (an older server) is kept: never hidden by default. */

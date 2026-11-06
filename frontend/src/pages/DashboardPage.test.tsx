@@ -499,9 +499,8 @@ describe('DashboardPage — availability collections', () => {
     renderDashboard()
 
     const callout = await screen.findByRole('region', { name: /Indisponibilités janvier–mars 2027/ })
-    expect(
-      within(callout).getByText('Indisponibilités à indiquer pour janvier–mars 2027'),
-    ).toBeInTheDocument()
+    expect(within(callout).getByText('Des absences en janvier–mars 2027 ?')).toBeInTheDocument()
+    expect(screen.queryByText(/Indisponibilités à indiquer/)).not.toBeInTheDocument()
     expect(within(callout).getByText('Date limite indicative : le 20 décembre.')).toBeInTheDocument()
     expect(
       within(callout).getByText(/Sans indisponibilité renseignée, vous êtes considéré comme disponible/),
@@ -529,6 +528,64 @@ describe('DashboardPage — availability collections', () => {
       ),
     ).toBeInTheDocument()
     expect(within(callout).queryByText(/^Date limite indicative : le/)).not.toBeInTheDocument()
+  })
+
+  it('asks only for the days still useful, names the lines still waiting and never writes "pour du" (D234)', async () => {
+    frozenDecember()
+    createFakeBackend({
+      collections: [
+        makeCollection({
+          startsAt: '2026-10-01',
+          endsAt: '2027-01-29',
+          lastDay: '2027-01-28',
+          deadline: null,
+          pending: { from: '2026-12-14', lastDay: '2027-01-28', lines: ['Juniors'], reason: 'NOT_GENERATED' },
+        }),
+      ],
+    }).install()
+
+    renderDashboard()
+
+    const callout = await screen.findByRole('region', {
+      name: /Indisponibilités du 14 décembre 2026 au 28 janvier 2027/,
+    })
+    expect(
+      within(callout).getByText('Des absences du 14 décembre 2026 au 28 janvier 2027 ?'),
+    ).toBeInTheDocument()
+    expect(
+      within(callout).getByText(
+        'Les gardes de « Juniors » ne sont pas encore réparties : vos indisponibilités sur ces dates seront prises en compte.',
+      ),
+    ).toBeInTheDocument()
+    expect(within(callout).queryByText(/1 octobre/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/pour du /i)).not.toBeInTheDocument()
+  })
+
+  it('says when only the new dates of an extension are asked for (D234)', async () => {
+    frozenDecember()
+    createFakeBackend({
+      collections: [
+        makeCollection({
+          deadline: null,
+          pending: {
+            from: '2027-01-29',
+            lastDay: '2027-01-29',
+            lines: ['Seniors', 'Fell/Ass'],
+            reason: 'NEW_DATES',
+          },
+        }),
+      ],
+    }).install()
+
+    renderDashboard()
+
+    const callout = await screen.findByRole('region', { name: /Indisponibilités le 29 janvier 2027/ })
+    expect(within(callout).getByText('Des absences le 29 janvier 2027 ?')).toBeInTheDocument()
+    expect(
+      within(callout).getByText(
+        'Nouvelles dates de « Seniors » et « Fell/Ass », sans titulaire pour l’instant.',
+      ),
+    ).toBeInTheDocument()
   })
 
   it('shows nothing when no collection is open', async () => {

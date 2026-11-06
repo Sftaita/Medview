@@ -1182,7 +1182,8 @@
   background: var(--success-bg, #e9f7f0);
   color: var(--success-text, #14663f);
 }
-.pd-main-action__state[data-kind='manual'] {
+.pd-main-action__state[data-kind='manual'],
+.pd-main-action__state[data-kind='unfillable'] {
   border-color: var(--warning-border, #eccf8d);
   background: var(--warning-bg, #fdf6e5);
   color: var(--warning-text, #7a5400);

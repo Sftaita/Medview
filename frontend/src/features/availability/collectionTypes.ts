@@ -39,6 +39,22 @@ export type AvailabilityCollection = {
   period?: { stableId: string; number: number } | null
   /** Only present for someone who may manage the collection. */
   progress?: CollectionProgress
+  /**
+   * docs/decisions.md D234 — only on GET /api/me/availability-collections: the
+   * days of the window that still wait for the user's availabilities (from
+   * today on), the lines concerned, and why. A collection with nothing left to
+   * ask is not returned at all.
+   */
+  pending?: CollectionPending
+}
+
+export type CollectionPending = {
+  from: string
+  /** Inclusive. */
+  lastDay: string
+  lines: string[]
+  /** NOT_GENERATED: a line not generated yet; NEW_DATES: only new dates of an extension, without holder. */
+  reason: 'NOT_GENERATED' | 'NEW_DATES'
 }
 
 /** One row of the manager's follow-up list. */

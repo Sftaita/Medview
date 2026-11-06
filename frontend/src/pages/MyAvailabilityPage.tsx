@@ -101,7 +101,10 @@ export function MyAvailabilityPage() {
       {collectionId !== null && collections !== null && collection === null && (
         <p role="status" className="alert alert--info">
           <Icon name="alert" size={18} strokeWidth={2} />
-          <span>Cette collecte n&apos;est plus ouverte ou ne vous concerne pas.</span>
+          <span>
+            Aucune indisponibilité n&apos;est plus attendue de vous pour cette collecte : les gardes
+            concernées sont déjà réparties, ou elle ne vous concerne pas. Votre calendrier reste modifiable.
+          </span>
         </p>
       )}
       {ranges !== null && !waitingForCollection && (
