@@ -738,6 +738,145 @@ describe('PlanningDetailPage — engine jobs (docs/decisions.md D149)', () => {
   })
 })
 
+describe('PlanningDetailPage — posts nobody can fill (docs/decisions.md D234)', () => {
+  it('never offers « Compléter » for them alone, and opens the line settings on its coverage start', async () => {
+    const api = renderPage(
+      planning({
+        canManageCalendar: true,
+        canPublish: true,
+        canManageLineStructure: true,
+        lines: [line({ periodStatus: 'GENERATED' })],
+      }),
+      {
+        'GET /api/plannings/plan-1/result': () => ({
+          planningStableId: 'plan-1',
+          lines: [
+            {
+              lineStableId: 'line-1',
+              lineName: 'Première ligne',
+              lineType: 'PRIMARY',
+              generationStableId: 'g-1',
+              generatedAt: null,
+              coverageStatus: 'INCOMPLETE',
+              requiredDutyCount: 1,
+              coveredRequiredDutyCount: 0,
+              uncoveredRequiredDutyCount: 1,
+              periodStatus: 'GENERATED',
+              duties: [
+                {
+                  dutyStableId: 'd-1',
+                  date: '2026-10-05',
+                  startsAt: '2026-10-05T08:00:00+02:00',
+                  endsAt: '2026-10-05T20:00:00+02:00',
+                  timezone: 'Europe/Brussels',
+                  dutyType: { stableId: 't', code: 'G', name: 'Garde' },
+                  required: true,
+                  grouped: false,
+                  groupInstanceStableId: null,
+                  groupLabel: null,
+                  groupDates: null,
+                  covered: false,
+                  assignment: null,
+                  reasons: [],
+                },
+              ],
+            },
+          ],
+        }),
+        'GET /api/plannings/plan-1/fill-preview': () =>
+          fillPreview([
+            {
+              ...publishedPlan(1),
+              periodStatus: 'GENERATED',
+              action: 'NOTHING',
+              reason: 'no_eligible_member',
+              unfillable: {
+                dutyCount: 1,
+                noMemberOnDateCount: 1,
+                noEligibleMemberCount: 0,
+                firstMembershipStart: '2026-11-01',
+                from: '2026-10-05',
+                to: '2026-10-05',
+              },
+            },
+          ]),
+        'GET /api/plannings/plan-1/publication-state': () => ({
+          published: false,
+          firstPublishedAt: null,
+          lastPublishedAt: null,
+          lastPublishedBy: null,
+          hasUnpublishedChanges: false,
+          changes: [],
+          history: [],
+        }),
+        'GET /api/plannings/plan-1/publication-preflight': () => ({
+          publishable: false,
+          republishable: false,
+          lines: [],
+          uncoveredDuties: [
+            { dutyStableId: 'd-1', date: '2026-10-05', lineStableId: 'line-1', lineName: 'Première ligne' },
+          ],
+          uncoveredUnits: [
+            {
+              lineStableId: 'line-1',
+              lineName: 'Première ligne',
+              sourceLineName: null,
+              conditional: false,
+              materialized: true,
+              linePublished: false,
+              dates: ['2026-10-05'],
+              dutyStableIds: ['d-1'],
+              days: [],
+              vacancy: {
+                code: 'NO_MEMBER_ON_DATE',
+                memberCount: 2,
+                assignableCount: 0,
+                firstMembershipStart: '2026-11-01',
+                reasons: [],
+                unfillable: true,
+              },
+            },
+          ],
+          inconsistentGroups: [],
+          invalidAssignments: [],
+          conflicts: [],
+          undeterminedDuties: [],
+          superfluousCoverages: [],
+        }),
+        'GET /api/planning-lines/line-1/demand-policy': () => ({
+          schemaVersion: 1,
+          line: { stableId: 'line-1', name: 'Première ligne', type: 'PRIMARY' },
+          mode: 'INDEPENDENT',
+          policy: null,
+          source: null,
+          triggers: [],
+          weekdays: ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'],
+          sourceOptions: [],
+          targetStructure: { configured: false, excludedWeekdays: [], blocks: [] },
+          warnings: [],
+        }),
+        'GET /api/planning-lines/line-1/rule-set': () => ({ active: true }),
+        'GET /api/planning-lines/line-1/coverage-start': () => ({ coverageStartsOn: null }),
+      },
+    )
+
+    await waitFor(() =>
+      expect(within(mainAction()).getByRole('status')).toHaveTextContent('1 garde sans membre éligible'),
+    )
+    expect(within(mainAction()).queryByRole('button', { name: /Compléter/ })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Planning' }))
+    const note = await screen.findByRole('note', { name: 'Postes impossibles à pourvoir — Première ligne' })
+    fireEvent.click(within(note).getByRole('button', { name: 'Vérifier le début de couverture de la ligne' }))
+
+    expect(await screen.findByText('Paramètres — Première ligne')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByLabelText('Date de début')).toHaveFocus())
+    // Nothing is changed by opening it: the date stays a decision of the manager.
+    expect(api.requests('PUT', '/api/planning-lines/line-1/coverage-start')).toHaveLength(0)
+    expect(api.requests('POST', '/api/plannings/plan-1/fill')).toHaveLength(0)
+  })
+})
+
 describe('PlanningDetailPage — loading errors', () => {
   it('says so when the planning does not exist', async () => {
     renderPage(planning(), { 'GET /api/plannings/plan-1': () => httpStatus(404) })

@@ -97,6 +97,21 @@
   color: var(--text-muted);
 }
 
+/* docs/decisions.md D234: posts nobody can fill - their cause and the one useful check, apart from the rest. */
+.cal-unfillable {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--warning-border, #eccf8d);
+  border-radius: 10px;
+  background: var(--warning-bg, #fdf6e5);
+}
+.cal-unfillable p {
+  margin: 0;
+}
+
 /* docs/decisions.md D223: a published line is never completed automatically - said next to the button. */
 .cal-locked {
   display: flex;

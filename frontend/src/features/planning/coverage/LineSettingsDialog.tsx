@@ -24,6 +24,8 @@ type Props = {
   onClose: () => void
   /** Something was saved (coverage rules or weekly structure): the caller may refresh what depends on it. */
   onSaved?: () => void
+  /** docs/decisions.md D234 — « Vérifier le début de couverture de la ligne »: open on that section. */
+  focus?: 'coverage'
 }
 
 /**
@@ -47,7 +49,7 @@ type Props = {
  * SOURCE's surgeons, who trigger a reinforcement — never this line's members,
  * who hold them. The preview is computed by the server, nothing saved.
  */
-export function LineSettingsDialog({ line, timezone = 'Europe/Brussels', onClose, onSaved }: Props) {
+export function LineSettingsDialog({ line, timezone = 'Europe/Brussels', onClose, onSaved, focus }: Props) {
   // docs/decisions.md D227: what this line uses — the general weekly structure, or its own.
   const [weekMode, setWeekMode] = useState<'GENERAL' | 'CUSTOM'>(
     line.coverage?.weekStructure ?? (line.type === 'PRIMARY' ? 'GENERAL' : 'CUSTOM'),
@@ -261,7 +263,11 @@ export function LineSettingsDialog({ line, timezone = 'Europe/Brussels', onClose
             </section>
           )}
 
-          <CoverageStartSection lineStableId={line.stableId} onSaved={onSaved} />
+          <CoverageStartSection
+            lineStableId={line.stableId}
+            onSaved={onSaved}
+            focused={focus === 'coverage'}
+          />
 
           {line.type === 'PRIMARY' ? (
             <section className="cov-section">

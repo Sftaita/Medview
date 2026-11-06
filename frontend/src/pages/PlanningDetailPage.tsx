@@ -99,6 +99,8 @@ export function PlanningDetailPage() {
   const toastTimer = useRef<number | undefined>(undefined)
   const [membersLine, setMembersLine] = useState<PlanningLineSummary | null>(null)
   const [settingsLine, setSettingsLine] = useState<PlanningLineSummary | null>(null)
+  // docs/decisions.md D234: "Vérifier le début de couverture de la ligne" opens the settings on that section.
+  const [settingsFocus, setSettingsFocus] = useState<'coverage' | undefined>(undefined)
   const [pilotDialog, setPilotDialog] = useState<PilotDialog | null>(null)
   // docs/decisions.md D222: "Générer cette ligne", "Règles de génération" of any line, and each line's counters.
   const [fillLine, setFillLine] = useState<PlanningLineSummary | null>(null)
@@ -658,7 +660,10 @@ export function PlanningDetailPage() {
               saving={saving}
               onManageMembers={setMembersLine}
               onDeleteLine={handleDeleteLine}
-              onConfigureLine={setSettingsLine}
+              onConfigureLine={(line) => {
+                setSettingsFocus(undefined)
+                setSettingsLine(line)
+              }}
               fillPlans={
                 planning.canGenerate && fillPreview && fillPreview.period === periodStableId
                   ? Object.fromEntries(fillPreview.plans.map((line) => [line.lineStableId, line]))
@@ -756,6 +761,18 @@ export function PlanningDetailPage() {
                     onPublished={() => void load()}
                     jobActive={jobs.active}
                     jobKind={jobs.active ? (jobs.job?.kind ?? null) : null}
+                    onCheckCoverage={
+                      planning.canManageLineStructure === true
+                        ? (lineStableId) => {
+                            const line = planning.lines.find(
+                              (candidate) => candidate.stableId === lineStableId,
+                            )
+                            if (!line) return
+                            setSettingsFocus('coverage')
+                            setSettingsLine(line)
+                          }
+                        : undefined
+                    }
                   />
                 ) : (
                   <PersonalPlanningView key={generationVersion} planning={planning} period={calendarPeriod} />
@@ -904,6 +921,7 @@ export function PlanningDetailPage() {
         <LineSettingsDialog
           line={settingsLine}
           timezone={planning.timezone}
+          focus={settingsFocus}
           onClose={() => setSettingsLine(null)}
           onSaved={() => {
             void load()

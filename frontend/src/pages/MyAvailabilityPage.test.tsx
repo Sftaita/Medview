@@ -357,7 +357,7 @@ describe('MyAvailabilityPage — a collection, with nothing to confirm (D214)', 
     await renderLoaded('/my-availability?collection=col-1')
 
     expect(screen.getByRole('region', { name: /Indisponibilités janvier–mars 2027/ })).toBeInTheDocument()
-    expect(screen.getByText('Indisponibilités à indiquer pour janvier–mars 2027')).toBeInTheDocument()
+    expect(screen.getByText('Des absences en janvier–mars 2027 ?')).toBeInTheDocument()
     expect(screen.getByText('Date limite indicative : le 20 décembre.')).toBeInTheDocument()
     expect(document.querySelector('.cal__nav-label')?.textContent).toMatch(/Janvier/)
     expect(cell(15, 2027, 0)).toHaveClass('day--window')

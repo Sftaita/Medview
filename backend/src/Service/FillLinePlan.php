@@ -15,7 +15,9 @@ use App\Entity\PlanningPeriodStatus;
  *   only, every other line kept and constraining it;
  * - COMPLETE — the line has a current generation with uncovered required
  *   duties: its holes only, every assignment it holds fixed (D145);
- * - NOTHING — generated, nothing uncovered: nothing is written;
+ * - NOTHING — generated, nothing uncovered: nothing is written; also
+ *   (`no_eligible_member`, docs/decisions.md D234) when every hole is one
+ *   nobody can fill — a completion would assign nothing;
  * - EXCLUDED — never touched, `$reason` says why (archived, nothing
  *   demanded, a blocker of its first generation…).
  *
@@ -61,12 +63,14 @@ final readonly class FillLinePlan
         public bool $extensionOnly = false,
         /** docs/decisions.md D226: its older holes, never completed automatically. */
         public int $otherUncoveredCount = 0,
+        /** docs/decisions.md D234: the holes nobody can fill, counted apart (null: not analysed). */
+        public ?FillVacancies $unfillable = null,
     ) {
     }
 
     public function followingSource(): self
     {
-        return new self($this->line, $this->periodStatus, $this->generated, $this->action, $this->reason, $this->selectable, $this->selectedByDefault, $this->requiredDutyCount, $this->coveredRequiredDutyCount, $this->uncoveredRequiredDutyCount, $this->protectedAssignmentCount, $this->blockers, $this->warnings, $this->afterSource, $this->lateMemberCount, true, $this->extensionOnly, $this->otherUncoveredCount);
+        return new self($this->line, $this->periodStatus, $this->generated, $this->action, $this->reason, $this->selectable, $this->selectedByDefault, $this->requiredDutyCount, $this->coveredRequiredDutyCount, $this->uncoveredRequiredDutyCount, $this->protectedAssignmentCount, $this->blockers, $this->warnings, $this->afterSource, $this->lateMemberCount, true, $this->extensionOnly, $this->otherUncoveredCount, $this->unfillable);
     }
 
     public function writes(): bool
@@ -100,6 +104,7 @@ final readonly class FillLinePlan
             'followsSource' => $this->followsSource,
             'extensionOnly' => $this->extensionOnly,
             'otherUncoveredCount' => $this->otherUncoveredCount,
+            'unfillable' => $this->unfillable?->toArray(),
         ];
     }
 }

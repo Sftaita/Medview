@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Icon } from '../../../components/Icon'
 import { ApiError } from '../../../lib/apiClient'
 import { datesLabel } from '../calendar/preflightIssues'
@@ -9,6 +9,8 @@ type Props = {
   lineStableId: string
   /** Something was saved: the caller may refresh what depends on it. */
   onSaved?: () => void
+  /** docs/decisions.md D234 — opened from « Vérifier le début de couverture »: brought into view, the date focused. */
+  focused?: boolean
 }
 
 const FULL_DATE = new Intl.DateTimeFormat('fr-BE', {
@@ -37,8 +39,10 @@ function errorMessage(err: unknown): string {
  * consequences, saved on its own: the server says what the date would do, the
  * manager confirms exactly that. Nothing is computed here.
  */
-export function CoverageStartSection({ lineStableId, onSaved }: Props) {
+export function CoverageStartSection({ lineStableId, onSaved, focused = false }: Props) {
   const inputId = useId()
+  const sectionRef = useRef<HTMLElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
   const [saved, setSaved] = useState<string | null | undefined>(undefined)
   const [value, setValue] = useState('')
   const [plan, setPlan] = useState<CoverageStartPlan | null>(null)
@@ -61,6 +65,14 @@ export function CoverageStartSection({ lineStableId, onSaved }: Props) {
       stale = true
     }
   }, [lineStableId])
+
+  // Once the date is read (the input is enabled), never before: a disabled input cannot take the focus.
+  const ready = saved !== undefined
+  useEffect(() => {
+    if (!focused || !ready) return
+    sectionRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+    inputRef.current?.focus({ preventScroll: true })
+  }, [focused, ready])
 
   const wanted = value === '' ? null : value
   const changed = saved !== undefined && wanted !== saved
@@ -101,7 +113,11 @@ export function CoverageStartSection({ lineStableId, onSaved }: Props) {
   }
 
   return (
-    <section className="cov-section" aria-labelledby={`${inputId}-title`}>
+    <section
+      ref={sectionRef}
+      className={`cov-section${focused ? ' cov-section--focused' : ''}`}
+      aria-labelledby={`${inputId}-title`}
+    >
       <h3 id={`${inputId}-title`}>Début de couverture de cette ligne</h3>
       <span className="cov-help">
         Cette date détermine à partir de quand des gardes de cette ligne sont nécessaires, indépendamment de
@@ -111,6 +127,7 @@ export function CoverageStartSection({ lineStableId, onSaved }: Props) {
       <div className="cov-start__row">
         <label htmlFor={inputId}>Date de début</label>
         <input
+          ref={inputRef}
           id={inputId}
           type="date"
           className="mv-input"

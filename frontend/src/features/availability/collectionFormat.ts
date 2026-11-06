@@ -23,6 +23,9 @@ export function formatWindow(startsAt: string, lastDay: string): string {
   const to = civil(lastDay)
   const wholeMonths = from.day === 1 && to.day === daysInMonth(to.year, to.month)
 
+  if (!wholeMonths && startsAt === lastDay) {
+    return `le ${from.day} ${monthName(from.month)} ${from.year}`
+  }
   if (!wholeMonths) {
     const start =
       from.year === to.year
@@ -37,6 +40,23 @@ export function formatWindow(startsAt: string, lastDay: string): string {
     return `${monthName(from.month)}–${monthName(to.month)} ${to.year}`
   }
   return `${monthName(from.month)} ${from.year}–${monthName(to.month)} ${to.year}`
+}
+
+/**
+ * The window as a complement of time: "du 5 novembre au 28 janvier 2027" and
+ * "le 3 février 2027" stay as they are, a month range takes "en" ("en
+ * janvier–mars 2027") — never "pour du …".
+ */
+export function windowPhrase(label: string): string {
+  return label.startsWith('du ') || label.startsWith('le ') ? label : `en ${label}`
+}
+
+/** "« Juniors »", "« Juniors » et « Fell/Ass »", "« A », « B » et « C »". */
+export function lineNames(names: string[]): string {
+  const quoted = names.map((name) => `« ${name} »`)
+  return quoted.length <= 1
+    ? (quoted[0] ?? '')
+    : `${quoted.slice(0, -1).join(', ')} et ${quoted[quoted.length - 1]}`
 }
 
 /** "20 décembre" (the year only when it is not the current one). */

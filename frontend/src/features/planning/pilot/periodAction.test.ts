@@ -63,6 +63,44 @@ describe('periodAction (docs/decisions.md D228)', () => {
     ).toEqual({ kind: 'manual', label: '2 gardes à attribuer à la main', holes: 2 })
   })
 
+  it('only posts nobody can fill: never "Compléter", said as such (D234)', () => {
+    const fell = plan({
+      action: 'NOTHING',
+      reason: 'no_eligible_member',
+      uncoveredRequiredDutyCount: 19,
+      unfillable: {
+        dutyCount: 19,
+        noMemberOnDateCount: 19,
+        noEligibleMemberCount: 0,
+        firstMembershipStart: '2026-11-01',
+        from: '2026-10-02',
+        to: '2026-10-29',
+      },
+    })
+    expect(run(true, [plan({ reason: 'nothing_to_complete' }), fell])).toEqual({
+      kind: 'unfillable',
+      label: '19 gardes sans membre éligible',
+      holes: 19,
+    })
+  })
+
+  it('completable posts next to impossible ones: "Compléter" — never blocked for a few impossible posts (D234)', () => {
+    const mixed = plan({
+      action: 'COMPLETE',
+      selectable: true,
+      uncoveredRequiredDutyCount: 21,
+      unfillable: {
+        dutyCount: 19,
+        noMemberOnDateCount: 19,
+        noEligibleMemberCount: 0,
+        firstMembershipStart: '2026-11-01',
+        from: '2026-10-02',
+        to: '2026-10-29',
+      },
+    })
+    expect(run(true, [mixed])).toEqual({ kind: 'complete', label: 'Compléter la période 2' })
+  })
+
   it('a calculation running comes first', () => {
     expect(run(true, undefined, true)).toEqual({ kind: 'busy', label: 'Calcul en cours…' })
     expect(run(false, undefined, true).kind).toBe('busy')

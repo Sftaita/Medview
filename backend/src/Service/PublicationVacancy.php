@@ -33,4 +33,29 @@ final readonly class PublicationVacancy
         public array $reasons = [],
     ) {
     }
+
+    /**
+     * docs/decisions.md D234: nobody can fill this post — neither a completion
+     * nor a manual assignment. A member left out only because they joined after
+     * the generation (NOT_IN_GENERATION_SNAPSHOT) does not count as an
+     * impossibility: the completion takes late members into account
+     * (PlanningCompletionService). A post not created yet is never said
+     * impossible: the completion creates it.
+     */
+    public function isUnfillable(): bool
+    {
+        if (self::NO_MEMBER_ON_DATE === $this->code) {
+            return true;
+        }
+        if (self::NO_ELIGIBLE_MEMBER !== $this->code) {
+            return false;
+        }
+        foreach ($this->reasons as $reason) {
+            if (ReassignmentCandidateService::NOT_IN_GENERATION_SNAPSHOT === $reason['code']) {
+                return false;
+            }
+        }
+
+        return true;
+    }
 }

@@ -370,6 +370,8 @@ export type PublicationVacancy = {
   /** NO_MEMBER_ON_DATE: the first day a member joins the line after these dates. */
   firstMembershipStart: string | null
   reasons: { code: string; label: string; count: number }[]
+  /** docs/decisions.md D234: nobody can fill it — neither the completion nor a manual assignment. Older servers do not send it. */
+  unfillable?: boolean
 }
 
 /** One required post keeping a line from its first publication (docs/decisions.md D232), a block once. */

@@ -69,6 +69,7 @@ final class PlanningLineFillService
         private readonly CurrentCalendarLedger $ledger,
         private readonly EntityManagerInterface $entityManager,
         private readonly WorkHeartbeat $heartbeat,
+        private readonly VacancyAnalyzer $vacancyAnalyzer,
     ) {
     }
 
@@ -114,7 +115,10 @@ final class PlanningLineFillService
                     // older holes stay holes, every assignment stays as it is, what it receives waits for a republication.
                     $added = $this->completionService->extensionHoleCount($line, $cycle);
                     if ($added > 0) {
-                        $plans[] = new FillLinePlan($line, $status, true, FillLinePlan::COMPLETE, 'extension_days', [] === $globalBlockers, [] === $globalBlockers, $count?->requiredDutyCount, $count->coveredRequiredDutyCount ?? 0, $added, $protected, $globalBlockers, extensionOnly: true, otherUncoveredCount: max(0, $uncovered - $added));
+                        // docs/decisions.md D234: the new days nobody can take are said, never offered alone.
+                        $unfillable = $this->unfillableHoles($count, onlyExtension: true);
+                        $offered = $added > $unfillable->unfillableDutyCount;
+                        $plans[] = new FillLinePlan($line, $status, true, $offered ? FillLinePlan::COMPLETE : FillLinePlan::NOTHING, $offered ? 'extension_days' : 'no_eligible_member', $offered && [] === $globalBlockers, $offered && [] === $globalBlockers, $count?->requiredDutyCount, $count->coveredRequiredDutyCount ?? 0, $added, $protected, $offered ? $globalBlockers : [], extensionOnly: true, otherUncoveredCount: max(0, $uncovered - $added), unfillable: $unfillable);
                         continue;
                     }
                     // docs/decisions.md D222: a published (or validated) line is never completed by this operation, even
@@ -123,10 +127,17 @@ final class PlanningLineFillService
                     $plans[] = new FillLinePlan($line, $status, true, FillLinePlan::EXCLUDED, 'published', false, false, $count?->requiredDutyCount, $count->coveredRequiredDutyCount ?? 0, $uncovered, $protected);
                     continue;
                 }
-                $lateMembers = 0 === $uncovered ? 0 : \count($this->completionService->lateMembersOf($line, $cycle));
-                $plans[] = 0 === $uncovered
-                    ? new FillLinePlan($line, $status, true, FillLinePlan::NOTHING, 'nothing_to_complete', false, false, $count?->requiredDutyCount, $count->coveredRequiredDutyCount ?? 0, 0, $protected)
-                    : new FillLinePlan($line, $status, true, FillLinePlan::COMPLETE, null, [] === $globalBlockers, [] === $globalBlockers, $count?->requiredDutyCount, $count->coveredRequiredDutyCount ?? 0, $uncovered, $protected, $globalBlockers, lateMemberCount: $lateMembers);
+                if (0 === $uncovered) {
+                    $plans[] = new FillLinePlan($line, $status, true, FillLinePlan::NOTHING, 'nothing_to_complete', false, false, $count?->requiredDutyCount, $count->coveredRequiredDutyCount ?? 0, 0, $protected);
+                    continue;
+                }
+                $lateMembers = \count($this->completionService->lateMembersOf($line, $cycle));
+                // docs/decisions.md D234: a completion offered only for posts nobody can take would assign nothing.
+                // Those are counted apart; the line is completed as soon as one hole can be filled.
+                $unfillable = $this->unfillableHoles($count, onlyExtension: false);
+                $plans[] = $uncovered > $unfillable->unfillableDutyCount
+                    ? new FillLinePlan($line, $status, true, FillLinePlan::COMPLETE, null, [] === $globalBlockers, [] === $globalBlockers, $count?->requiredDutyCount, $count->coveredRequiredDutyCount ?? 0, $uncovered, $protected, $globalBlockers, lateMemberCount: $lateMembers, unfillable: $unfillable)
+                    : new FillLinePlan($line, $status, true, FillLinePlan::NOTHING, 'no_eligible_member', false, false, $count?->requiredDutyCount, $count->coveredRequiredDutyCount ?? 0, $uncovered, $protected, lateMemberCount: $lateMembers, unfillable: $unfillable);
                 continue;
             }
 
@@ -375,6 +386,59 @@ final class PlanningLineFillService
             'keptExistingCount' => \count($before) - \count($changed),
             'addedCount' => \count(array_diff_key($after, $before)),
         ];
+    }
+
+    /**
+     * docs/decisions.md D234: the required holes of a generated line that
+     * nobody can fill, read unit by unit with the check behind the candidate
+     * list and the save (VacancyAnalyzer, the same as the publication
+     * preflight). Read only: nothing is written.
+     *
+     * @param bool $onlyExtension only the duties an extension created (D226), the only holes of a published line
+     */
+    private function unfillableHoles(?PlanningResultLine $count, bool $onlyExtension): FillVacancies
+    {
+        if (null === $count || null === $count->generation) {
+            return new FillVacancies();
+        }
+
+        $currentByDutyId = [];
+        $byUnit = [];
+        foreach ($count->duties as $resultDuty) {
+            if (null !== $resultDuty->assignment) {
+                $currentByDutyId[(int) $resultDuty->duty->getId()] = $resultDuty->assignment;
+            }
+            if (!$resultDuty->required || $resultDuty->covered || ($onlyExtension && null === $resultDuty->duty->getAddedByChange())) {
+                continue;
+            }
+            $byUnit[(string) ($resultDuty->duty->getGroupInstance()?->getStableId() ?? $resultDuty->duty->getStableId())][] = $resultDuty->duty;
+        }
+
+        $unfillable = 0;
+        $noMember = 0;
+        $firstStart = null;
+        $from = null;
+        $to = null;
+        foreach ($byUnit as $duties) {
+            $vacancy = $this->vacancyAnalyzer->vacancyOf($count->generation, $duties, $currentByDutyId);
+            if (!$vacancy->isUnfillable()) {
+                continue;
+            }
+            $unfillable += \count($duties);
+            if (PublicationVacancy::NO_MEMBER_ON_DATE === $vacancy->code) {
+                $noMember += \count($duties);
+                if (null !== $vacancy->firstMembershipStart && (null === $firstStart || $vacancy->firstMembershipStart < $firstStart)) {
+                    $firstStart = $vacancy->firstMembershipStart;
+                }
+            }
+            foreach ($duties as $duty) {
+                $date = $duty->getLocalDate();
+                $from = null === $from || $date < $from ? $date : $from;
+                $to = null === $to || $date > $to ? $date : $to;
+            }
+        }
+
+        return new FillVacancies($unfillable, $noMember, $firstStart, $from, $to);
     }
 
     private function tryLock(Planning $planning): bool

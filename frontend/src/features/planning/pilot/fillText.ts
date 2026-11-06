@@ -2,6 +2,38 @@ import type { FillLinePlan, FillLineResult } from './types'
 
 const plural = (count: number, one: string, many: string) => `${count} ${count > 1 ? many : one}`
 
+const FULL_DATE = new Intl.DateTimeFormat('fr-BE', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+  timeZone: 'UTC',
+})
+const fullDate = (date: string) => FULL_DATE.format(new Date(`${date}T00:00:00Z`))
+
+/**
+ * docs/decisions.md D234 — why some holes of a line cannot be filled, in one
+ * sentence: no member of the line on their dates (with the first day one
+ * joins), or none of the members on these dates can take them.
+ */
+export function unfillableText(plan: FillLinePlan): string {
+  const vacancies = plan.unfillable
+  if (!vacancies || vacancies.dutyCount === 0) return ''
+  const dates =
+    vacancies.from && vacancies.to
+      ? vacancies.from === vacancies.to
+        ? ` (le ${fullDate(vacancies.from)})`
+        : ` (du ${fullDate(vacancies.from)} au ${fullDate(vacancies.to)})`
+      : ''
+  const what = plural(vacancies.dutyCount, 'garde', 'gardes') + dates
+  if (vacancies.noMemberOnDateCount === vacancies.dutyCount) {
+    const joins = vacancies.firstMembershipStart
+      ? ` : ses membres n’y sont rattachés qu’à partir du ${fullDate(vacancies.firstMembershipStart)}`
+      : ''
+    return `Aucun membre de « ${plan.lineName} » n’est éligible pour ${what}${joins}.`
+  }
+  return `Aucun membre de « ${plan.lineName} » ne peut assurer ${what}.`
+}
+
 /** Why a line cannot be given its first generation — from its stable code, never an internal message. */
 export function fillBlockerText(code: string): string {
   switch (code) {
@@ -46,9 +78,17 @@ export function fillPlanText(plan: FillLinePlan): string {
         (plan.lateMemberCount ?? 0) > 0
           ? ` ${plural(plan.lateMemberCount ?? 0, 'membre arrivé', 'membres arrivés')} depuis la génération ${(plan.lateMemberCount ?? 0) > 1 ? 'sont pris' : 'est pris'} en compte.`
           : ''
+      const impossible = plan.unfillable?.dutyCount ?? 0
+      if (impossible > 0) {
+        const fillable = (plan.uncoveredRequiredDutyCount ?? 0) - impossible
+        return `${plural(fillable, 'garde non pourvue', 'gardes non pourvues')} à compléter, sans toucher aux gardes attribuées.${late} ${unfillableText(plan)} Elles resteront vacantes.`
+      }
       return `${holes} à compléter, sans toucher aux gardes attribuées.${late}`
     }
     case 'NOTHING':
+      if (plan.reason === 'no_eligible_member') {
+        return `${unfillableText(plan)} La complétion ne peut pas les pourvoir : rien n’est lancé pour cette ligne.`
+      }
       return plan.followsSource
         ? 'Ses gardes actuelles sont conservées. Des renforts seront ajoutés si les nouveaux titulaires de sa ligne source les déclenchent.'
         : 'Toutes les gardes obligatoires sont attribuées : rien à faire.'

@@ -98,9 +98,14 @@ export function FillModal({
     (line) => selected.has(line.lineStableId) && (line.action === 'GENERATE' || line.action === 'COMPLETE'),
   )
   const protectedCount = lines.reduce((sum, line) => sum + line.protectedAssignmentCount, 0)
+  // docs/decisions.md D234: the posts nobody can fill are never counted as "à compléter".
   const toComplete = chosen
     .filter((line) => line.action === 'COMPLETE')
-    .reduce((sum, line) => sum + (line.uncoveredRequiredDutyCount ?? 0), 0)
+    .reduce(
+      (sum, line) => sum + (line.uncoveredRequiredDutyCount ?? 0) - (line.unfillable?.dutyCount ?? 0),
+      0,
+    )
+  const unfillable = lines.reduce((sum, line) => sum + (line.unfillable?.dutyCount ?? 0), 0)
   const toGenerate = chosen.filter((line) => line.action === 'GENERATE')
 
   async function run() {
@@ -239,6 +244,12 @@ export function FillModal({
             {toComplete > 0 && (
               <li>
                 {plural(toComplete, 'garde non pourvue à compléter', 'gardes non pourvues à compléter')}
+              </li>
+            )}
+            {unfillable > 0 && (
+              <li>
+                {plural(unfillable, 'garde sans membre éligible', 'gardes sans membre éligible')} : aucune
+                attribution possible, {unfillable > 1 ? 'elles resteront vacantes' : 'elle restera vacante'}
               </li>
             )}
             {toGenerate.length > 0 && (

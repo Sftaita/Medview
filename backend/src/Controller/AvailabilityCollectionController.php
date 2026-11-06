@@ -17,10 +17,11 @@ use App\Exception\AvailabilityCollectionOverlapException;
 use App\Exception\InvalidAvailabilityDeadlineException;
 use App\Repository\AvailabilityCollectionRepository;
 use App\Repository\AvailabilityCollectionResponseRepository;
-use App\Repository\PeriodPreparationRepository;
 use App\Repository\PlanningRepository;
 use App\Security\Voter\PlanningVoter;
 use App\Service\AvailabilityCollectionService;
+use App\Service\CollectionReminder;
+use App\Service\CollectionReminderService;
 use App\Service\DateWindow;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -52,7 +53,7 @@ final class AvailabilityCollectionController
         private readonly AvailabilityCollectionService $service,
         private readonly AuthorizationCheckerInterface $authorizationChecker,
         private readonly ValidatorInterface $validator,
-        private readonly PeriodPreparationRepository $preparationRepository,
+        private readonly CollectionReminderService $reminderService,
     ) {
     }
 
@@ -210,27 +211,21 @@ final class AvailabilityCollectionController
     }
 
     /**
-     * The OPEN collections the current user takes part in — what the
-     * dashboard shows. Never someone else's. docs/decisions.md D214: a
-     * collection whose period announcement is still scheduled is not shown —
-     * its participants have not been told yet, and their calendar is open to
-     * them anyway.
+     * The OPEN collections the current user takes part in, as long as their
+     * availabilities can still change something — what the dashboard shows
+     * (docs/decisions.md D234, CollectionReminderService). Never someone
+     * else's; never a collection whose announcement is still scheduled
+     * (D214). `pending` gives the days still waiting and the lines concerned.
      */
     #[Route('/api/me/availability-collections', name: 'api_me_availability_collections', methods: ['GET'])]
     public function mine(#[CurrentUser] User $user): JsonResponse
     {
-        $collections = array_values(array_filter(
-            array_map(
-                static fn (AvailabilityCollectionResponse $response): AvailabilityCollection => $response->getCollection(),
-                $this->responseRepository->findActiveInOpenCollectionsForUser($user),
-            ),
-            fn (AvailabilityCollection $collection): bool => null === $collection->getCycle()
-                || true !== $this->preparationRepository->findOneByCycle($collection->getCycle())?->isAnnouncementScheduled(),
-        ));
-
         return new JsonResponse(array_map(
-            fn (AvailabilityCollection $collection): array => $this->collectionToArray($collection, $user, withProgress: false),
-            $collections,
+            fn (CollectionReminder $reminder): array => [
+                ...$this->collectionToArray($reminder->collection, $user, withProgress: false),
+                'pending' => $reminder->toArray(),
+            ],
+            $this->reminderService->remindersFor($user),
         ));
     }
 

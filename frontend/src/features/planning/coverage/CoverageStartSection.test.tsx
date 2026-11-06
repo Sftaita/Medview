@@ -30,6 +30,27 @@ function pick(date: string) {
 }
 
 describe('CoverageStartSection (docs/decisions.md D233)', () => {
+  it('opened from « Vérifier le début de couverture »: brought into view and the date focused once read (D234)', async () => {
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    stubApi({ [`GET ${URL}`]: () => ({ coverageStartsOn: null }) })
+    render(<CoverageStartSection lineStableId="l1" focused />)
+
+    await vi.waitFor(() => expect(screen.getByLabelText('Date de début')).toHaveFocus())
+    expect(scrollIntoView).toHaveBeenCalled()
+    expect(
+      screen.getByRole('heading', { name: 'Début de couverture de cette ligne' }).closest('section'),
+    ).toHaveClass('cov-section--focused')
+  })
+
+  it('never takes the focus when opened normally', async () => {
+    stubApi({ [`GET ${URL}`]: () => ({ coverageStartsOn: null }) })
+    render(<CoverageStartSection lineStableId="l1" />)
+
+    await vi.waitFor(() => expect(screen.getByLabelText('Date de début')).toBeEnabled())
+    expect(screen.getByLabelText('Date de début')).not.toHaveFocus()
+  })
+
   it('explains the date, independent of memberships, and shows the saved one', async () => {
     stubApi({ [`GET ${URL}`]: () => ({ coverageStartsOn: '2026-11-01' }) })
     render(<CoverageStartSection lineStableId="l1" />)

@@ -302,3 +302,11 @@ exposition) : ce sont des comptages.
   partielle (une ligne en échec n'empêche pas les suivantes, mais rien ne les
   relance automatiquement).
 - Un membre retiré en milieu de fenêtre reste attendu pour cette fenêtre.
+
+## 15. Rappels du tableau de bord (docs/decisions.md D234)
+
+`GET /api/me/availability-collections` ne rend une collecte ouverte que si elle attend encore quelque chose de la
+personne, à partir d'aujourd'hui : une ligne de la période non générée à laquelle elle appartient (depuis le début de
+couverture de la ligne), ou des gardes créées par une prolongation encore sans titulaire. Chaque collecte rendue porte
+`pending` (`from`, `lastDay`, `lines`, `reason`). La collecte elle-même n'est ni close ni modifiée : la vue du gestionnaire
+(`GET /api/plannings/{id}/availability-collections`) est inchangée.
